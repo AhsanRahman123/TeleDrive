@@ -13,7 +13,7 @@ class TransferTaskTest {
         transferred: Long,
         speed: Long = 0,
         state: TransferState = TransferState.RUNNING,
-        type: TransferType.UPLOAD
+        type: TransferType = TransferType.UPLOAD
     ) = TransferTask(
         id = "t",
         type = type,
