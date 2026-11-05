@@ -131,6 +131,8 @@ class PreviewViewModel(
                     files = files,
                     initialIndex = files.indexOfFirst { file -> file.id == target.id }
                         .coerceAtLeast(0),
+                    autoStartSlideshow = route.startSlideshow && files.size > 1 &&
+                            files.all { it.category == FileCategory.IMAGE },
                     ready = true
                 )
             }
