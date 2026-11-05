@@ -970,4 +970,7 @@
     <string name="files_view_grid">Cuadrícula</string>
     <string name="files_view_list">Lista</string>
     <string name="files_view_details">Detalles</string>
+
+    <string name="preview_slideshow_start">Iniciar presentación</string>
+    <string name="preview_slideshow_pause">Pausar presentación</string>
 </resources>
