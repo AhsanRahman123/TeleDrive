@@ -104,13 +104,7 @@ fun FileListItem(
             }
             if (details) {
                 Text(
-                    text = buildString {
-                        append(file.mimeType.ifBlank { "Unknown type" })
-                        file.extension.takeIf { it.isNotBlank() }?.let {
-                            append(" · ")
-                            append(it)
-                        }
-                    },
+                    text = file.extension.ifBlank { file.mimeType.ifBlank { "—" } },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
