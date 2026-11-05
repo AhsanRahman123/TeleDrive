@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -95,6 +96,7 @@ import com.drdisagree.teledrive.resources.transfers_failed_uploads
 import com.drdisagree.teledrive.resources.transfers_more_queued
 import com.drdisagree.teledrive.resources.transfers_no_transfers
 import com.drdisagree.teledrive.resources.transfers_pause
+import com.drdisagree.teledrive.resources.transfers_prioritize_download
 import com.drdisagree.teledrive.resources.transfers_queued_running_paused_failed
 import com.drdisagree.teledrive.resources.transfers_resume
 import com.drdisagree.teledrive.resources.transfers_section_active
@@ -265,6 +267,11 @@ fun TransfersScreen(
                     primaryIcon = Icons.Filled.Pause,
                     primaryLabel = stringResource(Res.string.common_pause),
                     onPrimary = { viewModel.pause(transfer.id) },
+                    onPrioritize = if (transfer.canPrioritizeDownload) {
+                        { viewModel.prioritizeDownload(transfer.id) }
+                    } else {
+                        null
+                    },
                     onCancel = { viewModel.cancel(transfer.id) },
                     actionsFocusable = actionsFocusable(transfer),
                     modifier = itemModifier(transfer)
@@ -372,6 +379,7 @@ private fun TransferRow(
     primaryIcon: ImageVector? = null,
     primaryLabel: String? = null,
     onPrimary: (() -> Unit)? = null,
+    onPrioritize: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
     actionsFocusable: Boolean = true,
     modifier: Modifier = Modifier
@@ -427,6 +435,16 @@ private fun TransferRow(
                 if (primaryIcon != null && onPrimary != null) {
                     IconButton(onClick = onPrimary, modifier = actions) {
                         Icon(primaryIcon, contentDescription = primaryLabel)
+                    }
+                }
+                if (onPrioritize != null) {
+                    IconButton(onClick = onPrioritize, modifier = actions) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowUpward,
+                            contentDescription = stringResource(
+                                Res.string.transfers_prioritize_download
+                            )
+                        )
                     }
                 }
                 if (onCancel != null) {
