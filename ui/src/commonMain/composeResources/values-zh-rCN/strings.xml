@@ -955,4 +955,7 @@
     <string name="files_view_grid">网格</string>
     <string name="files_view_list">列表</string>
     <string name="files_view_details">详细信息</string>
+
+    <string name="preview_slideshow_start">开始幻灯片放映</string>
+    <string name="preview_slideshow_pause">暂停幻灯片放映</string>
 </resources>
