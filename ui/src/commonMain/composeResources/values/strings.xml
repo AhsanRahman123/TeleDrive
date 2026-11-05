@@ -970,4 +970,7 @@
     <string name="files_view_grid">Grid</string>
     <string name="files_view_list">List</string>
     <string name="files_view_details">Details</string>
+
+    <string name="preview_slideshow_start">Start slideshow</string>
+    <string name="preview_slideshow_pause">Pause slideshow</string>
 </resources>
