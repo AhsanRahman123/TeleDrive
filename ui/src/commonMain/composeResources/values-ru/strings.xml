@@ -985,4 +985,10 @@
         <item>简体中文</item>
         <item>Español</item>
     </string-array>
+
+    <!-- File view modes -->
+    <string name="files_view_mode">Режим отображения</string>
+    <string name="files_view_grid">Сетка</string>
+    <string name="files_view_list">Список</string>
+    <string name="files_view_details">Подробности</string>
 </resources>
