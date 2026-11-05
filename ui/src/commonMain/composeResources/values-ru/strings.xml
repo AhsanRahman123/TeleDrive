@@ -991,4 +991,7 @@
     <string name="files_view_grid">Сетка</string>
     <string name="files_view_list">Список</string>
     <string name="files_view_details">Подробности</string>
+
+    <string name="preview_slideshow_start">Начать слайд-шоу</string>
+    <string name="preview_slideshow_pause">Приостановить слайд-шоу</string>
 </resources>
