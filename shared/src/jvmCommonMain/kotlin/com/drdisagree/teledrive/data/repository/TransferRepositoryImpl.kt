@@ -283,6 +283,16 @@ class TransferRepositoryImpl(
         return AppResult.Success(transfer.id)
     }
 
+    override suspend fun prioritizeDownload(id: String): Boolean {
+        val updated = transferDao.prioritizeQueuedDownload(
+            id = id,
+            priority = MANUAL_DOWNLOAD_PRIORITY,
+            updatedAt = System.currentTimeMillis()
+        )
+        if (updated > 0) kickWorker()
+        return updated > 0
+    }
+
     override suspend fun pause(id: String) {
         val transfer = transferDao.byId(id) ?: return
         if (transfer.state == TransferState.QUEUED || transfer.state == TransferState.RUNNING) {
