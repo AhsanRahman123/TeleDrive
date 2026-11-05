@@ -165,7 +165,9 @@ fun DesktopPreviewScreen(
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     val canSlideshow = state.files.size > 1 &&
             state.files.all { it.category == FileCategory.IMAGE }
-    var slideshowPlaying by remember(state.files) { mutableStateOf(false) }
+    var slideshowPlaying by remember(state.files, state.autoStartSlideshow) {
+        mutableStateOf(state.autoStartSlideshow && canSlideshow)
+    }
     LaunchedEffect(slideshowPlaying, index, canSlideshow) {
         if (!slideshowPlaying || !canSlideshow) return@LaunchedEffect
         delay(PREVIEW_SLIDESHOW_INTERVAL_MS)
