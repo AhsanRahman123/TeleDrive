@@ -949,4 +949,10 @@
         <item>简体中文</item>
         <item>Español</item>
     </string-array>
+
+    <!-- File view modes -->
+    <string name="files_view_mode">视图模式</string>
+    <string name="files_view_grid">网格</string>
+    <string name="files_view_list">列表</string>
+    <string name="files_view_details">详细信息</string>
 </resources>
