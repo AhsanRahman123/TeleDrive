@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.domain.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,10 +12,11 @@ class TransferTaskTest {
         size: Long,
         transferred: Long,
         speed: Long = 0,
-        state: TransferState = TransferState.RUNNING
+        state: TransferState = TransferState.RUNNING,
+        type: TransferType.UPLOAD
     ) = TransferTask(
         id = "t",
-        type = TransferType.UPLOAD,
+        type = type,
         fileId = "f",
         displayName = "file",
         sizeBytes = size,
@@ -47,6 +49,14 @@ class TransferTaskTest {
     @Test
     fun `eta null without speed`() {
         assertNull(task(1000, 500, speed = 0).etaSeconds)
+    }
+
+    @Test
+    fun `only queued downloads can be prioritized`() {
+        assertTrue(task(100, 0, state = TransferState.QUEUED, type = TransferType.DOWNLOAD).canPrioritizeDownload)
+        assertFalse(task(100, 0, state = TransferState.QUEUED, type = TransferType.UPLOAD).canPrioritizeDownload)
+        assertFalse(task(100, 0, state = TransferState.RUNNING, type = TransferType.DOWNLOAD).canPrioritizeDownload)
+        assertFalse(task(100, 0, state = TransferState.PAUSED, type = TransferType.DOWNLOAD).canPrioritizeDownload)
     }
 
     @Test
