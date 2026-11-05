@@ -228,7 +228,9 @@ fun PreviewScreen(
 
     val canSlideshow = state.files.size > 1 &&
             state.files.all { it.category == FileCategory.IMAGE }
-    var slideshowPlaying by remember(state.files) { mutableStateOf(false) }
+    var slideshowPlaying by remember(state.files, state.autoStartSlideshow) {
+        mutableStateOf(state.autoStartSlideshow && canSlideshow)
+    }
     LaunchedEffect(slideshowPlaying, pagerState.currentPage, canSlideshow) {
         if (!slideshowPlaying || !canSlideshow) return@LaunchedEffect
         delay(PREVIEW_SLIDESHOW_INTERVAL_MS)
