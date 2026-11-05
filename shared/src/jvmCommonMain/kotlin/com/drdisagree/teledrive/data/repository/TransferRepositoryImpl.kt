@@ -385,5 +385,6 @@ class TransferRepositoryImpl(
         private const val TAG = "TransferRepository"
         private const val STORAGE_MARGIN = 100L * 1024 * 1024
         private const val SQL_BATCH = 500
+        private const val MANUAL_DOWNLOAD_PRIORITY = Int.MAX_VALUE
     }
 }
