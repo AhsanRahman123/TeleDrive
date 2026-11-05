@@ -150,6 +150,8 @@ import com.drdisagree.teledrive.resources.preview_no_preview
 import com.drdisagree.teledrive.resources.preview_preparing
 import com.drdisagree.teledrive.resources.preview_progress_bytes
 import com.drdisagree.teledrive.resources.preview_remove_favorites
+import com.drdisagree.teledrive.resources.preview_slideshow_pause
+import com.drdisagree.teledrive.resources.preview_slideshow_start
 import com.drdisagree.teledrive.resources.preview_requires_download
 import com.drdisagree.teledrive.resources.preview_share_chooser_title
 import com.drdisagree.teledrive.resources.preview_share_copy
