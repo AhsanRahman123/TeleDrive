@@ -1038,7 +1038,7 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                 onChange = { value -> viewModel.update { it.copy(galleryGridSize = value) } }
             )
         }
-        add(visible = prefs.viewMode == ViewMode.LIST || prefs.galleryViewMode == ViewMode.LIST) {
+        add(visible = prefs.viewMode != ViewMode.GRID || prefs.galleryViewMode == ViewMode.LIST) {
             SettingsSwitchRow(
                 title = stringResource(Res.string.settings_compact_layout),
                 subtitle = stringResource(Res.string.settings_tighter_list_rows_without),
