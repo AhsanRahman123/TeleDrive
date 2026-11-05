@@ -995,4 +995,5 @@
     <string name="preview_slideshow_start">Начать слайд-шоу</string>
     <string name="preview_slideshow_pause">Приостановить слайд-шоу</string>
     <string name="gallery_start_slideshow">Запустить слайд-шоу</string>
+    <string name="transfers_prioritize_download">Переместить загрузку в начало очереди</string>
 </resources>
