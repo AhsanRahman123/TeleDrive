@@ -974,4 +974,5 @@
     <string name="preview_slideshow_start">Start slideshow</string>
     <string name="preview_slideshow_pause">Pause slideshow</string>
     <string name="gallery_start_slideshow">Start slideshow</string>
+    <string name="transfers_prioritize_download">Move download to top of queue</string>
 </resources>
