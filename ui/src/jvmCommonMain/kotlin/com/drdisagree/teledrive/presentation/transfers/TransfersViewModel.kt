@@ -62,6 +62,10 @@ class TransfersViewModel(
 
     fun retry(id: String) = launch { transferRepository.retry(id) }
 
+    fun prioritizeDownload(id: String) = launch {
+        transferRepository.prioritizeDownload(id)
+    }
+
     fun pauseAll() = launch { transferRepository.pauseAll() }
 
     fun resumeAll() = launch { transferRepository.resumeAll() }
