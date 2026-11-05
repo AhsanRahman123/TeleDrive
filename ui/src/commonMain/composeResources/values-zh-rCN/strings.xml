@@ -959,4 +959,5 @@
     <string name="preview_slideshow_start">开始幻灯片放映</string>
     <string name="preview_slideshow_pause">暂停幻灯片放映</string>
     <string name="gallery_start_slideshow">开始播放幻灯片</string>
+    <string name="transfers_prioritize_download">将下载任务移至队列顶部</string>
 </resources>
