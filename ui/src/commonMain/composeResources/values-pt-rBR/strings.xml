@@ -971,4 +971,5 @@
     <string name="preview_slideshow_start">Iniciar apresentação</string>
     <string name="preview_slideshow_pause">Pausar apresentação</string>
     <string name="gallery_start_slideshow">Iniciar apresentação</string>
+    <string name="transfers_prioritize_download">Mover o download para o início da fila</string>
 </resources>
