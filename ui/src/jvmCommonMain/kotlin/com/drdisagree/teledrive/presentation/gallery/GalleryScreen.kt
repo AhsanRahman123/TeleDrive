@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Storage
@@ -118,6 +119,7 @@ import com.drdisagree.teledrive.resources.gallery_no_albums
 import com.drdisagree.teledrive.resources.gallery_no_media
 import com.drdisagree.teledrive.resources.gallery_photos_videos_appear_here
 import com.drdisagree.teledrive.resources.gallery_title
+import com.drdisagree.teledrive.resources.gallery_start_slideshow
 import com.drdisagree.teledrive.resources.nav_gallery
 import com.drdisagree.teledrive.domain.model.MediaAlbum
 import com.drdisagree.teledrive.domain.model.ViewMode
@@ -504,6 +506,26 @@ fun GalleryScreen(
                         }
                     },
                     actions = {
+                        val firstPhoto = media.itemSnapshotList.items
+                            .filterIsInstance<GalleryListItem.Media>()
+                            .firstOrNull()?.file
+                        if (state.tab == GalleryTab.PHOTOS && firstPhoto != null &&
+                            !state.selectionMode
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    onOpenFile(
+                                        firstPhoto.id,
+                                        previewSequence.copy(startSlideshow = true)
+                                    )
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.PlayArrow,
+                                    contentDescription = stringResource(Res.string.gallery_start_slideshow)
+                                )
+                            }
+                        }
                         if (state.isAlbumView || state.tab != GalleryTab.ALBUMS) {
                             var showSortMenu by remember { mutableStateOf(false) }
                             IconButton(onClick = { showSortMenu = true }) {

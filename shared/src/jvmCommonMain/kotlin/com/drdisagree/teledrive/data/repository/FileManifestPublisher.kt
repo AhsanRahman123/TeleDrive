@@ -43,9 +43,12 @@ class FileManifestPublisher(
             iconFileId = entity.iconFileId,
             extra = ExtraFields.fromText(entity.manifestExtra)
         )
-        val partCount = maxOf(filePartDao.countOf(entity.id), entity.partCount)
+        val parts = filePartDao.partsOf(entity.id)
+        val partCount = maxOf(parts.size, entity.partCount)
         val manifest = if (partCount > 1) {
-            FileParts.asFirstPart(fileManifest, partCount)
+            FileParts.asFirstPart(fileManifest, partCount).copy(
+                partHash = parts.firstOrNull { it.partIndex == 0 }?.plainHash
+            )
         } else {
             fileManifest
         }

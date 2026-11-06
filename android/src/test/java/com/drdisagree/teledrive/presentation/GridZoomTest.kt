@@ -12,6 +12,13 @@ import org.junit.Test
 class GridZoomTest {
 
     @Test
+    fun `details view is unchanged by zoom gestures`() {
+        val details = GridZoomLevel(ViewMode.DETAILS, 3)
+        assertEquals(details, details.zoomedIn())
+        assertEquals(details, details.zoomedOut())
+    }
+
+    @Test
     fun `zooming out past the densest grid switches to list`() {
         val densest = GridZoomLevel(ViewMode.GRID, MAX_GRID_COLUMNS)
         assertEquals(GridZoomLevel(ViewMode.LIST, MAX_GRID_COLUMNS), densest.zoomedOut())

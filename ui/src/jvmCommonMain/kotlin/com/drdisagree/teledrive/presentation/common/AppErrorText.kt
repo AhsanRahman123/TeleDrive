@@ -24,6 +24,7 @@ import com.drdisagree.teledrive.resources.error_not_supported
 import com.drdisagree.teledrive.resources.error_backup_folders_unreadable
 import com.drdisagree.teledrive.resources.error_permission_denied
 import com.drdisagree.teledrive.resources.error_rate_limited
+import com.drdisagree.teledrive.resources.error_remote_deletion_disabled
 import com.drdisagree.teledrive.resources.error_sign_in_required
 import com.drdisagree.teledrive.resources.error_telegram
 import com.drdisagree.teledrive.resources.error_timed_out
@@ -69,6 +70,7 @@ fun AppError.toUiText(): UiText = when (this) {
     is AppError.IncorrectPassword -> UiText.Resource(Res.string.error_incorrect_password)
     is AppError.UnsupportedOperation ->
         reason?.let(UiText::Plain) ?: UiText.Resource(Res.string.error_not_supported)
+    is AppError.RemoteDeletionDisabled -> UiText.Resource(Res.string.error_remote_deletion_disabled)
 
     is AppError.EncryptionFailure -> UiText.Resource(Res.string.error_encryption_failed)
     is AppError.TransferFailed ->

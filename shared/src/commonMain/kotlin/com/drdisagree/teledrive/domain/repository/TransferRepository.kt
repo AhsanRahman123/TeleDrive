@@ -30,6 +30,9 @@ interface TransferRepository {
 
     suspend fun enqueueDownload(fileId: String, priority: Int = 0): AppResult<String>
 
+    /** Moves a queued download ahead of other queued work. Returns false if it is no longer queued. */
+    suspend fun prioritizeDownload(id: String): Boolean
+
     suspend fun pause(id: String)
 
     suspend fun resume(id: String)

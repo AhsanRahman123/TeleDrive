@@ -13,11 +13,13 @@ const val MIN_GRID_COLUMNS = 2
 const val MAX_GRID_COLUMNS = 6
 
 fun GridZoomLevel.zoomedIn(): GridZoomLevel = when {
+    viewMode == ViewMode.DETAILS -> this
     viewMode == ViewMode.LIST -> GridZoomLevel(ViewMode.GRID, MAX_GRID_COLUMNS)
     else -> GridZoomLevel(ViewMode.GRID, (gridSize - 1).coerceAtLeast(MIN_GRID_COLUMNS))
 }
 
 fun GridZoomLevel.zoomedOut(): GridZoomLevel = when {
+    viewMode == ViewMode.DETAILS -> this
     viewMode == ViewMode.LIST -> this
     gridSize >= MAX_GRID_COLUMNS -> GridZoomLevel(ViewMode.LIST, gridSize)
     else -> GridZoomLevel(ViewMode.GRID, gridSize + 1)

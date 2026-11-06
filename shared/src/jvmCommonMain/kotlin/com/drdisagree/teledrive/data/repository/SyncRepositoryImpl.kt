@@ -616,7 +616,8 @@ class SyncRepositoryImpl(
                 plainOffset = manifest.partOffset,
                 plainSize = manifest.partSize,
                 storedSize = document.sizeBytes,
-                uploadedAt = document.dateSeconds * 1000L
+                uploadedAt = document.dateSeconds * 1000L,
+                plainHash = manifest.partHash
             )
         )
     }

@@ -8,7 +8,7 @@ on:
 jobs:
   android:
     name: Android
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -69,9 +69,20 @@ jobs:
 
   linux:
     name: Linux
-    runs-on: ubuntu-latest
-    continue-on-error: true
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:22.04
     steps:
+      - name: Install Linux build prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends software-properties-common
+          add-apt-repository -y universe
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git unzip zip file dpkg-dev desktop-file-utils \
+            patchelf libvlc5 libvlccore9 vlc-plugin-base vlc-plugin-video-output
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-java@v6
@@ -92,9 +103,20 @@ jobs:
 
   appimage:
     name: Linux AppImage
-    runs-on: ubuntu-22.04
-    continue-on-error: true
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:22.04
     steps:
+      - name: Install Linux build prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends software-properties-common
+          add-apt-repository -y universe
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl git unzip zip file dpkg-dev desktop-file-utils \
+            patchelf libvlc5 libvlccore9 vlc-plugin-base vlc-plugin-video-output
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-java@v6
@@ -104,11 +126,8 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
-      - name: Install packaging tools and libVLC
+      - name: Download AppImage packaging tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y desktop-file-utils patchelf \
-            libvlc5 libvlccore9 vlc-plugin-base vlc-plugin-video-output
           curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
             https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
           curl -fsSL -o "$RUNNER_TEMP/linuxdeploy" \
@@ -129,55 +148,14 @@ jobs:
           path: desktop/build/appimage/*.AppImage
           if-no-files-found: error
 
-  macos:
-    name: macOS
-    runs-on: macos-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - uses: gradle/actions/setup-gradle@v5
-
-      - name: Package .dmg
-        run: ./gradlew :desktop:packageDmg
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: macos-release
-          path: desktop/build/compose/binaries/main/dmg/*.dmg
-          if-no-files-found: error
-
   publish:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/') && always() && needs.android.result == 'success' && needs.windows.result == 'success'
-    needs: [android, windows, linux, appimage, macos]
-    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') && needs.android.result == 'success' && needs.windows.result == 'success' && needs.linux.result == 'success' && needs.appimage.result == 'success'
+    needs: [android, windows, linux, appimage]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Report a missing Linux build
-        if: needs.linux.result != 'success'
-        run: >-
-          echo "::warning title=No Linux artifact::Linux packaging did not
-          succeed (${{ needs.linux.result }}), so this draft has no .deb."
-
-      - name: Report a missing AppImage build
-        if: needs.appimage.result != 'success'
-        run: >-
-          echo "::warning title=No AppImage artifact::AppImage packaging did not
-          succeed (${{ needs.appimage.result }}), so this draft has no AppImage."
-
-      - name: Report a missing macOS build
-        if: needs.macos.result != 'success'
-        run: >-
-          echo "::warning title=No macOS artifact::macOS packaging did not
-          succeed (${{ needs.macos.result }}), so this draft has no .dmg."
-
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -191,4 +169,3 @@ jobs:
             artifacts/*.msi
             artifacts/*.deb
             artifacts/*.AppImage
-            artifacts/*.dmg
