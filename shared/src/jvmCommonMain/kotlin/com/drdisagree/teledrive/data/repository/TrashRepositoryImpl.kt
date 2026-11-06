@@ -1,47 +1,24 @@
 package com.drdisagree.teledrive.data.repository
 
 import com.drdisagree.teledrive.core.common.AppError
-import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.common.AppResult
-import com.drdisagree.teledrive.core.common.SafeLog
-import com.drdisagree.teledrive.core.crypto.SecureFileDeleter
 import com.drdisagree.teledrive.core.publish.PublishScheduler
-import com.drdisagree.teledrive.core.telegram.TelegramClient
-import com.drdisagree.teledrive.core.telegram.TelegramException
-import com.drdisagree.teledrive.data.local.dao.BackupDao
 import com.drdisagree.teledrive.data.local.dao.FileDao
-import com.drdisagree.teledrive.data.local.dao.FilePartDao
 import com.drdisagree.teledrive.data.local.dao.FolderDao
-import com.drdisagree.teledrive.data.local.dao.FolderTombstoneDao
-import com.drdisagree.teledrive.data.local.dao.PendingDeleteDao
-import com.drdisagree.teledrive.data.local.dao.ThumbnailDao
-import com.drdisagree.teledrive.data.local.entity.PendingDeleteEntity
-import com.drdisagree.teledrive.data.local.entity.FolderTombstoneEntity
 import com.drdisagree.teledrive.data.mapper.toDomain
 import com.drdisagree.teledrive.domain.model.TrashItem
-import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.domain.repository.TrashRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TrashRepositoryImpl(
-    private val storagePaths: AppStoragePaths,
     private val fileDao: FileDao,
     private val folderDao: FolderDao,
-    private val backupDao: BackupDao,
-    private val thumbnailDao: ThumbnailDao,
-    private val telegramClient: TelegramClient,
-    private val secureFileDeleter: SecureFileDeleter,
     private val publishScheduler: PublishScheduler,
-    private val pendingDeleteDao: PendingDeleteDao,
-    private val filePartDao: FilePartDao,
-    private val activeChannel: ActiveChannel,
-    private val transferRepository: TransferRepository,
-    private val tombstoneDao: FolderTombstoneDao
+    private val activeChannel: ActiveChannel
 ) : TrashRepository {
 
     override fun observeTrash(): Flow<List<TrashItem>> =
@@ -210,11 +187,7 @@ class TrashRepositoryImpl(
     }
 
     companion object {
-        private const val TAG = "TrashRepository"
-        private const val REMOTE_DELETE_BATCH = 100
-        private const val IMPORT_DIR = "imports"
         private const val SQL_BATCH = 500
-        private const val MILLIS_PER_DAY = 24L * 60 * 60 * 1000
         private const val MAX_FOLDER_DEPTH = 64
     }
 }
