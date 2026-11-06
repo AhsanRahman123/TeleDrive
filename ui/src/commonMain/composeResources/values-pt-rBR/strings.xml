@@ -972,4 +972,6 @@
     <string name="preview_slideshow_pause">Pausar apresentação</string>
     <string name="gallery_start_slideshow">Iniciar apresentação</string>
     <string name="transfers_prioritize_download">Mover o download para o início da fila</string>
+    <string name="error_remote_deletion_disabled">A exclusão permanente de arquivos armazenados no Telegram está desativada para proteger seus dados.</string>
+    <string name="trash_remote_delete_protected">A exclusão permanente no Telegram está desativada. Os itens movidos para cá permanecem no seu canal de armazenamento e podem ser restaurados a qualquer momento.</string>
 </resources>
