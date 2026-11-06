@@ -32,6 +32,7 @@ data class RemoteFileManifest(
     @SerialName("pi") val partIndex: Int = 0,
     @SerialName("po") val partOffset: Long = 0,
     @SerialName("ps") val partSize: Long = 0,
+    @SerialName("ph") val partHash: String? = null,
     @SerialName("icon") val iconFileId: String? = null,
     @Transient val extra: Map<String, JsonElement> = emptyMap()
 ) {
@@ -39,6 +40,6 @@ data class RemoteFileManifest(
 
     companion object {
         const val VERSION = 1
-        const val PART_VERSION = 2
+        const val PART_VERSION = 3
     }
 }
