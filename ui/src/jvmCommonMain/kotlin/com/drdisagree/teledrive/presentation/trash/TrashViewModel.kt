@@ -8,7 +8,6 @@ import com.drdisagree.teledrive.resources.trash_restoring_items
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.TrashItem
-import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TrashRepository
 import com.drdisagree.teledrive.presentation.common.UiText
 import kotlinx.coroutines.NonCancellable
@@ -25,8 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class TrashViewModel(
-    private val trashRepository: TrashRepository,
-    private val settingsRepository: SettingsRepository
+    private val trashRepository: TrashRepository
 ) : ViewModel() {
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
@@ -46,10 +44,9 @@ class TrashViewModel(
     val uiState: StateFlow<TrashUiState> = combine(
         trashTree,
         combine(selection, working) { selected, busy -> selected to busy },
-        settingsRepository.preferences,
         expanded,
         cache
-    ) { tree, selectionAndWork, prefs, expandedIds, loaded ->
+    ) { tree, selectionAndWork, expandedIds, loaded ->
         val (selected, busy) = selectionAndWork
         val (items, rootCounts) = tree
         val childMap = loaded.children
@@ -59,7 +56,6 @@ class TrashViewModel(
             rows = flatten(items, expandedIds, childMap, childCounts, depth = 0),
             selection = selected,
             working = busy,
-            autoClearDays = prefs.trashAutoClearDays,
             loading = false
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TrashUiState())
