@@ -2,21 +2,15 @@ package com.drdisagree.teledrive.presentation.trash
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.drdisagree.teledrive.resources.trash_emptying
-import com.drdisagree.teledrive.resources.trash_delete_partial
-import com.drdisagree.teledrive.resources.trash_deleted_permanently
-import com.drdisagree.teledrive.resources.trash_deleting_items
 import com.drdisagree.teledrive.resources.trash_restored_partial
 import com.drdisagree.teledrive.resources.trash_restored
 import com.drdisagree.teledrive.resources.trash_restoring_items
 import com.drdisagree.teledrive.resources.Res
-import com.drdisagree.teledrive.resources.message_trash_emptied
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.TrashItem
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TrashRepository
 import com.drdisagree.teledrive.presentation.common.UiText
-import com.drdisagree.teledrive.presentation.common.toUiText
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -192,53 +186,6 @@ class TrashViewModel(
                     UiText.Resource(Res.string.trash_restored_partial, total - failed, failed)
                 }
             )
-        }
-    }
-
-    fun deleteSelectedForever() {
-        val (fileIds, folderIds) = partitionSelection()
-        val total = fileIds.size + folderIds.size
-        clearSelection()
-        viewModelScope.launch {
-            working.value = UiText.PluralResource(Res.plurals.trash_deleting_items, total, total)
-            var failed = 0
-            var lastError: UiText? = null
-            withContext(NonCancellable) {
-                if (fileIds.isNotEmpty()) {
-                    val result = trashRepository.deleteFilesPermanently(fileIds)
-                    if (result is AppResult.Failure) {
-                        failed += fileIds.size
-                        lastError = result.error.toUiText()
-                    }
-                }
-                folderIds.forEach { folderId ->
-                    val result = trashRepository.deleteFolderPermanently(folderId)
-                    if (result is AppResult.Failure) {
-                        failed++
-                        lastError = result.error.toUiText()
-                    }
-                }
-            }
-            working.value = null
-            _messages.tryEmit(
-                when {
-                    failed == 0 -> UiText.Resource(Res.string.trash_deleted_permanently, total)
-                    else -> lastError
-                        ?: UiText.Resource(Res.string.trash_delete_partial, failed, total)
-                }
-            )
-        }
-    }
-
-    fun emptyTrash() {
-        viewModelScope.launch {
-            working.value = UiText.Resource(Res.string.trash_emptying)
-            val result = withContext(NonCancellable) { trashRepository.emptyTrash() }
-            working.value = null
-            when (result) {
-                is AppResult.Success -> _messages.tryEmit(UiText.Resource(Res.string.message_trash_emptied))
-                is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
-            }
         }
     }
 
