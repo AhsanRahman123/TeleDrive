@@ -69,7 +69,6 @@ import com.drdisagree.teledrive.resources.rebuild_indexed_files
 import com.drdisagree.teledrive.resources.settings_add_another_folder
 import com.drdisagree.teledrive.resources.settings_app_lock
 import com.drdisagree.teledrive.resources.settings_archived_shortcut
-import com.drdisagree.teledrive.resources.settings_auto_clear_trash
 import com.drdisagree.teledrive.resources.settings_auto_lock
 import com.drdisagree.teledrive.resources.settings_automatic_backup
 import com.drdisagree.teledrive.resources.settings_back_new_media_instantly
@@ -587,7 +586,6 @@ private fun StorageSection(
 ) {
     val prefs = state.preferences
     val reclaimable by viewModel.reclaimableBytes.collectAsStateWithLifecycle()
-    var showTrashDialog by remember { mutableStateOf(false) }
     var confirmFreeUpSpace by remember { mutableStateOf(false) }
     var confirmClearThumbnails by remember { mutableStateOf(false) }
 
@@ -618,19 +616,6 @@ private fun StorageSection(
                 viewModel.freeUpSpace()
             },
             onDismiss = { confirmFreeUpSpace = false }
-        )
-    }
-
-    if (showTrashDialog) {
-        ChoiceDialog(
-            title = stringResource(Res.string.settings_auto_clear_trash),
-            options = trashDayOptions.map { it to trashDaysLabel(it) },
-            selected = prefs.trashAutoClearDays,
-            onSelect = { days ->
-                showTrashDialog = false
-                viewModel.update { it.copy(trashAutoClearDays = days) }
-            },
-            onDismiss = { showTrashDialog = false }
         )
     }
 
@@ -714,13 +699,6 @@ private fun StorageSection(
                     viewModel.update { it.copy(maxCacheSizeMb = value * 256) }
                 },
                 valueLabel = { Formatters.bytes(it * 256L * 1024 * 1024) }
-            )
-        }
-        add {
-            SettingsClickRow(
-                title = stringResource(Res.string.settings_auto_clear_trash),
-                subtitle = trashDaysLabel(prefs.trashAutoClearDays),
-                onClick = { showTrashDialog = true }
             )
         }
     }
@@ -1222,12 +1200,6 @@ private val lockTimeoutOptions = listOf(0, 1, 5, 10, 15, 30)
 @Composable
 private fun lockTimeoutLabel(minutes: Int): String =
     labelFor(Res.array.lock_timeout_labels, lockTimeoutOptions, minutes) { "$it min" }
-
-private val trashDayOptions = listOf(0, 1, 7, 30, 90, 365)
-
-@Composable
-private fun trashDaysLabel(days: Int): String =
-    labelFor(Res.array.trash_clear_labels, trashDayOptions, days) { "$it d" }
 
 /**
  * Labels live in arrays.xml so translations can reword them; a value outside the set shows as a
