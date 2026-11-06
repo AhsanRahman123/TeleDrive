@@ -26,4 +26,7 @@ interface FilePartDao {
 
     @Query("SELECT * FROM file_parts WHERE remoteUniqueId = :uniqueId LIMIT 1")
     suspend fun byRemoteUniqueId(uniqueId: String): FilePartEntity?
+
+    @Query("SELECT * FROM file_parts WHERE fileId = :fileId AND partIndex = :partIndex LIMIT 1")
+    suspend fun byPart(fileId: String, partIndex: Int): FilePartEntity?
 }
