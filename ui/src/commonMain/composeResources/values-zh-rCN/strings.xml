@@ -960,4 +960,6 @@
     <string name="preview_slideshow_pause">暂停幻灯片放映</string>
     <string name="gallery_start_slideshow">开始播放幻灯片</string>
     <string name="transfers_prioritize_download">将下载任务移至队列顶部</string>
+    <string name="error_remote_deletion_disabled">为保护数据，已禁用永久删除存储在 Telegram 中的文件。</string>
+    <string name="trash_remote_delete_protected">已禁用从 Telegram 永久删除文件。移到此处的项目仍保留在存储频道中，可随时恢复。</string>
 </resources>
