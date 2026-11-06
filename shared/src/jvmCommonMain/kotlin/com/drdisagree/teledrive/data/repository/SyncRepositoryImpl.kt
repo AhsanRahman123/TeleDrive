@@ -605,6 +605,11 @@ class SyncRepositoryImpl(
         }
 
     private suspend fun recordPart(document: RemoteDocument, manifest: RemoteFileManifest) {
+        val existing = filePartDao.byPart(manifest.fileId, manifest.partIndex)
+        val sameRemotePart = existing != null &&
+                existing.chatId == document.chatId &&
+                existing.messageId == document.messageId &&
+                existing.remoteUniqueId == document.uniqueFileId
         filePartDao.upsert(
             FilePartEntity(
                 fileId = manifest.fileId,
@@ -616,7 +621,8 @@ class SyncRepositoryImpl(
                 plainOffset = manifest.partOffset,
                 plainSize = manifest.partSize,
                 storedSize = document.sizeBytes,
-                uploadedAt = document.dateSeconds * 1000L
+                uploadedAt = document.dateSeconds * 1000L,
+                plainHash = manifest.partHash ?: existing?.plainHash?.takeIf { sameRemotePart }
             )
         )
     }
