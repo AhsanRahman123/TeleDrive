@@ -7,6 +7,8 @@ import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.DownloadWriter
 import com.drdisagree.teledrive.core.files.FileImporter
+import com.drdisagree.teledrive.core.files.DiscardingOutputStream
+import com.drdisagree.teledrive.core.files.HashAccumulator
 import com.drdisagree.teledrive.core.files.Hashing
 import com.drdisagree.teledrive.core.files.LocalCopyDeleter
 import com.drdisagree.teledrive.core.files.PartialDownload
@@ -342,9 +344,30 @@ class TransferExecutor(
                         is PartUploadEvent.Completed -> {
                             val first = event.parts.firstOrNull()
                                 ?: error("Upload finished with no parts")
-                            event.contentHash
-                                ?.takeIf { it != entity.contentHash }
-                                ?.let { fileDao.setContentHash(entity.id, it) }
+                            val finalHash = event.contentHash ?: contentHash
+                            if (finalHash != null || first.plainHash != null) {
+                                val firstChatId = first.chatId ?: chatId
+                                val firstMessageId = first.messageId
+                                    ?: error("First part has no Telegram message")
+                                val remoteCaption = telegramClient.getDocument(firstChatId, firstMessageId)
+                                    ?.let { manifestCodec.decode(it.caption) } ?: manifest
+                                val durableCaption = remoteCaption.copy(
+                                    contentHash = finalHash ?: remoteCaption.contentHash,
+                                    partHash = first.plainHash ?: remoteCaption.partHash
+                                )
+                                if (durableCaption.contentHash != remoteCaption.contentHash ||
+                                    durableCaption.partHash != remoteCaption.partHash
+                                ) {
+                                    telegramClient.editCaption(
+                                        firstChatId,
+                                        firstMessageId,
+                                        manifestCodec.encode(durableCaption, encrypt)
+                                    )
+                                }
+                            }
+                            if (finalHash != null && finalHash != entity.contentHash) {
+                                fileDao.setContentHash(entity.id, finalHash)
+                            }
                             fileDao.setPartCount(entity.id, event.parts.size)
                             fileDao.setRemoteMapping(
                                 id = entity.id,
@@ -364,7 +387,7 @@ class TransferExecutor(
                                         fileId = entity.id,
                                         sizeBytes = manifest.sizeBytes,
                                         modifiedAt = sourceFile.lastModified(),
-                                        contentHash = contentHash,
+                                        contentHash = finalHash,
                                         backedUpAt = System.currentTimeMillis(),
                                         chatId = first.chatId
                                     )
@@ -375,13 +398,16 @@ class TransferExecutor(
                                     telegramClient.deleteMessages(chatId, listOf(stale))
                                 }
                             }
-                            releaseLocalCopy(transfer.type, entity, localPath, contentHash)
+                            releaseLocalCopy(transfer.type, entity, localPath, finalHash)
                             transferDao.setCompleted(transfer.id, System.currentTimeMillis())
                             outcome = TransferOutcome.Completed
                         }
                     }
                 }
             outcome
+        } catch (e: PartSourceChangedException) {
+            fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.FAILED)
+            TransferOutcome.Failed(messages.verifyFailed)
         } catch (e: TransferControlException) {
             fileDao.setBackupStateIfLocalOnly(
                 entity.id,
@@ -507,6 +533,9 @@ class TransferExecutor(
                 transferDao.setLocalPath(transfer.id, null)
             }
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
+        } catch (e: PartIntegrityException) {
+            transferDao.setStage(transfer.id, null, System.currentTimeMillis())
+            TransferOutcome.Failed(messages.verifyFailed)
         } catch (e: TelegramException) {
             TransferOutcome.Failed(e.message, e.retryAfterSeconds)
         }
@@ -553,6 +582,33 @@ class TransferExecutor(
                 ?: return TransferOutcome.Failed(messages.keyMissing)
         } else {
             null
+        }
+
+        if (entity.contentHash != null) {
+            val actualHash = try {
+                withContext(Dispatchers.IO) {
+                    val accumulator = HashAccumulator()
+                    val hashingOutput = accumulator.wrap(DiscardingOutputStream)
+                    source.inputStream().buffered().use { input ->
+                        if (key != null) {
+                            streamCrypto.decryptStream(key, input, hashingOutput)
+                        } else {
+                            input.copyTo(hashingOutput)
+                        }
+                    }
+                    hashingOutput.flush()
+                    accumulator.result()
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                return TransferOutcome.Failed(
+                    if (key != null) messages.decryptionFailed else messages.verifyFailed
+                )
+            }
+            if (actualHash != entity.contentHash) {
+                return TransferOutcome.Failed(messages.verifyFailed)
+            }
         }
 
         val folderPath = folderPathResolver.pathOf(entity.folderId)
