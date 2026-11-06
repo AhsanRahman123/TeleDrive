@@ -10,6 +10,12 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
     }
 }
 
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `file_parts` ADD COLUMN `plainHash` TEXT")
+    }
+}
+
 val MIGRATION_15_16 = object : Migration(15, 16) {
     override fun migrate(connection: SQLiteConnection) {
         connection.execSQL("ALTER TABLE `files` ADD COLUMN `manifestExtra` TEXT")
