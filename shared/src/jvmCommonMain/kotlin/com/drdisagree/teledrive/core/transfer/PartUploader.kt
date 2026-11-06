@@ -6,6 +6,7 @@ import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
 import com.drdisagree.teledrive.core.dispatchers.DispatcherProvider
 import com.drdisagree.teledrive.core.files.AppStoragePaths
+import com.drdisagree.teledrive.core.files.DiscardingOutputStream
 import com.drdisagree.teledrive.core.files.HashAccumulator
 import com.drdisagree.teledrive.core.media.ThumbnailStore
 import com.drdisagree.teledrive.core.telegram.TelegramClient
@@ -67,9 +68,11 @@ class PartUploader(
 
             try {
                 if (encrypt) emit(PartUploadEvent.Sealing(index))
+                val partHasher = HashAccumulator()
                 withContext(dispatchers.io) {
-                    writePart(source, plainOffset, plainSize, scratch, encrypt, hasher)
+                    writePart(source, plainOffset, plainSize, scratch, encrypt, hasher, partHasher)
                 }
+                val partHash = partHasher.result() ?: error("Could not calculate part hash")
                 if (encrypt) emit(PartUploadEvent.PartDone(index, partCount))
 
                 val iconFileId = if (index == 0) {
@@ -82,7 +85,8 @@ class PartUploader(
                     partIndex = index,
                     partOffset = plainOffset,
                     partSize = plainSize,
-                    iconFileId = if (index == 0) iconFileId ?: manifest.iconFileId else null
+                    iconFileId = if (index == 0) iconFileId ?: manifest.iconFileId else null,
+                    partHash = partHash
                 )
                 val partName = if (encrypt) {
                     FileParts.nameFor(entity.id, index)
@@ -120,7 +124,8 @@ class PartUploader(
                                 plainOffset = plainOffset,
                                 plainSize = plainSize,
                                 storedSize = scratch.length(),
-                                uploadedAt = System.currentTimeMillis()
+                                uploadedAt = System.currentTimeMillis(),
+                                plainHash = partHash
                             )
                         }
                     }
@@ -137,7 +142,12 @@ class PartUploader(
             }
         }
 
-        emit(PartUploadEvent.Completed(done.values.sortedBy { it.partIndex }, hasher?.result()))
+        if (source.length() != totalSize) throw PartSourceChangedException()
+        val completedParts = done.values.sortedBy { it.partIndex }
+        val contentHash = hasher?.result() ?: withContext(dispatchers.io) {
+            hashResumedSource(source, completedParts, partCount, manifest.contentHash)
+        }
+        emit(PartUploadEvent.Completed(completedParts, contentHash))
     }
 
     suspend fun discardParts(fileId: String) {
@@ -158,13 +168,15 @@ class PartUploader(
         plainSize: Long,
         target: File,
         encrypt: Boolean,
-        hasher: HashAccumulator?
+        hasher: HashAccumulator?,
+        partHasher: HashAccumulator
     ) {
         target.parentFile?.mkdirs()
         source.inputStream().use { input ->
             skipExactly(input, plainOffset)
             val ranged = RangeInputStream(input, plainSize)
-            val hashed = hasher?.wrap(ranged) ?: ranged
+            val partHashed = partHasher.wrap(ranged)
+            val hashed = hasher?.wrap(partHashed) ?: partHashed
             target.outputStream().buffered().use { output ->
                 if (encrypt) {
                     val key = wrappedKeyRepository.getOrCreate(CryptoKeys.CONTENT)
@@ -173,6 +185,7 @@ class PartUploader(
                     hashed.copyTo(output)
                 }
             }
+            if (ranged.bytesRead != plainSize) throw PartSourceChangedException()
         }
     }
 
@@ -181,12 +194,51 @@ class PartUploader(
         while (remaining > 0) {
             val skipped = input.skip(remaining)
             if (skipped <= 0) {
-                if (input.read() == -1) return
+                if (input.read() == -1) throw PartSourceChangedException()
                 remaining--
             } else {
                 remaining -= skipped
             }
         }
+    }
+
+    private fun hashResumedSource(
+        source: File,
+        parts: List<FilePartEntity>,
+        expectedPartCount: Int,
+        expectedContentHash: String?
+    ): String? {
+        if (parts.size != expectedPartCount) throw PartSourceChangedException()
+        val checkWholeHash = expectedContentHash != null || parts.all { it.plainHash != null }
+        if (!checkWholeHash && parts.none { it.plainHash != null }) return null
+
+        val wholeHasher = if (checkWholeHash) HashAccumulator() else null
+        val totalSize = source.length()
+        var offset = 0L
+        source.inputStream().use { input ->
+            parts.sortedBy { it.partIndex }.forEachIndexed { index, part ->
+                val expectedSize = FileParts.sizeOf(index, totalSize)
+                if (part.partIndex != index || part.plainOffset != offset ||
+                    part.plainSize != expectedSize
+                ) throw PartSourceChangedException()
+
+                val range = RangeInputStream(input, expectedSize)
+                val wholeInput = wholeHasher?.wrap(range) ?: range
+                val partHasher = part.plainHash?.let { HashAccumulator() }
+                val hashedInput = partHasher?.wrap(wholeInput) ?: wholeInput
+                val copied = hashedInput.copyTo(DiscardingOutputStream)
+                if (copied != expectedSize ||
+                    (part.plainHash != null && partHasher?.result() != part.plainHash)
+                ) throw PartSourceChangedException()
+                offset += copied
+            }
+        }
+        if (offset != totalSize) throw PartSourceChangedException()
+        val actualWholeHash = wholeHasher?.result()
+        if (expectedContentHash != null && actualWholeHash != expectedContentHash) {
+            throw PartSourceChangedException()
+        }
+        return actualWholeHash
     }
 
     private fun scratchDir(): File = File(storagePaths.cacheDir, SCRATCH_DIR).apply { mkdirs() }
