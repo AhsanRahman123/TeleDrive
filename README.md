@@ -193,7 +193,7 @@ Point the build at a full JDK with a `desktopJavaHome` property in your global
 ```bash
 ./gradlew :desktop:packageMsi           # Windows installer
 ./gradlew :desktop:packageDebUser       # Linux .deb with system dependencies
-./gradlew :desktop:packageAppImage      # Linux AppImage for any distro
+./gradlew :desktop:packageAppImage      # Linux x86_64 AppImage (host libraries required)
 ./gradlew :desktop:packageDmg           # macOS disk image
 ./gradlew :desktop:createDistributable  # portable app folder
 ```
