@@ -249,3 +249,5 @@ class PartUploader(
         const val OCTET_STREAM = "application/octet-stream"
     }
 }
+
+internal class PartSourceChangedException : IllegalStateException("Source file does not match the previously uploaded parts")
