@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.core.telegram
 import com.drdisagree.teledrive.domain.model.Country
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.StateFlow
 
 /** No TDLib types cross this boundary. */
@@ -142,4 +143,30 @@ interface TelegramClient {
     suspend fun openChat(chatId: Long)
 
     suspend fun closeChat(chatId: Long)
+}
+
+/**
+ * Replaces an existing single-message document in place when a remote message is available.
+ * A failed edit leaves the previous Telegram document intact; a new message is created only
+ * for a file that does not already have a remote message.
+ */
+internal fun TelegramClient.uploadOrReplaceDocument(
+    chatId: Long,
+    existingMessageId: Long?,
+    localPath: String,
+    fileName: String,
+    mimeType: String,
+    caption: String,
+    thumbnailPath: String? = null
+): Flow<TelegramUploadEvent> = if (existingMessageId == null) {
+    uploadDocument(chatId, localPath, fileName, mimeType, caption, thumbnailPath)
+} else {
+    flow {
+        emit(TelegramUploadEvent.Started(existingMessageId))
+        emit(
+            TelegramUploadEvent.Completed(
+                editDocument(chatId, existingMessageId, localPath, caption)
+            )
+        )
+    }
 }
