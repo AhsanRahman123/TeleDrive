@@ -11,6 +11,7 @@ import com.drdisagree.teledrive.core.files.Hashing
 import com.drdisagree.teledrive.core.files.LocalCopyDeleter
 import com.drdisagree.teledrive.core.files.PartialDownload
 import com.drdisagree.teledrive.core.media.ThumbnailStore
+import com.drdisagree.teledrive.core.publish.PublishScheduler
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.core.telegram.TelegramException
@@ -65,6 +66,7 @@ class TransferExecutor(
     private val downloadWriter: DownloadWriter,
     private val fileImporter: FileImporter,
     private val settingsRepository: SettingsRepository,
+    private val publishScheduler: PublishScheduler,
     private val filePartDao: FilePartDao,
     private val partUploader: PartUploader,
     private val partDownloader: PartDownloader,
@@ -339,12 +341,17 @@ class TransferExecutor(
                             checkControl(transfer.id)
                         }
 
+                        is PartUploadEvent.SourceChanged -> {
+                            fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.FAILED)
+                            outcome = TransferOutcome.Failed(messages.verifyFailed)
+                        }
+
                         is PartUploadEvent.Completed -> {
                             val first = event.parts.firstOrNull()
                                 ?: error("Upload finished with no parts")
-                            event.contentHash
+                            val updatedContentHash = event.contentHash
                                 ?.takeIf { it != entity.contentHash }
-                                ?.let { fileDao.setContentHash(entity.id, it) }
+                            updatedContentHash?.let { fileDao.setContentHash(entity.id, it) }
                             fileDao.setPartCount(entity.id, event.parts.size)
                             fileDao.setRemoteMapping(
                                 id = entity.id,
@@ -356,6 +363,10 @@ class TransferExecutor(
                                 iconFileId = manifest.iconFileId
                             )
                             fileDao.setRemoteBase(entity.id, FileBase.of(manifest).toText())
+                            if (updatedContentHash != null) {
+                                fileDao.markPendingPublish(listOf(entity.id))
+                                publishScheduler.kick()
+                            }
                             if (transfer.type == TransferType.BACKUP) {
                                 backupDao.upsertRecord(
                                     BackupRecordEntity(
@@ -493,6 +504,11 @@ class TransferExecutor(
                                 System.currentTimeMillis()
                             )
                             checkControl(transfer.id)
+                        }
+
+                        is PartDownloadEvent.IntegrityFailure -> {
+                            transferDao.setStage(transfer.id, null, System.currentTimeMillis())
+                            outcome = TransferOutcome.Failed(messages.verifyFailed)
                         }
 
                         is PartDownloadEvent.Completed -> {
