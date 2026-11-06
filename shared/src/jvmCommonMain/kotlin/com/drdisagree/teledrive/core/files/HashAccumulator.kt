@@ -25,3 +25,8 @@ class HashAccumulator {
     fun result(): String? =
         if (abandoned) null else digest.digest().joinToString("") { "%02x".format(it) }
 }
+
+internal object DiscardingOutputStream : OutputStream() {
+    override fun write(value: Int) = Unit
+    override fun write(buffer: ByteArray, offset: Int, length: Int) = Unit
+}
