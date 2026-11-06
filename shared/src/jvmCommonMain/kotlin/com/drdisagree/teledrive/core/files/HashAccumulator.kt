@@ -1,7 +1,9 @@
 package com.drdisagree.teledrive.core.files
 
 import java.io.InputStream
+import java.io.OutputStream
 import java.security.DigestInputStream
+import java.security.DigestOutputStream
 import java.security.MessageDigest
 
 /**
@@ -13,6 +15,8 @@ class HashAccumulator {
     private var abandoned = false
 
     fun wrap(input: InputStream): InputStream = DigestInputStream(input, digest)
+
+    fun wrap(output: OutputStream): OutputStream = DigestOutputStream(output, digest)
 
     fun abandon() {
         abandoned = true
