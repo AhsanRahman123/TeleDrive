@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.app_drive_recreated
 import com.drdisagree.teledrive.resources.channels_creating_drive
-import com.drdisagree.teledrive.resources.channels_deleting
 import com.drdisagree.teledrive.resources.channels_looking_for_drives
 import com.drdisagree.teledrive.resources.channels_opening_drive
 import com.drdisagree.teledrive.resources.channels_removed_missing
@@ -81,10 +80,6 @@ class ChannelsViewModel(
 
     fun rename(chatId: Long, label: String) = run(UiText.Resource(Res.string.channels_renaming)) {
         channelRepository.rename(chatId, label)
-    }
-
-    fun deleteRemotely(chatId: Long) = run(UiText.Resource(Res.string.channels_deleting)) {
-        channelRepository.deleteRemotely(chatId)
     }
 
     private fun run(label: UiText, block: suspend () -> AppResult<*>) {
