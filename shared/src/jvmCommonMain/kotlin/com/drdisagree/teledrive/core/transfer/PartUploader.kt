@@ -168,7 +168,16 @@ class PartUploader(
             emit(PartUploadEvent.SourceChanged(null))
             return@flow
         }
-        emit(PartUploadEvent.Completed(done.values.sortedBy { it.partIndex }, contentHash))
+        val safeContentHash = if (
+            manifest.contentHash == null && done.values.any { it.plainHash == null }
+        ) {
+            // Older remote parts have no checksum to compare against; do not publish a hash
+            // calculated only from the current local source as if it verified those messages.
+            null
+        } else {
+            contentHash
+        }
+        emit(PartUploadEvent.Completed(done.values.sortedBy { it.partIndex }, safeContentHash))
     }
 
     suspend fun discardParts(fileId: String) {
