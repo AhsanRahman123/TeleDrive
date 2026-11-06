@@ -352,6 +352,11 @@ class TransferExecutor(
                                 val remoteCaption = telegramClient.getDocument(firstChatId, firstMessageId)
                                     ?.let { manifestCodec.decode(it.caption) } ?: manifest
                                 val durableCaption = remoteCaption.copy(
+                                    version = RemoteFileManifest.PART_VERSION,
+                                    partCount = event.parts.size,
+                                    partIndex = first.partIndex,
+                                    partOffset = first.plainOffset,
+                                    partSize = first.plainSize,
                                     contentHash = finalHash ?: remoteCaption.contentHash,
                                     partHash = first.plainHash ?: remoteCaption.partHash
                                 )
