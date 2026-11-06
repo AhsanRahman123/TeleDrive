@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -59,7 +58,6 @@ import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.resolve
 import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
-import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileThumbnail
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
@@ -72,7 +70,6 @@ import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_back
 import com.drdisagree.teledrive.resources.common_clear_selection
 import com.drdisagree.teledrive.resources.common_collapse
-import com.drdisagree.teledrive.resources.common_delete_forever
 import com.drdisagree.teledrive.resources.common_deselect_all
 import com.drdisagree.teledrive.resources.common_expand
 import com.drdisagree.teledrive.resources.common_restore
@@ -80,13 +77,7 @@ import com.drdisagree.teledrive.resources.common_select
 import com.drdisagree.teledrive.resources.common_select_all
 import com.drdisagree.teledrive.resources.common_selection_count
 import com.drdisagree.teledrive.resources.trash
-import com.drdisagree.teledrive.resources.trash_auto_clear_after_days
-import com.drdisagree.teledrive.resources.trash_delete_permanently
-import com.drdisagree.teledrive.resources.trash_delete_selected_message
 import com.drdisagree.teledrive.resources.trash_empty
-import com.drdisagree.teledrive.resources.trash_empty_trash_action
-import com.drdisagree.teledrive.resources.trash_empty_trash_title
-import com.drdisagree.teledrive.resources.trash_items_permanently_deleted_device
 import com.drdisagree.teledrive.resources.trash_kept_until_removed
 import com.drdisagree.teledrive.resources.trash_restores_with_folder
 import com.drdisagree.teledrive.resources.trash_trashed_at
@@ -101,8 +92,6 @@ fun TrashScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var confirmEmpty by remember { mutableStateOf(false) }
-    var confirmDeleteSelected by remember { mutableStateOf(false) }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
@@ -135,10 +124,7 @@ fun TrashScreen(
     val shortcuts = CollectionShortcuts(
         onToggleSelect = { index -> selectableIdAt(index)?.let(viewModel::toggleSelection) },
         onSelectAll = viewModel::selectAll,
-        onDelete = { index ->
-            if (!state.selectionMode) selectableIdAt(index)?.let(viewModel::toggleSelection)
-            if (state.selectionMode || selectableIdAt(index) != null) confirmDeleteSelected = true
-        },
+        onDelete = null,
         onExpand = { index ->
             state.rows.getOrNull(index)?.takeIf { it.expandable && !it.expanded }
                 ?.let { viewModel.toggleExpanded(it.item.id) }
@@ -193,12 +179,6 @@ fun TrashScreen(
                                 contentDescription = stringResource(Res.string.common_restore)
                             )
                         }
-                        IconButton(onClick = { confirmDeleteSelected = true }) {
-                            Icon(
-                                Icons.Filled.DeleteForever,
-                                contentDescription = stringResource(Res.string.common_delete_forever)
-                            )
-                        }
                     }
                 )
             } else {
@@ -213,16 +193,6 @@ fun TrashScreen(
                             )
                         }
                     },
-                    actions = {
-                        if (state.items.isNotEmpty()) {
-                            IconButton(onClick = { confirmEmpty = true }) {
-                                Icon(
-                                    Icons.Filled.DeleteForever,
-                                    contentDescription = stringResource(Res.string.trash_empty_trash_action)
-                                )
-                            }
-                        }
-                    }
                 )
             }
         }
@@ -231,11 +201,7 @@ fun TrashScreen(
             EmptyState(
                 icon = Icons.Outlined.Delete,
                 title = stringResource(Res.string.trash_empty),
-                description = if (state.autoClearDays > 0) {
-                    stringResource(Res.string.trash_auto_clear_after_days, state.autoClearDays)
-                } else {
-                    stringResource(Res.string.trash_kept_until_removed)
-                },
+                description = stringResource(Res.string.trash_remote_delete_protected),
                 modifier = Modifier.padding(padding)
             )
             return@Scaffold
@@ -248,6 +214,16 @@ fun TrashScreen(
                 .then(dragSelect),
             contentPadding = padding.add(horizontal = 12.dp, top = 12.dp, bottom = 12.dp)
         ) {
+            item(key = "remote-delete-protection") {
+                Text(
+                    text = stringResource(Res.string.trash_remote_delete_protected),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
             itemsIndexed(
                 state.rows,
                 key = { _, row -> row.key }
@@ -360,33 +336,4 @@ fun TrashScreen(
         }
     }
 
-    if (confirmEmpty) {
-        ConfirmDialog(
-            title = stringResource(Res.string.trash_empty_trash_title),
-            message = stringResource(Res.string.trash_items_permanently_deleted_device),
-            confirmLabel = stringResource(Res.string.trash_empty_trash_action),
-            destructive = true,
-            onConfirm = {
-                confirmEmpty = false
-                viewModel.emptyTrash()
-            },
-            onDismiss = { confirmEmpty = false }
-        )
-    }
-    if (confirmDeleteSelected) {
-        ConfirmDialog(
-            title = stringResource(Res.string.trash_delete_permanently),
-            message = stringResource(
-                Res.string.trash_delete_selected_message,
-                state.selection.size
-            ),
-            confirmLabel = stringResource(Res.string.common_delete_forever),
-            destructive = true,
-            onConfirm = {
-                confirmDeleteSelected = false
-                viewModel.deleteSelectedForever()
-            },
-            onDismiss = { confirmDeleteSelected = false }
-        )
-    }
 }
