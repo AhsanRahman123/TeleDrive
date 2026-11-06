@@ -17,6 +17,7 @@ import com.drdisagree.teledrive.data.remote.telegram.ManifestCodec
 import com.drdisagree.teledrive.data.remote.telegram.RemoteFileManifest
 import java.io.File
 import java.io.InputStream
+import java.io.OutputStream
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -47,6 +48,7 @@ class PartUploader(
         thumbnailPath: String? = null
     ): Flow<PartUploadEvent> = flow {
         val totalSize = source.length()
+        val sourceModifiedAt = source.lastModified()
         val partCount = FileParts.countFor(totalSize)
         val done = filePartDao.partsOf(entity.id)
             .filter { it.messageId != null }
@@ -56,18 +58,36 @@ class PartUploader(
         var uploadedBefore = done.values.sumOf { it.plainSize }
         emit(PartUploadEvent.Progress(uploadedBefore))
 
-        val hasher = if (done.isEmpty()) HashAccumulator() else null
+        val hasher = HashAccumulator()
+        if (done.keys.any { it !in 0 until partCount }) {
+            emit(PartUploadEvent.SourceChanged(null))
+            return@flow
+        }
 
         for (index in 0 until partCount) {
-            if (done.containsKey(index)) continue
-
             val plainOffset = FileParts.offsetOf(index)
             val plainSize = FileParts.sizeOf(index, totalSize)
+            val existingPart = done[index]
+            if (existingPart != null) {
+                if (existingPart.plainOffset != plainOffset || existingPart.plainSize != plainSize) {
+                    emit(PartUploadEvent.SourceChanged(index))
+                    return@flow
+                }
+                val currentPartHash = withContext(dispatchers.io) {
+                    hashRange(source, plainOffset, plainSize, hasher)
+                }
+                if (existingPart.plainHash != null && existingPart.plainHash != currentPartHash) {
+                    emit(PartUploadEvent.SourceChanged(index))
+                    return@flow
+                }
+                continue
+            }
+
             val scratch = File(scratchDir(), "${entity.id}.${index}.part")
 
             try {
                 if (encrypt) emit(PartUploadEvent.Sealing(index))
-                withContext(dispatchers.io) {
+                val partHash = withContext(dispatchers.io) {
                     writePart(source, plainOffset, plainSize, scratch, encrypt, hasher)
                 }
                 if (encrypt) emit(PartUploadEvent.PartDone(index, partCount))
@@ -82,6 +102,7 @@ class PartUploader(
                     partIndex = index,
                     partOffset = plainOffset,
                     partSize = plainSize,
+                    partHash = partHash,
                     iconFileId = if (index == 0) iconFileId ?: manifest.iconFileId else null
                 )
                 val partName = if (encrypt) {
@@ -120,7 +141,8 @@ class PartUploader(
                                 plainOffset = plainOffset,
                                 plainSize = plainSize,
                                 storedSize = scratch.length(),
-                                uploadedAt = System.currentTimeMillis()
+                                uploadedAt = System.currentTimeMillis(),
+                                plainHash = partHash
                             )
                         }
                     }
@@ -137,7 +159,16 @@ class PartUploader(
             }
         }
 
-        emit(PartUploadEvent.Completed(done.values.sortedBy { it.partIndex }, hasher?.result()))
+        val contentHash = hasher.result()
+        if (
+            source.length() != totalSize ||
+            source.lastModified() != sourceModifiedAt ||
+            (manifest.contentHash != null && contentHash != manifest.contentHash)
+        ) {
+            emit(PartUploadEvent.SourceChanged(null))
+            return@flow
+        }
+        emit(PartUploadEvent.Completed(done.values.sortedBy { it.partIndex }, contentHash))
     }
 
     suspend fun discardParts(fileId: String) {
@@ -158,13 +189,15 @@ class PartUploader(
         plainSize: Long,
         target: File,
         encrypt: Boolean,
-        hasher: HashAccumulator?
-    ) {
+        wholeHasher: HashAccumulator
+    ): String {
+        val partHasher = HashAccumulator()
         target.parentFile?.mkdirs()
         source.inputStream().use { input ->
             skipExactly(input, plainOffset)
             val ranged = RangeInputStream(input, plainSize)
-            val hashed = hasher?.wrap(ranged) ?: ranged
+            val wholeHashed = wholeHasher.wrap(ranged)
+            val hashed = partHasher.wrap(wholeHashed)
             target.outputStream().buffered().use { output ->
                 if (encrypt) {
                     val key = wrappedKeyRepository.getOrCreate(CryptoKeys.CONTENT)
@@ -174,6 +207,25 @@ class PartUploader(
                 }
             }
         }
+        return partHasher.result() ?: error("Could not calculate part checksum")
+    }
+
+    private fun hashRange(
+        source: File,
+        plainOffset: Long,
+        plainSize: Long,
+        wholeHasher: HashAccumulator
+    ): String {
+        val partHasher = HashAccumulator()
+        source.inputStream().use { input ->
+            skipExactly(input, plainOffset)
+            val ranged = RangeInputStream(input, plainSize)
+            val wholeHashed = wholeHasher.wrap(ranged)
+            partHasher.wrap(wholeHashed).use { hashed ->
+                hashed.copyTo(OutputStream.nullOutputStream())
+            }
+        }
+        return partHasher.result() ?: error("Could not calculate completed part checksum")
     }
 
     private fun skipExactly(input: InputStream, count: Long) {
@@ -181,7 +233,7 @@ class PartUploader(
         while (remaining > 0) {
             val skipped = input.skip(remaining)
             if (skipped <= 0) {
-                if (input.read() == -1) return
+                if (input.read() == -1) error("Source file ended before the part range")
                 remaining--
             } else {
                 remaining -= skipped
