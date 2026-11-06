@@ -33,6 +33,7 @@ data class RemoteFileManifest(
     @SerialName("po") val partOffset: Long = 0,
     @SerialName("ps") val partSize: Long = 0,
     @SerialName("icon") val iconFileId: String? = null,
+    @SerialName("ph") val partHash: String? = null,
     @Transient val extra: Map<String, JsonElement> = emptyMap()
 ) {
     val isPart: Boolean get() = partCount > 1
