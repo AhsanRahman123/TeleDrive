@@ -9,6 +9,8 @@ internal class RangeInputStream(
 
     private var read = 0L
 
+    val bytesRead: Long get() = read
+
     override fun read(): Int {
         if (read >= limit) return -1
         val value = delegate.read()
