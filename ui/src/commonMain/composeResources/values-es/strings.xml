@@ -975,4 +975,6 @@
     <string name="preview_slideshow_pause">Pausar presentación</string>
     <string name="gallery_start_slideshow">Iniciar presentación</string>
     <string name="transfers_prioritize_download">Mover la descarga al principio de la cola</string>
+    <string name="error_remote_deletion_disabled">La eliminación permanente de los archivos almacenados en Telegram está desactivada para proteger tus datos.</string>
+    <string name="trash_remote_delete_protected">La eliminación permanente en Telegram está desactivada. Los elementos movidos aquí permanecen en tu canal de almacenamiento y se pueden restaurar en cualquier momento.</string>
 </resources>
