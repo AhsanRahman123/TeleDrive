@@ -17,6 +17,7 @@ import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.core.telegram.TelegramLimits
 import com.drdisagree.teledrive.core.telegram.TelegramUploadEvent
+import com.drdisagree.teledrive.core.telegram.uploadOrReplaceDocument
 import com.drdisagree.teledrive.data.local.dao.BackupDao
 import com.drdisagree.teledrive.data.local.dao.FileDao
 import com.drdisagree.teledrive.data.local.dao.FilePartDao
@@ -201,6 +202,7 @@ class TransferExecutor(
         val ticker = ProgressTicker().apply { start(0, startedAt) }
 
         return try {
+            checkControl(transfer.id)
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.uploadEnded)
             telegramClient.uploadOrReplaceDocument(
