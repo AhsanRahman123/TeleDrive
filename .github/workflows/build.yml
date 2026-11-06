@@ -105,6 +105,9 @@ jobs:
       - name: Install Linux build prerequisites
         run: |
           apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends software-properties-common
+          add-apt-repository -y universe
+          apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates curl git unzip zip file dpkg-dev desktop-file-utils \
             patchelf libvlc5 libvlccore9 vlc-plugin-base vlc-plugin-video-output
@@ -142,6 +145,9 @@ jobs:
     steps:
       - name: Install Linux build prerequisites
         run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends software-properties-common
+          add-apt-repository -y universe
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             ca-certificates curl git unzip zip file dpkg-dev desktop-file-utils \
