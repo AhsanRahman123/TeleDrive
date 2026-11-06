@@ -25,7 +25,8 @@ interface TelegramClient {
         chatId: Long,
         messageId: Long,
         localPath: String,
-        caption: String
+        caption: String,
+        thumbnailPath: String? = null
     ): RemoteDocument
 
     /** Link metadata fetched by Telegram, so the device never calls the site. */
@@ -165,7 +166,7 @@ internal fun TelegramClient.uploadOrReplaceDocument(
         emit(TelegramUploadEvent.Started(existingMessageId))
         emit(
             TelegramUploadEvent.Completed(
-                editDocument(chatId, existingMessageId, localPath, caption)
+                editDocument(chatId, existingMessageId, localPath, caption, thumbnailPath)
             )
         )
     }
