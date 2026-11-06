@@ -5,11 +5,14 @@ import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.KeyUnavailableException
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
+import com.drdisagree.teledrive.core.files.DiscardingOutputStream
+import com.drdisagree.teledrive.core.files.HashAccumulator
 import com.drdisagree.teledrive.core.files.PartialDownload
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.data.local.dao.FilePartDao
 import com.drdisagree.teledrive.data.local.entity.FilePartEntity
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.io.File
@@ -55,15 +58,20 @@ class PartDownloader(
                 ?: error("Part ${part.partIndex + 1} did not download")
 
             emit(PartDownloadEvent.Joining(part.partIndex))
-            withContext(dispatchers.io) {
-                appendPart(source, target, encrypted)
-                if (target.length() != written + part.plainSize) {
-                    target.truncate(written)
-                    error("Part ${part.partIndex + 1} was not written completely")
+            try {
+                withContext(dispatchers.io) {
+                    appendPart(source, target, encrypted, part)
+                    if (target.length() != written + part.plainSize) {
+                        error("Part ${part.partIndex + 1} was not written completely")
+                    }
                 }
+            } catch (error: Throwable) {
+                withContext(NonCancellable + dispatchers.io) { target.truncate(written) }
+                throw error
+            } finally {
+                runCatching { telegramClient.deleteLocalCopy(remoteFileId) }
+                    .onFailure { SafeLog.w(TAG, "Could not free part ${part.partIndex + 1}", it) }
             }
-            runCatching { telegramClient.deleteLocalCopy(remoteFileId) }
-                .onFailure { SafeLog.w(TAG, "Could not free part ${part.partIndex + 1}", it) }
 
             written += part.plainSize
             emit(PartDownloadEvent.Progress(written))
@@ -72,9 +80,16 @@ class PartDownloader(
         emit(PartDownloadEvent.Completed(target.token))
     }
 
-    private fun appendPart(source: File, target: PartialDownload, encrypted: Boolean) {
+    private fun appendPart(
+        source: File,
+        target: PartialDownload,
+        encrypted: Boolean,
+        part: FilePartEntity
+    ) {
+        val hasher = part.plainHash?.let { HashAccumulator() }
         target.append { output ->
-            val buffered = output.buffered()
+            val hashedOutput = hasher?.wrap(output) ?: output
+            val buffered = hashedOutput.buffered()
             if (encrypted) {
                 val key = wrappedKeyRepository.get(CryptoKeys.CONTENT)
                     ?: throw KeyUnavailableException(CryptoKeys.CONTENT)
@@ -86,6 +101,9 @@ class PartDownloader(
             }
             buffered.flush()
         }
+        if (part.plainHash != null && hasher?.result() != part.plainHash) {
+            throw PartIntegrityException(part.partIndex)
+        }
     }
 
     /** Only whole parts count: a half-written one cannot be trusted and is fetched again. */
@@ -94,10 +112,18 @@ class PartDownloader(
         if (length == 0L) return 0 to 0L
         var covered = 0L
         var index = 0
-        for (part in parts) {
-            if (covered + part.plainSize > length) break
-            covered += part.plainSize
-            index++
+        target.read().use { input ->
+            for (part in parts) {
+                if (part.partIndex != index || part.plainOffset != covered ||
+                    part.plainHash == null || covered + part.plainSize > length
+                ) break
+                val hasher = HashAccumulator()
+                val ranged = RangeInputStream(input, part.plainSize)
+                val copied = hasher.wrap(ranged).copyTo(DiscardingOutputStream)
+                if (copied != part.plainSize || hasher.result() != part.plainHash) break
+                covered += copied
+                index++
+            }
         }
         if (covered != length) target.truncate(covered)
         return index to covered
@@ -107,3 +133,5 @@ class PartDownloader(
         const val TAG = "PartDownloader"
     }
 }
+
+internal class PartIntegrityException(val partIndex: Int) : IllegalStateException("Part ${partIndex + 1} failed SHA-256 verification")
