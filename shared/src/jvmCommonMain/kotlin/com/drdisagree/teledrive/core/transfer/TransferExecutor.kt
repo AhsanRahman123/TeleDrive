@@ -203,8 +203,9 @@ class TransferExecutor(
         return try {
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.uploadEnded)
-            telegramClient.uploadDocument(
+            telegramClient.uploadOrReplaceDocument(
                 chatId = chatId,
+                existingMessageId = supersededMessageId,
                 localPath = uploadPath,
                 fileName = uploadName,
                 mimeType = if (encrypt) "application/octet-stream" else entity.mimeType,
@@ -250,13 +251,6 @@ class TransferExecutor(
                                 )
                             )
                         }
-                        supersededMessageId
-                            ?.takeIf { it != document.messageId }
-                            ?.let { stale ->
-                                runCatching {
-                                    telegramClient.deleteMessages(chatId, listOf(stale))
-                                }
-                            }
                         releaseLocalCopy(transfer.type, entity, localPath, contentHash)
                         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
                         outcome = TransferOutcome.Completed
@@ -265,13 +259,17 @@ class TransferExecutor(
             }
             outcome
         } catch (e: TransferControlException) {
-            fileDao.setBackupStateIfLocalOnly(
+            fileDao.setBackupState(
                 entity.id,
-                if (e.paused) BackupState.QUEUED else BackupState.NONE
+                when {
+                    e.paused -> BackupState.QUEUED
+                    supersededMessageId != null -> BackupState.FAILED
+                    else -> BackupState.NONE
+                }
             )
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
         } catch (e: TelegramException) {
-            fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.FAILED)
+            fileDao.setBackupState(entity.id, BackupState.FAILED)
             TransferOutcome.Failed(e.message, e.retryAfterSeconds)
         } finally {
             stagingFile?.delete()
@@ -394,16 +392,20 @@ class TransferExecutor(
                 }
             outcome
         } catch (e: TransferControlException) {
-            fileDao.setBackupStateIfLocalOnly(
+            fileDao.setBackupState(
                 entity.id,
-                if (e.paused) BackupState.QUEUED else BackupState.NONE
+                when {
+                    e.paused -> BackupState.QUEUED
+                    entity.messageId != null -> BackupState.FAILED
+                    else -> BackupState.NONE
+                }
             )
             if (!e.paused && fileDao.byId(entity.id)?.messageId == null) {
                 partUploader.discardParts(entity.id)
             }
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
         } catch (e: TelegramException) {
-            fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.FAILED)
+            fileDao.setBackupState(entity.id, BackupState.FAILED)
             TransferOutcome.Failed(e.message, e.retryAfterSeconds)
         }
     }
