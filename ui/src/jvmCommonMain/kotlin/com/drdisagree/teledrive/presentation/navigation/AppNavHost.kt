@@ -103,6 +103,11 @@ fun AppNavHost(
                         navController.navigateOnce(
                             Route.SettingsSection(SettingsSectionType.BACKUP.name)
                         )
+                    },
+                    onOpenSecuritySettings = {
+                        navController.navigateOnce(
+                            Route.SettingsSection(SettingsSectionType.SECURITY.name)
+                        )
                     }
                 )
             }
