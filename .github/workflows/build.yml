@@ -74,6 +74,13 @@ jobs:
       - name: Desktop tests
         run: ./gradlew :desktop:test
 
+      - name: Upload generated Room schema
+        uses: actions/upload-artifact@v7
+        with:
+          name: TeleDrive-room-schema
+          path: shared/schemas/com.drdisagree.teledrive.data.local.database.TeleDriveDatabase/18.json
+          if-no-files-found: error
+
       - name: Cache VLC natives
         uses: actions/cache@v6
         with:
