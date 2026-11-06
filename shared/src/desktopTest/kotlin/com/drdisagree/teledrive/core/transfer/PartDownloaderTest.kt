@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.core.transfer
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.dispatchers.DispatcherProvider
 import com.drdisagree.teledrive.core.files.FilePartialDownload
+import com.drdisagree.teledrive.core.files.Hashing
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.data.local.entity.FilePartEntity
@@ -62,6 +63,21 @@ class PartDownloaderTest {
     }
 
     @Test
+    fun `a corrupted part is rejected without removing previously verified parts`() = runBlocking {
+        recordParts()
+        telegram.corruptParts += 1
+        val target = FilePartialDownload.open(destination, "big.vhdx", null)!!
+
+        val failure = runCatching {
+            downloader().download("f1", encrypted = false, target = target).toList()
+        }.exceptionOrNull()
+
+        assertTrue(failure is PartIntegrityException)
+        assertArrayEquals(contents[0], File(target.token).readBytes())
+        assertEquals(listOf("r0", "r1"), telegram.freed)
+    }
+
+    @Test
     fun `a name already taken gets a free one`() {
         File(destination, "big.vhdx").writeText("old")
 
@@ -84,7 +100,8 @@ class PartDownloaderTest {
                     plainOffset = offset,
                     plainSize = bytes.size.toLong(),
                     storedSize = bytes.size.toLong(),
-                    uploadedAt = 1
+                    uploadedAt = 1,
+                    plainHash = Hashing.sha256(java.io.ByteArrayInputStream(bytes))
                 )
             )
             offset += bytes.size
@@ -109,11 +126,16 @@ class PartDownloaderTest {
     ) : TelegramClient by unused() {
         val downloaded = mutableListOf<String>()
         val freed = mutableListOf<String>()
+        val corruptParts = mutableSetOf<Int>()
 
         override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> {
             downloaded += remoteFileId
             val index = remoteFileId.removePrefix("r").toInt()
-            val file = File(dir, "tdlib-$remoteFileId").apply { writeBytes(contents[index]) }
+            val bytes = contents[index].copyOf()
+            if (index in corruptParts && bytes.isNotEmpty()) {
+                bytes[0] = (bytes[0].toInt() xor 0xFF).toByte()
+            }
+            val file = File(dir, "tdlib-$remoteFileId").apply { writeBytes(bytes) }
             return flowOf(TelegramDownloadEvent.Completed(file.absolutePath, file.length()))
         }
 
