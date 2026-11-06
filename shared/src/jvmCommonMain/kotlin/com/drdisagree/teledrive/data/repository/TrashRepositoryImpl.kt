@@ -161,18 +161,6 @@ class TrashRepositoryImpl(
         }
     }
 
-    private suspend fun collectTrashedDescendantFolderIds(rootId: String): List<String> {
-        val result = mutableListOf(rootId)
-        var frontier = listOf(rootId)
-        var guard = 0
-        val chatId = activeChannel.id()
-        while (frontier.isNotEmpty() && guard++ < MAX_FOLDER_DEPTH) {
-            frontier = folderDao.trashedChildrenOf(frontier, chatId).map { it.id }
-            result.addAll(frontier)
-        }
-        return result
-    }
-
     private suspend fun collectDescendantFolderIds(rootId: String): List<String> {
         val result = mutableListOf(rootId)
         var frontier = listOf(rootId)
