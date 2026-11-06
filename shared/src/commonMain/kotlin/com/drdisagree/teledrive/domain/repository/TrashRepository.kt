@@ -23,7 +23,7 @@ interface TrashRepository {
 
     suspend fun restoreFolder(id: String): AppResult<Unit>
 
-    /** Irreversible: deletes local copies and remote messages. */
+    /** Kept for compatibility; permanent deletion is disabled to protect remote files. */
     suspend fun deleteFilesPermanently(ids: List<String>): AppResult<Unit>
 
     suspend fun deleteFolderPermanently(id: String): AppResult<Unit>
