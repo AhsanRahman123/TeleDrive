@@ -35,9 +35,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,7 +75,6 @@ import com.drdisagree.teledrive.resources.common_select_all
 import com.drdisagree.teledrive.resources.common_selection_count
 import com.drdisagree.teledrive.resources.trash
 import com.drdisagree.teledrive.resources.trash_empty
-import com.drdisagree.teledrive.resources.trash_kept_until_removed
 import com.drdisagree.teledrive.resources.trash_restores_with_folder
 import com.drdisagree.teledrive.resources.trash_trashed_at
 import org.jetbrains.compose.resources.stringResource
