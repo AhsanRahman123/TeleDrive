@@ -494,7 +494,7 @@ class GalleryViewModel(
         viewModelScope.launch {
             val files = fileRepository.getFiles(ids)
             val paths = files.mapNotNull { it.localPath }
-            if (paths.size != files.size) {
+            if (files.size != ids.size || paths.size != files.size) {
                 _messages.tryEmit(UiText.Resource(Res.string.files_share_needs_local))
                 return@launch
             }
