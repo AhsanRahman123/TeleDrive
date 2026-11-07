@@ -240,13 +240,32 @@ fun DesktopMediaPlayer(
         onPreferredAudioLanguage(next.language)
         trackTick++
     }
-    fun cycleSubtitleTrack() {
+    fun cycleSubtitleTrack(reverse: Boolean = false) {
         val tracks = player.textTracks(trackWord)
         if (tracks.isEmpty()) return
         val selected = tracks.indexOfFirst { it.selected }
-        val next = tracks[(selected + 1).coerceAtLeast(0) % tracks.size]
+        val nextIndex = if (reverse) {
+            if (selected <= 0) tracks.lastIndex else selected - 1
+        } else {
+            (selected + 1) % tracks.size
+        }
+        val next = tracks[nextIndex]
         player.subpictures().setTrack(next.id)
         onPreferredSubtitleLanguage(next.language)
+        trackTick++
+    }
+    fun toggleSubtitles() {
+        val tracks = player.textTracks(trackWord)
+        if (tracks.isEmpty()) return
+        val selected = tracks.firstOrNull { it.selected }
+        if (selected != null) {
+            player.subpictures().setTrack(VLC_TRACK_DISABLED)
+        } else {
+            val next = tracks.firstOrNull { it.language == preferredSubtitleLanguage }
+                ?: tracks.first()
+            player.subpictures().setTrack(next.id)
+            onPreferredSubtitleLanguage(next.language)
+        }
         trackTick++
     }
 
@@ -386,7 +405,15 @@ fun DesktopMediaPlayer(
                         setPlaybackRate(rate + RATE_STEP)
                         true
                     }
+                    key == Key.RightBracket && !ctrl && !alt -> {
+                        setPlaybackRate(rate + RATE_STEP)
+                        true
+                    }
                     key == Key.Minus -> {
+                        setPlaybackRate(rate - RATE_STEP)
+                        true
+                    }
+                    key == Key.LeftBracket && !ctrl && !alt -> {
                         setPlaybackRate(rate - RATE_STEP)
                         true
                     }
@@ -427,7 +454,17 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.V && !ctrl && !alt -> {
+                    key == Key.V && shift && !ctrl && !alt -> {
+                        toggleSubtitles()
+                        interactionTick++
+                        true
+                    }
+                    key == Key.V && alt && !ctrl && !shift -> {
+                        cycleSubtitleTrack(reverse = true)
+                        interactionTick++
+                        true
+                    }
+                    key == Key.V && !ctrl && !alt && !shift -> {
                         cycleSubtitleTrack()
                         interactionTick++
                         true
