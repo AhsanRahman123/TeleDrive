@@ -48,6 +48,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -70,6 +72,9 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -77,6 +82,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -130,6 +138,12 @@ import com.drdisagree.teledrive.resources.gallery_albums_appear_organise_media
 import com.drdisagree.teledrive.resources.gallery_no_albums
 import com.drdisagree.teledrive.resources.gallery_no_media
 import com.drdisagree.teledrive.resources.gallery_new_album
+import com.drdisagree.teledrive.resources.gallery_filter_backed_up
+import com.drdisagree.teledrive.resources.gallery_filter_not_backed_up
+import com.drdisagree.teledrive.resources.gallery_view_grid
+import com.drdisagree.teledrive.resources.gallery_view_list
+import com.drdisagree.teledrive.resources.gallery_search_hint
+import com.drdisagree.teledrive.resources.gallery_clear_filters
 import com.drdisagree.teledrive.resources.gallery_photos_videos_appear_here
 import com.drdisagree.teledrive.resources.gallery_title
 import com.drdisagree.teledrive.resources.info_details
@@ -610,6 +624,30 @@ fun GalleryScreen(
                                     contentDescription = stringResource(Res.string.common_select)
                                 )
                             }
+                            IconButton(
+                                onClick = {
+                                    viewModel.setViewMode(
+                                        if (state.viewMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
+                                    )
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = if (state.viewMode == ViewMode.GRID) {
+                                        Icons.Filled.ViewList
+                                    } else {
+                                        Icons.Filled.GridView
+                                    },
+                                    contentDescription = stringResource(
+                                        if (state.viewMode == ViewMode.GRID) {
+                                            Res.string.gallery_view_list
+                                        } else {
+                                            Res.string.gallery_view_grid
+                                        }
+                                    )
+                                )
+                            }
+                        }
+                        run {
                             var showSortMenu by remember { mutableStateOf(false) }
                             IconButton(onClick = { showSortMenu = true }) {
                                 Icon(
@@ -673,6 +711,65 @@ fun GalleryScreen(
                         selected = state.tab,
                         onSelect = viewModel::setTab
                     )
+                }
+            }
+
+            OutlinedTextField(
+                value = state.filters.searchQuery,
+                onValueChange = viewModel::setSearchQuery,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                singleLine = true,
+                placeholder = { Text(stringResource(Res.string.gallery_search_hint)) },
+                leadingIcon = {
+                    Icon(Icons.Filled.Search, contentDescription = null)
+                },
+                trailingIcon = if (state.filters.searchQuery.isNotEmpty()) {
+                    {
+                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = stringResource(Res.string.common_clear_selection)
+                            )
+                        }
+                    }
+                } else null
+            )
+
+            if (state.tab != GalleryTab.ALBUMS) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = state.filters.favoritesOnly,
+                        onClick = { viewModel.setFavoritesFilter(!state.filters.favoritesOnly) },
+                        label = { Text(stringResource(Res.string.collection_favorites_title)) }
+                    )
+                    FilterChip(
+                        selected = state.filters.availableOfflineOnly,
+                        onClick = { viewModel.setOfflineFilter(!state.filters.availableOfflineOnly) },
+                        label = { Text(stringResource(Res.string.collection_offline_title)) }
+                    )
+                    FilterChip(
+                        selected = state.filters.backedUpOnly,
+                        onClick = { viewModel.setBackedUpFilter(!state.filters.backedUpOnly) },
+                        label = { Text(stringResource(Res.string.gallery_filter_backed_up)) }
+                    )
+                    FilterChip(
+                        selected = state.filters.notBackedUpOnly,
+                        onClick = { viewModel.setNotBackedUpFilter(!state.filters.notBackedUpOnly) },
+                        label = { Text(stringResource(Res.string.gallery_filter_not_backed_up)) }
+                    )
+                    if (state.hasActiveFilters) {
+                        TextButton(onClick = viewModel::clearFilters) {
+                            Text(stringResource(Res.string.gallery_clear_filters))
+                        }
+                    }
                 }
             }
 
