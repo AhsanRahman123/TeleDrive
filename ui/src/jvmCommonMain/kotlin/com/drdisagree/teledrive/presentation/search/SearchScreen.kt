@@ -60,6 +60,7 @@ import com.drdisagree.teledrive.presentation.components.MenuAction
 import com.drdisagree.teledrive.presentation.components.label
 import com.drdisagree.teledrive.presentation.components.liftedTopAppBarColors
 import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollection
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
 import com.drdisagree.teledrive.presentation.preview.PreviewSequence
 import com.drdisagree.teledrive.resources.Res
@@ -115,6 +116,14 @@ fun SearchScreen(
         0
     }
     val fileIdAt: (Int) -> String? = { index -> state.results.getOrNull(index - fileStart)?.id }
+    val dragSelect = rememberDragSelect(
+        listState = listState,
+        onStart = viewModel::startRangeSelection,
+        onRange = { range ->
+            viewModel.extendRangeSelection(range.mapNotNull(fileIdAt))
+        },
+        onEnd = viewModel::endRangeSelection
+    )
     val keyboard = rememberKeyboardCollection(listState) { index ->
         index >= fileStart || index in folderStart until folderStart + state.folders.size
     }
@@ -239,7 +248,8 @@ fun SearchScreen(
                             keyboard,
                             state.folders.size + state.results.size,
                             shortcuts
-                        ),
+                        )
+                        .then(dragSelect),
                     contentPadding = PaddingValues(
                         start = 12.dp,
                         end = 12.dp,
