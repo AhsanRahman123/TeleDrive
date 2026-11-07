@@ -39,7 +39,7 @@ Gallery must reuse the existing file repository, transfer queue, preview resolve
 - Keep day grouping as a base and improve it to a navigable date timeline with month/year jumping.
 - Add a capture-date timeline only after a real capture timestamp can be extracted and synced. At present DriveFile has width, height and duration, but no EXIF capture date, GPS or camera fields. Current day headers use file modified/added timestamps, not necessarily the moment a photo was taken.
 - Later: calendar view, location map (opt-in, privacy-aware), Recently Added, Favorites, Offline and smart collections.
-- Duplicate detection should start with exact contentHash matches. Perceptual similarity (pHash) is a later opt-in local CPU feature, not part of the initial release.
+- Exact duplicates by contentHash and basic perceptual image duplicates (pHash) are both required in the main practical scope. Perceptual scans must be local, throttled/on-demand or low-priority background work, and review-only: never automatically delete or merge files.
 
 ### 3. Album management
 - Albums currently map to folders; retain this as the single source of truth.
@@ -64,6 +64,7 @@ Gallery must reuse the existing file repository, transfer queue, preview resolve
 
 ### 5. Viewer experience
 - Reuse the current preview screen for next/previous navigation, image display, video stream/local playback, audio/subtitle tracks and download progress.
+- Add manual external subtitle file loading (common supported formats such as SRT/VTT/ASS where the platform player supports them), with an in-player track picker and a clear off/reset action. Keep embedded subtitle tracks working.
 - Improve image zoom/pan/fit/fill, rotate, slideshow and playback controls in place; don't build a second media engine.
 - Add side-by-side compare for selected images later.
 - Show a persistent information panel with safe metadata.

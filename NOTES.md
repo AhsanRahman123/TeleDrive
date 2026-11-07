@@ -1,6 +1,6 @@
 # TeleDrive Development Notes
 
-Last updated: 2026-11-07
+Last updated: 2026-11-08
 
 ## Project guardrails
 
@@ -157,3 +157,20 @@ Before release, the user must verify with their Telegram accounts:
 3. Terminate the app mid-transfer, relaunch, and confirm recovery.
 4. Temporarily sign out/unavailable one account and verify another authorised account takes over.
 5. Confirm no ordinary app action deletes the remote Telegram messages.
+
+
+## Active user requirements — 2026-11-08
+
+The user's current testing feedback and the complete agreed pre-library-build scope are tracked in **IMPLEMENTATION_BACKLOG.md**. Treat that file as the authoritative acceptance checklist for the remaining practical work.
+
+Newly recorded gaps include player volume/brightness sliders, external subtitle-file loading, cursor-position desktop context menus, complete folder copy/move actions, and stronger transfer queue controls.
+
+Important source audit findings:
+- Android already supports vertical-swipe volume and brightness adjustment over the player; dedicated in-player sliders are still requested.
+- Android and desktop already support selecting embedded subtitle tracks; manually loading an external subtitle file is still requested.
+- Folder move has repository and ViewModel support, but the UI experience needs to be made discoverable and complete. Folder copy is not implemented in the FileRepository contract.
+- The Transfers screen already has per-task pause/resume/retry/cancel, global pause/resume/cancel, clear-finished actions, progress, speed and ETA. Queue prioritisation/reordering and filtering/search remain requested enhancements.
+
+The latest source changes for the Files Details view and basic 7z listing are present on this branch but remain subject to the user's local build and runtime verification. Do not mark them verified until that happens.
+
+Do not alter `master`, original TeleDrive profiles, TDLib sessions or Telegram channel messages during this work.
