@@ -39,6 +39,8 @@ class SearchViewModel(
 ) : ViewModel() {
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
+    private val _selectionModeEnabled = MutableStateFlow(false)
+    val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
 
     private val query = MutableStateFlow("")
     private val filters = MutableStateFlow(SearchFilters())
@@ -112,11 +114,23 @@ class SearchViewModel(
         state.copy(selection = selected.intersect(state.results.map { it.id }.toSet()))
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchUiState())
 
+    fun startSelectionMode() {
+        _selectionModeEnabled.update { true }
+    }
+
+    fun selectForContext(id: String) {
+        _selectionModeEnabled.update { true }
+        if (id !in selection.value) selection.update { setOf(id) }
+    }
+
     fun toggleSelection(id: String) = selection.update { current ->
         if (id in current) current - id else current + id
     }
 
-    fun clearSelection() = selection.update { emptySet() }
+    fun clearSelection() {
+        _selectionModeEnabled.update { false }
+        selection.update { emptySet() }
+    }
 
     fun selectAll() {
         selection.value = uiState.value.results.map { it.id }.toSet()
