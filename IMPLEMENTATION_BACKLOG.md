@@ -232,6 +232,73 @@ Acceptance checks:
 - A mixed or multi-item selection exposes only safe, applicable shared actions without breaking selection.
 - The menu remains compact and is not expanded into a File Pilot-sized list of unrelated commands.
 
+### A11. User-configurable media fields, metadata filters and date-based discovery
+
+Required:
+- Add a configurable **Fields / Display information** menu, inspired by MX Player's media-list options. Use a tick/checkmark next to each field so the user can choose exactly which metadata is displayed and used as useful discovery criteria.
+- Include these selectable fields/options:
+  - Thumbnail (show/hide preview thumbnails).
+  - Length / duration.
+  - File extension / format.
+  - Played time (last played date/time where available, and playback/resume position as a separate useful value where supported).
+  - Resolution.
+  - Frame rate (FPS).
+  - Full folder path / location.
+  - File size.
+  - Date information (use available created, added/imported, modified and last-played timestamps; label each meaning clearly).
+- Let users select one field, several fields or all fields. A checked field should be available in the current view's display/details and corresponding filter/sort/group controls where that field can meaningfully be used; unchecking it removes that field from the selected display/filter configuration.
+- Do not force every field into a narrow row. On desktop, provide a Details/column configuration; on Android, use compact metadata rows/cards and a fields/filter panel with touch-friendly controls. The available information and discovery capabilities should match across platforms even when presentation differs.
+- Provide filters and sorting that can be combined: e.g. type/extension + resolution + date range, or duration + size + path. Allow ascending/descending sort where meaningful.
+- Provide date-based grouping/categorization (such as year/month/day or date ranges) and date sorting. Make the date basis explicit (created, added/imported, modified or last played); do not silently treat these timestamps as interchangeable.
+- Apply the same metadata fields, filters and sorting to Files, Gallery, Archived, Hidden, Trash, Offline and Favourites. Results must remain scoped to the current view and respect that view's membership rules.
+- Keep thumbnail visibility independent from the availability of file metadata. Turning thumbnails off must not disable metadata search, sorting or the ability to preview a file when opened.
+- Extract media metadata lazily/incrementally and cache it safely. Do not decode every full-resolution image or video just to show a list. Use existing media metadata when present and show a clear unavailable/unknown value if a field cannot be read.
+- Keep user field selections and sort/filter preferences persistent. Prefer sensible defaults and allow the user to reset to defaults.
+- Maintain responsiveness for large libraries: indexed queries, paging/virtualisation, debounced filters and no unbounded in-memory scans.
+
+Acceptance checks:
+- The user can tick only Resolution, Size and Date, for example, and see/filter/sort by those fields without unrelated metadata clutter.
+- The user can enable every available field and use combined filters/sorts.
+- Date grouping/sorting clearly distinguishes modified vs added vs last played dates.
+- Fields and filtering work in all five special views plus Files and Gallery, without leaking results between scopes.
+- Missing metadata does not break the list; thumbnails can be hidden without affecting original-quality viewing.
+- The same fields and discovery behavior work on Windows, Android and Linux, with platform-appropriate layouts.
+
+### A12. Complete cross-platform media-player controls
+
+Required:
+- All capabilities below must be available on Windows, Android and Linux. The controls, gestures, menus, shortcuts and native integrations may differ to fit each platform; feature parity means the user can perform the same underlying action on each supported platform.
+- Keep controls discoverable without overcrowding the player. Use a compact controls panel / overflow menu for less frequently used settings and remember suitable per-user defaults.
+
+Playback and queue:
+- Playback speed: selectable speed options to increase/decrease playback speed, with clear current-speed indication and reset to normal speed.
+- Shuffle: shuffle the current playback queue/playlist, with a clear on/off state.
+- Loop/repeat: Off, Repeat current item and Repeat all/queue where a queue exists.
+- Sleep timer: user-selectable countdown to stop/pause playback, plus a useful option to stop after the current item. Show remaining time and allow cancel/reset.
+- Background playback: audio must continue when the app is backgrounded or the screen is off where the OS permits it; provide native media-session/notification/lock-screen controls where available. Video-to-audio background behavior should be clear and predictable.
+- Picture-in-Picture / floating mini-player: provide native PiP on Android where supported; on desktop provide an equivalent compact always-on-top/floating mini-player where the platform/window manager supports it. Preserve playback state when entering/exiting.
+- Screen rotation/orientation: on Android provide orientation behavior/rotation lock appropriate to the device. On desktop provide video rotation controls (e.g. rotate by 90-degree steps and reset) rather than attempting to rotate the physical monitor. Keep this capability discoverable and platform-appropriate.
+- Audio/video synchronization: provide independent audio delay and subtitle delay adjustments, with positive/negative offset controls, fine adjustment steps, a visible current offset and reset-to-zero. Do not conflate audio delay with playback speed.
+- Keep the previously requested in-player volume and brightness sliders, embedded/external subtitle selection and audio-track selection, plus seeking and other existing working controls.
+- Ensure player settings that are sensible to persist (e.g. speed, preferred subtitle/audio track) are saved intentionally; keep transient settings (e.g. sleep timer and sync offsets) scoped appropriately unless there is a well-defined per-file preference.
+
+Platform-specific behavior and implementation:
+- Implement through each platform's suitable media backend and native APIs: Android Media3/system media session/PiP/orientation; desktop VLC/player output and native window/taskbar/media integration where supported. Reuse shared domain state and behavior where practical without forcing identical UI controls across mouse, keyboard and touch.
+- On Windows/Linux, background playback should continue when TeleDrive is minimized or not focused; expose native media controls when supported by the desktop environment.
+- On desktop, PiP means a small separate floating video window with always-on-top behavior where supported. On Android, use the OS PiP lifecycle.
+- On desktop, rotation applies to the video image/rendering. On Android, rotation/orientation should follow device and player-screen rules without unexpectedly changing global device settings.
+- Where a backend, device or OS version genuinely lacks a capability, provide a clear explanation/fallback rather than a dead control or silently omitting the feature. Do not mark overall cross-platform parity complete until each target platform has been tested.
+
+Acceptance checks:
+- Sleep timer reliably stops playback at the selected time or after the current item and can be cancelled.
+- Shuffle and all repeat modes work correctly across a multi-item queue and a single item.
+- Playback speed changes, displays the current rate and returns to normal on reset.
+- Background audio keeps playing when switching apps/minimizing and exposes native transport controls where supported.
+- PiP/floating mini-player can be entered and exited without losing playback position.
+- Rotation behaves correctly on mobile and desktop using each platform's appropriate interpretation.
+- Audio delay and subtitle delay can be adjusted independently, in both directions, and reset.
+- Every capability is validated on Windows, Android and Linux; a desktop-only implementation is not counted as parity.
+
 ## B. The complete required 13-capability scope
 
 These are all required before the user begins building the full library. Some parts already exist; the checklist means complete and verify the overall capability, not rebuild everything from scratch.
@@ -251,9 +318,9 @@ These are all required before the user begins building the full library. Some pa
 - Apply the same automatic categories inside Archived, Hidden, Trash, Offline and Favourites, with category results restricted to the current scope rather than mixing special-view items into ordinary library counts.
 
 ### B3. Global search and easy discovery
-- Search by name, extension, folder/path, type, size, date, backup/offline/favorite status.
+- Search by name, extension, folder/path, type, size, date, backup/offline/favorite status and available media metadata (duration, resolution, frame rate, last played).
 - Fast debounced local search against indexed metadata and paged results.
-- Helpful filters and predictable sort options.
+- User-selectable ticked metadata fields, combined filters, date-basis-aware grouping and predictable sort options (see A11).
 - Search defaults to the current browsing scope; special-view browsing/search remain isolated unless the user explicitly chooses to search across scopes. Filters should support intersecting attributes (for example favourites that are also offline) without duplicating records.
 - AI semantic search and deep OCR/content indexing remain deferred.
 
@@ -266,7 +333,7 @@ These are all required before the user begins building the full library. Some pa
 
 ### B5. Video and audio playback
 - Reliable local and Telegram-streamed playback on each target platform.
-- Seek, skip, speed, repeat, audio-track selection and embedded subtitle selection.
+- Seek, skip, speed, shuffle, repeat, sleep timer, background playback, PiP/floating mini-player, rotation/orientation, audio delay, subtitle delay, audio-track selection and embedded subtitle selection (see A12).
 - Add the requested volume and brightness sliders and external subtitle loading described in A1–A3.
 - Graceful fallback when a codec/stream is unsupported; no silent corruption or fake "streaming" state.
 
@@ -319,7 +386,10 @@ These are all required before the user begins building the full library. Some pa
 
 ### B13. Minimal, consistent Windows/Android/Linux experience
 - Shared behavior and design where possible, with native platform integration where required.
-- Validate file pickers, folder access, sharing, player controls, menus, transfer recovery and archive support separately on each platform.
+- **Feature parity is required across Windows, Android and Linux:** every agreed capability must have a usable implementation on all three. Identical UI is not required; mouse/keyboard, touch, gestures, native system controls and platform conventions should be respected.
+- For any capability with different platform semantics (such as Android screen orientation vs desktop video rotation, or Android PiP vs desktop floating mini-player), provide the closest appropriate native equivalent that preserves the user's intended outcome.
+- Do not count a feature as complete just because it exists on one platform. Track implementation, build, automated tests and runtime validation per platform.
+- Validate file pickers, folder access, sharing, player controls, menus, transfer recovery, metadata discovery and archive support separately on each platform.
 - Windows is the current primary test platform; Android and Linux runtime validation remain open.
 - macOS is explicitly out of scope.
 
@@ -352,7 +422,9 @@ Do not mix these into the practical build:
 8. Verify Archived, Hidden, Trash, Offline and Favourites as full Gallery scopes: categories, scoped search/filters, Grid/List/Details, folder navigation, original-quality image viewing, video/audio playback, document/archive previews, and scope-appropriate actions.
 9. Verify overlapping attributes (Favourite + Offline, Archived + Favourite, etc.), independent status changes, Trash restore preservation, permanent deletion safeguards and offline-only playback without network fallback.
 10. Verify direct sharing for cloud-only, local-only and offline files on Android, Windows and Linux. Confirm cloud-only Share opens immediately without a forced full download, destination links are genuinely accessible, streaming providers preserve file bytes, and unsupported destinations offer only an explicit download fallback.
-11. Build and runtime-test Android and Linux separately. Do not mark those platforms complete after desktop-only tests.
+11. Verify selectable metadata fields, combined filters, date grouping/sorting and persistent preferences on Windows, Android and Linux.
+12. Verify every player feature in A12 on Windows, Android and Linux using each platform's native interaction model and media integration.
+13. Build and runtime-test Android and Linux separately. Do not mark those platforms complete after desktop-only tests.
 
 ## E. Current implementation-status snapshot
 
