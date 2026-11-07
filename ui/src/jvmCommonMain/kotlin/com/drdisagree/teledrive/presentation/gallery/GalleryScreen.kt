@@ -20,6 +20,10 @@ import com.drdisagree.teledrive.resources.common_organize
 import com.drdisagree.teledrive.resources.common_remove_from_offline
 import com.drdisagree.teledrive.resources.common_storage_actions
 import com.drdisagree.teledrive.resources.files_archive
+import com.drdisagree.teledrive.resources.files_copy
+import com.drdisagree.teledrive.resources.files_copy_here
+import com.drdisagree.teledrive.resources.files_copy_to
+import com.drdisagree.teledrive.resources.files_new_folder
 import com.drdisagree.teledrive.resources.files_hide
 import com.drdisagree.teledrive.resources.files_sort
 import com.drdisagree.teledrive.resources.preview_remove_favorites
@@ -28,6 +32,7 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
+import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.resources.files_move_to
 import com.drdisagree.teledrive.resources.files_move_here
 import com.drdisagree.teledrive.presentation.common.AppBackHandler
@@ -61,6 +66,10 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -101,6 +110,7 @@ import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_add_favorites
 import com.drdisagree.teledrive.resources.common_back
 import com.drdisagree.teledrive.resources.common_clear_selection
+import com.drdisagree.teledrive.resources.common_create
 import com.drdisagree.teledrive.resources.common_confirm_trash_count_title
 import com.drdisagree.teledrive.resources.common_deselect_all
 import com.drdisagree.teledrive.resources.common_download
@@ -111,6 +121,7 @@ import com.drdisagree.teledrive.resources.common_restore_trash_emptied
 import com.drdisagree.teledrive.resources.common_select_all
 import com.drdisagree.teledrive.resources.common_selection_count
 import com.drdisagree.teledrive.resources.common_select
+import com.drdisagree.teledrive.resources.common_share
 import com.drdisagree.teledrive.resources.common_upload
 import com.drdisagree.teledrive.resources.date_days_ago
 import com.drdisagree.teledrive.resources.date_today
@@ -118,9 +129,12 @@ import com.drdisagree.teledrive.resources.date_yesterday
 import com.drdisagree.teledrive.resources.gallery_albums_appear_organise_media
 import com.drdisagree.teledrive.resources.gallery_no_albums
 import com.drdisagree.teledrive.resources.gallery_no_media
+import com.drdisagree.teledrive.resources.gallery_new_album
 import com.drdisagree.teledrive.resources.gallery_photos_videos_appear_here
 import com.drdisagree.teledrive.resources.gallery_title
+import com.drdisagree.teledrive.resources.info_details
 import com.drdisagree.teledrive.resources.nav_gallery
+import com.drdisagree.teledrive.resources.preview_share_chooser_title
 import com.drdisagree.teledrive.domain.model.MediaAlbum
 import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.presentation.common.DayBucket
@@ -130,6 +144,7 @@ import com.drdisagree.teledrive.presentation.components.RefreshAction
 import com.drdisagree.teledrive.presentation.components.RefreshableContent
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
+import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileGridItem
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FileListItem
@@ -269,12 +284,24 @@ fun GalleryScreen(
     var confirmTrash by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var showMovePicker by remember { mutableStateOf(false) }
+    var showCopyPicker by remember { mutableStateOf(false) }
+    var showCreateAlbum by remember { mutableStateOf(false) }
+
+    val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
     }
     val snackbarHostState = remember { SnackbarHostState() }
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
+    val fileSharer = LocalFileSharer.current
+    val shareChooserTitle = stringResource(Res.string.preview_share_chooser_title)
+
+    LaunchedEffect(Unit) {
+        viewModel.shareRequests.collect { request ->
+            fileSharer.share(request.paths, request.mimeType, shareChooserTitle)
+        }
+    }
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -294,6 +321,37 @@ fun GalleryScreen(
             },
             onDismiss = { showMovePicker = false }
         )
+    }
+
+    if (showCopyPicker) {
+        FolderPickerHost(
+            title = stringResource(Res.string.files_copy_to),
+            confirmLabel = stringResource(Res.string.files_copy_here),
+            loadChildren = viewModel::childFolders,
+            createFolder = viewModel::createFolderIn,
+            onConfirm = { target ->
+                showCopyPicker = false
+                viewModel.copySelected(target)
+            },
+            onDismiss = { showCopyPicker = false }
+        )
+    }
+
+    if (showCreateAlbum) {
+        RenameDialog(
+            title = stringResource(Res.string.gallery_new_album),
+            initialValue = "",
+            confirmLabel = stringResource(Res.string.common_create),
+            onConfirm = { name ->
+                showCreateAlbum = false
+                viewModel.createFolderIn(null, name)
+            },
+            onDismiss = { showCreateAlbum = false }
+        )
+    }
+
+    infoTarget?.let { file ->
+        FileInfoSheet(file = file, onDismiss = viewModel::dismissInfo)
     }
 
     if (confirmTrash) {
@@ -458,7 +516,25 @@ fun GalleryScreen(
                                 )
                             }
                             val actions = buildList {
+                                add(
+                                    MenuAction(
+                                        label = stringResource(Res.string.common_share),
+                                        icon = Icons.Filled.Share
+                                    ) { viewModel.shareSelected() }
+                                )
+                                add(
+                                    MenuAction(
+                                        label = stringResource(Res.string.files_copy),
+                                        icon = Icons.Filled.ContentCopy
+                                    ) { showCopyPicker = true }
+                                )
                                 if (state.selection.size == 1) {
+                                    add(
+                                        MenuAction(
+                                            label = stringResource(Res.string.info_details),
+                                            icon = Icons.Outlined.Info
+                                        ) { viewModel.showInfoForSelection() }
+                                    )
                                     add(
                                         MenuAction(
                                             label = stringResource(Res.string.common_rename),
@@ -519,6 +595,14 @@ fun GalleryScreen(
                         }
                     },
                     actions = {
+                        if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                            IconButton(onClick = { showCreateAlbum = true }) {
+                                Icon(
+                                    Icons.Filled.CreateNewFolder,
+                                    contentDescription = stringResource(Res.string.gallery_new_album)
+                                )
+                            }
+                        }
                         if (state.isAlbumView || state.tab != GalleryTab.ALBUMS) {
                             IconButton(onClick = viewModel::startSelectionMode) {
                                 Icon(
