@@ -325,7 +325,6 @@ fun DesktopMediaPlayer(
             .fillMaxSize()
             .background(Color.Black)
             .focusRequester(playerFocusRequester)
-            .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val key = event.key
@@ -527,6 +526,7 @@ fun DesktopMediaPlayer(
                     else -> false
                 }
             }
+            .focusable()
             .pointerHoverIcon(if (controlsVisible) PointerIcon.Default else blankCursor)
             .pointerInput(player, playing, finished, isAudio) {
                 if (!isAudio) {
