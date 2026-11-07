@@ -244,13 +244,34 @@ class PreviewViewModel(
         viewModelScope.launch {
             when (val result = fileRepository.moveFiles(listOf(file.id), targetFolderId)) {
                 is AppResult.Success -> {
-                    val remaining = _uiState.value.files.filterNot { it.id == file.id }
-                    if (remaining.isEmpty()) {
+                    val currentFiles = _uiState.value.files
+                    val remaining = currentFiles.filterNot { it.id == file.id }
+                    val isMedia = file.category == FileCategory.IMAGE ||
+                            file.category == FileCategory.VIDEO
+                    val nextFiles = if (isMedia) {
+                        remaining.filter {
+                            it.category == FileCategory.IMAGE || it.category == FileCategory.VIDEO
+                        }
+                    } else {
+                        remaining
+                    }
+                    if (nextFiles.isEmpty()) {
                         _uiState.update { it.copy(files = emptyList(), closed = true) }
                     } else {
-                        val nextIndex = currentIndex.coerceIn(0, remaining.lastIndex)
+                        val nextFile = if (isMedia) {
+                            currentFiles.drop(currentIndex + 1).firstOrNull { candidate ->
+                                nextFiles.any { it.id == candidate.id }
+                            } ?: currentFiles.take(currentIndex).lastOrNull { candidate ->
+                                nextFiles.any { it.id == candidate.id }
+                            }
+                        } else {
+                            null
+                        }
+                        val nextIndex = nextFile?.let { candidate ->
+                            nextFiles.indexOfFirst { it.id == candidate.id }
+                        }?.takeIf { it >= 0 } ?: currentIndex.coerceIn(0, nextFiles.lastIndex)
                         _uiState.update {
-                            it.copy(files = remaining, initialIndex = nextIndex)
+                            it.copy(files = nextFiles, initialIndex = nextIndex)
                         }
                     }
                     _messages.tryEmit(
