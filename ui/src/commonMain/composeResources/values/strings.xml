@@ -965,4 +965,5 @@
         <item>Español</item>
     </string-array>
     <string name="snackbar_view_downloads">View downloads</string>
+    <string name="nav_offline">Offline</string>
 </resources>
