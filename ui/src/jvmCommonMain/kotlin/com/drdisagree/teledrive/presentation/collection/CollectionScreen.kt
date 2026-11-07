@@ -15,10 +15,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +47,7 @@ import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
+import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FolderRow
 import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
@@ -78,13 +84,15 @@ fun CollectionScreen(
     val folders by viewModel.folders.collectAsStateWithLifecycle()
     val selection by viewModel.selection.collectAsStateWithLifecycle()
     val folderSelection by viewModel.folderSelection.collectAsStateWithLifecycle()
-    val selectionMode = selection.isNotEmpty() || folderSelection.isNotEmpty()
+    val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
+    val selectionMode = selection.isNotEmpty() || folderSelection.isNotEmpty() || selectionModeEnabled
     val selectionCount = selection.size + folderSelection.size
     val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
     val missingCount by viewModel.missingCount.collectAsStateWithLifecycle()
     val offline = viewModel.type == CollectionType.AVAILABLE_OFFLINE
     var confirmTrash by remember { mutableStateOf(false) }
+    var showSelectionOverflow by remember { mutableStateOf(false) }
 
     AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
@@ -151,7 +159,14 @@ fun CollectionScreen(
                             )
                         }
                     }
-                    if (selectionMode) {
+                    if (!selectionMode) {
+                        IconButton(onClick = viewModel::startSelectionMode) {
+                            Icon(
+                                Icons.Filled.CheckBoxOutlineBlank,
+                                contentDescription = stringResource(Res.string.common_select)
+                            )
+                        }
+                    } else {
                         IconButton(
                             onClick = {
                                 if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
@@ -170,20 +185,43 @@ fun CollectionScreen(
                                 }
                             )
                         }
-                        IconButton(onClick = viewModel::removeFromCollection) {
-                            Icon(
-                                Icons.Filled.RemoveCircleOutline,
-                                contentDescription = stringResource(
-                                    Res.string.collection_remove_from,
-                                    stringResource(viewModel.type.titleRes)
+                        if (selectionCount > 0) {
+                            IconButton(onClick = viewModel::removeFromCollection) {
+                                Icon(
+                                    Icons.Filled.RemoveCircleOutline,
+                                    contentDescription = stringResource(
+                                        Res.string.collection_remove_from,
+                                        stringResource(viewModel.type.titleRes)
+                                    )
                                 )
-                            )
-                        }
-                        IconButton(onClick = { confirmTrash = true }) {
-                            Icon(
-                                Icons.Filled.Delete,
-                                contentDescription = stringResource(Res.string.common_move_trash)
-                            )
+                            }
+                            IconButton(onClick = { confirmTrash = true }) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = stringResource(Res.string.common_move_trash)
+                                )
+                            }
+                            Box {
+                                IconButton(onClick = { showSelectionOverflow = true }) {
+                                    Icon(
+                                        Icons.Filled.MoreVert,
+                                        contentDescription = stringResource(Res.string.common_actions)
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showSelectionOverflow,
+                                    onDismissRequest = { showSelectionOverflow = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(Res.string.common_download)) },
+                                        leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                                        onClick = {
+                                            showSelectionOverflow = false
+                                            viewModel.downloadSelected()
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -269,9 +307,15 @@ fun CollectionScreen(
                         else onOpenFolder(folder.id)
                     },
                     onLongClick = { viewModel.toggleFolderSelection(folder.id) },
+                    selectionMode = selectionMode,
+                    onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
+                        .onDesktopContextClick {
+                            viewModel.selectFolderForContext(folder.id)
+                            showSelectionOverflow = true
+                        }
                 )
             }
             items(
@@ -288,6 +332,7 @@ fun CollectionScreen(
                         else onOpenFile(file.id, viewModel.previewSequence)
                     },
                     onLongClick = { viewModel.toggleSelection(file.id) },
+                    onToggleSelection = { viewModel.toggleSelection(file.id) },
                     showFavorite = viewModel.type != CollectionType.FAVORITES,
                     showAvailableOffline = !offline,
                     status = if (offline) {
@@ -304,6 +349,10 @@ fun CollectionScreen(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, folders.size + index)
                         .animateItem()
+                        .onDesktopContextClick {
+                            viewModel.selectFileForContext(file.id)
+                            showSelectionOverflow = true
+                        }
                 )
             }
         }
