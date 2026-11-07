@@ -741,6 +741,7 @@ fun FilesScreen(
                                 highlightedFileId = highlightedFileId,
                                 gridState = gridState,
                                 state = state,
+                                selectionMode = selectionMode,
                                 files = files,
                                 padding = PaddingValues(
                                     bottom = padding.calculateBottomPadding() +
@@ -1026,6 +1027,7 @@ private fun FilesContent(
     highlightedFileId: String?,
     gridState: LazyGridState,
     state: FilesUiState,
+    selectionMode: Boolean,
     files: LazyPagingItems<DriveFile>,
     padding: PaddingValues,
     onOpenFolder: (String) -> Unit,
