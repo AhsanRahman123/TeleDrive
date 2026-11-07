@@ -148,7 +148,6 @@ import com.drdisagree.teledrive.presentation.navigation.FabBottomBarInset
 import com.drdisagree.teledrive.presentation.navigation.LocalBottomBarInset
 import com.drdisagree.teledrive.presentation.platform.FileDropArea
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
-import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalFolderPicker
 import com.drdisagree.teledrive.presentation.platform.LocalMultiFilePicker
@@ -215,7 +214,6 @@ import com.drdisagree.teledrive.resources.nav_files
 import com.drdisagree.teledrive.resources.note_new
 import com.drdisagree.teledrive.resources.preview_remove_favorites
 import com.drdisagree.teledrive.resources.preview_share_chooser_title
-import java.io.File
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -429,9 +427,6 @@ fun FilesScreen(
                                             contentDescription = stringResource(Res.string.common_actions)
                                         )
                                     }
-                                    val fileRevealer = LocalFileRevealer.current
-                                    val revealPath = state.capabilities.soleLocalPath
-                                        ?.takeIf { path -> remember(path) { File(path).exists() } }
                                     val editableNote = state.capabilities.canEditNote &&
                                             state.selectionCount == 1 &&
                                             state.folderSelection.isEmpty()
