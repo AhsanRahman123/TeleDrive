@@ -444,6 +444,8 @@
     <string name="preview_forward_10_seconds">Avanzar 10 segundos</string>
     <string name="preview_hidden">Oculto</string>
     <string name="preview_image_undecodable">Este formato de imagen no se puede mostrar aquí. Descárgala y ábrela en otra app.</string>
+    <string name="preview_zoom_in">Ampliar</string>
+    <string name="preview_zoom_out">Reducir</string>
     <string name="preview_local_copy_removed">Copia local eliminada</string>
     <string name="preview_move_to_trash">¿Mover a la papelera?</string>
     <string name="preview_next">Archivo siguiente</string>

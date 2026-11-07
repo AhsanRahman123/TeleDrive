@@ -432,6 +432,8 @@
     <string name="preview_forward_10_seconds">前进 10 秒</string>
     <string name="preview_hidden">已隐藏</string>
     <string name="preview_image_undecodable">此处无法显示该图片格式，请下载后用其他应用打开。</string>
+    <string name="preview_zoom_in">放大</string>
+    <string name="preview_zoom_out">缩小</string>
     <string name="preview_local_copy_removed">本地副本已移除</string>
     <string name="preview_move_to_trash">移入回收站？</string>
     <string name="preview_next">下一个文件</string>
