@@ -102,6 +102,7 @@ import com.drdisagree.teledrive.resources.player_unmute
 import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
+import java.io.File
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
@@ -226,6 +227,16 @@ fun DesktopMediaPlayer(
         muted = !muted
         player.audio().isMute = muted
     }
+    fun saveVideoSnapshot() {
+        if (isAudio) return
+        val snapshotDirectory = File(
+            File(System.getProperty("user.home"), "Pictures"),
+            "TeleDrive"
+        )
+        if (!snapshotDirectory.exists() && !snapshotDirectory.mkdirs()) return
+        player.snapshots().setSnapshotDirectory(snapshotDirectory.absolutePath)
+        player.snapshots().save()
+    }
     fun setPlaybackRate(value: Float) {
         rate = value.coerceIn(0.25f, 4f)
         player.controls().setRate(rate)
@@ -343,7 +354,12 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.MediaStop || (key == Key.S && !ctrl && !alt) -> {
+                    key == Key.S && shift && !ctrl && !alt -> {
+                        saveVideoSnapshot()
+                        interactionTick++
+                        true
+                    }
+                    key == Key.MediaStop || (key == Key.S && !shift && !ctrl && !alt) -> {
                         player.controls().stopAsync()
                         playing = false
                         finished = true
