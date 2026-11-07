@@ -950,4 +950,5 @@
         <item>Español</item>
     </string-array>
     <string name="snackbar_view_downloads">查看下载</string>
+    <string name="nav_offline">离线</string>
 </resources>
