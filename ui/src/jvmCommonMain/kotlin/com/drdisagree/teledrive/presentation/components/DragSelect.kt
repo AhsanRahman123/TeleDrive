@@ -10,6 +10,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -93,6 +95,8 @@ private fun dragSelect(
     val edgePx = with(density) { edgeSize.toPx() }
     val maxScrollPx = with(density) { scrollPerFrame.toPx() }
     var autoScroll by remember { mutableFloatStateOf(0f) }
+    var activeAnchor by remember { mutableIntStateOf(-1) }
+    var latestPointerPosition by remember { mutableStateOf<Offset?>(null) }
     val scrolling = autoScroll != 0f
 
     val currentIndexAt by rememberUpdatedState(indexAt)
@@ -104,6 +108,18 @@ private fun dragSelect(
         while (scrolling) {
             withFrameNanos { }
             scrollable.scrollBy(autoScroll)
+
+            // Keep extending the range while the pointer is stationary near an edge.
+            val anchor = activeAnchor
+            val pointer = latestPointerPosition
+            val current = if (anchor >= 0 && pointer != null) {
+                currentIndexAt(pointer)
+            } else {
+                null
+            }
+            if (anchor >= 0 && current != null) {
+                currentOnRange(minOf(anchor, current)..maxOf(anchor, current))
+            }
         }
     }
 
@@ -124,12 +140,21 @@ private fun dragSelect(
 
             var anchor = currentIndexAt(down.position)
             currentOnStart()
-            val initialPosition = mouseDragStart?.position ?: down.position
+            val clampPosition: (Offset) -> Offset = { point ->
+                Offset(
+                    x = point.x.coerceIn(0f, (size.width - 1).coerceAtLeast(0).toFloat()),
+                    y = point.y.coerceIn(0f, (size.height - 1).coerceAtLeast(0).toFloat())
+                )
+            }
+            val initialPosition = clampPosition(mouseDragStart?.position ?: down.position)
+            latestPointerPosition = initialPosition
             val initialIndex = currentIndexAt(initialPosition)
             if (initialIndex != null) {
                 val start = anchor ?: initialIndex.also { anchor = it }
+                activeAnchor = start
                 currentOnRange(minOf(start, initialIndex)..maxOf(start, initialIndex))
             } else {
+                activeAnchor = anchor ?: -1
                 anchor?.let { currentOnRange(it..it) }
             }
             while (true) {
@@ -137,14 +162,21 @@ private fun dragSelect(
                 val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
                 change.consume()
                 if (!change.pressed) break
-                val current = currentIndexAt(change.position)
+                val position = clampPosition(change.position)
+                latestPointerPosition = position
+                val current = currentIndexAt(position)
                 if (current != null) {
-                    val start = anchor ?: current.also { anchor = it }
+                    val start = anchor ?: current.also {
+                        anchor = it
+                        activeAnchor = it
+                    }
                     currentOnRange(minOf(start, current)..maxOf(start, current))
                 }
                 autoScroll = edgeScroll(change.position.y, size.height, edgePx, maxScrollPx)
             }
             autoScroll = 0f
+            activeAnchor = -1
+            latestPointerPosition = null
             currentOnEnd()
         }
     }
