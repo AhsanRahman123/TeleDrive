@@ -416,7 +416,7 @@ fun FilesScreen(
                                     )
                                 }
                                 Box {
-                                    IconButton(onClick = { onShowContextMenu() }) {
+                                    IconButton(onClick = { showSelectionOverflow = true }) {
                                         Icon(
                                             Icons.Filled.MoreVert,
                                             contentDescription = stringResource(Res.string.common_actions)
