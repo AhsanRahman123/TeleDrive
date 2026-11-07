@@ -229,6 +229,33 @@ fun CollectionScreen(
                                             viewModel.downloadSelected()
                                         }
                                     )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(
+                                                    Res.string.collection_remove_from,
+                                                    stringResource(viewModel.type.titleRes)
+                                                )
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.RemoveCircleOutline, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showSelectionOverflow = false
+                                            viewModel.removeFromCollection()
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(Res.string.common_move_trash)) },
+                                        leadingIcon = {
+                                            Icon(Icons.Filled.Delete, contentDescription = null)
+                                        },
+                                        onClick = {
+                                            showSelectionOverflow = false
+                                            confirmTrash = true
+                                        }
+                                    )
                                 }
                             }
                         }
