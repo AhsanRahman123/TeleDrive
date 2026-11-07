@@ -20,6 +20,15 @@ interface TransferRepository {
 
     suspend fun enqueueUpload(fileId: String, priority: Int = 0): AppResult<String>
 
+    /**
+     * A batch captures this generation before it starts importing. Cancel all advances the
+     * generation so stale import work cannot add uploads after the cancellation has completed.
+     */
+    suspend fun uploadQueueGeneration(): Long
+
+    /** Returns false when [generation] was invalidated by Cancel all. */
+    suspend fun enqueueUploadForGeneration(fileId: String, generation: Long): AppResult<Boolean>
+
     suspend fun enqueuePendingUploads(): AppResult<Int>
 
     /**

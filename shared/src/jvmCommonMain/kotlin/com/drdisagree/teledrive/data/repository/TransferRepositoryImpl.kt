@@ -42,6 +42,34 @@ class TransferRepositoryImpl(
 ) : TransferRepository {
 
     private val enqueueLock = Mutex()
+    private var uploadQueueGeneration = 0L
+
+    private sealed interface EnqueueOutcome {
+        data class Enqueued(val id: String) : EnqueueOutcome
+        data class Failed(val error: AppError) : EnqueueOutcome
+        data object CancelledByCancelAll : EnqueueOutcome
+    }
+
+    override suspend fun uploadQueueGeneration(): Long =
+        enqueueLock.withLock { uploadQueueGeneration }
+
+    override suspend fun enqueueUploadForGeneration(
+        fileId: String,
+        generation: Long
+    ): AppResult<Boolean> = when (
+        val result = enqueueInternal(
+            fileId = fileId,
+            type = TransferType.UPLOAD,
+            priority = 0,
+            sessionId = null,
+            expectedUploadGeneration = generation
+        )
+    ) {
+        is EnqueueOutcome.Enqueued -> AppResult.Success(true)
+        is EnqueueOutcome.Failed -> AppResult.Failure(result.error)
+        EnqueueOutcome.CancelledByCancelAll -> AppResult.Success(false)
+    }
+
 
     override fun observeSection(
         section: TransferSection,
@@ -212,14 +240,34 @@ class TransferRepositoryImpl(
         type: TransferType,
         priority: Int,
         sessionId: String? = null
-    ): AppResult<String> {
-        val entity = fileDao.byId(fileId) ?: return AppResult.Failure(AppError.NotFound)
-        if (entity.localPath == null) {
-            return AppResult.Failure(AppError.NoLocalCopy)
-        }
-        transferDao.unfinishedIdsForFiles(listOf(fileId)).firstOrNull()
-            ?.let { return AppResult.Success(it) }
+    ): AppResult<String> = when (
+        val result = enqueueInternal(
+            fileId = fileId,
+            type = type,
+            priority = priority,
+            sessionId = sessionId,
+            expectedUploadGeneration = null
+        )
+    ) {
+        is EnqueueOutcome.Enqueued -> AppResult.Success(result.id)
+        is EnqueueOutcome.Failed -> AppResult.Failure(result.error)
+        EnqueueOutcome.CancelledByCancelAll -> AppResult.Failure(
+            AppError.TransferFailed("Upload batch was cancelled")
+        )
+    }
 
+    private suspend fun enqueueInternal(
+        fileId: String,
+        type: TransferType,
+        priority: Int,
+        sessionId: String?,
+        expectedUploadGeneration: Long?
+    ): EnqueueOutcome {
+        val entity = fileDao.byId(fileId)
+            ?: return EnqueueOutcome.Failed(AppError.NotFound)
+        if (entity.localPath == null) {
+            return EnqueueOutcome.Failed(AppError.NoLocalCopy)
+        }
 
         val limits = currentLimits()
         val prefs = settingsRepository.preferences.first()
@@ -234,21 +282,33 @@ class TransferRepositoryImpl(
             availableLocalBytes = storageInspector.availableBytes(),
             requiredScratchBytes = scratch,
             splitsIfTooLarge = true
-        )?.let { return AppResult.Failure(it) }
+        )?.let { return EnqueueOutcome.Failed(it) }
 
         return enqueueLock.withLock {
-            transferDao.unfinishedIdsForFiles(listOf(fileId)).firstOrNull()
-                ?.let { return@withLock AppResult.Success(it) }
+            if (
+                expectedUploadGeneration != null &&
+                expectedUploadGeneration != uploadQueueGeneration
+            ) {
+                return@withLock EnqueueOutcome.CancelledByCancelAll
+            }
+            transferDao.unfinishedIdsForFiles(listOf(fileId)).firstOrNull()?.let {
+                return@withLock EnqueueOutcome.Enqueued(it)
+            }
             fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.QUEUED)
-            insertTransfer(
-                entity.id,
-                entity.name,
-                entity.sizeBytes,
-                entity.chatId,
-                type,
-                priority,
-                sessionId
-            )
+            when (
+                val inserted = insertTransfer(
+                    entity.id,
+                    entity.name,
+                    entity.sizeBytes,
+                    entity.chatId,
+                    type,
+                    priority,
+                    sessionId
+                )
+            ) {
+                is AppResult.Success -> EnqueueOutcome.Enqueued(inserted.value)
+                is AppResult.Failure -> EnqueueOutcome.Failed(inserted.error)
+            }
         }
     }
 
@@ -331,7 +391,12 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun cancelAll() {
-        transferDao.cancelAll(System.currentTimeMillis())
+        enqueueLock.withLock {
+            // Serialize cancellation against upload inserts. Any import batch holding an older
+            // generation is rejected if it tries to enqueue after this block completes.
+            uploadQueueGeneration++
+            transferDao.cancelAll(System.currentTimeMillis())
+        }
         syncFileStates()
         backupSessionTracker.refreshActive()
     }
