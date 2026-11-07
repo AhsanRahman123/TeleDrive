@@ -99,6 +99,7 @@ Implemented in source:
 - Empty folders can appear as zero-item albums. Folders with document-only content are not shown as photo/video albums.
 - New album action creates a folder, retaining folders as the single source of truth.
 - Gallery selection menu includes Copy to…, Share, Details, Move to…, Download, Upload, Favorites, Offline, Hide, Archive, Trash and safe Free up space when applicable.
+- Successful Gallery download queueing surfaces the View downloads snackbar action and opens Transfer History.
 - Share uses the existing platform FileSharer and refuses partial sharing if some selected media is cloud-only.
 - Free up space uses the existing verified-local-copy deletion and platform consent flow. Trash remains separate and recoverable.
 - Gallery download notifications include View downloads navigation.
