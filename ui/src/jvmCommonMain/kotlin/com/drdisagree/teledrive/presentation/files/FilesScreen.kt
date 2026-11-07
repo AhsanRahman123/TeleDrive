@@ -33,7 +33,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -44,7 +43,6 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.DriveFolderUpload
 import androidx.compose.material.icons.filled.EditNote
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Search
@@ -52,9 +50,6 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.FolderOff
@@ -170,10 +165,8 @@ import com.drdisagree.teledrive.resources.common_confirm_trash_count_title
 import com.drdisagree.teledrive.resources.common_create
 import com.drdisagree.teledrive.resources.common_deselect_all
 import com.drdisagree.teledrive.resources.common_download
-import com.drdisagree.teledrive.resources.common_free_space
 import com.drdisagree.teledrive.resources.common_make_available_offline
 import com.drdisagree.teledrive.resources.common_move_trash
-import com.drdisagree.teledrive.resources.common_organize
 import com.drdisagree.teledrive.resources.common_remove_from_offline
 import com.drdisagree.teledrive.resources.common_rename
 import com.drdisagree.teledrive.resources.common_restore_trash_emptied
@@ -181,8 +174,6 @@ import com.drdisagree.teledrive.resources.common_select_all
 import com.drdisagree.teledrive.resources.common_select
 import com.drdisagree.teledrive.resources.common_selection_count
 import com.drdisagree.teledrive.resources.common_share
-import com.drdisagree.teledrive.resources.common_storage_actions
-import com.drdisagree.teledrive.resources.common_upload
 import com.drdisagree.teledrive.resources.files
 import com.drdisagree.teledrive.resources.files_view_details
 import com.drdisagree.teledrive.resources.files_view_list
@@ -216,7 +207,6 @@ import com.drdisagree.teledrive.resources.files_rename_folder
 import com.drdisagree.teledrive.resources.files_search
 import com.drdisagree.teledrive.resources.files_share_destination_confirm
 import com.drdisagree.teledrive.resources.files_share_destination_title
-import com.drdisagree.teledrive.resources.files_show_in_file_manager
 import com.drdisagree.teledrive.resources.snackbar_view_downloads
 import com.drdisagree.teledrive.resources.files_sort
 import com.drdisagree.teledrive.resources.info_details
@@ -447,7 +437,47 @@ fun FilesScreen(
                                             state.folderSelection.isEmpty()
                                     val filesOnly = !state.folderInSelection
 
-                                    val organize = buildList {
+                                    val selectedItemCount =
+                                        state.selectionCount + state.folderSelection.size
+                                    val actions = buildList {
+                                        if (filesOnly) {
+                                            add(
+                                                MenuAction(
+                                                    label = stringResource(Res.string.common_share),
+                                                    icon = Icons.Filled.Share
+                                                ) { viewModel.shareSelected() }
+                                            )
+                                        }
+                                        if (state.folderInSelection || state.capabilities.canDownload) {
+                                            add(
+                                                MenuAction(
+                                                    label = stringResource(Res.string.common_download),
+                                                    icon = Icons.Filled.Download
+                                                ) { viewModel.downloadSelected() }
+                                            )
+                                        }
+                                        if (selectedItemCount == 1) {
+                                            add(
+                                                MenuAction(
+                                                    label = stringResource(Res.string.common_rename),
+                                                    icon = Icons.Filled.DriveFileRenameOutline
+                                                ) { viewModel.requestRenameSelected() }
+                                            )
+                                        }
+                                        if (filesOnly) {
+                                            add(
+                                                MenuAction(
+                                                    label = stringResource(Res.string.files_copy),
+                                                    icon = Icons.Filled.ContentCopy
+                                                ) { showCopyPicker = true }
+                                            )
+                                        }
+                                        add(
+                                            MenuAction(
+                                                label = stringResource(Res.string.files_move_to),
+                                                icon = Icons.AutoMirrored.Filled.DriveFileMove
+                                            ) { showMovePicker = true }
+                                        )
                                         add(
                                             MenuAction(
                                                 label = stringResource(
@@ -488,84 +518,6 @@ fun FilesScreen(
                                                 icon = Icons.Filled.Archive
                                             ) { viewModel.archiveSelected(true) }
                                         )
-                                    }
-
-                                    val storage = buildList {
-                                        if (state.folderInSelection || state.capabilities.canDownload) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.common_download),
-                                                    icon = Icons.Filled.Download
-                                                ) { viewModel.downloadSelected() }
-                                            )
-                                        }
-                                        if (filesOnly && state.capabilities.canUpload) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.common_upload),
-                                                    icon = Icons.Filled.Upload
-                                                ) { viewModel.uploadSelected() }
-                                            )
-                                        }
-                                        if (filesOnly && state.capabilities.canFreeUpSpace) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.common_free_space),
-                                                    icon = Icons.Filled.CleaningServices
-                                                ) { confirmDeleteLocal = true }
-                                            )
-                                        }
-                                        if (fileRevealer != null && revealPath != null) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.files_show_in_file_manager),
-                                                    icon = Icons.Filled.FolderOpen
-                                                ) { fileRevealer.reveal(revealPath) }
-                                            )
-                                        }
-                                    }
-
-                                    val actions = buildList {
-                                        if (filesOnly) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.common_share),
-                                                    icon = Icons.Filled.Share
-                                                ) { viewModel.shareSelected() }
-                                            )
-                                        }
-                                        if (state.selectionCount == 1) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.common_rename),
-                                                    icon = Icons.Filled.DriveFileRenameOutline
-                                                ) { viewModel.requestRenameSelected() }
-                                            )
-                                        }
-                                        if (filesOnly) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.files_copy),
-                                                    icon = Icons.Filled.ContentCopy
-                                                ) { showCopyPicker = true }
-                                            )
-                                        }
-                                        if (storage.isNotEmpty()) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.common_storage_actions),
-                                                    icon = Icons.Filled.Storage,
-                                                    children = storage
-                                                )
-                                            )
-                                        }
-                                        add(
-                                            MenuAction(
-                                                label = stringResource(Res.string.common_organize),
-                                                icon = Icons.Filled.Tune,
-                                                children = organize
-                                            )
-                                        )
                                         if (editableNote) {
                                             add(
                                                 MenuAction(
@@ -574,7 +526,7 @@ fun FilesScreen(
                                                 ) { viewModel.editSelectedNote() }
                                             )
                                         }
-                                        if (state.selectionCount + state.folderSelection.size == 1) {
+                                        if (selectedItemCount == 1) {
                                             add(
                                                 MenuAction(
                                                     label = stringResource(Res.string.info_details),
