@@ -129,33 +129,10 @@ jobs:
           path: desktop/build/appimage/*.AppImage
           if-no-files-found: error
 
-  macos:
-    name: macOS
-    runs-on: macos-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - uses: gradle/actions/setup-gradle@v5
-
-      - name: Package .dmg
-        run: ./gradlew :desktop:packageDmg
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: macos-release
-          path: desktop/build/compose/binaries/main/dmg/*.dmg
-          if-no-files-found: error
-
   publish:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/') && always() && needs.android.result == 'success' && needs.windows.result == 'success'
-    needs: [android, windows, linux, appimage, macos]
+    needs: [android, windows, linux, appimage]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -172,12 +149,6 @@ jobs:
           echo "::warning title=No AppImage artifact::AppImage packaging did not
           succeed (${{ needs.appimage.result }}), so this draft has no AppImage."
 
-      - name: Report a missing macOS build
-        if: needs.macos.result != 'success'
-        run: >-
-          echo "::warning title=No macOS artifact::macOS packaging did not
-          succeed (${{ needs.macos.result }}), so this draft has no .dmg."
-
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -191,4 +162,3 @@ jobs:
             artifacts/*.msi
             artifacts/*.deb
             artifacts/*.AppImage
-            artifacts/*.dmg
