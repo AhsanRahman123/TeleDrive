@@ -245,33 +245,48 @@ class PreviewViewModel(
             when (val result = fileRepository.moveFiles(listOf(file.id), targetFolderId)) {
                 is AppResult.Success -> {
                     val currentFiles = _uiState.value.files
+                    val actualIndex = currentFiles.indexOfFirst { it.id == file.id }
+                        .takeIf { it >= 0 }
+                        ?: currentIndex.coerceIn(0, (currentFiles.size - 1).coerceAtLeast(0))
                     val remaining = currentFiles.filterNot { it.id == file.id }
-                    val isMedia = file.category == FileCategory.IMAGE ||
+                    val isImageOrVideo = file.category == FileCategory.IMAGE ||
                             file.category == FileCategory.VIDEO
-                    val nextFiles = if (isMedia) {
-                        remaining.filter {
-                            it.category == FileCategory.IMAGE || it.category == FileCategory.VIDEO
+                    val nextFiles = if (isImageOrVideo) {
+                        remaining.filter { candidate ->
+                            candidate.category == FileCategory.IMAGE ||
+                                    candidate.category == FileCategory.VIDEO
                         }
                     } else {
                         remaining
                     }
-                    if (nextFiles.isEmpty()) {
-                        _uiState.update { it.copy(files = emptyList(), closed = true) }
+
+                    if (isImageOrVideo && nextFiles.isEmpty()) {
+                        // The media sequence is exhausted. Closing returns to the folder that
+                        // launched this viewer instead of leaving the moved file on screen.
+                        _uiState.update {
+                            it.copy(files = emptyList(), closed = true)
+                        }
                     } else {
-                        val nextFile = if (isMedia) {
-                            currentFiles.drop(currentIndex + 1).firstOrNull { candidate ->
-                                nextFiles.any { it.id == candidate.id }
-                            } ?: currentFiles.take(currentIndex).lastOrNull { candidate ->
-                                nextFiles.any { it.id == candidate.id }
-                            }
+                        val nextFile = if (isImageOrVideo) {
+                            val remainingIds = nextFiles.asSequence().map { it.id }.toSet()
+                            currentFiles.drop(actualIndex + 1)
+                                .firstOrNull { it.id in remainingIds }
+                                ?: currentFiles.take(actualIndex)
+                                    .lastOrNull { it.id in remainingIds }
                         } else {
                             null
                         }
                         val nextIndex = nextFile?.let { candidate ->
                             nextFiles.indexOfFirst { it.id == candidate.id }
-                        }?.takeIf { it >= 0 } ?: currentIndex.coerceIn(0, nextFiles.lastIndex)
+                        }?.takeIf { it >= 0 }
+                            ?: actualIndex.coerceIn(0, nextFiles.lastIndex)
                         _uiState.update {
-                            it.copy(files = nextFiles, initialIndex = nextIndex)
+                            it.copy(
+                                files = nextFiles,
+                                initialIndex = nextIndex,
+                                ready = true,
+                                closed = false
+                            )
                         }
                     }
                     _messages.tryEmit(
