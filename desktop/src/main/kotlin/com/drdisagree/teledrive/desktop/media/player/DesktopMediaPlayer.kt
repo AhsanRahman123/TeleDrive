@@ -141,7 +141,7 @@ fun DesktopMediaPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionTick by remember { mutableIntStateOf(0) }
 
-    val player = remember {
+    val player = remember(mrl, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) videoSurface().set(composeVideoSurface { frame = it })
             events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
@@ -196,7 +196,7 @@ fun DesktopMediaPlayer(
     }
 
     val fullscreenController = LocalFullscreenController.current
-    DisposableEffect(mrl) {
+    DisposableEffect(player, mrl) {
         player.media().play(mrl)
         onDispose {
             runCatching {
