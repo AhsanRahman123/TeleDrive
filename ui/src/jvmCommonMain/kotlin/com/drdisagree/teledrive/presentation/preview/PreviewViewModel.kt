@@ -260,7 +260,7 @@ class PreviewViewModel(
                         remaining
                     }
 
-                    if (isImageOrVideo && nextFiles.isEmpty()) {
+                    if (nextFiles.isEmpty()) {
                         // The media sequence is exhausted. Closing returns to the folder that
                         // launched this viewer instead of leaving the moved file on screen.
                         _uiState.update {
