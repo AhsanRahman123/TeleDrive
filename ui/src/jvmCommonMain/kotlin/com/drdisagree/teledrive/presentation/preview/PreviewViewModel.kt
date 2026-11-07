@@ -268,7 +268,7 @@ class PreviewViewModel(
                             )
                         }
                     }
-                                        _messages.tryEmit(
+                    _messages.tryEmit(
                         UiText.Resource(Res.string.message_moved_count, result.value)
                     )
                 }
