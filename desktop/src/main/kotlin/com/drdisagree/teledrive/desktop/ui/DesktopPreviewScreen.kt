@@ -161,7 +161,12 @@ fun DesktopPreviewScreen(
     val state by viewModel.uiState.collectAsState()
     LaunchedEffect(state.closed) { if (state.closed) onBack() }
 
-    var index by remember(state.files, state.initialIndex) { mutableStateOf(state.initialIndex) }
+    var index by remember { mutableStateOf(0) }
+    LaunchedEffect(state.files, state.initialIndex) {
+        if (state.files.isNotEmpty()) {
+            index = state.initialIndex.coerceIn(0, state.files.lastIndex)
+        }
+    }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     val infoTarget by viewModel.infoTarget.collectAsState()
     var showOverflow by remember { mutableStateOf(false) }
@@ -587,7 +592,7 @@ private fun PreviewPane(
                                             if ((state.zoomFraction ?: 0f) > 0f) {
                                                 state.resetZoom()
                                             } else {
-                                                state.zoomBy(zoomFactor = 2f, centroid = centroid)
+                                                state.zoomBy(zoomFactor = 1.35f, centroid = centroid)
                                             }
                                         }
                                     }
