@@ -168,28 +168,3 @@ jobs:
           name: TeleDrive-linux-appimage
           path: desktop/build/appimage/*.AppImage
           if-no-files-found: error
-
-  macos:
-    name: macOS
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - uses: gradle/actions/setup-gradle@v5
-
-      - name: Desktop tests
-        run: ./gradlew :desktop:test
-
-      - name: Package .dmg
-        run: ./gradlew :desktop:packageDmg
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: TeleDrive-macos
-          path: desktop/build/compose/binaries/main/dmg/*.dmg
-          if-no-files-found: error
