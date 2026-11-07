@@ -334,7 +334,7 @@ fun DesktopMediaPlayer(
                 val shift = event.isShiftPressed
 
                 when {
-                    key == Key.Spacebar && !ctrl && !alt -> {
+                    key == Key.Spacebar && !ctrl && !alt && !shift -> {
                         togglePlayback()
                         interactionTick++
                         true
@@ -354,7 +354,7 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.S && ctrl && alt && !shift -> {
+                    key == Key.S && shift && !ctrl && !alt -> {
                         saveVideoSnapshot()
                         interactionTick++
                         true
@@ -367,7 +367,7 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.F && !ctrl && !alt -> {
+                    key == Key.F && !ctrl && !alt && !shift -> {
                         fullscreenController?.toggle()
                         interactionTick++
                         fullscreenController != null
@@ -376,12 +376,12 @@ fun DesktopMediaPlayer(
                         fullscreenController.toggle()
                         true
                     }
-                    key == Key.N && !ctrl && !alt -> {
+                    key == Key.N && !ctrl && !alt && !shift -> {
                         onNext()
                         interactionTick++
                         true
                     }
-                    key == Key.P && !ctrl && !alt -> {
+                    key == Key.P && !ctrl && !alt && !shift -> {
                         onPrevious()
                         interactionTick++
                         true
@@ -412,24 +412,24 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.M && !ctrl && !alt -> {
+                    key == Key.M && !ctrl && !alt && !shift -> {
                         toggleMute()
                         interactionTick++
                         true
                     }
-                    key == Key.Plus || (key == Key.Equals && shift) -> {
+                    (key == Key.Plus && !ctrl && !alt) || (key == Key.Equals && shift && !ctrl && !alt) -> {
                         setPlaybackRate(rate * 1.5f)
                         true
                     }
-                    key == Key.RightBracket && !ctrl && !alt -> {
+                    key == Key.RightBracket && !ctrl && !alt && !shift -> {
                         setPlaybackRate(rate * FINE_RATE_FACTOR)
                         true
                     }
-                    key == Key.Minus -> {
+                    key == Key.Minus && !ctrl && !alt && !shift -> {
                         setPlaybackRate(rate / 1.5f)
                         true
                     }
-                    key == Key.LeftBracket && !ctrl && !alt -> {
+                    key == Key.LeftBracket && !ctrl && !alt && !shift -> {
                         setPlaybackRate(rate / FINE_RATE_FACTOR)
                         true
                     }
@@ -454,18 +454,18 @@ fun DesktopMediaPlayer(
                             true
                         }
                     }
-                    key == Key.E && !ctrl && !alt -> {
+                    key == Key.E && !ctrl && !alt && !shift -> {
                         player.controls().nextFrame()
                         interactionTick++
                         true
                     }
-                    key == Key.L && !ctrl && !alt -> {
+                    key == Key.L && !ctrl && !alt && !shift -> {
                         repeatOne = !repeatOne
                         player.controls().repeat = repeatOne
                         interactionTick++
                         true
                     }
-                    key == Key.B && !ctrl && !alt -> {
+                    key == Key.B && !ctrl && !alt && !shift -> {
                         cycleAudioTrack()
                         interactionTick++
                         true
@@ -485,22 +485,22 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.J && !ctrl && !alt -> {
+                    key == Key.J && !ctrl && !alt && !shift -> {
                         player.audio().setDelay(player.audio().delay() - SYNC_STEP_US)
                         interactionTick++
                         true
                     }
-                    key == Key.K && !ctrl && !alt -> {
+                    key == Key.K && !ctrl && !alt && !shift -> {
                         player.audio().setDelay(player.audio().delay() + SYNC_STEP_US)
                         interactionTick++
                         true
                     }
-                    key == Key.G && !ctrl && !alt -> {
+                    key == Key.G && !ctrl && !alt && !shift -> {
                         player.subpictures().setDelay(player.subpictures().delay() - SYNC_STEP_US)
                         interactionTick++
                         true
                     }
-                    key == Key.H && !ctrl && !alt -> {
+                    key == Key.H && !ctrl && !alt && !shift -> {
                         player.subpictures().setDelay(player.subpictures().delay() + SYNC_STEP_US)
                         interactionTick++
                         true
@@ -510,12 +510,12 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.Z && !ctrl && !alt -> {
+                    key == Key.Z && !ctrl && !alt && !shift -> {
                         scaling = VideoScaling.ZOOM
                         interactionTick++
                         true
                     }
-                    key == Key.O && !ctrl && !alt -> {
+                    key == Key.O && !ctrl && !alt && !shift -> {
                         scaling = if (scaling == VideoScaling.FIT) {
                             VideoScaling.FILL
                         } else {
@@ -528,6 +528,16 @@ fun DesktopMediaPlayer(
                 }
             }
             .pointerHoverIcon(if (controlsVisible) PointerIcon.Default else blankCursor)
+            .pointerInput(player, playing, finished, isAudio) {
+                if (!isAudio) {
+                    detectTapGestures(
+                        onTap = {
+                            togglePlayback()
+                            interactionTick++
+                        }
+                    )
+                }
+            }
             .pointerInput(Unit) {
                 var lastPosition = Offset.Unspecified
                 awaitPointerEventScope {
@@ -535,7 +545,10 @@ fun DesktopMediaPlayer(
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         val position = event.changes.firstOrNull()?.position ?: continue
                         when (event.type) {
-                            PointerEventType.Press -> interactionTick++
+                            PointerEventType.Press -> {
+                                playerFocusRequester.requestFocus()
+                                interactionTick++
+                            }
                             PointerEventType.Move -> {
                                 if (lastPosition != Offset.Unspecified &&
                                     (position - lastPosition).getDistance() > MOVE_THRESHOLD_PX
@@ -564,16 +577,7 @@ fun DesktopMediaPlayer(
                 Image(
                     bitmap = current,
                     contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(player, playing, finished) {
-                            detectTapGestures(
-                                onTap = {
-                                    togglePlayback()
-                                    interactionTick++
-                                }
-                            )
-                        },
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = scaling.contentScale
                 )
             }
