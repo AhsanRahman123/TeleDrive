@@ -418,14 +418,15 @@ fun FilesScreen(
                                         }
                                     )
                                 }
-                                IconButton(onClick = { showMovePicker = true }) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.DriveFileMove,
-                                        contentDescription = stringResource(Res.string.files_move)
-                                    )
-                                }
-                                Box {
-                                    IconButton(onClick = { showSelectionOverflow = true }) {
+                                if (state.selectionCount > 0) {
+                                    IconButton(onClick = { showMovePicker = true }) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.DriveFileMove,
+                                            contentDescription = stringResource(Res.string.files_move)
+                                        )
+                                    }
+                                    Box {
+                                        IconButton(onClick = { showSelectionOverflow = true }) {
                                         Icon(
                                             Icons.Filled.MoreVert,
                                             contentDescription = stringResource(Res.string.common_actions)
