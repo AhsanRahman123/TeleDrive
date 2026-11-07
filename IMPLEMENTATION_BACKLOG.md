@@ -120,3 +120,24 @@ Acceptance:
 ## User-verified baseline
 
 The user reports that the other previously tested TeleDrive features are working perfectly. Treat them as accepted baseline behavior for this iteration. Do not expand scope back to the older wishlist unless the user raises a new issue.
+
+
+## Latest implementation checkpoint — 8 November 2026
+
+Source changes now present on `codex/file-integrity-phase-1`:
+
+- Android image preview wraps the existing Telephoto zoom state with dedicated Zoom in / Zoom out controls. The existing Telephoto pinch gesture pipeline is retained.
+- Desktop image preview uses Telephoto's `Modifier.zoomable` with dedicated zoom controls, giving double-click zoom and mouse/keyboard zoom interactions.
+- Android and desktop preview menus now offer Copy to… and Move to… and reuse the shared folder picker. Both actions route through the existing `FileRepository` operations.
+- The Files browser now handles right-click on unconsumed blank space by opening the same Add menu as the + button. Item context clicks are consumed by their own row handlers, so they should not trigger the blank-space action.
+- Folder imports capture an upload-queue generation. `Cancel all` advances that generation while holding the same enqueue mutex used to insert upload rows. Enqueues from an older import generation are rejected after cancellation, while imported local files remain in the library.
+- Added a focused `UploadBatchGenerationTest` covering generation snapshots and invalidation after Cancel all.
+- When a folder import's upload batch is invalidated, the final message explicitly says the files were imported locally and their uploads were cancelled.
+
+Validation state:
+- These newest source changes have **not yet been compiled or runtime-tested** on the user's machine.
+- The generation unit test is added but has not yet been run.
+- A real-world regression test remains required: upload a large folder, Cancel all after a few transfers appear, then immediately upload a new single file and confirm that no old batch item reappears and the new file completes.
+- Also validate viewer pinch/double-click/buttons, viewer Copy/Move, and blank-space right-click in both populated and empty Files folders.
+- Windows is the primary runtime verification target; Android and Linux builds/gestures must be checked separately before claiming cross-platform completion.
+

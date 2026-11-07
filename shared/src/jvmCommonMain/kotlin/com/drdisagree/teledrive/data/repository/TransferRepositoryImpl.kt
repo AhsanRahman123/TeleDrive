@@ -10,6 +10,7 @@ import com.drdisagree.teledrive.core.telegram.TelegramLimits
 import com.drdisagree.teledrive.core.transfer.BackupSessionTracker
 import com.drdisagree.teledrive.core.transfer.FileParts
 import com.drdisagree.teledrive.core.transfer.TransferScheduler
+import com.drdisagree.teledrive.core.transfer.UploadBatchGeneration
 import com.drdisagree.teledrive.data.local.dao.FileDao
 import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
