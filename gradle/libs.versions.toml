@@ -34,7 +34,7 @@ documentfile = "1.1.0"
 exifinterface = "1.4.2"
 zip4j = "2.11.6"
 commonsCompress = "1.28.0"
-xz = "1.10"
+xz = "1.12"
 tdlib = "1.8.56"
 tdlight = "3.5.5+td.1.8.66"
 #noinspection UnusedVersionCatalogEntry

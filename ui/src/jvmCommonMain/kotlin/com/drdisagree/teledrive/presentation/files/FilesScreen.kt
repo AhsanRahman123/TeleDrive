@@ -184,6 +184,10 @@ import com.drdisagree.teledrive.resources.common_share
 import com.drdisagree.teledrive.resources.common_storage_actions
 import com.drdisagree.teledrive.resources.common_upload
 import com.drdisagree.teledrive.resources.files
+import com.drdisagree.teledrive.resources.files_view_details
+import com.drdisagree.teledrive.resources.files_view_list
+import com.drdisagree.teledrive.resources.files_view_grid
+import com.drdisagree.teledrive.resources.files_change_view
 import com.drdisagree.teledrive.resources.files_add_files
 import com.drdisagree.teledrive.resources.files_add_folder
 import com.drdisagree.teledrive.resources.files_archive
@@ -636,7 +640,7 @@ fun FilesScreen(
                                     IconButton(onClick = { showViewMenu = true }) {
                                         Icon(
                                             Icons.Filled.ViewList,
-                                            contentDescription = "Change view"
+                                            contentDescription = stringResource(Res.string.files_change_view)
                                         )
                                     }
                                     DropdownMenu(
@@ -644,21 +648,21 @@ fun FilesScreen(
                                         onDismissRequest = { showViewMenu = false }
                                     ) {
                                         DropdownMenuItem(
-                                            text = { Text("Grid") },
+                                            text = { Text(stringResource(Res.string.files_view_grid)) },
                                             onClick = {
                                                 showViewMenu = false
                                                 viewModel.setViewMode(ViewMode.GRID)
                                             }
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("List") },
+                                            text = { Text(stringResource(Res.string.files_view_list)) },
                                             onClick = {
                                                 showViewMenu = false
                                                 viewModel.setViewMode(ViewMode.LIST)
                                             }
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Details") },
+                                            text = { Text(stringResource(Res.string.files_view_details)) },
                                             onClick = {
                                                 showViewMenu = false
                                                 viewModel.setViewMode(ViewMode.DETAILS)

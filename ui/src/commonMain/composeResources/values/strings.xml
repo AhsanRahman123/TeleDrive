@@ -297,6 +297,10 @@
 
     <!-- Files -->
     <string name="files">Files</string>
+    <string name="files_change_view">Change view</string>
+    <string name="files_view_grid">Grid</string>
+    <string name="files_view_list">List</string>
+    <string name="files_view_details">Details</string>
     <string name="files_add_files">Upload files</string>
     <string name="files_add_folder">Upload folder</string>
     <string name="files_archive">Archive</string>
