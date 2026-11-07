@@ -417,7 +417,7 @@ class FileRepositoryImpl(
             val destinationParentId = if (source.id == id) {
                 targetParentId
             } else {
-                copiedFolderIds[source.parentId]
+                copiedFolderIds[source.parentId ?: return AppResult.Failure(AppError.NotFound)]
                     ?: return AppResult.Failure(AppError.NotFound)
             }
             val existingNames = folderDao.namesIn(destinationParentId, channelId)
