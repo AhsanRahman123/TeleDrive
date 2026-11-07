@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -126,6 +127,7 @@ import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileGridItem
+import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.SortMenu
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileListItem
@@ -244,6 +246,8 @@ fun FilesScreen(
     viewModel: FilesViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
+    val selectionMode = selectionMode || selectionModeEnabled
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val files = viewModel.pagedFiles.collectAsLazyPagingItems()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
@@ -301,7 +305,7 @@ fun FilesScreen(
     val working by viewModel.working.collectAsStateWithLifecycle()
     working?.let { BlockingProgressDialog(message = it.resolve()) }
 
-    AppBackHandler(enabled = state.selectionMode) { viewModel.clearSelection() }
+    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     val gridState = rememberLazyGridState()
     gridState.rememberPosition(viewModel.listPosition, state.folders.size + files.itemCount)
@@ -365,7 +369,7 @@ fun FilesScreen(
             Scaffold(
                 snackbarHost = {},
                 topBar = {
-                    if (state.selectionMode) {
+                    if (selectionMode) {
                         TopAppBar(
                             colors = liftedTopAppBarColors(lifted),
                             title = {
@@ -592,6 +596,12 @@ fun FilesScreen(
                                 }
                             },
                             actions = {
+                                IconButton(onClick = viewModel::startSelectionMode) {
+                                    Icon(
+                                        Icons.Filled.CheckBoxOutlineBlank,
+                                        contentDescription = stringResource(Res.string.common_select)
+                                    )
+                                }
                                 RefreshAction(
                                     refreshing = refreshing,
                                     onRefresh = viewModel::refresh
@@ -630,7 +640,7 @@ fun FilesScreen(
                 },
                 floatingActionButton = {
                     AnimatedVisibility(
-                        visible = fabVisible && !state.selectionMode,
+                        visible = fabVisible && !selectionMode,
                         enter = scaleIn() + fadeIn(),
                         exit = scaleOut() + fadeOut()
                     ) {
@@ -1034,7 +1044,7 @@ private fun FilesContent(
             files.peek(index - state.folders.size)?.let { viewModel.toggleSelection(it.id) }
         }
     }
-    val selectIfNone: (Int) -> Unit = { index -> if (!state.selectionMode) toggleAt(index) }
+    val selectIfNone: (Int) -> Unit = { index -> if (!selectionMode) toggleAt(index) }
     val shortcuts = CollectionShortcuts(
         onToggleSelect = toggleAt,
         onSelectAll = viewModel::selectAll,
@@ -1055,7 +1065,7 @@ private fun FilesContent(
         },
         onPaste = viewModel::paste,
         onBack = onBack,
-        onClear = if (state.selectionMode) viewModel::clearSelection else null
+        onClear = if (selectionMode) viewModel::clearSelection else null
     )
     val dragSelect = rememberDragSelect(
         gridState = gridState,
@@ -1109,26 +1119,38 @@ private fun FilesContent(
                     folder = folder,
                     selected = folderSelected,
                     onClick = {
-                        if (state.selectionMode) viewModel.toggleFolderSelection(folder.id)
+                        if (selectionMode) viewModel.toggleFolderSelection(folder.id)
                         else onOpenFolder(folder.id)
                     },
                     onLongClick = { viewModel.toggleFolderSelection(folder.id) },
+                    selectionMode = selectionMode,
+                    onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
+                        .onDesktopContextClick {
+                            viewModel.selectFolderForContext(folder.id)
+                            showSelectionOverflow = true
+                        }
                 )
             } else {
                 FolderRow(
                     folder = folder,
                     selected = folderSelected,
                     onClick = {
-                        if (state.selectionMode) viewModel.toggleFolderSelection(folder.id)
+                        if (selectionMode) viewModel.toggleFolderSelection(folder.id)
                         else onOpenFolder(folder.id)
                     },
                     onLongClick = { viewModel.toggleFolderSelection(folder.id) },
+                    selectionMode = selectionMode,
+                    onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
+                        .onDesktopContextClick {
+                            viewModel.selectFolderForContext(folder.id)
+                            showSelectionOverflow = true
+                        }
                 )
             }
         }
@@ -1144,8 +1166,10 @@ private fun FilesContent(
                 FileGridItem(
                     file = file,
                     selected = selected,
+                    selectionMode = selectionMode,
+                    onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
-                        if (state.selectionMode) viewModel.toggleSelection(file.id)
+                        if (selectionMode) viewModel.toggleSelection(file.id)
                         else onOpenFile(
                             file.id,
                             PreviewSequence(
@@ -1161,14 +1185,19 @@ private fun FilesContent(
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .animateItem()
                         .focusHighlight(highlighted)
+                        .onDesktopContextClick {
+                            viewModel.selectFileForContext(file.id)
+                            showSelectionOverflow = true
+                        }
                 )
             } else {
                 FileListItem(
                     file = file,
                     selected = selected,
-                    selectionMode = state.selectionMode,
+                    selectionMode = selectionMode,
+                    onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
-                        if (state.selectionMode) viewModel.toggleSelection(file.id)
+                        if (selectionMode) viewModel.toggleSelection(file.id)
                         else onOpenFile(
                             file.id,
                             PreviewSequence(
@@ -1184,6 +1213,10 @@ private fun FilesContent(
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .animateItem()
                         .focusHighlight(highlighted)
+                        .onDesktopContextClick {
+                            viewModel.selectFileForContext(file.id)
+                            showSelectionOverflow = true
+                        }
                 )
             }
         }
