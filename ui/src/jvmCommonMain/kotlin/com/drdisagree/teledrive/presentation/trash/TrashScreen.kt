@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,6 +18,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.ExpandLess
@@ -25,6 +28,8 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,6 +67,8 @@ import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileThumbnail
+import com.drdisagree.teledrive.presentation.components.SelectionCheckbox
+import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
 import com.drdisagree.teledrive.presentation.components.keyboardCollectionItem
 import com.drdisagree.teledrive.presentation.components.liftedTopAppBarColors
@@ -100,9 +107,12 @@ fun TrashScreen(
     viewModel: TrashViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
+    val selectionMode = selectionMode || selectionModeEnabled
     val snackbarHostState = remember { SnackbarHostState() }
     var confirmEmpty by remember { mutableStateOf(false) }
     var confirmDeleteSelected by remember { mutableStateOf(false) }
+    var showSelectionOverflow by remember { mutableStateOf(false) }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
@@ -110,7 +120,7 @@ fun TrashScreen(
         BlockingProgressDialog(message = message.resolve())
     }
 
-    AppBackHandler(enabled = state.selectionMode) { viewModel.clearSelection() }
+    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     val listState = rememberLazyListState()
     val lifted by rememberToolbarLift(listState)
@@ -136,8 +146,8 @@ fun TrashScreen(
         onToggleSelect = { index -> selectableIdAt(index)?.let(viewModel::toggleSelection) },
         onSelectAll = viewModel::selectAll,
         onDelete = { index ->
-            if (!state.selectionMode) selectableIdAt(index)?.let(viewModel::toggleSelection)
-            if (state.selectionMode || selectableIdAt(index) != null) confirmDeleteSelected = true
+            if (!selectionMode) selectableIdAt(index)?.let(viewModel::toggleSelection)
+            if (selectionMode || selectableIdAt(index) != null) confirmDeleteSelected = true
         },
         onExpand = { index ->
             state.rows.getOrNull(index)?.takeIf { it.expandable && !it.expanded }
@@ -148,13 +158,13 @@ fun TrashScreen(
                 ?.let { viewModel.toggleExpanded(it.item.id) }
         },
         onBack = onBack,
-        onClear = if (state.selectionMode) viewModel::clearSelection else null
+        onClear = if (selectionMode) viewModel::clearSelection else null
     )
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            if (state.selectionMode) {
+            if (selectionMode) {
                 TopAppBar(
                     colors = liftedTopAppBarColors(lifted),
                     title = {
@@ -199,6 +209,35 @@ fun TrashScreen(
                                 contentDescription = stringResource(Res.string.common_delete_forever)
                             )
                         }
+                        Box {
+                            IconButton(onClick = { showSelectionOverflow = true }) {
+                                Icon(
+                                    Icons.Filled.MoreVert,
+                                    contentDescription = stringResource(Res.string.common_actions)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showSelectionOverflow,
+                                onDismissRequest = { showSelectionOverflow = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.common_restore)) },
+                                    leadingIcon = { Icon(Icons.Filled.RestoreFromTrash, contentDescription = null) },
+                                    onClick = {
+                                        showSelectionOverflow = false
+                                        viewModel.restoreSelected()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.common_delete_forever)) },
+                                    leadingIcon = { Icon(Icons.Filled.DeleteForever, contentDescription = null) },
+                                    onClick = {
+                                        showSelectionOverflow = false
+                                        confirmDeleteSelected = true
+                                    }
+                                )
+                            }
+                        }
                     }
                 )
             } else {
@@ -214,6 +253,14 @@ fun TrashScreen(
                         }
                     },
                     actions = {
+                        if (state.rows.any { it.selectable }) {
+                            IconButton(onClick = viewModel::startSelectionMode) {
+                                Icon(
+                                    Icons.Filled.CheckBoxOutlineBlank,
+                                    contentDescription = stringResource(Res.string.common_select)
+                                )
+                            }
+                        }
                         if (state.items.isNotEmpty()) {
                             IconButton(onClick = { confirmEmpty = true }) {
                                 Icon(
@@ -286,7 +333,7 @@ fun TrashScreen(
                         .combinedClickable(
                             onClick = {
                                 when {
-                                    state.selectionMode && row.selectable ->
+                                    selectionMode && row.selectable ->
                                         viewModel.toggleSelection(item.id)
 
                                     row.expandable -> viewModel.toggleExpanded(item.id)
@@ -301,9 +348,22 @@ fun TrashScreen(
                                 if (row.selectable) viewModel.toggleSelection(item.id)
                             }
                         )
+                        .onDesktopContextClick {
+                            if (row.selectable) {
+                                viewModel.selectForContext(item.id)
+                                showSelectionOverflow = true
+                            }
+                        }
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (selectionMode && row.selectable) {
+                        SelectionCheckbox(
+                            checked = selected,
+                            onClick = { viewModel.toggleSelection(item.id) },
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                    }
                     when (item) {
                         is TrashItem.File -> FileThumbnail(
                             file = item.file,
