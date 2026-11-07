@@ -87,16 +87,6 @@ fun FileListItem(
                     .size(if (compact) 38.dp else 48.dp)
                     .clip(MaterialTheme.shapes.medium)
             )
-            if (selected) {
-                Icon(
-                    imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = stringResource(Res.string.common_content_description_selected),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(18.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
         }
         Spacer(Modifier.width(if (compact) 10.dp else 14.dp))
         Column(modifier = Modifier.weight(1f)) {
