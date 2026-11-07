@@ -110,6 +110,7 @@ import com.drdisagree.teledrive.presentation.common.normalizeUrl
 import com.drdisagree.teledrive.presentation.common.scaledBy
 import com.drdisagree.teledrive.presentation.common.soleUrlOf
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
+import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.ErrorState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
@@ -121,6 +122,10 @@ import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
 import com.drdisagree.teledrive.resources.common_collapse
 import com.drdisagree.teledrive.resources.common_download
+import com.drdisagree.teledrive.resources.files_copy_here
+import com.drdisagree.teledrive.resources.files_copy_to
+import com.drdisagree.teledrive.resources.files_move_here
+import com.drdisagree.teledrive.resources.files_move_to
 import com.drdisagree.teledrive.resources.common_expand
 import com.drdisagree.teledrive.resources.common_free_space
 import com.drdisagree.teledrive.resources.common_move_trash
@@ -184,6 +189,8 @@ fun PreviewScreen(
 
     var renameTarget by remember { mutableStateOf<DriveFile?>(null) }
     var deleteTarget by remember { mutableStateOf<DriveFile?>(null) }
+    var copyTarget by remember { mutableStateOf<DriveFile?>(null) }
+    var moveTarget by remember { mutableStateOf<DriveFile?>(null) }
     var showOverflow by remember { mutableStateOf(false) }
 
     val deleteConsentLauncher = rememberLauncherForActivityResult(
@@ -382,6 +389,20 @@ fun PreviewScreen(
                                         }
                                     )
                                 }
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.files_copy_to)) },
+                                    onClick = {
+                                        showOverflow = false
+                                        copyTarget = currentFile
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(Res.string.files_move_to)) },
+                                    onClick = {
+                                        showOverflow = false
+                                        moveTarget = currentFile
+                                    }
+                                )
                                 if (!currentFile.hasRemoteCopy) {
                                     DropdownMenuItem(
                                         text = { Text(stringResource(Res.string.common_upload)) },
@@ -475,6 +496,33 @@ fun PreviewScreen(
                 deleteTarget = null
             },
             onDismiss = { deleteTarget = null }
+        )
+    }
+
+    copyTarget?.let { file ->
+        FolderPickerHost(
+            title = stringResource(Res.string.files_copy_to),
+            confirmLabel = stringResource(Res.string.files_copy_here),
+            loadChildren = viewModel::childFolders,
+            createFolder = viewModel::createFolderIn,
+            onConfirm = { target ->
+                viewModel.copyTo(file, target)
+                copyTarget = null
+            },
+            onDismiss = { copyTarget = null }
+        )
+    }
+    moveTarget?.let { file ->
+        FolderPickerHost(
+            title = stringResource(Res.string.files_move_to),
+            confirmLabel = stringResource(Res.string.files_move_here),
+            loadChildren = viewModel::childFolders,
+            createFolder = viewModel::createFolderIn,
+            onConfirm = { target ->
+                viewModel.moveTo(file, target)
+                moveTarget = null
+            },
+            onDismiss = { moveTarget = null }
         )
     }
     infoTarget?.let { file ->

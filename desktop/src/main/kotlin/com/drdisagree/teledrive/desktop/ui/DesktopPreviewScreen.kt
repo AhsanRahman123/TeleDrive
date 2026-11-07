@@ -101,6 +101,7 @@ import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.ErrorState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
+import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.RenameDialog
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
@@ -111,6 +112,10 @@ import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
 import com.drdisagree.teledrive.resources.common_download
+import com.drdisagree.teledrive.resources.files_copy_here
+import com.drdisagree.teledrive.resources.files_copy_to
+import com.drdisagree.teledrive.resources.files_move_here
+import com.drdisagree.teledrive.resources.files_move_to
 import com.drdisagree.teledrive.resources.common_free_space
 import com.drdisagree.teledrive.resources.common_move_trash
 import com.drdisagree.teledrive.resources.common_rename
@@ -167,6 +172,8 @@ fun DesktopPreviewScreen(
     var showOverflow by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<DriveFile?>(null) }
     var trashTarget by remember { mutableStateOf<DriveFile?>(null) }
+    var copyTarget by remember { mutableStateOf<DriveFile?>(null) }
+    var moveTarget by remember { mutableStateOf<DriveFile?>(null) }
     var playerChromeVisible by remember { mutableStateOf(true) }
     LaunchedEffect(file?.id) { playerChromeVisible = true }
 
@@ -217,7 +224,9 @@ fun DesktopPreviewScreen(
                                 viewModel = viewModel,
                                 onDismiss = { showOverflow = false },
                                 onRename = { renameTarget = it },
-                                onTrash = { trashTarget = it }
+                                onTrash = { trashTarget = it },
+                                onCopy = { copyTarget = it },
+                                onMove = { moveTarget = it }
                             )
                         }
                     }
@@ -327,6 +336,33 @@ fun DesktopPreviewScreen(
             onDismiss = { trashTarget = null }
         )
     }
+
+    copyTarget?.let { target ->
+        FolderPickerHost(
+            title = stringResource(Res.string.files_copy_to),
+            confirmLabel = stringResource(Res.string.files_copy_here),
+            loadChildren = viewModel::childFolders,
+            createFolder = viewModel::createFolderIn,
+            onConfirm = { destination ->
+                viewModel.copyTo(target, destination)
+                copyTarget = null
+            },
+            onDismiss = { copyTarget = null }
+        )
+    }
+    moveTarget?.let { target ->
+        FolderPickerHost(
+            title = stringResource(Res.string.files_move_to),
+            confirmLabel = stringResource(Res.string.files_move_here),
+            loadChildren = viewModel::childFolders,
+            createFolder = viewModel::createFolderIn,
+            onConfirm = { destination ->
+                viewModel.moveTo(target, destination)
+                moveTarget = null
+            },
+            onDismiss = { moveTarget = null }
+        )
+    }
     infoTarget?.let { target ->
         FileInfoSheet(file = target, onDismiss = viewModel::dismissInfo)
     }
@@ -339,7 +375,9 @@ private fun PreviewOverflowMenu(
     viewModel: PreviewViewModel,
     onDismiss: () -> Unit,
     onRename: (DriveFile) -> Unit,
-    onTrash: (DriveFile) -> Unit
+    onTrash: (DriveFile) -> Unit,
+    onCopy: (DriveFile) -> Unit,
+    onMove: (DriveFile) -> Unit
 ) {
     val fileRevealer = LocalFileRevealer.current
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
@@ -375,6 +413,20 @@ private fun PreviewOverflowMenu(
                 }
             )
         }
+        DropdownMenuItem(
+            text = { Text(stringResource(Res.string.files_copy_to)) },
+            onClick = {
+                onDismiss()
+                onCopy(file)
+            }
+        )
+        DropdownMenuItem(
+            text = { Text(stringResource(Res.string.files_move_to)) },
+            onClick = {
+                onDismiss()
+                onMove(file)
+            }
+        )
         if (!file.hasRemoteCopy) {
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.common_upload)) },

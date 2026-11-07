@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.message_download_queued
+import com.drdisagree.teledrive.resources.files_copied_all
+import com.drdisagree.teledrive.resources.message_moved_count
 import com.drdisagree.teledrive.resources.message_moved_to_trash
 import com.drdisagree.teledrive.resources.message_renamed
 import com.drdisagree.teledrive.resources.message_upload_queued
@@ -21,6 +23,7 @@ import com.drdisagree.teledrive.core.files.DeleteConsentRequest
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.DriveFile
+import com.drdisagree.teledrive.domain.model.DriveFolder
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.LinkMetadata
@@ -211,6 +214,38 @@ class PreviewViewModel(
         viewModelScope.launch {
             when (val result = transferRepository.enqueueUpload(file.id)) {
                 is AppResult.Success -> _messages.tryEmit(UiText.Resource(Res.string.message_upload_queued))
+                is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+            }
+        }
+    }
+
+    suspend fun childFolders(parentId: String?): List<DriveFolder> =
+        fileRepository.observeFolders(
+            parentId = parentId,
+            showHidden = true,
+            showArchived = true
+        ).first()
+
+    suspend fun createFolderIn(parentId: String?, name: String): Boolean =
+        fileRepository.createFolder(parentId, name) is AppResult.Success
+
+    fun copyTo(file: DriveFile, targetFolderId: String?) {
+        viewModelScope.launch {
+            when (val result = fileRepository.copyFiles(listOf(file.id), targetFolderId)) {
+                is AppResult.Success ->
+                    _messages.tryEmit(UiText.Resource(Res.string.files_copied_all, result.value))
+                is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+            }
+        }
+    }
+
+    fun moveTo(file: DriveFile, targetFolderId: String?) {
+        viewModelScope.launch {
+            when (val result = fileRepository.moveFiles(listOf(file.id), targetFolderId)) {
+                is AppResult.Success -> {
+                    refreshFile(file.id)
+                    _messages.tryEmit(UiText.Resource(Res.string.message_moved_count, 1))
+                }
                 is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
             }
         }

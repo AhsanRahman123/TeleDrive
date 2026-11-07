@@ -1250,7 +1250,7 @@ private fun FilesContent(
 }
 
 @Composable
-internal fun FolderPickerHost(
+fun FolderPickerHost(
     title: String,
     confirmLabel: String,
     loadChildren: suspend (String?) -> List<DriveFolder>,
