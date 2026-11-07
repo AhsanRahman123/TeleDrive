@@ -726,9 +726,14 @@ fun FilesScreen(
                         onRefresh = viewModel::refresh,
                         modifier = Modifier
                             .fillMaxSize()
-                            .onDesktopEmptySpaceContextClick {
-                                if (!selectionMode) showAddMenu = true
-                            }
+                            .onDesktopEmptySpaceContextClick(
+                                onContextClick = {
+                                    if (!selectionMode) showAddMenu = true
+                                },
+                                onEmptySpaceClick = {
+                                    if (showAddMenu) showAddMenu = false
+                                }
+                            )
                     ) {
                         if (isLoading) {
                             LoadingState()

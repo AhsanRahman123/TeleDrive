@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 
 /**
@@ -43,22 +44,30 @@ fun Modifier.onDesktopContextClick(onContextClick: () -> Unit): Modifier {
  * parent only opens its blank-space action when the click lands on unused content.
  */
 @Composable
-fun Modifier.onDesktopEmptySpaceContextClick(onContextClick: () -> Unit): Modifier {
+fun Modifier.onDesktopEmptySpaceContextClick(
+    onContextClick: () -> Unit,
+    onEmptySpaceClick: () -> Unit = {}
+): Modifier {
     val currentOnContextClick by rememberUpdatedState(onContextClick)
+    val currentOnEmptySpaceClick by rememberUpdatedState(onEmptySpaceClick)
     return pointerInput(Unit) {
         awaitPointerEventScope {
             while (true) {
                 var event = awaitPointerEvent(PointerEventPass.Main)
                 if (
                     event.type == PointerEventType.Press &&
-                    event.buttons.isSecondaryPressed &&
                     event.changes.none { it.isConsumed }
                 ) {
-                    currentOnContextClick()
-                    event.changes.forEach { it.consume() }
-                    do {
-                        event = awaitPointerEvent(PointerEventPass.Main)
-                    } while (event.buttons.isSecondaryPressed)
+                    when {
+                        event.buttons.isSecondaryPressed -> {
+                            currentOnContextClick()
+                            event.changes.forEach { it.consume() }
+                            do {
+                                event = awaitPointerEvent(PointerEventPass.Main)
+                            } while (event.buttons.isSecondaryPressed)
+                        }
+                        event.buttons.isPrimaryPressed -> currentOnEmptySpaceClick()
+                    }
                 }
             }
         }

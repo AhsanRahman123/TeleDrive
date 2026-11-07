@@ -168,7 +168,7 @@ fun DesktopPreviewScreen(
     val state by viewModel.uiState.collectAsState()
     LaunchedEffect(state.closed) { if (state.closed) onBack() }
 
-    var index by remember(state.ready) { mutableStateOf(state.initialIndex) }
+    var index by remember(state.files, state.initialIndex) { mutableStateOf(state.initialIndex) }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     val infoTarget by viewModel.infoTarget.collectAsState()
     var showOverflow by remember { mutableStateOf(false) }
@@ -359,7 +359,7 @@ fun DesktopPreviewScreen(
             loadChildren = viewModel::childFolders,
             createFolder = viewModel::createFolderIn,
             onConfirm = { destination ->
-                viewModel.moveTo(target, destination)
+                viewModel.moveTo(target, destination, index)
                 moveTarget = null
             },
             onDismiss = { moveTarget = null }
@@ -580,7 +580,7 @@ private fun PreviewPane(
             is PreviewContent.Image -> {
                 var undecodable by remember(current.model) { mutableStateOf(false) }
                 val zoomableState = rememberZoomableState(
-                    zoomSpec = ZoomSpec(maxZoomFactor = 6f)
+                    zoomSpec = ZoomSpec(maxZoomFactor = 4f)
                 )
                 val zoomScope = rememberCoroutineScope()
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -595,7 +595,18 @@ private fun PreviewPane(
                             contentDescription = file.name,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .zoomable(state = zoomableState),
+                                .zoomable(
+                                    state = zoomableState,
+                                    onDoubleClick = { state, centroid ->
+                                        zoomScope.launch {
+                                            if ((state.zoomFraction ?: 0f) > 0f) {
+                                                state.resetZoom()
+                                            } else {
+                                                state.zoomBy(zoomFactor = 2f, centroid = centroid)
+                                            }
+                                        }
+                                    }
+                                ),
                             contentScale = ContentScale.Fit,
                             onState = { state ->
                                 if (state is AsyncImagePainter.State.Error) undecodable = true

@@ -239,12 +239,23 @@ class PreviewViewModel(
         }
     }
 
-    fun moveTo(file: DriveFile, targetFolderId: String?) {
+    fun moveTo(file: DriveFile, targetFolderId: String?, currentIndex: Int) {
+        if (file.folderId == targetFolderId) return
         viewModelScope.launch {
             when (val result = fileRepository.moveFiles(listOf(file.id), targetFolderId)) {
                 is AppResult.Success -> {
-                    refreshFile(file.id)
-                    _messages.tryEmit(UiText.Resource(Res.string.message_moved_count, 1))
+                    val remaining = _uiState.value.files.filterNot { it.id == file.id }
+                    if (remaining.isEmpty()) {
+                        _uiState.update { it.copy(files = emptyList(), closed = true) }
+                    } else {
+                        val nextIndex = currentIndex.coerceIn(0, remaining.lastIndex)
+                        _uiState.update {
+                            it.copy(files = remaining, initialIndex = nextIndex)
+                        }
+                    }
+                    _messages.tryEmit(
+                        UiText.Resource(Res.string.message_moved_count, result.value)
+                    )
                 }
                 is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
             }

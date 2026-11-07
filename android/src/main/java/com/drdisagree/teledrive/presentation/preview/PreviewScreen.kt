@@ -222,6 +222,12 @@ fun PreviewScreen(
         initialPage = state.initialIndex.coerceAtMost(state.files.lastIndex),
         pageCount = { state.files.size }
     )
+    LaunchedEffect(state.files, state.initialIndex) {
+        if (state.ready && state.files.isNotEmpty()) {
+            val nextPage = state.initialIndex.coerceIn(0, state.files.lastIndex)
+            if (pagerState.currentPage != nextPage) pagerState.scrollToPage(nextPage)
+        }
+    }
     val pagedFile = state.files[pagerState.currentPage.coerceAtMost(state.files.lastIndex)]
     // The pager holds a snapshot, so the open row is read live and edits made elsewhere show at
     // once.
@@ -519,7 +525,7 @@ fun PreviewScreen(
             loadChildren = viewModel::childFolders,
             createFolder = viewModel::createFolderIn,
             onConfirm = { target ->
-                viewModel.moveTo(file, target)
+                viewModel.moveTo(file, target, pagerState.currentPage)
                 moveTarget = null
             },
             onDismiss = { moveTarget = null }

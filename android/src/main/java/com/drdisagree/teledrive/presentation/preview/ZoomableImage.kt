@@ -76,6 +76,15 @@ fun ZoomableImage(
             contentDescription = contentDescription,
             state = rememberZoomableImageState(zoomableState),
             onClick = { onTap() },
+            onDoubleClick = { state, centroid ->
+                zoomScope.launch {
+                    if ((state.zoomFraction ?: 0f) > 0f) {
+                        state.resetZoom()
+                    } else {
+                        state.zoomBy(zoomFactor = 2f, centroid = centroid)
+                    }
+                }
+            },
             modifier = Modifier.fillMaxSize()
         )
         if (controlsVisible) {
@@ -105,4 +114,4 @@ fun ZoomableImage(
     }
 }
 
-private const val MAX_ZOOM = 6f
+private const val MAX_ZOOM = 4f
