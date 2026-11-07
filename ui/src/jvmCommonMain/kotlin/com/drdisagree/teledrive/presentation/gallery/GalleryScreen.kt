@@ -55,6 +55,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.itemsIndexed as listItemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -172,6 +174,7 @@ import com.drdisagree.teledrive.presentation.components.RefreshableContent
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
+import com.drdisagree.teledrive.presentation.gallery.AlbumListItem
 import com.drdisagree.teledrive.presentation.components.FileGridItem
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FileListItem
@@ -247,6 +250,7 @@ private fun GalleryTabSelector(
 private fun AlbumGrid(
     albums: List<MediaAlbum>,
     columns: Int,
+    viewMode: ViewMode,
     bottomPadding: Dp,
     onOpenAlbum: (MediaAlbum) -> Unit,
     onZoomIn: () -> Unit,
@@ -260,35 +264,66 @@ private fun AlbumGrid(
         )
         return
     }
-    val gridState = rememberLazyGridState()
-    val keyboard = rememberKeyboardCollection(gridState, columns)
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Fixed(columns),
-        modifier = Modifier
-            .fillMaxSize()
-            .keyboardCollection(keyboard, albums.size)
-            .pinchZoom(onZoomIn = onZoomIn, onZoomOut = onZoomOut),
-        contentPadding = PaddingValues(
-            start = 12.dp,
-            end = 12.dp,
-            top = 12.dp,
-            bottom = 12.dp + bottomPadding
-        ),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        itemsIndexed(
-            albums,
-            key = { _, album -> album.folderId ?: UNFILED_ALBUM_KEY }
-        ) { index, album ->
-            AlbumCard(
-                album = album,
-                onClick = { onOpenAlbum(album) },
-                modifier = Modifier
-                    .keyboardCollectionItem(keyboard, index)
-                    .animateItem()
-            )
+    if (viewMode == ViewMode.LIST) {
+        val listState = rememberLazyListState()
+        val keyboard = rememberKeyboardCollection(listState)
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .keyboardCollection(keyboard, albums.size),
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = 12.dp,
+                bottom = 12.dp + bottomPadding
+            ),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listItemsIndexed(
+                albums,
+                key = { _, album -> album.folderId ?: UNFILED_ALBUM_KEY }
+            ) { index, album ->
+                AlbumListItem(
+                    album = album,
+                    onClick = { onOpenAlbum(album) },
+                    modifier = Modifier
+                        .keyboardCollectionItem(keyboard, index)
+                        .animateItem()
+                )
+            }
+        }
+    } else {
+        val gridState = rememberLazyGridState()
+        val keyboard = rememberKeyboardCollection(gridState, columns)
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier
+                .fillMaxSize()
+                .keyboardCollection(keyboard, albums.size)
+                .pinchZoom(onZoomIn = onZoomIn, onZoomOut = onZoomOut),
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = 12.dp,
+                bottom = 12.dp + bottomPadding
+            ),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            itemsIndexed(
+                albums,
+                key = { _, album -> album.folderId ?: UNFILED_ALBUM_KEY }
+            ) { index, album ->
+                AlbumCard(
+                    album = album,
+                    onClick = { onOpenAlbum(album) },
+                    modifier = Modifier
+                        .keyboardCollectionItem(keyboard, index)
+                        .animateItem()
+                )
+            }
         }
     }
 }
@@ -683,6 +718,7 @@ fun GalleryScreen(
                                     contentDescription = stringResource(Res.string.common_select)
                                 )
                             }
+                        }
                             IconButton(
                                 onClick = {
                                     viewModel.setViewMode(
@@ -705,7 +741,6 @@ fun GalleryScreen(
                                     )
                                 )
                             }
-                        }
                         IconButton(onClick = { showSortMenu = true }) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Sort,
@@ -846,6 +881,7 @@ fun GalleryScreen(
                 AlbumGrid(
                     albums = state.albums,
                     columns = state.albumGridSize,
+                    viewMode = state.viewMode,
                     bottomPadding = padding.calculateBottomPadding() + LocalBottomBarInset.current,
                     onOpenAlbum = onOpenAlbum,
                     onZoomIn = viewModel::zoomAlbumsIn,
