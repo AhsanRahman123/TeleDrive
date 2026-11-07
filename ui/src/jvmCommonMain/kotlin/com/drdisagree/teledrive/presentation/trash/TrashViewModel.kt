@@ -36,6 +36,8 @@ class TrashViewModel(
 ) : ViewModel() {
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
+    private val _selectionModeEnabled = MutableStateFlow(false)
+    val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
     private val working = MutableStateFlow<UiText?>(null)
     private val expanded = MutableStateFlow<Set<String>>(emptySet())
     private val cache = MutableStateFlow(TrashTreeCache())
@@ -144,11 +146,23 @@ class TrashViewModel(
         }
     }
 
+    fun startSelectionMode() {
+        _selectionModeEnabled.update { true }
+    }
+
+    fun selectForContext(id: String) {
+        _selectionModeEnabled.update { true }
+        if (id !in selection.value) selection.update { setOf(id) }
+    }
+
     fun toggleSelection(id: String) = selection.update {
         if (id in it) it - id else it + id
     }
 
-    fun clearSelection() = selection.update { emptySet() }
+    fun clearSelection() {
+        _selectionModeEnabled.update { false }
+        selection.update { emptySet() }
+    }
 
     fun selectAll() = selection.update {
         uiState.value.rows.filter { row -> row.selectable }.map { row -> row.item.id }.toSet()
