@@ -207,7 +207,6 @@ private fun MainScaffold(
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = backStackEntry?.destination
 
     val isTopLevel = TopLevelDestination.entries.any { destination ->
         destination.matches(backStackEntry)
