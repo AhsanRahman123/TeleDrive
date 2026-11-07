@@ -262,7 +262,7 @@ fun GalleryScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
-    val selectionMode = selectionMode || selectionModeEnabled
+    val selectionMode = state.selectionMode || selectionModeEnabled
     val media = viewModel.pagedMedia.collectAsLazyPagingItems()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     var confirmTrash by remember { mutableStateOf(false) }
