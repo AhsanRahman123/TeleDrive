@@ -86,8 +86,9 @@ Required:
 Current source audit:
 - `FileRepository.moveFolder` and the Files ViewModel's selected-folder move path exist.
 - The current selection UI exposes Copy to… only when the selection contains files and no folders.
-- `FileRepository` exposes `copyFiles`, but no recursive `copyFolder` operation.
-- The present gap is therefore both a missing folder-copy implementation and an incomplete/discoverable folder-action UI, not a need to replace the entire file repository.
+- `FileRepository.copyFolder` is now implemented in source: it recursively clones nested and empty folders, generates Keep Both names when folder names conflict, and delegates file copies to the existing file-copy path (including Telegram-side copies for backed-up files).
+- The selection UI now exposes Copy to for file, folder and mixed selections; folder move is also directly exposed in the same menu.
+- The current recursive implementation is a first pass: compile/runtime validation, overlapping parent/child multi-selection handling, more explicit partial-failure reporting, and full Merge / Keep both / Cancel conflict UX remain to be verified or improved.
 
 ### A6. More capable Transfers workspace
 
@@ -436,7 +437,7 @@ As inspected from source on 2026-11-08 (not a claim of local build success):
 - Android swipe gestures for volume and brightness: present; requested visible sliders are missing.
 - Embedded subtitle selection: present on Android Media3 and desktop VLC; external subtitle-file loading is missing.
 - Folder move: repository and ViewModel support exists; UI discoverability/user-reported behavior needs testing.
-- Folder copy: missing for folders (file copy exists).
+- Folder copy: recursive implementation and folder-selection UI are now present in source; build/test/runtime verification pending. Overlapping selected folder roots and detailed partial-failure reporting still need review.
 - Desktop context menu: right-click selection/action menu exists; pointer-position placement is requested.
 - Transfers: basic controls exist; advanced queue management remains to implement.
 - Exact duplicate discovery and perceptual image duplicate discovery: not yet implemented as a user-facing review workflow.
