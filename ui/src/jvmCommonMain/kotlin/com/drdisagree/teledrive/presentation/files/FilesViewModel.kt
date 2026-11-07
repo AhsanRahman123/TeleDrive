@@ -47,6 +47,7 @@ import com.drdisagree.teledrive.resources.files_import_uploading_copied
 import com.drdisagree.teledrive.resources.files_import_uploading_duplicates
 import com.drdisagree.teledrive.resources.files_import_uploading_failed
 import com.drdisagree.teledrive.resources.files_import_uploading_restored
+import com.drdisagree.teledrive.resources.files_import_upload_cancelled
 import com.drdisagree.teledrive.resources.files_moving_to_trash
 import com.drdisagree.teledrive.resources.files_queued_for_download
 import com.drdisagree.teledrive.resources.files_queued_for_upload
