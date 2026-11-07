@@ -110,6 +110,7 @@ import com.drdisagree.teledrive.resources.common_rename_file
 import com.drdisagree.teledrive.resources.common_restore_trash_emptied
 import com.drdisagree.teledrive.resources.common_select_all
 import com.drdisagree.teledrive.resources.common_selection_count
+import com.drdisagree.teledrive.resources.common_select
 import com.drdisagree.teledrive.resources.common_upload
 import com.drdisagree.teledrive.resources.date_days_ago
 import com.drdisagree.teledrive.resources.date_today
