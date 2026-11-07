@@ -185,16 +185,22 @@ class PreviewContentResolver(
             }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
 
             "application/x-7z-compressed" -> runCatching {
-                val entries = SevenZFile.builder().setFile(File(path)).get().use { archive ->
-                    archive.entries.map { header ->
-                        ArchiveEntry(
-                            name = header.name.orEmpty(),
-                            sizeBytes = header.size.coerceAtLeast(0L),
-                            compressedBytes = header.compressedSize.coerceAtLeast(0L),
-                            isDirectory = header.isDirectory
-                        )
+                val entries = SevenZFile.builder()
+                    // Keep archive metadata parsing bounded on low-memory devices.
+                    .setMaxMemoryLimitKiB(128 * 1024)
+                    .setFile(File(path))
+                    .get()
+                    .use { archive ->
+                        archive.entries.map { header ->
+                            ArchiveEntry(
+                                name = header.name.orEmpty(),
+                                sizeBytes = header.size.coerceAtLeast(0L),
+                                // Commons Compress does not expose this 7z value publicly.
+                                compressedBytes = 0L,
+                                isDirectory = header.isDirectory
+                            )
+                        }
                     }
-                }
                 PreviewContent.Archive(entries, "7Z")
             }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
 
