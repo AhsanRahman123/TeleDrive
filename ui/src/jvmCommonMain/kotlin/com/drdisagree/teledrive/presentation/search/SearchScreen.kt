@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
@@ -34,6 +35,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +51,7 @@ import com.drdisagree.teledrive.presentation.components.ActionMenu
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
+import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FolderRow
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
 import com.drdisagree.teledrive.presentation.components.keyboardCollectionItem
@@ -91,12 +94,18 @@ fun SearchScreen(
     viewModel: SearchViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
+    val selectionMode = state.selectionMode || selectionModeEnabled
 
     val listState = rememberLazyListState()
     val lifted by rememberToolbarLift(listState)
     var showSelectionMenu by remember { mutableStateOf(false) }
 
-    AppBackHandler(enabled = state.selectionMode) { viewModel.clearSelection() }
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) showSelectionMenu = false
+    }
+
+    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     val folderStart = if (state.folders.isNotEmpty()) 1 else 0
     val fileStart = if (state.folders.isNotEmpty()) {
@@ -112,16 +121,16 @@ fun SearchScreen(
         onToggleSelect = { index -> fileIdAt(index)?.let(viewModel::toggleSelection) },
         onSelectAll = viewModel::selectAll,
         onDelete = { index ->
-            if (!state.selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
+            if (!selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
             viewModel.trashSelected()
         },
         onBack = onBack,
-        onClear = if (state.selectionMode) viewModel::clearSelection else null
+        onClear = if (selectionMode) viewModel::clearSelection else null
     )
 
     Scaffold(
         topBar = {
-            if (state.selectionMode) {
+            if (selectionMode) {
                 SearchSelectionBar(
                     state = state,
                     lifted = lifted,
@@ -157,6 +166,15 @@ fun SearchScreen(
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(Res.string.common_back)
+                            )
+                        }
+                    }
+                    ,
+                    actions = {
+                        IconButton(onClick = viewModel::startSelectionMode) {
+                            Icon(
+                                Icons.Filled.CheckBoxOutlineBlank,
+                                contentDescription = stringResource(Res.string.common_select)
                             )
                         }
                     }
@@ -258,9 +276,9 @@ fun SearchScreen(
                         FileListItem(
                             file = file,
                             selected = file.id in state.selection,
-                            selectionMode = state.selectionMode,
+                            selectionMode = selectionMode,
                             onClick = {
-                                if (state.selectionMode) {
+                                if (selectionMode) {
                                     viewModel.toggleSelection(file.id)
                                 } else {
                                     onOpenFile(
@@ -277,6 +295,7 @@ fun SearchScreen(
                                 }
                             },
                             onLongClick = { viewModel.toggleSelection(file.id) },
+                            onToggleSelection = { viewModel.toggleSelection(file.id) },
                             modifier = Modifier
                                 .keyboardCollectionItem(
                                     keyboard,
@@ -284,6 +303,10 @@ fun SearchScreen(
                                     state.folders.size + index
                                 )
                                 .animateItem()
+                                .onDesktopContextClick {
+                                    viewModel.selectForContext(file.id)
+                                    showSelectionMenu = true
+                                }
                         )
                     }
                 }
