@@ -162,6 +162,7 @@ import com.drdisagree.teledrive.resources.info_details
 import com.drdisagree.teledrive.resources.nav_gallery
 import com.drdisagree.teledrive.resources.preview_share_chooser_title
 import com.drdisagree.teledrive.domain.model.MediaAlbum
+import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.presentation.common.DayBucket
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -719,6 +720,15 @@ fun GalleryScreen(
                             onSelect = { field, direction ->
                                 showSortMenu = false
                                 viewModel.setSort(field, direction)
+                            },
+                            fields = if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                                listOf(
+                                    FileSortField.NAME,
+                                    FileSortField.SIZE,
+                                    FileSortField.DATE_MODIFIED
+                                )
+                            } else {
+                                FileSortField.entries
                             }
                         )
                         RefreshAction(refreshing = refreshing, onRefresh = viewModel::refresh)
