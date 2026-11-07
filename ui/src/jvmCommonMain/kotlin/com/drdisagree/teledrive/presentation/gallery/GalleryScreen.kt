@@ -268,8 +268,16 @@ fun GalleryScreen(
     var confirmTrash by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var showMovePicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) showSelectionOverflow = false
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
+
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) showSelectionOverflow = false
+    }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
