@@ -404,6 +404,7 @@ private fun SearchSelectionBar(
                     onDismissRequest = { onMenuExpandedChange(false) },
                     actions = actions
                 )
+                }
             }
         }
     )
