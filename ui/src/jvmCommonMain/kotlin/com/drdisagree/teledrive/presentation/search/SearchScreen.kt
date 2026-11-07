@@ -391,8 +391,9 @@ private fun SearchSelectionBar(
                     contentDescription = stringResource(Res.string.common_select_all)
                 )
             }
-            Box {
-                IconButton(onClick = { onMenuExpandedChange(true) }) {
+            if (state.selection.isNotEmpty()) {
+                Box {
+                    IconButton(onClick = { onMenuExpandedChange(true) }) {
                     Icon(
                         Icons.Filled.MoreVert,
                         contentDescription = stringResource(Res.string.common_actions)
