@@ -20,6 +20,7 @@ import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -108,10 +109,16 @@ private fun dragSelect(
     return Modifier.pointerInput(scrollable) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            if (!awaitLongPress(down)) return@awaitEachGesture
+            val shouldStart = if (down.type == PointerType.Mouse) {
+                awaitMouseDragStart(down)
+            } else {
+                awaitLongPress(down)
+            }
+            if (!shouldStart) return@awaitEachGesture
 
             var anchor = currentIndexAt(down.position)
             currentOnStart()
+            anchor?.let { currentOnRange(it..it) }
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
                 val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
@@ -130,6 +137,23 @@ private fun dragSelect(
     }
 }
 
+/**
+ * Mouse drag starts as soon as movement exceeds normal click slop. A simple click therefore stays
+ * a normal click; touch and stylus retain the long-press gesture to avoid fighting scroll.
+ */
+private suspend fun AwaitPointerEventScope.awaitMouseDragStart(down: PointerInputChange): Boolean {
+    while (true) {
+        val event = awaitPointerEvent(PointerEventPass.Initial)
+        val change = event.changes.fastFirstOrNull { it.id == down.id } ?: return false
+        if (!change.pressed) return false
+        if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) return true
+    }
+}
+
+/**
+ * Consumes nothing while waiting, so the item still gets its long press; moving past touch slop
+ * means a scroll.
+ */
 /**
  * Consumes nothing while waiting, so the item still gets its long press; moving past touch slop
  * means a scroll.
