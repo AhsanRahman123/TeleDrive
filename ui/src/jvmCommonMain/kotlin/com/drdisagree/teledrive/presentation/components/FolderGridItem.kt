@@ -41,7 +41,9 @@ fun FolderGridItem(
     selected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectionMode: Boolean = selected,
+    onToggleSelection: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier
@@ -69,6 +71,15 @@ fun FolderGridItem(
                 modifier = Modifier.size(48.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
+            if (selectionMode) {
+                SelectionCheckbox(
+                    checked = selected,
+                    onClick = onToggleSelection ?: onClick,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(2.dp)
+                )
+            }
         }
         Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
