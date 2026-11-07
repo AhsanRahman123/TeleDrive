@@ -494,25 +494,58 @@ interface FileDao {
     suspend fun queuedWithoutTransferFileIds(chatId: Long?): List<String>
 
     @Query(
-        """SELECT f.folderId AS folderId,
-                  fo.name AS name,
-                  COUNT(*) AS itemCount,
-                  MAX(f.modifiedAt) AS latestAt,
-                  (SELECT c.id FROM files c
-                     WHERE c.folderId IS f.folderId
-                       AND c.trashedAt IS NULL
-                       AND c.category IN ('IMAGE', 'VIDEO')
-                       AND (:showHidden = 1 OR c.isHidden = 0)
-                       AND (:showArchived = 1 OR c.isArchived = 0)
-                     ORDER BY c.modifiedAt DESC LIMIT 1) AS coverFileId
-           FROM files f
-           LEFT JOIN folders fo ON fo.id = f.folderId
-           WHERE f.trashedAt IS NULL AND f.chatId IS :chatId
-             AND f.category IN ('IMAGE', 'VIDEO')
-             AND (:showHidden = 1 OR f.isHidden = 0)
-             AND (:showArchived = 1 OR f.isArchived = 0)
-           GROUP BY f.folderId
-           ORDER BY latestAt DESC"""
+        """SELECT album.folderId AS folderId,
+                  album.name AS name,
+                  album.itemCount AS itemCount,
+                  album.coverFileId AS coverFileId,
+                  album.latestAt AS latestAt
+           FROM (
+             SELECT f.folderId AS folderId,
+                    fo.name AS name,
+                    COUNT(*) AS itemCount,
+                    MAX(f.modifiedAt) AS latestAt,
+                    (SELECT c.id FROM files c
+                       WHERE c.folderId IS f.folderId
+                         AND c.chatId IS :chatId
+                         AND c.trashedAt IS NULL
+                         AND c.category IN ('IMAGE', 'VIDEO')
+                         AND (:showHidden = 1 OR c.isHidden = 0)
+                         AND (:showArchived = 1 OR c.isArchived = 0)
+                       ORDER BY c.modifiedAt DESC LIMIT 1) AS coverFileId
+             FROM files f
+             LEFT JOIN folders fo ON fo.id = f.folderId
+             WHERE f.trashedAt IS NULL AND f.chatId IS :chatId
+               AND f.category IN ('IMAGE', 'VIDEO')
+               AND (:showHidden = 1 OR f.isHidden = 0)
+               AND (:showArchived = 1 OR f.isArchived = 0)
+             GROUP BY f.folderId
+
+             UNION ALL
+
+             SELECT fo.id AS folderId,
+                    fo.name AS name,
+                    0 AS itemCount,
+                    fo.modifiedAt AS latestAt,
+                    NULL AS coverFileId
+             FROM folders fo
+             WHERE fo.chatId IS :chatId
+               AND fo.trashedAt IS NULL
+               AND (:showHidden = 1 OR fo.isHidden = 0)
+               AND (:showArchived = 1 OR fo.isArchived = 0)
+               AND NOT EXISTS (
+                 SELECT 1 FROM files f
+                 WHERE f.folderId = fo.id
+                   AND f.chatId IS :chatId
+                   AND f.trashedAt IS NULL
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM folders child
+                 WHERE child.parentId = fo.id
+                   AND child.chatId IS :chatId
+                   AND child.trashedAt IS NULL
+               )
+           ) AS album
+           ORDER BY album.latestAt DESC"""
     )
     fun observeAlbumsScoped(
         showHidden: Boolean,
