@@ -54,18 +54,18 @@ fun Modifier.onDesktopEmptySpaceContextClick(
         awaitPointerEventScope {
             while (true) {
                 var event = awaitPointerEvent(PointerEventPass.Main)
-                if (
-                    event.type == PointerEventType.Press &&
-                    event.changes.none { it.isConsumed }
-                ) {
+                if (event.type == PointerEventType.Press) {
                     when {
-                        event.buttons.isSecondaryPressed -> {
+                        event.buttons.isSecondaryPressed &&
+                                event.changes.none { it.isConsumed } -> {
                             currentOnContextClick()
                             event.changes.forEach { it.consume() }
                             do {
                                 event = awaitPointerEvent(PointerEventPass.Main)
                             } while (event.buttons.isSecondaryPressed)
                         }
+                        // A child can consume a normal click before it reaches this parent.
+                        // Still dismiss the Add menu so the next left-click closes it reliably.
                         event.buttons.isPrimaryPressed -> currentOnEmptySpaceClick()
                     }
                 }
