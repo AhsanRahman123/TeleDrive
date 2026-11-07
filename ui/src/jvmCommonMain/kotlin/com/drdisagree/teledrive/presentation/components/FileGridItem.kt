@@ -46,7 +46,9 @@ fun FileGridItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    selectionMode: Boolean = selected,
+    onToggleSelection: (() -> Unit)? = null
 ) {
     Column(
         modifier = modifier
@@ -70,15 +72,13 @@ fun FileGridItem(
                     .fillMaxWidth()
                     .aspectRatio(1f)
             )
-            if (selected) {
-                Icon(
-                    imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = stringResource(Res.string.common_content_description_selected),
+            if (selectionMode) {
+                SelectionCheckbox(
+                    checked = selected,
+                    onClick = onToggleSelection ?: onClick,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .size(22.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                        .padding(2.dp)
                 )
             }
             if (file.backupState != BackupState.BACKED_UP) {
