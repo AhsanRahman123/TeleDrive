@@ -268,6 +268,7 @@ fun SearchScreen(
                             FolderRow(
                                 folder = folder,
                                 onClick = { onOpenFolder(folder.id, null) },
+                                showSelectionCheckbox = false,
                                 modifier = Modifier
                                     .keyboardCollectionItem(keyboard, folderStart + index, index)
                                     .animateItem()
