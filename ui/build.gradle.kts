@@ -66,6 +66,7 @@ kotlin {
                 api(libs.koin.compose.viewmodel)
                 api(libs.androidx.paging.compose)
                 api(libs.coil.compose)
+                api(libs.telephoto.zoomable.coil)
                 implementation(libs.kotlinx.serialization.json)
                 implementation(libs.zxing.core)
             }

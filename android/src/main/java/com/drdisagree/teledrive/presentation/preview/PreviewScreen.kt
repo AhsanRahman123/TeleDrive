@@ -566,6 +566,7 @@ private fun PreviewPage(
         is PreviewContent.Image -> ZoomableImage(
             model = content.model,
             contentDescription = file.name,
+            controlsVisible = chromeVisible,
             onTap = onToggleChrome
         )
 

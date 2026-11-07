@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -123,6 +125,8 @@ import com.drdisagree.teledrive.resources.preview_confirm_trash_file_message
 import com.drdisagree.teledrive.resources.preview_download_view
 import com.drdisagree.teledrive.resources.preview_file_info
 import com.drdisagree.teledrive.resources.preview_image_undecodable
+import com.drdisagree.teledrive.resources.preview_zoom_in
+import com.drdisagree.teledrive.resources.preview_zoom_out
 import com.drdisagree.teledrive.resources.preview_move_to_trash
 import com.drdisagree.teledrive.resources.preview_next
 import com.drdisagree.teledrive.resources.preview_no_preview
@@ -137,6 +141,9 @@ import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
+import me.saket.telephoto.zoomable.ZoomSpec
+import me.saket.telephoto.zoomable.rememberZoomableState
+import me.saket.telephoto.zoomable.zoomable
 import java.awt.Desktop
 import java.io.File
 import com.drdisagree.teledrive.desktop.resources.Res as DesktopRes
@@ -518,21 +525,51 @@ private fun PreviewPane(
 
             is PreviewContent.Image -> {
                 var undecodable by remember(current.model) { mutableStateOf(false) }
-                if (undecodable) {
-                    EmptyState(
-                        icon = Icons.Filled.BrokenImage,
-                        title = stringResource(Res.string.preview_image_undecodable)
-                    )
-                } else {
-                    AsyncImage(
-                        model = current.model,
-                        contentDescription = file.name,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit,
-                        onState = { state ->
-                            if (state is AsyncImagePainter.State.Error) undecodable = true
+                val zoomableState = rememberZoomableState(
+                    zoomSpec = ZoomSpec(maxZoomFactor = 6f)
+                )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (undecodable) {
+                        EmptyState(
+                            icon = Icons.Filled.BrokenImage,
+                            title = stringResource(Res.string.preview_image_undecodable)
+                        )
+                    } else {
+                        AsyncImage(
+                            model = current.model,
+                            contentDescription = file.name,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zoomable(state = zoomableState),
+                            contentScale = ContentScale.Fit,
+                            onState = { state ->
+                                if (state is AsyncImagePainter.State.Error) undecodable = true
+                            }
+                        )
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilledIconButton(
+                                onClick = { zoomableState.zoomBy(zoomFactor = 1.2f) }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.ZoomIn,
+                                    contentDescription = stringResource(Res.string.preview_zoom_in)
+                                )
+                            }
+                            FilledIconButton(
+                                onClick = { zoomableState.zoomBy(zoomFactor = 1f / 1.2f) }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.ZoomOut,
+                                    contentDescription = stringResource(Res.string.preview_zoom_out)
+                                )
+                            }
                         }
-                    )
+                    }
                 }
             }
 
