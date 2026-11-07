@@ -964,4 +964,5 @@
         <item>简体中文</item>
         <item>Español</item>
     </string-array>
+    <string name="snackbar_view_downloads">View downloads</string>
 </resources>
