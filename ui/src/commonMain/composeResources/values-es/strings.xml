@@ -973,5 +973,6 @@
         <item>Español</item>
     </string-array>
     <string name="snackbar_view_downloads">Ver descargas</string>
+    <string name="snackbar_view_transfers">Ver</string>
     <string name="nav_offline">Sin conexión</string>
 </resources>
