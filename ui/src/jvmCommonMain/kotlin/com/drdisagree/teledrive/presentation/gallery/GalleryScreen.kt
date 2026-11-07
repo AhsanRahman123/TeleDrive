@@ -34,6 +34,7 @@ import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
+import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.resources.files_move_to
 import com.drdisagree.teledrive.resources.files_move_here
 import com.drdisagree.teledrive.presentation.common.AppBackHandler
@@ -63,6 +64,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.MoreVert
@@ -123,6 +125,10 @@ import com.drdisagree.teledrive.resources.common_create
 import com.drdisagree.teledrive.resources.common_confirm_trash_count_title
 import com.drdisagree.teledrive.resources.common_deselect_all
 import com.drdisagree.teledrive.resources.common_download
+import com.drdisagree.teledrive.resources.common_free_space
+import com.drdisagree.teledrive.resources.files_delete_local
+import com.drdisagree.teledrive.resources.files_delete_local_copies
+import com.drdisagree.teledrive.resources.files_only_files_verified_telegram
 import com.drdisagree.teledrive.resources.collection_favorites_title
 import com.drdisagree.teledrive.resources.collection_offline_title
 import com.drdisagree.teledrive.resources.common_move_trash
@@ -308,6 +314,7 @@ fun GalleryScreen(
     var showCopyPicker by remember { mutableStateOf(false) }
     var showCreateAlbum by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var confirmDeleteLocal by remember { mutableStateOf(false) }
 
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
 
@@ -322,6 +329,15 @@ fun GalleryScreen(
     LaunchedEffect(Unit) {
         viewModel.shareRequests.collect { request ->
             fileSharer.share(request.paths, request.mimeType, shareChooserTitle)
+        }
+    }
+
+    val deleteConsentLauncher = LocalDeleteConsentLauncher.current
+    LaunchedEffect(Unit) {
+        viewModel.deleteConsentRequests.collect { request ->
+            deleteConsentLauncher.launch(request) { granted ->
+                if (granted) viewModel.retryLocalCopyRemoval()
+            }
         }
     }
 
@@ -386,6 +402,20 @@ fun GalleryScreen(
 
     infoTarget?.let { file ->
         FileInfoSheet(file = file, onDismiss = viewModel::dismissInfo)
+    }
+
+    if (confirmDeleteLocal) {
+        ConfirmDialog(
+            title = stringResource(Res.string.files_delete_local_copies),
+            message = stringResource(Res.string.files_only_files_verified_telegram),
+            confirmLabel = stringResource(Res.string.files_delete_local),
+            destructive = true,
+            onConfirm = {
+                confirmDeleteLocal = false
+                viewModel.deleteLocalCopies()
+            },
+            onDismiss = { confirmDeleteLocal = false }
+        )
     }
 
     if (confirmTrash) {
@@ -504,6 +534,14 @@ fun GalleryScreen(
                                             label = stringResource(Res.string.common_upload),
                                             icon = Icons.Filled.Upload
                                         ) { viewModel.uploadSelected() }
+                                    )
+                                }
+                                if (state.capabilities.canFreeUpSpace) {
+                                    add(
+                                        MenuAction(
+                                            label = stringResource(Res.string.common_free_space),
+                                            icon = Icons.Filled.CleaningServices
+                                        ) { confirmDeleteLocal = true }
                                     )
                                 }
                             }
