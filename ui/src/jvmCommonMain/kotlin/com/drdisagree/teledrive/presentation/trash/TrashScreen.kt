@@ -203,13 +203,14 @@ fun TrashScreen(
                                 }
                             )
                         }
-                        IconButton(onClick = viewModel::restoreSelected) {
-                            Icon(
-                                Icons.Filled.RestoreFromTrash,
-                                contentDescription = stringResource(Res.string.common_restore)
-                            )
-                        }
-                        IconButton(onClick = { confirmDeleteSelected = true }) {
+                        if (state.selection.isNotEmpty()) {
+                            IconButton(onClick = viewModel::restoreSelected) {
+                                Icon(
+                                    Icons.Filled.RestoreFromTrash,
+                                    contentDescription = stringResource(Res.string.common_restore)
+                                )
+                            }
+                            IconButton(onClick = { confirmDeleteSelected = true }) {
                             Icon(
                                 Icons.Filled.DeleteForever,
                                 contentDescription = stringResource(Res.string.common_delete_forever)
