@@ -263,6 +263,10 @@ fun FilesScreen(
     var showCopyPicker by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) showSelectionOverflow = false
+    }
     val uploadPicker = LocalMultiFilePicker.current
     val onPickUploads = {
         uploadPicker.pick { references ->
@@ -274,6 +278,10 @@ fun FilesScreen(
         folderUploadPicker.pick { result ->
             if (result is PickResult.Picked) viewModel.importAndUpload(listOf(result.path))
         }
+    }
+
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) showSelectionOverflow = false
     }
 
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
