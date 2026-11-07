@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.preview
 
+import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.SortDirection
@@ -44,14 +45,14 @@ const val CATEGORY_SEPARATOR = ","
 
 /** The viewer destination after a successful move, kept pure so the navigation rule is testable. */
 internal data class PreviewMoveResult(
-    val files: List<com.drdisagree.teledrive.domain.model.DriveFile>,
+    val files: List<DriveFile>,
     val initialIndex: Int,
     val closeViewer: Boolean
 )
 
 internal fun previewAfterMove(
-    currentFiles: List<com.drdisagree.teledrive.domain.model.DriveFile>,
-    movedFile: com.drdisagree.teledrive.domain.model.DriveFile,
+    currentFiles: List<DriveFile>,
+    movedFile: DriveFile,
     currentIndex: Int
 ): PreviewMoveResult {
     val actualIndex = currentFiles.indexOfFirst { it.id == movedFile.id }
