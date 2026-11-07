@@ -54,12 +54,13 @@ Existing foundation:
 - Search and category/backup filters are present.
 - Sort fields include name, size, modified date, added date, type, and backup status.
 - Grid and list view modes exist.
+- A global compact-density preference already exists and is applied through `LocalCompactLayout`; do not reimplement it. A dedicated Details/table view is still missing.
 - Folder and file selection, favorites, offline, archive, hidden, and trash actions are present.
 
 Still to implement:
 - A true folder-tree navigation pane.
 - Details/table view with useful columns and sorting.
-- A dedicated compact list density/layout.
+- A true Details/table view with useful columns. The app-wide compact-density preference already exists; decide whether to expose it as a Files-specific quick view control without duplicating the preference.
 - Tags and tag filters.
 - Unified context menus and selection behaviour in every file-bearing screen.
 - Persist view preference per drive/folder where appropriate.
