@@ -512,7 +512,16 @@ class GalleryViewModel(
         val ids = selection.value.toList()
         clearSelection()
         viewModelScope.launch {
-            ids.forEach { transferRepository.enqueueDownload(it).reportFailure() }
+            var queued = 0
+            ids.forEach { id ->
+                when (val result = transferRepository.enqueueDownload(id)) {
+                    is AppResult.Success -> queued++
+                    is AppResult.Failure -> report(result.error)
+                }
+            }
+            if (queued > 0) {
+                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
+            }
         }
     }
 
