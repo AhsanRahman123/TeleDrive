@@ -674,6 +674,9 @@ class FilesViewModel(
     fun importAndUpload(uris: List<String>, target: String? = folderId) {
         if (uris.isEmpty()) return
         importScope.launch {
+            // Capture before expanding or showing the folder-conflict dialog. Cancel all
+            // invalidates this token even if the import has not reached its first upload yet.
+            val uploadGeneration = transferRepository.uploadQueueGeneration()
             val sources = uris.flatMap { uri -> fileImporter.expand(uri) }
             val existing = fileRepository.folderNamesIn(target)
             val clashes = sources
@@ -681,7 +684,7 @@ class FilesViewModel(
                 .distinct()
                 .filter { name -> existing.any { it.equals(name, ignoreCase = true) } }
             if (clashes.isEmpty()) {
-                runImport(sources, target)
+                runImport(sources, target, uploadGeneration)
                 return@launch
             }
             val taken = existing.mapTo(mutableSetOf()) { it.lowercase() }
@@ -691,13 +694,13 @@ class FilesViewModel(
                     .first { it.lowercase() !in taken }
                     .also { taken += it.lowercase() }
             }
-            _folderConflict.value = FolderConflict(clashes, renamed, sources, target)
+            _folderConflict.value = FolderConflict(clashes, renamed, sources, target, uploadGeneration)
         }
     }
 
     fun mergeIntoExistingFolders() {
         val conflict = _folderConflict.getAndUpdate { null } ?: return
-        importScope.launch { runImport(conflict.sources, conflict.target) }
+        importScope.launch { runImport(conflict.sources, conflict.target, conflict.uploadGeneration) }
     }
 
     fun keepBothFolders() {
@@ -707,16 +710,22 @@ class FilesViewModel(
             val replacement = conflict.renamed[top] ?: return@map source
             source.copy(relativeFolder = replacement + source.relativeFolder.removePrefix(top))
         }
-        importScope.launch { runImport(sources, conflict.target) }
+        importScope.launch { runImport(sources, conflict.target, conflict.uploadGeneration) }
     }
 
     fun cancelFolderImport() {
         _folderConflict.value = null
     }
 
-    private suspend fun runImport(sources: List<ImportSource>, target: String?) {
+    private suspend fun runImport(
+        sources: List<ImportSource>,
+        target: String?,
+        uploadGeneration: Long
+    ) {
         _messages.tryEmit(UiText.Resource(Res.string.files_import_preparing))
         var imported = 0
+        var localImports = 0
+        var uploadsCancelled = false
         var restored = 0
         var duplicates = 0
         var copied = 0
@@ -753,8 +762,20 @@ class FilesViewModel(
                     if (drive.hasRemoteCopy) {
                         restored++
                     } else {
-                        transferRepository.enqueueUpload(drive.id)
-                        imported++
+                        localImports++
+                        if (!uploadsCancelled) {
+                            when (
+                                val result = transferRepository.enqueueUploadForGeneration(
+                                    drive.id,
+                                    uploadGeneration
+                                )
+                            ) {
+                                is AppResult.Success -> {
+                                    if (result.value) imported++ else uploadsCancelled = true
+                                }
+                                is AppResult.Failure -> failed++
+                            }
+                        }
                     }
                 }
 
@@ -764,7 +785,13 @@ class FilesViewModel(
                 }
             }
         }
-        _messages.tryEmit(importSummary(imported, restored, duplicates, copied, failed))
+        _messages.tryEmit(
+            if (uploadsCancelled) {
+                UiText.Resource(Res.string.files_import_upload_cancelled, localImports)
+            } else {
+                importSummary(imported, restored, duplicates, copied, failed)
+            }
+        )
     }
 
     private fun importSummary(

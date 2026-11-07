@@ -307,6 +307,7 @@
     <string name="files_folder_merge">合并</string>
     <string name="files_folder_keep_both">保留两者</string>
     <string name="files_import_preparing">正在准备上传文件…</string>
+    <string name="files_import_upload_cancelled">已将 %1$d 个文件导入本地；其上传已取消。</string>
     <string name="files_import_restored">已从回收站恢复 %1$d 个</string>
     <string name="files_import_uploading">正在上传 %1$d 个</string>
     <string name="files_import_uploading_copied">正在上传 %1$d 个，已复制 %2$d 个 Telegram 中已有的文件</string>

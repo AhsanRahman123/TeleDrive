@@ -319,6 +319,7 @@
     <string name="files_folder_merge">Combinar</string>
     <string name="files_folder_keep_both">Conservar ambas</string>
     <string name="files_import_preparing">Preparando archivos para subir…</string>
+    <string name="files_import_upload_cancelled">Se importaron %1$d archivos localmente; se cancelaron sus subidas.</string>
     <string name="files_import_restored">Se restauraron %1$d de la papelera</string>
     <string name="files_import_uploading">Subiendo %1$d</string>
     <string name="files_import_uploading_copied">Subiendo %1$d, %2$d copiados que ya estaban en Telegram</string>

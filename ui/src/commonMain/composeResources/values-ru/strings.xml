@@ -343,6 +343,7 @@
     <string name="files_folder_merge">Объединить</string>
     <string name="files_folder_keep_both">Оставить обе</string>
     <string name="files_import_preparing">Подготовка файлов к загрузке…</string>
+    <string name="files_import_upload_cancelled">%1$d файлов импортировано локально; их загрузка отменена.</string>
     <string name="files_import_restored">Восстановлено %1$d из корзины</string>
     <string name="files_import_uploading">Загрузка %1$d</string>
     <string name="files_import_uploading_copied">Загрузка %1$d, скопировано %2$d имеющихся в Telegram</string>

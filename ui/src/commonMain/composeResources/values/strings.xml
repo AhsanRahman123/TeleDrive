@@ -323,6 +323,7 @@
     <string name="files_folder_merge">Merge</string>
     <string name="files_folder_keep_both">Keep both</string>
     <string name="files_import_preparing">Preparing files for upload…</string>
+    <string name="files_import_upload_cancelled">Imported %1$d files locally; their uploads were cancelled.</string>
     <string name="files_import_restored">Restored %1$d from trash</string>
     <string name="files_import_uploading">Uploading %1$d</string>
     <string name="files_import_uploading_copied">Uploading %1$d, copied %2$d already in Telegram</string>
