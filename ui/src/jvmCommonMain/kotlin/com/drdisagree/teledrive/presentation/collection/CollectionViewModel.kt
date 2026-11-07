@@ -176,9 +176,11 @@ class CollectionViewModel(
     }
 
     fun downloadSelected() {
-        val ids = _selection.value.toList()
+        val fileIds = _selection.value.toList()
+        val folderIds = _folderSelection.value.toList()
         clearSelection()
         viewModelScope.launch {
+            val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
             ids.forEach { transferRepository.enqueueDownload(it) }
         }
     }
