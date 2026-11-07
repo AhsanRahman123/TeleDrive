@@ -64,6 +64,8 @@ import com.drdisagree.teledrive.resources.collection_empty_title
 import com.drdisagree.teledrive.resources.collection_offline_download_missing
 import com.drdisagree.teledrive.resources.collection_remove_from
 import com.drdisagree.teledrive.resources.common_back
+import com.drdisagree.teledrive.resources.common_actions
+import com.drdisagree.teledrive.resources.common_select
 import com.drdisagree.teledrive.resources.common_clear_selection
 import com.drdisagree.teledrive.resources.common_confirm_trash_count_title
 import com.drdisagree.teledrive.resources.common_deselect_all
