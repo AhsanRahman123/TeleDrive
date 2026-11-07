@@ -890,7 +890,6 @@ private fun TrackMenuItem(label: String, selected: Boolean, onClick: () -> Unit)
 private const val CONTROLS_HIDE_DELAY_MS = 3_000L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
-private const val SMALL_SKIP_MS = 3_000L
 private const val VOLUME_STEP = 5
 private const val RATE_STEP = 0.1f
 private const val SYNC_STEP_US = 50_000L

@@ -142,3 +142,30 @@ Validation state:
 - Also validate viewer pinch/double-click/buttons, viewer Copy/Move, and blank-space right-click in both populated and empty Files folders.
 - Windows is the primary runtime verification target; Android and Linux builds/gestures must be checked separately before claiming cross-platform completion.
 
+
+
+## Runtime feedback refinements — 8 November 2026
+
+Newly requested changes and implementation checkpoint:
+
+- Double-click/double-tap image zoom now toggles between fit and a controlled 2x zoom around the tap point. The maximum allowed manual/pinch zoom has been reduced from 6x to 4x; the dedicated Zoom in / Zoom out buttons remain unchanged.
+- Moving the currently viewed image/video now removes it from the active preview sequence. The next item takes its place immediately; moving the last item opens the new last item, and moving the only item closes the viewer.
+- Right-click on empty Files space still opens Add. A subsequent left-click on any unconsumed empty Files space now closes the menu. Item context menus continue to consume their own right-click.
+- Desktop video playback toggles pause/resume when the video surface is clicked.
+- Desktop video/audio transport now groups Previous, 10-second rewind, Play/Pause, 10-second forward and Next together at the bottom centre. The old side pager buttons remain for static image/other non-player previews.
+- The old preview-level Left/Right key handler was removed because it captured keys before the player could handle them. The focused desktop player now handles VLC-style shortcuts directly.
+
+Desktop VLC-style shortcut map added:
+- Space: play/pause; F / Esc: fullscreen / exit fullscreen; S: stop.
+- N / P: next / previous preview item.
+- + / - / =: faster / slower / normal speed.
+- Ctrl+Up / Ctrl+Down: volume; M: mute.
+- Shift+Left / Shift+Right: 3-second seek; Alt+arrows: 10-second seek; Ctrl+arrows: 1-minute seek; Ctrl+Alt+arrows: 5-minute seek.
+- E: next frame; L: repeat toggle; B / V: next audio/subtitle track.
+- J / K: audio delay -/+ 50 ms; G / H: subtitle delay -/+ 50 ms; O: cycle video scaling.
+- Hardware media play/pause, stop, next and previous keys are also handled.
+
+Validation still required:
+- The above refinements are committed but have not yet been compiled or runtime-tested by the user.
+- Re-run the established Windows command suite, then verify zoom is no longer excessive, Move advances immediately for images and videos, the Add menu closes on blank-space left-click, click-to-pause works, the central transport cluster is compact, and the VLC-style shortcuts respond without stealing text-field or menu input.
+- Re-test Android pinch/double-tap/buttons and Android move-to-next behavior after the pager updates.
