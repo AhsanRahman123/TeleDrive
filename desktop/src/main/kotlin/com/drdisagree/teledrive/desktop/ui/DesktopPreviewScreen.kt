@@ -90,6 +90,7 @@ import com.drdisagree.teledrive.desktop.resources.preview_open_externally
 import com.drdisagree.teledrive.desktop.resources.preview_open_failed
 import com.drdisagree.teledrive.desktop.resources.preview_stream
 import com.drdisagree.teledrive.domain.model.DriveFile
+import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.LinkedText
 import com.drdisagree.teledrive.presentation.common.MarkdownText
@@ -163,9 +164,7 @@ fun DesktopPreviewScreen(
     LaunchedEffect(file?.id) { playerChromeVisible = true }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(Unit) {
-        viewModel.messages.collect { snackbarHostState.showSnackbar(it.load()) }
-    }
+    CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) }

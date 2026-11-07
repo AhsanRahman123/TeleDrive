@@ -29,6 +29,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -44,6 +45,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import com.drdisagree.teledrive.presentation.common.AppBackHandler
+import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
+import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.common.isInitialLoad
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
@@ -95,6 +98,8 @@ fun CollectionScreen(
     val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
     val downloads by viewModel.downloads.collectAsStateWithLifecycle()
     val missingCount by viewModel.missingCount.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    CollectSnackbarMessages(viewModel.messages, snackbarHostState)
     val offline = viewModel.type == CollectionType.AVAILABLE_OFFLINE
     var confirmTrash by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
@@ -123,6 +128,7 @@ fun CollectionScreen(
     val lifted by rememberToolbarLift(listState)
 
     Scaffold(
+        snackbarHost = { BottomBarSnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 colors = liftedTopAppBarColors(lifted),

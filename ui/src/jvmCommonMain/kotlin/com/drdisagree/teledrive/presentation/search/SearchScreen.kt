@@ -32,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -47,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.presentation.common.AppBackHandler
+import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
+import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.ActionMenu
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.EmptyState
@@ -99,6 +102,9 @@ fun SearchScreen(
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val selectionMode = state.selectionMode || selectionModeEnabled
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    CollectSnackbarMessages(viewModel.messages, snackbarHostState)
+
     val listState = rememberLazyListState()
     val lifted by rememberToolbarLift(listState)
     var showSelectionMenu by remember { mutableStateOf(false) }
@@ -139,6 +145,7 @@ fun SearchScreen(
     )
 
     Scaffold(
+        snackbarHost = { BottomBarSnackbarHost(snackbarHostState) },
         topBar = {
             if (selectionMode) {
                 SearchSelectionBar(
