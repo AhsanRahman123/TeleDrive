@@ -514,12 +514,10 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.O && !ctrl && !alt && !shift -> {
-                        scaling = if (scaling == VideoScaling.FIT) {
-                            VideoScaling.FILL
-                        } else {
-                            VideoScaling.FIT
-                        }
+                    // VLC uses A to cycle aspect ratio. The embedded Compose player
+                    // exposes the matching fit/zoom/fill display modes.
+                    key == Key.A && !ctrl && !alt && !shift -> {
+                        scaling = scaling.next()
                         interactionTick++
                         true
                     }
