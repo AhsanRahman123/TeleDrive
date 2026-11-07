@@ -108,7 +108,7 @@ fun TrashScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
-    val selectionMode = selectionMode || selectionModeEnabled
+    val selectionMode = state.selectionMode || selectionModeEnabled
     val snackbarHostState = remember { SnackbarHostState() }
     var confirmEmpty by remember { mutableStateOf(false) }
     var confirmDeleteSelected by remember { mutableStateOf(false) }
