@@ -42,7 +42,7 @@ class TransferRepositoryImpl(
 ) : TransferRepository {
 
     private val enqueueLock = Mutex()
-    private var uploadQueueGeneration = 0L
+    private val uploadBatchGeneration = UploadBatchGeneration()
 
     private sealed interface EnqueueOutcome {
         data class Enqueued(val id: String) : EnqueueOutcome
@@ -51,7 +51,7 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun uploadQueueGeneration(): Long =
-        enqueueLock.withLock { uploadQueueGeneration }
+        enqueueLock.withLock { uploadBatchGeneration.current() }
 
     override suspend fun enqueueUploadForGeneration(
         fileId: String,
@@ -287,7 +287,7 @@ class TransferRepositoryImpl(
         return enqueueLock.withLock {
             if (
                 expectedUploadGeneration != null &&
-                expectedUploadGeneration != uploadQueueGeneration
+                !uploadBatchGeneration.isCurrent(expectedUploadGeneration)
             ) {
                 return@withLock EnqueueOutcome.CancelledByCancelAll
             }
@@ -394,7 +394,7 @@ class TransferRepositoryImpl(
         enqueueLock.withLock {
             // Serialize cancellation against upload inserts. Any import batch holding an older
             // generation is rejected if it tries to enqueue after this block completes.
-            uploadQueueGeneration++
+            uploadBatchGeneration.advance()
             transferDao.cancelAll(System.currentTimeMillis())
         }
         syncFileStates()
