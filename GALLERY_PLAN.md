@@ -85,6 +85,27 @@ Gallery must reuse the existing file repository, transfer queue, preview resolve
 - All destructive bulk operations must be confirmed. Trash is recoverable; permanent delete is not a Gallery action.
 - Test local-only, remote-only, split/multipart, encrypted and mixed selections.
 
+## Current implementation checkpoint — Gallery 1
+
+Code is pushed to `codex/file-integrity-phase-1`; the local Gradle build and runtime verification are still pending.
+
+Implemented in source:
+- Debounced local media-name search.
+- Quick filters: Favorites, Offline, Backed up, Not backed up. Backup filters are mutually exclusive.
+- Search and filter criteria are carried into the Preview next/previous sequence, so the viewer stays within the filtered result set.
+- Explicit Grid/List view switch for media and albums.
+- Album list-row presentation as well as thumbnail grid.
+- Albums sort by name, item count, and latest media activity; album sort menu only offers meaningful fields.
+- Empty folders can appear as zero-item albums. Folders with document-only content are not shown as photo/video albums.
+- New album action creates a folder, retaining folders as the single source of truth.
+- Gallery selection menu includes Copy to…, Share, Details, Move to…, Download, Upload, Favorites, Offline, Hide, Archive, Trash and safe Free up space when applicable.
+- Share uses the existing platform FileSharer and refuses partial sharing if some selected media is cloud-only.
+- Free up space uses the existing verified-local-copy deletion and platform consent flow. Trash remains separate and recoverable.
+- Gallery download notifications include View downloads navigation.
+- Empty/populated album SQL scenarios have desktop database tests.
+
+Not yet built or runtime-verified on the user's Windows/Android/Linux devices.
+
 ## Implementation milestones
 
 ### Gallery 1 — Core workspace and action completeness
