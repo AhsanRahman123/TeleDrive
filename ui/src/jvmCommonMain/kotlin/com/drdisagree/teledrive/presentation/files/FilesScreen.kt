@@ -207,7 +207,7 @@ import com.drdisagree.teledrive.resources.files_rename_folder
 import com.drdisagree.teledrive.resources.files_search
 import com.drdisagree.teledrive.resources.files_share_destination_confirm
 import com.drdisagree.teledrive.resources.files_share_destination_title
-import com.drdisagree.teledrive.resources.snackbar_view_downloads
+import com.drdisagree.teledrive.resources.snackbar_view_transfers
 import com.drdisagree.teledrive.resources.files_sort
 import com.drdisagree.teledrive.resources.info_details
 import com.drdisagree.teledrive.resources.note_edit_action
@@ -283,7 +283,7 @@ fun FilesScreen(
 
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
 
-    val viewDownloadsLabel = stringResource(Res.string.snackbar_view_downloads)
+    val viewTransfersLabel = stringResource(Res.string.snackbar_view_transfers)
     CollectSnackbarMessages(
         messages = viewModel.messages,
         hostState = snackbarHostState,
@@ -292,7 +292,7 @@ fun FilesScreen(
                 message is UiText.Resource &&
                 message.resource == Res.string.files_queued_for_download
             ) {
-                viewDownloadsLabel
+                viewTransfersLabel
             } else {
                 null
             }

@@ -157,7 +157,7 @@ import com.drdisagree.teledrive.resources.gallery_search_hint
 import com.drdisagree.teledrive.resources.gallery_clear_filters
 import com.drdisagree.teledrive.resources.gallery_clear_search
 import com.drdisagree.teledrive.resources.files_queued_for_download
-import com.drdisagree.teledrive.resources.snackbar_view_downloads
+import com.drdisagree.teledrive.resources.snackbar_view_transfers
 import com.drdisagree.teledrive.resources.gallery_photos_videos_appear_here
 import com.drdisagree.teledrive.resources.gallery_title
 import com.drdisagree.teledrive.resources.info_details
@@ -377,7 +377,7 @@ fun GalleryScreen(
     }
 
 
-    val viewDownloadsLabel = stringResource(Res.string.snackbar_view_downloads)
+    val viewTransfersLabel = stringResource(Res.string.snackbar_view_transfers)
     CollectSnackbarMessages(
         messages = viewModel.messages,
         hostState = snackbarHostState,
@@ -386,7 +386,7 @@ fun GalleryScreen(
                 message is UiText.Resource &&
                 message.resource == Res.string.files_queued_for_download
             ) {
-                viewDownloadsLabel
+                viewTransfersLabel
             } else {
                 null
             }
