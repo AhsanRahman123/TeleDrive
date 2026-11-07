@@ -440,6 +440,7 @@
     <string name="gallery_tab_photos">Фотографии</string>
     <string name="gallery_tab_videos">Видео</string>
     <string name="gallery_title">Галерея</string>
+    <string name="gallery_new_album">Новый альбом</string>
 
     <!-- Preview -->
     <string name="preview_add_favorites">В избранное</string>
