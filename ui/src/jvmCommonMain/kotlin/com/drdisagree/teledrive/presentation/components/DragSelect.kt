@@ -110,8 +110,13 @@ private fun dragSelect(
     return Modifier.pointerInput(scrollable) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            val shouldStart = if (down.type == PointerType.Mouse) {
+            val mouseDragStart = if (down.type == PointerType.Mouse) {
                 awaitMouseDragStart(down)
+            } else {
+                null
+            }
+            val shouldStart = if (down.type == PointerType.Mouse) {
+                mouseDragStart != null
             } else {
                 awaitLongPress(down)
             }
@@ -119,7 +124,14 @@ private fun dragSelect(
 
             var anchor = currentIndexAt(down.position)
             currentOnStart()
-            anchor?.let { currentOnRange(it..it) }
+            val initialPosition = mouseDragStart?.position ?: down.position
+            val initialIndex = currentIndexAt(initialPosition)
+            if (initialIndex != null) {
+                val start = anchor ?: initialIndex.also { anchor = it }
+                currentOnRange(minOf(start, initialIndex)..maxOf(start, initialIndex))
+            } else {
+                anchor?.let { currentOnRange(it..it) }
+            }
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
                 val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
@@ -142,13 +154,18 @@ private fun dragSelect(
  * Mouse drag starts as soon as movement exceeds normal click slop. A simple click therefore stays
  * a normal click; touch and stylus retain the long-press gesture to avoid fighting scroll.
  */
-private suspend fun AwaitPointerEventScope.awaitMouseDragStart(down: PointerInputChange): Boolean {
+private suspend fun AwaitPointerEventScope.awaitMouseDragStart(
+    down: PointerInputChange
+): PointerInputChange? {
     while (true) {
         val event = awaitPointerEvent(PointerEventPass.Initial)
-        if (!event.buttons.isPrimaryPressed) return false
-        val change = event.changes.fastFirstOrNull { it.id == down.id } ?: return false
-        if (!change.pressed) return false
-        if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) return true
+        if (!event.buttons.isPrimaryPressed) return null
+        val change = event.changes.fastFirstOrNull { it.id == down.id } ?: return null
+        if (!change.pressed) return null
+        if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+            change.consume()
+            return change
+        }
     }
 }
 
