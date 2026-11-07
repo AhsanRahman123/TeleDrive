@@ -40,3 +40,45 @@ data class PreviewSequence(
 }
 
 const val CATEGORY_SEPARATOR = ","
+
+
+/** The viewer destination after a successful move, kept pure so the navigation rule is testable. */
+internal data class PreviewMoveResult(
+    val files: List<com.drdisagree.teledrive.domain.model.DriveFile>,
+    val initialIndex: Int,
+    val closeViewer: Boolean
+)
+
+internal fun previewAfterMove(
+    currentFiles: List<com.drdisagree.teledrive.domain.model.DriveFile>,
+    movedFile: com.drdisagree.teledrive.domain.model.DriveFile,
+    currentIndex: Int
+): PreviewMoveResult {
+    val actualIndex = currentFiles.indexOfFirst { it.id == movedFile.id }
+        .takeIf { it >= 0 }
+        ?: currentIndex.coerceIn(0, (currentFiles.size - 1).coerceAtLeast(0))
+    val remaining = currentFiles.filterNot { it.id == movedFile.id }
+    val movedMedia = movedFile.category == FileCategory.IMAGE ||
+        movedFile.category == FileCategory.VIDEO
+    val nextFiles = if (movedMedia) {
+        remaining.filter { it.category == FileCategory.IMAGE || it.category == FileCategory.VIDEO }
+    } else {
+        remaining
+    }
+
+    if (nextFiles.isEmpty()) {
+        return PreviewMoveResult(emptyList(), 0, closeViewer = true)
+    }
+
+    val originalPositions = currentFiles.mapIndexed { index, file -> file.id to index }.toMap()
+    val nextIndex = if (movedMedia) {
+        nextFiles.indexOfFirst { (originalPositions[it.id] ?: -1) > actualIndex }
+            .takeIf { it >= 0 }
+            ?: nextFiles.indexOfLast { (originalPositions[it.id] ?: Int.MAX_VALUE) < actualIndex }
+                .coerceAtLeast(0)
+    } else {
+        actualIndex.coerceIn(0, nextFiles.lastIndex)
+    }
+
+    return PreviewMoveResult(nextFiles, nextIndex, closeViewer = false)
+}
