@@ -47,7 +47,8 @@ fun FileListItem(
     modifier: Modifier = Modifier,
     showFavorite: Boolean = true,
     showAvailableOffline: Boolean = true,
-    status: (@Composable () -> Unit)? = null
+    status: (@Composable () -> Unit)? = null,
+    onToggleSelection: (() -> Unit)? = null
 ) {
     val compact = LocalCompactLayout.current
     val background = if (selected) {
@@ -71,6 +72,13 @@ fun FileListItem(
             .padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (selectionMode) {
+            SelectionCheckbox(
+                checked = selected,
+                onClick = onToggleSelection ?: onClick,
+                modifier = Modifier.padding(end = 4.dp)
+            )
+        }
         Box {
             FileThumbnail(
                 file = file,
