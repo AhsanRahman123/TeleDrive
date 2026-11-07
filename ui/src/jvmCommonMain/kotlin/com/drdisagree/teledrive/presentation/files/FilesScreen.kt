@@ -125,6 +125,7 @@ import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileGridItem
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
+import com.drdisagree.teledrive.presentation.components.onDesktopEmptySpaceContextClick
 import com.drdisagree.teledrive.presentation.components.SortMenu
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileListItem
@@ -637,7 +638,7 @@ fun FilesScreen(
                 },
                 floatingActionButton = {
                     AnimatedVisibility(
-                        visible = fabVisible && !selectionMode,
+                        visible = !selectionMode && (fabVisible || showAddMenu),
                         enter = scaleIn() + fadeIn(),
                         exit = scaleOut() + fadeOut()
                     ) {
@@ -723,7 +724,11 @@ fun FilesScreen(
                     RefreshableContent(
                         isRefreshing = refreshing,
                         onRefresh = viewModel::refresh,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onDesktopEmptySpaceContextClick {
+                                if (!selectionMode) showAddMenu = true
+                            }
                     ) {
                         if (isLoading) {
                             LoadingState()

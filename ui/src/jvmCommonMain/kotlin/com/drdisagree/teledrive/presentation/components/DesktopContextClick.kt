@@ -35,3 +35,32 @@ fun Modifier.onDesktopContextClick(onContextClick: () -> Unit): Modifier {
         }
     }
 }
+
+
+/**
+ * Handles a secondary click only when no child item consumed it. Attach this to a browsing
+ * container: row/folder context handlers consume their own press in the Initial pass, so the
+ * parent only opens its blank-space action when the click lands on unused content.
+ */
+@Composable
+fun Modifier.onDesktopEmptySpaceContextClick(onContextClick: () -> Unit): Modifier {
+    val currentOnContextClick by rememberUpdatedState(onContextClick)
+    return pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                var event = awaitPointerEvent(PointerEventPass.Main)
+                if (
+                    event.type == PointerEventType.Press &&
+                    event.buttons.isSecondaryPressed &&
+                    event.changes.none { it.isConsumed }
+                ) {
+                    currentOnContextClick()
+                    event.changes.forEach { it.consume() }
+                    do {
+                        event = awaitPointerEvent(PointerEventPass.Main)
+                    } while (event.buttons.isSecondaryPressed)
+                }
+            }
+        }
+    }
+}
