@@ -321,9 +321,6 @@ fun GalleryScreen(
         }
     }
 
-    LaunchedEffect(selectionMode) {
-        if (!selectionMode) showSelectionOverflow = false
-    }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
