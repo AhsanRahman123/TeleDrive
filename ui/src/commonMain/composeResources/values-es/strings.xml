@@ -417,6 +417,12 @@
     <string name="gallery_tab_videos">Videos</string>
     <string name="gallery_title">Galería</string>
     <string name="gallery_new_album">Nuevo álbum</string>
+    <string name="gallery_filter_backed_up">Con copia de seguridad</string>
+    <string name="gallery_filter_not_backed_up">Sin copia de seguridad</string>
+    <string name="gallery_view_grid">Vista de cuadrícula</string>
+    <string name="gallery_view_list">Vista de lista</string>
+    <string name="gallery_search_hint">Buscar fotos y vídeos</string>
+    <string name="gallery_clear_filters">Borrar filtros</string>
 
     <!-- Preview -->
     <string name="preview_add_favorites">Agregar a favoritos</string>
