@@ -122,6 +122,8 @@ import com.drdisagree.teledrive.resources.common_create
 import com.drdisagree.teledrive.resources.common_confirm_trash_count_title
 import com.drdisagree.teledrive.resources.common_deselect_all
 import com.drdisagree.teledrive.resources.common_download
+import com.drdisagree.teledrive.resources.collection_favorites_title
+import com.drdisagree.teledrive.resources.collection_offline_title
 import com.drdisagree.teledrive.resources.common_move_trash
 import com.drdisagree.teledrive.resources.common_rename
 import com.drdisagree.teledrive.resources.common_rename_file
@@ -144,6 +146,7 @@ import com.drdisagree.teledrive.resources.gallery_view_grid
 import com.drdisagree.teledrive.resources.gallery_view_list
 import com.drdisagree.teledrive.resources.gallery_search_hint
 import com.drdisagree.teledrive.resources.gallery_clear_filters
+import com.drdisagree.teledrive.resources.gallery_clear_search
 import com.drdisagree.teledrive.resources.gallery_photos_videos_appear_here
 import com.drdisagree.teledrive.resources.gallery_title
 import com.drdisagree.teledrive.resources.info_details
@@ -728,7 +731,7 @@ fun GalleryScreen(
                         IconButton(onClick = { viewModel.setSearchQuery("") }) {
                             Icon(
                                 Icons.Filled.Close,
-                                contentDescription = stringResource(Res.string.common_clear_selection)
+                                contentDescription = stringResource(Res.string.gallery_clear_search)
                             )
                         }
                     }
