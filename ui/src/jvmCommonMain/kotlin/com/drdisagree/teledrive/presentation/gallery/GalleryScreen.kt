@@ -55,6 +55,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SelectAll
@@ -129,6 +130,7 @@ import com.drdisagree.teledrive.presentation.components.RefreshableContent
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileGridItem
+import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.RenameDialog
@@ -259,6 +261,8 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
+    val selectionMode = selectionMode || selectionModeEnabled
     val media = viewModel.pagedMedia.collectAsLazyPagingItems()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     var confirmTrash by remember { mutableStateOf(false) }
@@ -310,7 +314,7 @@ fun GalleryScreen(
         )
     }
 
-    AppBackHandler(enabled = state.selectionMode) { viewModel.clearSelection() }
+    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     val mediaListState = rememberSaveable(state.tab, saver = LazyListState.Saver) {
         LazyListState()
@@ -332,11 +336,11 @@ fun GalleryScreen(
         snackbarHost = {
             BottomBarSnackbarHost(
                 hostState = snackbarHostState,
-                applyInset = !state.selectionMode
+                applyInset = !selectionMode
             )
         },
         topBar = {
-            if (state.selectionMode) {
+            if (selectionMode) {
                 TopAppBar(
                     colors = liftedTopAppBarColors(lifted),
                     title = {
@@ -505,6 +509,12 @@ fun GalleryScreen(
                     },
                     actions = {
                         if (state.isAlbumView || state.tab != GalleryTab.ALBUMS) {
+                            IconButton(onClick = viewModel::startSelectionMode) {
+                                Icon(
+                                    Icons.Filled.CheckBoxOutlineBlank,
+                                    contentDescription = stringResource(Res.string.common_select)
+                                )
+                            }
                             var showSortMenu by remember { mutableStateOf(false) }
                             IconButton(onClick = { showSortMenu = true }) {
                                 Icon(
@@ -612,7 +622,7 @@ fun GalleryScreen(
             val listKeyboard = rememberKeyboardCollection(mediaListState, isItem = isMedia)
             val gridKeyboard = rememberKeyboardCollection(mediaGridState, state.gridSize, isMedia)
             val selectIfNone: (Int) -> Unit = { index ->
-                if (!state.selectionMode) mediaIdAt(index)?.let(viewModel::toggleSelection)
+                if (!selectionMode) mediaIdAt(index)?.let(viewModel::toggleSelection)
             }
             val shortcuts = CollectionShortcuts(
                 onToggleSelect = { index -> mediaIdAt(index)?.let(viewModel::toggleSelection) },
@@ -627,7 +637,7 @@ fun GalleryScreen(
                     viewModel.cutSelected()
                 },
                 onBack = onBack,
-                onClear = if (state.selectionMode) viewModel::clearSelection else null
+                onClear = if (selectionMode) viewModel::clearSelection else null
             )
             RefreshableContent(
                 isRefreshing = refreshing,
@@ -680,18 +690,23 @@ fun GalleryScreen(
                                     FileListItem(
                                         file = file,
                                         selected = file.id in state.selection,
-                                        selectionMode = state.selectionMode,
+                                        selectionMode = selectionMode,
                                         onClick = {
-                                            if (state.selectionMode) {
+                                            if (selectionMode) {
                                                 viewModel.toggleSelection(file.id)
                                             } else {
                                                 onOpenFile(file.id, previewSequence)
                                             }
                                         },
                                         onLongClick = { viewModel.toggleSelection(file.id) },
+                                        onToggleSelection = { viewModel.toggleSelection(file.id) },
                                         modifier = Modifier
                                             .keyboardCollectionItem(listKeyboard, index)
                                             .animateItem()
+                                            .onDesktopContextClick {
+                                                viewModel.selectFileForContext(file.id)
+                                                showSelectionOverflow = true
+                                            }
                                     )
                                 }
 
@@ -748,8 +763,10 @@ fun GalleryScreen(
                                         file = file,
                                         selected = file.id in state.selection,
                                         compact = true,
+                                        selectionMode = selectionMode,
+                                        onToggleSelection = { viewModel.toggleSelection(file.id) },
                                         onClick = {
-                                            if (state.selectionMode) {
+                                            if (selectionMode) {
                                                 viewModel.toggleSelection(file.id)
                                             } else {
                                                 onOpenFile(file.id, previewSequence)
@@ -759,6 +776,10 @@ fun GalleryScreen(
                                         modifier = Modifier
                                             .keyboardCollectionItem(gridKeyboard, index)
                                             .animateItem()
+                                            .onDesktopContextClick {
+                                                viewModel.selectFileForContext(file.id)
+                                                showSelectionOverflow = true
+                                            }
                                     )
                                 }
 
