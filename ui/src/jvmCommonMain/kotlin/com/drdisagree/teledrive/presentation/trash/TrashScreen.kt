@@ -245,6 +245,7 @@ fun TrashScreen(
                                 )
                             }
                         }
+                        }
                     }
                 )
             } else {
