@@ -44,6 +44,8 @@ class CollectionViewModel(
 
     private val _selection = MutableStateFlow<Set<String>>(emptySet())
     val selection: StateFlow<Set<String>> = _selection.asStateFlow()
+    private val _selectionModeEnabled = MutableStateFlow(false)
+    val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
 
     private val _folderSelection = MutableStateFlow<Set<String>>(emptySet())
     val folderSelection: StateFlow<Set<String>> = _folderSelection.asStateFlow()
@@ -110,6 +112,28 @@ class CollectionViewModel(
         viewModelScope.launch { makeAvailableOffline.downloadMissing() }
     }
 
+    fun startSelectionMode() {
+        _selectionModeEnabled.update { true }
+    }
+
+    fun selectFileForContext(id: String) {
+        _selectionModeEnabled.update { true }
+        _allSelected.update { false }
+        if (id !in _selection.value) {
+            _selection.update { setOf(id) }
+            _folderSelection.update { emptySet() }
+        }
+    }
+
+    fun selectFolderForContext(id: String) {
+        _selectionModeEnabled.update { true }
+        _allSelected.update { false }
+        if (id !in _folderSelection.value) {
+            _selection.update { emptySet() }
+            _folderSelection.update { setOf(id) }
+        }
+    }
+
     fun toggleSelection(id: String) {
         _allSelected.update { false }
         _selection.update { if (id in it) it - id else it + id }
@@ -121,6 +145,7 @@ class CollectionViewModel(
     }
 
     fun clearSelection() {
+        _selectionModeEnabled.update { false }
         _allSelected.update { false }
         _selection.update { emptySet() }
         _folderSelection.update { emptySet() }
@@ -148,6 +173,14 @@ class CollectionViewModel(
 
     fun endRangeSelection() {
         rangeBase = null
+    }
+
+    fun downloadSelected() {
+        val ids = _selection.value.toList()
+        clearSelection()
+        viewModelScope.launch {
+            ids.forEach { transferRepository.enqueueDownload(it) }
+        }
     }
 
     fun removeFromCollection() {
