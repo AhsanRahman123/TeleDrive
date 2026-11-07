@@ -176,6 +176,7 @@ import com.drdisagree.teledrive.resources.common_remove_from_offline
 import com.drdisagree.teledrive.resources.common_rename
 import com.drdisagree.teledrive.resources.common_restore_trash_emptied
 import com.drdisagree.teledrive.resources.common_select_all
+import com.drdisagree.teledrive.resources.common_select
 import com.drdisagree.teledrive.resources.common_selection_count
 import com.drdisagree.teledrive.resources.common_share
 import com.drdisagree.teledrive.resources.common_storage_actions
