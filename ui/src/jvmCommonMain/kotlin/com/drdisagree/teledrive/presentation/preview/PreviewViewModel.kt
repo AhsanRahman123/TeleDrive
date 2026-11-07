@@ -244,52 +244,31 @@ class PreviewViewModel(
         viewModelScope.launch {
             when (val result = fileRepository.moveFiles(listOf(file.id), targetFolderId)) {
                 is AppResult.Success -> {
-                    val currentFiles = _uiState.value.files
-                    val actualIndex = currentFiles.indexOfFirst { it.id == file.id }
-                        .takeIf { it >= 0 }
-                        ?: currentIndex.coerceIn(0, (currentFiles.size - 1).coerceAtLeast(0))
-                    val remaining = currentFiles.filterNot { it.id == file.id }
-                    val isImageOrVideo = file.category == FileCategory.IMAGE ||
-                            file.category == FileCategory.VIDEO
-                    val nextFiles = if (isImageOrVideo) {
-                        remaining.filter { candidate ->
-                            candidate.category == FileCategory.IMAGE ||
-                                    candidate.category == FileCategory.VIDEO
-                        }
-                    } else {
-                        remaining
-                    }
-
-                    if (nextFiles.isEmpty()) {
-                        // The media sequence is exhausted. Closing returns to the folder that
-                        // launched this viewer instead of leaving the moved file on screen.
-                        _uiState.update {
-                            it.copy(files = emptyList(), closed = true)
-                        }
-                    } else {
-                        val nextFile = if (isImageOrVideo) {
-                            val remainingIds = nextFiles.asSequence().map { it.id }.toSet()
-                            currentFiles.drop(actualIndex + 1)
-                                .firstOrNull { it.id in remainingIds }
-                                ?: currentFiles.take(actualIndex)
-                                    .lastOrNull { it.id in remainingIds }
-                        } else {
-                            null
-                        }
-                        val nextIndex = nextFile?.let { candidate ->
-                            nextFiles.indexOfFirst { it.id == candidate.id }
-                        }?.takeIf { it >= 0 }
-                            ?: actualIndex.coerceIn(0, nextFiles.lastIndex)
+                    val moveResult = previewAfterMove(
+                        currentFiles = _uiState.value.files,
+                        movedFile = file,
+                        currentIndex = currentIndex
+                    )
+                    if (moveResult.closeViewer) {
+                        // No media remains in this viewer sequence; return to its caller.
                         _uiState.update {
                             it.copy(
-                                files = nextFiles,
-                                initialIndex = nextIndex,
+                                files = emptyList(),
+                                initialIndex = 0,
+                                closed = true
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                files = moveResult.files,
+                                initialIndex = moveResult.initialIndex,
                                 ready = true,
                                 closed = false
                             )
                         }
                     }
-                    _messages.tryEmit(
+                                        _messages.tryEmit(
                         UiText.Resource(Res.string.message_moved_count, result.value)
                     )
                 }
