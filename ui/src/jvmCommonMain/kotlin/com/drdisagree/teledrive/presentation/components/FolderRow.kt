@@ -42,7 +42,7 @@ fun FolderRow(
     showFavorite: Boolean = true,
     showAvailableOffline: Boolean = true,
     onLongClick: () -> Unit = {},
-    selectionMode: Boolean = selected,
+    selectionMode: Boolean = false,
     onToggleSelection: (() -> Unit)? = null
 ) {
     val compact = LocalCompactLayout.current
