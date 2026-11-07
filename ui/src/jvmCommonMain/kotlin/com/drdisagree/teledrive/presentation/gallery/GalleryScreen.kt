@@ -500,6 +500,7 @@ fun GalleryScreen(
                                 onDismissRequest = { showSelectionOverflow = false },
                                 actions = actions
                             )
+                            }
                         }
                     }
                 )
