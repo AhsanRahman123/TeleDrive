@@ -78,6 +78,7 @@ import com.drdisagree.teledrive.resources.common_download
 import com.drdisagree.teledrive.resources.common_make_available_offline
 import com.drdisagree.teledrive.resources.common_move_trash
 import com.drdisagree.teledrive.resources.common_remove_from_offline
+import com.drdisagree.teledrive.resources.common_select
 import com.drdisagree.teledrive.resources.common_select_all
 import com.drdisagree.teledrive.resources.search_open_folder
 import com.drdisagree.teledrive.resources.search_section_files
@@ -168,8 +169,7 @@ fun SearchScreen(
                                 contentDescription = stringResource(Res.string.common_back)
                             )
                         }
-                    }
-                    ,
+                    },
                     actions = {
                         IconButton(onClick = viewModel::startSelectionMode) {
                             Icon(
