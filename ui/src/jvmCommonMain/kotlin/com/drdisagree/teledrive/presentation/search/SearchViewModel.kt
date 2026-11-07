@@ -41,6 +41,7 @@ class SearchViewModel(
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
     private val _selectionModeEnabled = MutableStateFlow(false)
+    private var rangeBase: Set<String>? = null
     val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
 
     private val query = MutableStateFlow("")
@@ -126,6 +127,19 @@ class SearchViewModel(
 
     fun toggleSelection(id: String) = selection.update { current ->
         if (id in current) current - id else current + id
+    }
+
+    fun startRangeSelection() {
+        rangeBase = selection.value
+    }
+
+    fun extendRangeSelection(ids: List<String>) {
+        val base = rangeBase ?: return
+        selection.update { base + ids }
+    }
+
+    fun endRangeSelection() {
+        rangeBase = null
     }
 
     fun clearSelection() {
