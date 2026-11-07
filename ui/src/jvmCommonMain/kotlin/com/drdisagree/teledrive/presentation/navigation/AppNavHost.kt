@@ -11,6 +11,7 @@ import androidx.navigation.toRoute
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.album_not_in_folder
 import com.drdisagree.teledrive.presentation.channels.ChannelsScreen
+import com.drdisagree.teledrive.presentation.common.LocalOpenTransfers
 import com.drdisagree.teledrive.presentation.collection.CollectionScreen
 import com.drdisagree.teledrive.presentation.files.FilesScreen
 import com.drdisagree.teledrive.presentation.gallery.GalleryScreen
@@ -36,7 +37,10 @@ fun AppNavHost(
     modifier: Modifier = Modifier,
     verticalTabMotion: Boolean = false
 ) {
-    NavHost(
+    CompositionLocalProvider(
+        LocalOpenTransfers provides { navController.navigateOnce(Route.Transfers) }
+    ) {
+        NavHost(
         navController = navController,
         startDestination = startDestination,
         modifier = modifier,
@@ -221,6 +225,7 @@ fun AppNavHost(
         }
         composable<Route.Proxy> {
             ProxyScreen(onBack = { navController.popBackStackOnce() })
+        }
         }
     }
 }
