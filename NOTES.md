@@ -67,6 +67,31 @@ Still to implement:
 
 The current `ViewMode` enum only has `GRID` and `LIST`; add new modes carefully and keep migrations/backward compatibility safe.
 
+## Gallery V1 implementation checkpoint
+
+The current feature branch now contains a Gallery workspace expansion. It reuses the existing file repository, Telegram transfer queue, preview/stream pipeline, platform FileSharer, folder model, Trash and verified local-copy deletion flow.
+
+Implemented in source; local build and device/runtime verification still required:
+- Debounced media-name search.
+- Quick Favorites, Offline, Backed up and Not backed up filters.
+- The active Gallery filters are included in the preview route so next/previous navigation remains in the same filtered result set.
+- Explicit Grid/List toggle for media and albums, with album list rows.
+- Album sort by name, item count and latest activity.
+- Empty folder albums shown without adding a separate album database; document-only folders are excluded.
+- Create Album creates a regular folder; empty-album query has desktop database tests.
+- Bulk Copy to…, Share (only when every selected item has a local path), Details, Move to…, Download, Upload, Favorite, Offline, Hide, Archive and Trash actions.
+- Free up space is separate from Trash and uses the existing remote-verification and platform-consent deletion path.
+- Successful Gallery downloads show View downloads and navigate to Transfer History.
+- Gallery remains paged/lazy and uses the existing thumbnail cache and Preview/stream code.
+
+Still future Gallery phases:
+- EXIF capture-date/camera/orientation metadata, optional GPS with privacy controls, capture-date timeline/calendar.
+- Slideshow, image rotate/fit/fill and side-by-side compare; reuse the existing Preview screen.
+- Saved filters/smart albums, tags/ratings, exact duplicate groups by contentHash and optional perceptual duplicates.
+- Advanced size/date/extension filters and more advanced album metadata.
+
+Do not mark Gallery V1 verified until the user has pulled the branch, run Gradle tests/build, and visually tested search, filters, Grid/List, album creation, copy/share/free-space, Trash restore, and stream/playback on real media.
+
 ## Remaining roadmap
 
 ### Milestone 2 — Backup and safety
