@@ -365,7 +365,7 @@ fun TrashScreen(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (selectionMode && row.selectable) {
+                    if (row.selectable) {
                         SelectionCheckbox(
                             checked = selected,
                             onClick = { viewModel.toggleSelection(item.id) },
