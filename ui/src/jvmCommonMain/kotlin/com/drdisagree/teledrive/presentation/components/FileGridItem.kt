@@ -47,7 +47,7 @@ fun FileGridItem(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
-    selectionMode: Boolean = selected,
+    selectionMode: Boolean = false,
     onToggleSelection: (() -> Unit)? = null
 ) {
     Column(
