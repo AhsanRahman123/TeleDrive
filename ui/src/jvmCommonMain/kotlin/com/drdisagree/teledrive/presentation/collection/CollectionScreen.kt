@@ -97,6 +97,10 @@ fun CollectionScreen(
     var confirmTrash by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
 
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) showSelectionOverflow = false
+    }
+
     AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     if (confirmTrash) {
