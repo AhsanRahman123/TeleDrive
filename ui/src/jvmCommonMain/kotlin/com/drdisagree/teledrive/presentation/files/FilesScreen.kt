@@ -416,7 +416,7 @@ fun FilesScreen(
                                     )
                                 }
                                 Box {
-                                    IconButton(onClick = { showSelectionOverflow = true }) {
+                                    IconButton(onClick = { onShowContextMenu() }) {
                                         Icon(
                                             Icons.Filled.MoreVert,
                                             contentDescription = stringResource(Res.string.common_actions)
@@ -742,6 +742,7 @@ fun FilesScreen(
                                 gridState = gridState,
                                 state = state,
                                 selectionMode = selectionMode,
+                                onShowContextMenu = { showSelectionOverflow = true },
                                 files = files,
                                 padding = PaddingValues(
                                     bottom = padding.calculateBottomPadding() +
@@ -1028,6 +1029,7 @@ private fun FilesContent(
     gridState: LazyGridState,
     state: FilesUiState,
     selectionMode: Boolean,
+    onShowContextMenu: () -> Unit,
     files: LazyPagingItems<DriveFile>,
     padding: PaddingValues,
     onOpenFolder: (String) -> Unit,
@@ -1132,7 +1134,7 @@ private fun FilesContent(
                         .animateItem()
                         .onDesktopContextClick {
                             viewModel.selectFolderForContext(folder.id)
-                            showSelectionOverflow = true
+                            onShowContextMenu()
                         }
                 )
             } else {
@@ -1151,7 +1153,7 @@ private fun FilesContent(
                         .animateItem()
                         .onDesktopContextClick {
                             viewModel.selectFolderForContext(folder.id)
-                            showSelectionOverflow = true
+                            onShowContextMenu()
                         }
                 )
             }
@@ -1189,7 +1191,7 @@ private fun FilesContent(
                         .focusHighlight(highlighted)
                         .onDesktopContextClick {
                             viewModel.selectFileForContext(file.id)
-                            showSelectionOverflow = true
+                            onShowContextMenu()
                         }
                 )
             } else {
@@ -1217,7 +1219,7 @@ private fun FilesContent(
                         .focusHighlight(highlighted)
                         .onDesktopContextClick {
                             viewModel.selectFileForContext(file.id)
-                            showSelectionOverflow = true
+                            onShowContextMenu()
                         }
                 )
             }
