@@ -459,14 +459,12 @@ fun FilesScreen(
                                                 ) { viewModel.requestRenameSelected() }
                                             )
                                         }
-                                        if (filesOnly) {
-                                            add(
-                                                MenuAction(
-                                                    label = stringResource(Res.string.files_copy),
-                                                    icon = Icons.Filled.ContentCopy
-                                                ) { showCopyPicker = true }
-                                            )
-                                        }
+                                        add(
+                                            MenuAction(
+                                                label = stringResource(Res.string.files_copy),
+                                                icon = Icons.Filled.ContentCopy
+                                            ) { showCopyPicker = true }
+                                        )
                                         add(
                                             MenuAction(
                                                 label = stringResource(Res.string.files_move_to),

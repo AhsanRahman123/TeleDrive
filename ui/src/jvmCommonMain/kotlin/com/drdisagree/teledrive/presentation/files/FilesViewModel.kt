@@ -557,21 +557,46 @@ class FilesViewModel(
 
     fun copySelected(targetFolderId: String?) {
         val ids = selection.value.toList()
+        val folderIds = folderSelection.value.toList()
         clearSelection()
         _copying.update { true }
         viewModelScope.launch {
-            when (val result = fileRepository.copyFiles(ids, targetFolderId)) {
-                is AppResult.Success -> _messages.tryEmit(
-                    if (result.value == ids.size) {
-                        UiText.Resource(Res.string.files_copied_all, result.value)
-                    } else {
-                        UiText.Resource(Res.string.files_copied_partial, result.value, ids.size)
-                    }
-                )
+            try {
+                var copiedItems = 0
+                var totalItems = ids.size
 
-                is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+                if (ids.isNotEmpty()) {
+                    when (val result = fileRepository.copyFiles(ids, targetFolderId)) {
+                        is AppResult.Success -> copiedItems += result.value
+                        is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+                    }
+                }
+
+                folderIds.forEach { folderId ->
+                    when (val result = fileRepository.copyFolder(folderId, targetFolderId)) {
+                        is AppResult.Success -> {
+                            copiedItems += result.value.copiedItems
+                            totalItems += result.value.totalItems
+                        }
+                        is AppResult.Failure -> {
+                            totalItems += 1
+                            _messages.tryEmit(result.error.toUiText())
+                        }
+                    }
+                }
+
+                if (totalItems > 0) {
+                    _messages.tryEmit(
+                        if (copiedItems == totalItems) {
+                            UiText.Resource(Res.string.files_copied_all, copiedItems)
+                        } else {
+                            UiText.Resource(Res.string.files_copied_partial, copiedItems, totalItems)
+                        }
+                    )
+                }
+            } finally {
+                _copying.update { false }
             }
-            _copying.update { false }
         }
     }
 

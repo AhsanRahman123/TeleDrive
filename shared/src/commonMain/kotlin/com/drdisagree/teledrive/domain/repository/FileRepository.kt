@@ -6,6 +6,7 @@ import com.drdisagree.teledrive.core.files.LocalCleanup
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.DriveFolder
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
+import com.drdisagree.teledrive.domain.model.FolderCopyResult
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import com.drdisagree.teledrive.domain.model.MediaAlbum
@@ -80,6 +81,8 @@ interface FileRepository {
      * made.
      */
     suspend fun copyFiles(ids: List<String>, targetFolderId: String?): AppResult<Int>
+
+    suspend fun copyFolder(id: String, targetParentId: String?): AppResult<FolderCopyResult>
 
     suspend fun moveFolder(id: String, targetParentId: String?): AppResult<Unit>
 

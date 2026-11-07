@@ -363,6 +363,109 @@ class FileRepositoryImpl(
         }
     }
 
+    override suspend fun copyFolder(
+        id: String,
+        targetParentId: String?
+    ): AppResult<FolderCopyResult> {
+        val channelId = activeChannel.id()
+        val root = folderDao.byId(id) ?: return AppResult.Failure(AppError.NotFound)
+        if (root.trashedAt != null || (root.chatId != null && root.chatId != channelId)) {
+            return AppResult.Failure(AppError.NotFound)
+        }
+
+        val targetParent = targetParentId?.let { folderDao.byId(it) }
+        if (
+            targetParentId != null &&
+            (targetParent == null || targetParent.trashedAt != null ||
+                (targetParent.chatId != null && targetParent.chatId != channelId))
+        ) {
+            return AppResult.Failure(AppError.NotFound)
+        }
+        if (FolderCycleCheck.createsCycle(id, targetParentId, ancestorsOf(targetParentId))) {
+            return AppResult.Failure(AppError.FolderInsideItself)
+        }
+
+        // Read and validate the whole source tree before creating anything. This preserves empty
+        // folders and avoids leaving a half-created tree if a cycle or excessive depth is found.
+        val sourceFolders = mutableListOf<Pair<FolderEntity, Int>>()
+        val pending = mutableListOf(root to 0)
+        val visited = mutableSetOf<String>()
+        var cursor = 0
+        while (cursor < pending.size) {
+            val (folder, depth) = pending[cursor++]
+            if (!visited.add(folder.id)) {
+                return AppResult.Failure(AppError.FolderInsideItself)
+            }
+            if (depth > MAX_FOLDER_DEPTH) {
+                return AppResult.Failure(
+                    AppError.UnsupportedOperation("Folder nesting exceeds the supported copy depth")
+                )
+            }
+            sourceFolders += folder to depth
+            val children = folderDao.childrenOf(folder.id, folder.chatId)
+            if (children.isNotEmpty() && depth >= MAX_FOLDER_DEPTH) {
+                return AppResult.Failure(
+                    AppError.UnsupportedOperation("Folder nesting exceeds the supported copy depth")
+                )
+            }
+            children.forEach { child -> pending += child to depth + 1 }
+        }
+
+        val copiedFolderIds = mutableMapOf<String, String>()
+        val copiedFolders = mutableListOf<Pair<FolderEntity, String>>()
+        for ((source, _) in sourceFolders) {
+            val destinationParentId = if (source.id == id) {
+                targetParentId
+            } else {
+                copiedFolderIds[source.parentId]
+                    ?: return AppResult.Failure(AppError.NotFound)
+            }
+            val existingNames = folderDao.namesIn(destinationParentId, channelId)
+            val copiedName = FileNameUtils.uniqueName(source.name) { candidate ->
+                existingNames.any { it.equals(candidate, ignoreCase = true) }
+            }
+            val now = System.currentTimeMillis()
+            val copy = source.copy(
+                id = UUID.randomUUID().toString(),
+                chatId = channelId,
+                parentId = destinationParentId,
+                name = copiedName,
+                trashedAt = null,
+                preTrashParentId = null,
+                pendingPublish = true,
+                modifiedAt = now,
+                changedAt = now
+            )
+            folderDao.upsert(copy)
+            copiedFolderIds[source.id] = copy.id
+            copiedFolders += source to copy.id
+        }
+
+        var totalFiles = 0
+        var copiedFiles = 0
+        for ((source, destinationId) in copiedFolders) {
+            val sourceFiles = fileDao.filesInFolder(source.id, channelId)
+            totalFiles += sourceFiles.size
+            if (sourceFiles.isEmpty()) continue
+            when (val result = copyFiles(sourceFiles.map { it.id }, destinationId)) {
+                is AppResult.Success -> copiedFiles += result.value
+                is AppResult.Failure -> Unit
+            }
+        }
+
+        // Publish the copied folder metadata and the file manifests with their new folder paths.
+        markFolderStateDirty()
+        copiedFolders.firstOrNull()?.second?.let { markFolderContentsDirty(it) }
+
+        val copiedFolderCount = copiedFolders.size
+        return AppResult.Success(
+            FolderCopyResult(
+                copiedItems = copiedFolderCount + copiedFiles,
+                totalItems = copiedFolderCount + totalFiles
+            )
+        )
+    }
+
     private suspend fun copyRemote(
         copy: FileEntity,
         remoteFileId: String,
