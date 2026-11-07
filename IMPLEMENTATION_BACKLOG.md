@@ -110,6 +110,32 @@ Practical enhancements requested:
 - Keep the queue responsive with thousands of items; paginate or bound completed history.
 - Respect existing flood-safe transfer pacing and concurrency controls. Avoid adding continuous background scheduling unless later justified.
 
+### A7. Full Gallery and file-viewing experience inside Archived and Hidden
+
+Required:
+- Treat **Archived** and **Hidden** as complete library browsing scopes, not simple lists or storage bins.
+- Provide the same practical Gallery and file-viewing capabilities available in the normal library, using the same shared components and behavior wherever possible.
+- Inside each scope, automatically categorize eligible items into Photos, Videos, Audio, Documents, Archives, Apps/APKs and Other using reliable MIME type/extension metadata.
+- Keep categories scoped: Archived categories show only archived content; Hidden categories show only hidden content. Do not leak these items into the ordinary Gallery or ordinary category counts.
+- Support Grid, List and Details layouts, sorting, type/date/size filters, search within the current scope, multi-selection, breadcrumbs and navigation through nested folders.
+- Show category and folder counts that reflect the current Archived/Hidden scope.
+- Photos must open in the same original-quality viewer as ordinary Gallery images, with full-resolution zoom/pan and thumbnail-only derivatives.
+- Videos and audio must use the same players and controls as the main library, including volume/brightness controls, track selection and external subtitles where supported.
+- Documents and ZIP/7z archives must use the same supported preview/viewing flows as the main library. Unsupported formats should show a clear fallback rather than a broken viewer.
+- Preserve the usual file operations where meaningful: copy, move, download, share, rename, restore/unarchive/unhide, and recoverable delete. Folder operations must work recursively where applicable.
+- Clearly expose Restore/Unarchive and Unhide actions. Browsing, previewing, searching, copying or moving an item must not silently clear its archived/hidden status; only an explicit state-changing action should do so.
+- Keep Archived and Hidden separate from one another, and make the current scope visible so users know where they are working.
+- Reuse the normal thumbnail cache, paging/virtualisation, preview pipeline and low-memory behavior. Do not load all archived/hidden media at once.
+- This must work consistently on Windows, Android and Linux, with platform-appropriate file pickers and context actions.
+
+Acceptance checks:
+- An archived photo appears under Archived > Photos, opens at original resolution, and remains archived after viewing.
+- A hidden video appears under Hidden > Videos, streams/plays with the same controls as a normal video, and remains hidden after playback.
+- Search, filters, sorting, Grid/List/Details and folder navigation operate only within the selected Archived or Hidden scope by default.
+- Restoring/unarchiving or unhiding explicitly removes the item from that special scope and makes it visible in the ordinary library again.
+- Copy/move/download/share/delete actions do not silently change archive/hidden state or overwrite another item.
+- Large Archived/Hidden collections remain paged and responsive.
+
 ## B. The complete required 13-capability scope
 
 These are all required before the user begins building the full library. Some parts already exist; the checklist means complete and verify the overall capability, not rebuild everything from scratch.
@@ -120,16 +146,19 @@ These are all required before the user begins building the full library. Some pa
 - Support recursive folder copy/move, empty folders and conflict-safe operations.
 - Grid, List and Details views, sorting, multi-selection, keyboard navigation, right-click context menus at the pointer, breadcrumbs and folder-tree navigation.
 - Consistent actions across Files, Gallery, Search, Collections and Trash where relevant.
+- Archived and Hidden each expose the same complete Gallery/file-viewing feature set in their own scoped categories and folder navigation (see A7); they must not be reduced to plain lists.
 
 ### B2. Simple automatic categorization
 - Derive useful Photos, Videos, Audio, Documents, Archives, Apps/APKs and Other views from MIME type/extension and reliable metadata.
 - Keep the user's actual folder hierarchy as the primary organization system.
 - No mandatory manual tagging of every file or photo.
+- Apply the same automatic categories inside Archived and Hidden, with category results restricted to the current scope rather than mixing archived/hidden items into the ordinary library.
 
 ### B3. Global search and easy discovery
 - Search by name, extension, folder/path, type, size, date, backup/offline/favorite status.
 - Fast debounced local search against indexed metadata and paged results.
 - Helpful filters and predictable sort options.
+- Search defaults to the current browsing scope; Archived and Hidden browsing/search remain isolated unless the user explicitly chooses to include those scopes.
 - AI semantic search and deep OCR/content indexing remain deferred.
 
 ### B4. Original-quality image viewer with fast loading
@@ -224,7 +253,8 @@ Do not mix these into the practical build:
 5. Test exact and perceptual duplicates with known identical, resized/recompressed, cropped and unrelated photos. Check false positives manually; never delete automatically.
 6. Test transfer queues with multiple simultaneous uploads/downloads, priorities, filtering, errors, retries, pause/resume, app restart and interrupted network.
 7. Confirm file hashes after representative upload/download/copy/restore workflows.
-8. Build and runtime-test Android and Linux separately. Do not mark those platforms complete after desktop-only tests.
+8. Verify Archived and Hidden as full Gallery scopes: categories, scoped search/filters, Grid/List/Details, folder navigation, original-quality image viewing, video/audio playback, document/archive previews, file operations and explicit restore/unhide behavior.
+9. Build and runtime-test Android and Linux separately. Do not mark those platforms complete after desktop-only tests.
 
 ## E. Current implementation-status snapshot
 
