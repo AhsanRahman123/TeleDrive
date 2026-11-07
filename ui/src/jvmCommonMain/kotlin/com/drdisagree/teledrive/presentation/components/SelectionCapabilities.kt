@@ -15,7 +15,10 @@ data class SelectionCapabilities(
     companion object {
         fun of(files: List<DriveFile>): SelectionCapabilities = SelectionCapabilities(
             canUpload = files.any { !it.hasRemoteCopy },
-            canDownload = files.any { it.hasRemoteCopy && !it.hasLocalCopy },
+            // A remote copy can be downloaded even when a local copy exists. This lets the
+            // Storage menu offer Download and Free up space together instead of forcing
+            // users to remove the local copy before they can fetch it again.
+            canDownload = files.any { it.hasRemoteCopy },
             canFreeUpSpace = files.any { it.hasRemoteCopy && it.hasLocalCopy },
             anyNotAvailableOffline = files.any { !it.isAvailableOffline },
             anyUnfavorited = files.any { !it.isFavorite },
