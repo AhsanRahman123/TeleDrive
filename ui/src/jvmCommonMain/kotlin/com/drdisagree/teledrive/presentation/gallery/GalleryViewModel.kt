@@ -99,6 +99,8 @@ class GalleryViewModel(
     val listPosition = ListPosition(savedStateHandle)
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
+    private val _selectionModeEnabled = MutableStateFlow(false)
+    val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
     private var rangeBase: Set<String>? = null
     private val _allSelected = MutableStateFlow(false)
     val allSelected: StateFlow<Boolean> = _allSelected.asStateFlow()
@@ -269,12 +271,23 @@ class GalleryViewModel(
         }
     }
 
+    fun startSelectionMode() {
+        _selectionModeEnabled.update { true }
+    }
+
+    fun selectFileForContext(id: String) {
+        _selectionModeEnabled.update { true }
+        _allSelected.update { false }
+        if (id !in selection.value) selection.update { setOf(id) }
+    }
+
     fun toggleSelection(id: String) {
         _allSelected.update { false }
         selection.update { if (id in it) it - id else it + id }
     }
 
     fun clearSelection() {
+        _selectionModeEnabled.update { false }
         _allSelected.update { false }
         selection.update { emptySet() }
     }
