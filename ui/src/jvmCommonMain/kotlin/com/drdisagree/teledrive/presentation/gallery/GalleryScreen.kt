@@ -389,8 +389,9 @@ fun GalleryScreen(
                                 }
                             )
                         }
-                        Box {
-                            IconButton(onClick = { showSelectionOverflow = true }) {
+                        if (state.selection.size > 0) {
+                            Box {
+                                IconButton(onClick = { showSelectionOverflow = true }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = stringResource(Res.string.common_actions)
