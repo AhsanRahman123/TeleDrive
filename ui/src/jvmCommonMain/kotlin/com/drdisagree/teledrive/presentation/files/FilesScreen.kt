@@ -247,7 +247,7 @@ fun FilesScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
-    val selectionMode = selectionMode || selectionModeEnabled
+    val selectionMode = state.selectionMode || selectionModeEnabled
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val files = viewModel.pagedFiles.collectAsLazyPagingItems()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
