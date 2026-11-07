@@ -300,6 +300,7 @@ fun GalleryScreen(
     var showMovePicker by remember { mutableStateOf(false) }
     var showCopyPicker by remember { mutableStateOf(false) }
     var showCreateAlbum by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
 
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
 
@@ -647,25 +648,22 @@ fun GalleryScreen(
                                 )
                             }
                         }
-                        run {
-                            var showSortMenu by remember { mutableStateOf(false) }
-                            IconButton(onClick = { showSortMenu = true }) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.Sort,
-                                    contentDescription = stringResource(Res.string.files_sort)
-                                )
-                            }
-                            SortMenu(
-                                expanded = showSortMenu,
-                                current = state.sortField,
-                                direction = state.sortDirection,
-                                onDismiss = { showSortMenu = false },
-                                onSelect = { field, direction ->
-                                    showSortMenu = false
-                                    viewModel.setSort(field, direction)
-                                }
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = stringResource(Res.string.files_sort)
                             )
                         }
+                        SortMenu(
+                            expanded = showSortMenu,
+                            current = state.sortField,
+                            direction = state.sortDirection,
+                            onDismiss = { showSortMenu = false },
+                            onSelect = { field, direction ->
+                                showSortMenu = false
+                                viewModel.setSort(field, direction)
+                            }
+                        )
                         RefreshAction(refreshing = refreshing, onRefresh = viewModel::refresh)
                     }
                 )
