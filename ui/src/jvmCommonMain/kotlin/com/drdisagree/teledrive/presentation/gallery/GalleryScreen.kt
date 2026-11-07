@@ -429,7 +429,7 @@ fun GalleryScreen(
             confirmLabel = stringResource(Res.string.common_create),
             onConfirm = { name ->
                 showCreateAlbum = false
-                viewModel.createFolderIn(null, name)
+                viewModel.createAlbum(name)
             },
             onDismiss = { showCreateAlbum = false }
         )
