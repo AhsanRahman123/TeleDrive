@@ -46,7 +46,8 @@ fun FileListItem(
     showFavorite: Boolean = true,
     showAvailableOffline: Boolean = true,
     status: (@Composable () -> Unit)? = null,
-    onToggleSelection: (() -> Unit)? = null
+    onToggleSelection: (() -> Unit)? = null,
+    showSelectionCheckbox: Boolean = true
 ) {
     val compact = LocalCompactLayout.current
     val background = if (selected) {
@@ -70,7 +71,7 @@ fun FileListItem(
             .padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (selectionMode) {
+        if (showSelectionCheckbox) {
             SelectionCheckbox(
                 checked = selected,
                 onClick = onToggleSelection ?: onClick,
