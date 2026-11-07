@@ -201,6 +201,7 @@ import com.drdisagree.teledrive.resources.files_move_to
 import com.drdisagree.teledrive.resources.files_new_folder
 import com.drdisagree.teledrive.resources.files_nothing_here_yet
 import com.drdisagree.teledrive.resources.files_only_files_verified_telegram
+import com.drdisagree.teledrive.resources.files_queued_for_download
 import com.drdisagree.teledrive.resources.files_rename_file
 import com.drdisagree.teledrive.resources.files_rename_folder
 import com.drdisagree.teledrive.resources.files_search
