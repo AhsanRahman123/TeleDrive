@@ -404,6 +404,7 @@
     <string name="gallery_tab_photos">照片</string>
     <string name="gallery_tab_videos">视频</string>
     <string name="gallery_title">图库</string>
+    <string name="gallery_new_album">新建相册</string>
 
     <!-- Preview -->
     <string name="preview_add_favorites">添加到收藏</string>
