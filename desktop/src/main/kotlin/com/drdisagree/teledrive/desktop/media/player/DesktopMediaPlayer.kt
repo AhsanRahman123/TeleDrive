@@ -371,7 +371,7 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         fullscreenController != null
                     }
-                    key == Key.Escape && fullscreenController?.isFullscreen() == true -> {
+                    key == Key.Escape && !ctrl && !alt && !shift && fullscreenController?.isFullscreen() == true -> {
                         fullscreenController.toggle()
                         true
                     }
@@ -395,7 +395,7 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    ctrl && key == Key.DirectionUp -> {
+                    ctrl && !alt && !shift && key == Key.DirectionUp -> {
                         val volume = (player.audio().volume() + VOLUME_STEP).coerceAtMost(200)
                         player.audio().setVolume(volume)
                         player.audio().isMute = false
@@ -403,7 +403,7 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    ctrl && key == Key.DirectionDown -> {
+                    ctrl && !alt && !shift && key == Key.DirectionDown -> {
                         val volume = (player.audio().volume() - VOLUME_STEP).coerceAtLeast(0)
                         player.audio().setVolume(volume)
                         if (volume > 0) player.audio().isMute = false
