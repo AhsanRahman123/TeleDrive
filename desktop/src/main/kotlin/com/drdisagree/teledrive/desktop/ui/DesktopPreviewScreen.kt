@@ -59,6 +59,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,6 +143,7 @@ import com.drdisagree.teledrive.resources.preview_remove_favorites
 import com.drdisagree.teledrive.resources.preview_requires_download
 import com.drdisagree.teledrive.resources.preview_truncated_download_view
 import com.drdisagree.teledrive.resources.preview_unarchive
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -580,6 +582,7 @@ private fun PreviewPane(
                 val zoomableState = rememberZoomableState(
                     zoomSpec = ZoomSpec(maxZoomFactor = 6f)
                 )
+                val zoomScope = rememberCoroutineScope()
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (undecodable) {
                         EmptyState(
@@ -605,7 +608,7 @@ private fun PreviewPane(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilledIconButton(
-                                onClick = { zoomableState.zoomBy(zoomFactor = 1.2f) }
+                                onClick = { zoomScope.launch { zoomableState.zoomBy(zoomFactor = 1.2f) } }
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.ZoomIn,
@@ -613,7 +616,7 @@ private fun PreviewPane(
                                 )
                             }
                             FilledIconButton(
-                                onClick = { zoomableState.zoomBy(zoomFactor = 1f / 1.2f) }
+                                onClick = { zoomScope.launch { zoomableState.zoomBy(zoomFactor = 1f / 1.2f) } }
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.ZoomOut,

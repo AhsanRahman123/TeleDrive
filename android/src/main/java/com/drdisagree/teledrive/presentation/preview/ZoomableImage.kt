@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,7 @@ import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
 import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
 /**
@@ -59,6 +61,7 @@ fun ZoomableImage(
     }
 
     val zoomableState = rememberZoomableState(zoomSpec = ZoomSpec(maxZoomFactor = MAX_ZOOM))
+    val zoomScope = rememberCoroutineScope()
     val context = LocalContext.current
     val request = remember(model) {
         ImageRequest.Builder(context)
@@ -85,13 +88,13 @@ fun ZoomableImage(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { zoomableState.zoomBy(zoomFactor = 1.2f) }) {
+                IconButton(onClick = { zoomScope.launch { zoomableState.zoomBy(zoomFactor = 1.2f) } }) {
                     Icon(
                         imageVector = Icons.Filled.ZoomIn,
                         contentDescription = stringResource(Res.string.preview_zoom_in)
                     )
                 }
-                IconButton(onClick = { zoomableState.zoomBy(zoomFactor = 1f / 1.2f) }) {
+                IconButton(onClick = { zoomScope.launch { zoomableState.zoomBy(zoomFactor = 1f / 1.2f) } }) {
                     Icon(
                         imageVector = Icons.Filled.ZoomOut,
                         contentDescription = stringResource(Res.string.preview_zoom_out)
