@@ -30,10 +30,11 @@ internal fun SortMenu(
     current: FileSortField,
     direction: SortDirection,
     onDismiss: () -> Unit,
-    onSelect: (FileSortField, SortDirection) -> Unit
+    onSelect: (FileSortField, SortDirection) -> Unit,
+    fields: List<FileSortField> = FileSortField.entries
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-        FileSortField.entries.forEach { field ->
+        fields.forEach { field ->
             val selected = field == current
             val ascending = direction == SortDirection.ASCENDING
             DropdownMenuItem(
