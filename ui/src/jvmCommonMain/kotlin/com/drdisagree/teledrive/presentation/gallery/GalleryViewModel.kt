@@ -18,6 +18,9 @@ import androidx.paging.map
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.files_cut_count
 import com.drdisagree.teledrive.resources.files_queued_for_download
+import com.drdisagree.teledrive.resources.files_copied_all
+import com.drdisagree.teledrive.resources.files_copied_partial
+import com.drdisagree.teledrive.resources.files_share_needs_local
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
@@ -31,6 +34,7 @@ import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.domain.repository.TrashRepository
 import com.drdisagree.teledrive.presentation.files.CutItems
 import com.drdisagree.teledrive.presentation.files.FileClipboard
+import com.drdisagree.teledrive.presentation.files.ShareRequest
 import com.drdisagree.teledrive.domain.usecase.MakeAvailableOfflineUseCase
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.ListPosition
@@ -75,6 +79,12 @@ class GalleryViewModel(
 
     private val _messages = MutableSharedFlow<UiText>(extraBufferCapacity = 8)
     val messages = _messages.asSharedFlow()
+
+    private val _shareRequests = MutableSharedFlow<ShareRequest>(extraBufferCapacity = 2)
+    val shareRequests = _shareRequests.asSharedFlow()
+
+    private val _infoTarget = MutableStateFlow<DriveFile?>(null)
+    val infoTarget: StateFlow<DriveFile?> = _infoTarget.asStateFlow()
 
     private fun report(error: AppError) {
         _messages.tryEmit(error.toUiText())
@@ -346,6 +356,52 @@ class GalleryViewModel(
         val ids = selection.value.toList()
         clearSelection()
         viewModelScope.launch { trashRepository.moveFilesToTrash(ids).reportFailure() }
+    }
+
+    fun copySelected(targetFolderId: String?) {
+        val ids = selection.value.toList()
+        clearSelection()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            when (val result = fileRepository.copyFiles(ids, targetFolderId)) {
+                is AppResult.Success -> _messages.tryEmit(
+                    if (result.value == ids.size) {
+                        UiText.Resource(Res.string.files_copied_all, result.value)
+                    } else {
+                        UiText.Resource(Res.string.files_copied_partial, result.value, ids.size)
+                    }
+                )
+                is AppResult.Failure -> report(result.error)
+            }
+        }
+    }
+
+    fun shareSelected() {
+        val ids = selection.value.toList()
+        if (ids.isEmpty()) return
+        clearSelection()
+        viewModelScope.launch {
+            val files = fileRepository.getFiles(ids)
+            val paths = files.mapNotNull { it.localPath }
+            if (paths.size != files.size) {
+                _messages.tryEmit(UiText.Resource(Res.string.files_share_needs_local))
+                return@launch
+            }
+            val mimeType = files.map { it.mimeType }.distinct().singleOrNull() ?: "*/*"
+            _shareRequests.tryEmit(ShareRequest(paths, mimeType))
+        }
+    }
+
+    fun showInfoForSelection() {
+        val fileId = selection.value.singleOrNull() ?: return
+        viewModelScope.launch {
+            fileRepository.getFile(fileId)?.let { _infoTarget.value = it }
+            clearSelection()
+        }
+    }
+
+    fun dismissInfo() {
+        _infoTarget.value = null
     }
 
     fun downloadSelected() {
