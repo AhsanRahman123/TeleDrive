@@ -21,6 +21,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -144,16 +145,13 @@ private fun dragSelect(
 private suspend fun AwaitPointerEventScope.awaitMouseDragStart(down: PointerInputChange): Boolean {
     while (true) {
         val event = awaitPointerEvent(PointerEventPass.Initial)
+        if (!event.buttons.isPrimaryPressed) return false
         val change = event.changes.fastFirstOrNull { it.id == down.id } ?: return false
         if (!change.pressed) return false
         if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) return true
     }
 }
 
-/**
- * Consumes nothing while waiting, so the item still gets its long press; moving past touch slop
- * means a scroll.
- */
 /**
  * Consumes nothing while waiting, so the item still gets its long press; moving past touch slop
  * means a scroll.
