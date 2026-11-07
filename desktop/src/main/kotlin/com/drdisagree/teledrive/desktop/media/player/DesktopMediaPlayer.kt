@@ -521,6 +521,16 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
+                    // VLC's O shortcut toggles automatic scaling.
+                    key == Key.O && !ctrl && !alt && !shift -> {
+                        scaling = if (scaling == VideoScaling.FIT) {
+                            VideoScaling.FILL
+                        } else {
+                            VideoScaling.FIT
+                        }
+                        interactionTick++
+                        true
+                    }
                     else -> false
                 }
             }
