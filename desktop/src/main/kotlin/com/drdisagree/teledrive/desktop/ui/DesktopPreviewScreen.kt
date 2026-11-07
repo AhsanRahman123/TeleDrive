@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,14 +62,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -93,6 +85,7 @@ import com.drdisagree.teledrive.desktop.resources.preview_open_externally
 import com.drdisagree.teledrive.desktop.resources.preview_open_failed
 import com.drdisagree.teledrive.desktop.resources.preview_stream
 import com.drdisagree.teledrive.domain.model.DriveFile
+import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.LinkedText
@@ -185,8 +178,6 @@ fun DesktopPreviewScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        val focusRequester = remember { FocusRequester() }
-        LaunchedEffect(state.ready) { if (state.ready) focusRequester.requestFocus() }
         @Composable
         fun PreviewTopBar() {
             TopAppBar(
@@ -242,24 +233,6 @@ fun DesktopPreviewScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .focusRequester(focusRequester)
-                .focusable()
-                .onPreviewKeyEvent { event ->
-                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    when (event.key) {
-                        Key.DirectionLeft -> {
-                            if (index > 0) index--
-                            true
-                        }
-
-                        Key.DirectionRight -> {
-                            if (index < state.files.lastIndex) index++
-                            true
-                        }
-
-                        else -> false
-                    }
-                }
         ) {
             when {
                 !state.ready || file == null -> LoadingState()
@@ -282,6 +255,11 @@ fun DesktopPreviewScreen(
                         viewModel = viewModel,
                         file = pageFile,
                         snackbarHostState = snackbarHostState,
+                        currentIndex = index,
+                        hasPrevious = index > 0,
+                        hasNext = index < state.files.lastIndex,
+                        onPrevious = { if (index > 0) index-- },
+                        onNext = { if (index < state.files.lastIndex) index++ },
                         onPlayerControlsVisibilityChange = { playerChromeVisible = it }
                     )
                 }
@@ -294,7 +272,11 @@ fun DesktopPreviewScreen(
             ) {
                 PreviewTopBar()
             }
-            if (state.files.size > 1 && playerChromeVisible) {
+            if (
+                state.files.size > 1 &&
+                playerChromeVisible &&
+                file?.category !in setOf(FileCategory.AUDIO, FileCategory.VIDEO)
+            ) {
                 PreviewPagerButton(
                     icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                     contentDescription = stringResource(Res.string.preview_previous),
@@ -516,6 +498,11 @@ private fun PreviewPane(
     viewModel: PreviewViewModel,
     file: DriveFile,
     snackbarHostState: SnackbarHostState,
+    currentIndex: Int,
+    hasPrevious: Boolean,
+    hasNext: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val content by viewModel.contentFor(file).collectAsState()
@@ -655,6 +642,10 @@ private fun PreviewPane(
                     preferredSubtitleLanguage = preferredSubtitleLanguage,
                     onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
                     onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    hasPrevious = hasPrevious,
+                    hasNext = hasNext,
                     onControlsVisibilityChange = onPlayerControlsVisibilityChange
                 )
             } else {
@@ -681,6 +672,10 @@ private fun PreviewPane(
                     preferredSubtitleLanguage = preferredSubtitleLanguage,
                     onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
                     onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    hasPrevious = hasPrevious,
+                    hasNext = hasNext,
                     onControlsVisibilityChange = onPlayerControlsVisibilityChange
                 )
             } else {
@@ -825,6 +820,10 @@ private fun InlineStreamPlayer(
     preferredSubtitleLanguage: String,
     onPreferredAudioLanguage: (String) -> Unit,
     onPreferredSubtitleLanguage: (String) -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    hasPrevious: Boolean,
+    hasNext: Boolean,
     onControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val streamServer = koinInject<MediaStreamServer>()
@@ -857,6 +856,10 @@ private fun InlineStreamPlayer(
         preferredSubtitleLanguage = preferredSubtitleLanguage,
         onPreferredAudioLanguage = onPreferredAudioLanguage,
         onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
+        onPrevious = onPrevious,
+        onNext = onNext,
+        hasPrevious = hasPrevious,
+        hasNext = hasNext,
         onControlsVisibilityChange = onControlsVisibilityChange
     )
 }
