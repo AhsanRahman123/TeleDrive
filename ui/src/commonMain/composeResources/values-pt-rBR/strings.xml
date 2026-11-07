@@ -423,6 +423,7 @@
     <string name="gallery_view_list">Visualização em lista</string>
     <string name="gallery_search_hint">Pesquisar fotos e vídeos</string>
     <string name="gallery_clear_filters">Limpar filtros</string>
+    <string name="gallery_clear_search">Limpar pesquisa</string>
 
     <!-- Preview -->
     <string name="preview_add_favorites">Adicionar aos favoritos</string>
