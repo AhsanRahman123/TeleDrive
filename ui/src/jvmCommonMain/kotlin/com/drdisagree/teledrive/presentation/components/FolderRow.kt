@@ -42,7 +42,7 @@ fun FolderRow(
     showFavorite: Boolean = true,
     showAvailableOffline: Boolean = true,
     onLongClick: () -> Unit = {},
-    selectionMode: Boolean = false,
+    showSelectionCheckbox: Boolean = true,
     onToggleSelection: (() -> Unit)? = null
 ) {
     val compact = LocalCompactLayout.current
@@ -63,7 +63,7 @@ fun FolderRow(
             .padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (selectionMode) {
+        if (showSelectionCheckbox) {
             SelectionCheckbox(
                 checked = selected,
                 onClick = onToggleSelection ?: onClick,
