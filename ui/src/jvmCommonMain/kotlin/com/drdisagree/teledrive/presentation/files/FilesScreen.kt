@@ -432,8 +432,7 @@ fun FilesScreen(
                                             state.folderSelection.isEmpty()
                                     val filesOnly = !state.folderInSelection
 
-                                    val selectedItemCount =
-                                        state.selectionCount + state.folderSelection.size
+                                    val selectedItemCount = state.selectionCount
                                     val actions = buildList {
                                         if (filesOnly) {
                                             add(
