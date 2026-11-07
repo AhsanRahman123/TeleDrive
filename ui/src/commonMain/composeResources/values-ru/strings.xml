@@ -986,4 +986,5 @@
         <item>Español</item>
     </string-array>
     <string name="snackbar_view_downloads">Открыть загрузки</string>
+    <string name="nav_offline">Офлайн</string>
 </resources>
