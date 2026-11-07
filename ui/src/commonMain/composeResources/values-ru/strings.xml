@@ -441,6 +441,12 @@
     <string name="gallery_tab_videos">Видео</string>
     <string name="gallery_title">Галерея</string>
     <string name="gallery_new_album">Новый альбом</string>
+    <string name="gallery_filter_backed_up">С резервной копией</string>
+    <string name="gallery_filter_not_backed_up">Без резервной копии</string>
+    <string name="gallery_view_grid">Сетка</string>
+    <string name="gallery_view_list">Список</string>
+    <string name="gallery_search_hint">Поиск фото и видео</string>
+    <string name="gallery_clear_filters">Сбросить фильтры</string>
 
     <!-- Preview -->
     <string name="preview_add_favorites">В избранное</string>
