@@ -2,6 +2,10 @@ package com.drdisagree.teledrive.presentation.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.presentation.common.UiText
+import com.drdisagree.teledrive.resources.Res
+import com.drdisagree.teledrive.resources.files_queued_for_download
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.FileSortField
@@ -14,10 +18,12 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -38,6 +44,9 @@ class SearchViewModel(
     private val transferRepository: TransferRepository,
     private val makeAvailableOffline: MakeAvailableOfflineUseCase
 ) : ViewModel() {
+
+    private val _messages = MutableSharedFlow<UiText>(extraBufferCapacity = 4)
+    val messages = _messages.asSharedFlow()
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
     private val _selectionModeEnabled = MutableStateFlow(false)
@@ -154,7 +163,15 @@ class SearchViewModel(
     fun downloadSelected() {
         val ids = selection.value.toList()
         clearSelection()
-        viewModelScope.launch { ids.forEach { transferRepository.enqueueDownload(it) } }
+        viewModelScope.launch {
+            var queued = 0
+            ids.forEach { id ->
+                if (transferRepository.enqueueDownload(id) is AppResult.Success) queued++
+            }
+            if (queued > 0) {
+                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
+            }
+        }
     }
 
     fun favoriteSelected() {
@@ -166,7 +183,12 @@ class SearchViewModel(
     fun setSelectedAvailableOffline(available: Boolean) {
         val ids = selection.value.toList()
         clearSelection()
-        viewModelScope.launch { makeAvailableOffline(ids, available = available) }
+        viewModelScope.launch {
+            val queued = makeAvailableOffline(ids, available = available)
+            if (queued > 0) {
+                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
+            }
+        }
     }
 
     fun trashSelected() {

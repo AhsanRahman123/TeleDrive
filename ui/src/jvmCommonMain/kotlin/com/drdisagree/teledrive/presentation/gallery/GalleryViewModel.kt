@@ -19,6 +19,7 @@ import androidx.paging.map
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.files_cut_count
 import com.drdisagree.teledrive.resources.files_queued_for_download
+import com.drdisagree.teledrive.resources.files_queued_for_upload
 import com.drdisagree.teledrive.resources.files_copied_all
 import com.drdisagree.teledrive.resources.files_copied_partial
 import com.drdisagree.teledrive.resources.files_share_needs_local
@@ -581,7 +582,16 @@ class GalleryViewModel(
         val ids = selection.value.toList()
         clearSelection()
         viewModelScope.launch {
-            ids.forEach { transferRepository.enqueueUpload(it).reportFailure() }
+            var queued = 0
+            ids.forEach { id ->
+                when (val result = transferRepository.enqueueUpload(id)) {
+                    is AppResult.Success -> queued++
+                    is AppResult.Failure -> report(result.error)
+                }
+            }
+            if (queued > 0) {
+                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_upload, queued))
+            }
         }
     }
 

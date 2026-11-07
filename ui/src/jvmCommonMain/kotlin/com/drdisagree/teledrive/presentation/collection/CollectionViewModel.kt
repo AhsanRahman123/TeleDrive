@@ -12,6 +12,10 @@ import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.TransferState
+import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.presentation.common.UiText
+import com.drdisagree.teledrive.resources.Res
+import com.drdisagree.teledrive.resources.files_queued_for_download
 import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.domain.repository.TrashRepository
@@ -19,10 +23,12 @@ import com.drdisagree.teledrive.domain.usecase.MakeAvailableOfflineUseCase
 import com.drdisagree.teledrive.presentation.navigation.Route
 import com.drdisagree.teledrive.presentation.preview.PreviewSequence
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -41,6 +47,9 @@ class CollectionViewModel(
     val type: CollectionType = runCatching {
         CollectionType.valueOf(savedStateHandle.toRoute<Route.Collection>().type)
     }.getOrDefault(CollectionType.FAVORITES)
+
+    private val _messages = MutableSharedFlow<UiText>(extraBufferCapacity = 4)
+    val messages = _messages.asSharedFlow()
 
     private val _selection = MutableStateFlow<Set<String>>(emptySet())
     val selection: StateFlow<Set<String>> = _selection.asStateFlow()
@@ -109,7 +118,12 @@ class CollectionViewModel(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     fun downloadMissing() {
-        viewModelScope.launch { makeAvailableOffline.downloadMissing() }
+        viewModelScope.launch {
+            val queued = makeAvailableOffline.downloadMissing()
+            if (queued > 0) {
+                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
+            }
+        }
     }
 
     fun startSelectionMode() {
@@ -181,7 +195,13 @@ class CollectionViewModel(
         clearSelection()
         viewModelScope.launch {
             val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
-            ids.forEach { transferRepository.enqueueDownload(it) }
+            var queued = 0
+            ids.forEach { id ->
+                if (transferRepository.enqueueDownload(id) is AppResult.Success) queued++
+            }
+            if (queued > 0) {
+                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
+            }
         }
     }
 
