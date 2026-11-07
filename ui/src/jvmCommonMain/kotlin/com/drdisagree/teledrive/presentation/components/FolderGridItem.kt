@@ -42,7 +42,7 @@ fun FolderGridItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
-    selectionMode: Boolean = selected,
+    selectionMode: Boolean = false,
     onToggleSelection: (() -> Unit)? = null
 ) {
     Column(
