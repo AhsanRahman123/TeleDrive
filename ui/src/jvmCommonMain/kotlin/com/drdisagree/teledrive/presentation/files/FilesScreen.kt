@@ -588,6 +588,7 @@ fun FilesScreen(
                                         onDismissRequest = { showSelectionOverflow = false },
                                         actions = actions
                                     )
+                                    }
                                 }
                             }
                         )
