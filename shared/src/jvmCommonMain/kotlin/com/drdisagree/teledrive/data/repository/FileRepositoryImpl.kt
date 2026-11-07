@@ -35,6 +35,7 @@ import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.DriveFolder
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
+import com.drdisagree.teledrive.domain.model.FolderCopyResult
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import com.drdisagree.teledrive.domain.model.MediaAlbum
