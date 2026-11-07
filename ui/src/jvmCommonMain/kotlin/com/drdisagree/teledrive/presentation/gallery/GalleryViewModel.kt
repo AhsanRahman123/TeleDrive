@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.presentation.gallery
 
 import com.drdisagree.teledrive.core.common.AppError
+import com.drdisagree.teledrive.core.files.DeleteConsentRequest
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.toUiText
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -21,6 +22,8 @@ import com.drdisagree.teledrive.resources.files_queued_for_download
 import com.drdisagree.teledrive.resources.files_copied_all
 import com.drdisagree.teledrive.resources.files_copied_partial
 import com.drdisagree.teledrive.resources.files_share_needs_local
+import com.drdisagree.teledrive.resources.files_kept_offline_copies
+import com.drdisagree.teledrive.resources.files_removed_local_copies
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
@@ -108,6 +111,10 @@ class GalleryViewModel(
 
     private val _shareRequests = MutableSharedFlow<ShareRequest>(extraBufferCapacity = 2)
     val shareRequests = _shareRequests.asSharedFlow()
+
+    private val _deleteConsentRequests = MutableSharedFlow<DeleteConsentRequest>(extraBufferCapacity = 1)
+    val deleteConsentRequests = _deleteConsentRequests.asSharedFlow()
+    private var pendingLocalCopyIds: List<String> = emptyList()
 
     private val _infoTarget = MutableStateFlow<DriveFile?>(null)
     val infoTarget: StateFlow<DriveFile?> = _infoTarget.asStateFlow()
@@ -493,6 +500,45 @@ class GalleryViewModel(
             }
             val mimeType = files.map { it.mimeType }.distinct().singleOrNull() ?: "*/*"
             _shareRequests.tryEmit(ShareRequest(paths, mimeType))
+        }
+    }
+
+    fun deleteLocalCopies() {
+        val ids = selection.value.toList()
+        clearSelection()
+        removeLocalCopies(ids)
+    }
+
+    fun retryLocalCopyRemoval() {
+        removeLocalCopies(pendingLocalCopyIds)
+    }
+
+    private fun removeLocalCopies(ids: List<String>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            when (val result = fileRepository.deleteLocalCopy(ids)) {
+                is AppResult.Success -> {
+                    val consent = result.value.consentRequest
+                    if (consent != null) {
+                        pendingLocalCopyIds = ids
+                        _deleteConsentRequests.tryEmit(consent)
+                    } else {
+                        pendingLocalCopyIds = emptyList()
+                        val kept = result.value.keptOffline
+                        _messages.tryEmit(
+                            if (kept > 0 && result.value.deletedCount == 0) {
+                                UiText.Resource(Res.string.files_kept_offline_copies, kept)
+                            } else {
+                                UiText.Resource(
+                                    Res.string.files_removed_local_copies,
+                                    result.value.deletedCount
+                                )
+                            }
+                        )
+                    }
+                }
+                is AppResult.Failure -> report(result.error)
+            }
         }
     }
 
