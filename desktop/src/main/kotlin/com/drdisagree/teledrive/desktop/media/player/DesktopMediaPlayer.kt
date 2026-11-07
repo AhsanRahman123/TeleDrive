@@ -354,7 +354,7 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.S && shift && !ctrl && !alt -> {
+                    key == Key.S && ctrl && alt && !shift -> {
                         saveVideoSnapshot()
                         interactionTick++
                         true
@@ -439,10 +439,10 @@ fun DesktopMediaPlayer(
                     }
                     key == Key.DirectionLeft || key == Key.DirectionRight -> {
                         val jumpMs = when {
-                            ctrl && alt -> 300_000L
-                            ctrl -> 60_000L
-                            alt -> 10_000L
-                            shift -> 3_000L
+                            ctrl && alt && !shift -> 300_000L
+                            ctrl && !alt && !shift -> 60_000L
+                            alt && !ctrl && !shift -> 10_000L
+                            shift && !ctrl && !alt -> 3_000L
                             else -> 0L
                         }
                         if (jumpMs == 0L) {
