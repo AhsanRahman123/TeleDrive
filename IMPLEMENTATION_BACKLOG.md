@@ -172,13 +172,35 @@ These views share the Gallery experience in A7, but their actions must respect w
 - Trash is the exception for active visibility: while an item is trashed, it is browsed in Trash, not in ordinary active Files/Gallery/Favourites/Offline views. Restore returns it to the views matching its preserved attributes.
 - Show consistent counts, selection behavior, breadcrumbs/path context, and loading/empty/error states across all five views.
 
+### A9. Share cloud-backed files directly — no forced download-first flow
+
+User requirement:
+- The Share action must start sharing directly. The current flow that first downloads a cloud-only file and only then offers the share option is not acceptable.
+- Tapping Share should immediately open the relevant share destination/chooser or direct-share flow, without requiring the user to manually download the file first.
+- Prefer sharing the existing remote Telegram-backed item where the target supports it (for example, a Telegram message/document reference or accessible share link), rather than routing through a local download.
+- On Android, investigate a read-only, stream-backed content URI/provider for targets that require file bytes. The receiving app may read/stream the bytes on demand from the remote source; do not first materialize a second full copy in TeleDrive's normal Downloads folder. Respect URI permissions and revoke temporary access safely.
+- On Windows and Linux, provide the best native direct-share experience available. Where a target accepts links, share a valid recipient-accessible link/reference; do not silently download the entire file merely to populate a share dialog.
+- A link/reference must actually be usable by the intended recipient. Do not expose private Telegram channel/message identifiers as though they were public URLs, and do not claim that a private remote file is externally accessible unless permissions/access have been verified.
+- If the chosen destination fundamentally requires a local file and no stream-backed or remote share method is supported, explain that limitation and offer an explicit user-initiated download fallback. Never start a hidden/automatic download and then unexpectedly show the share sheet.
+- Preserve the original filename, MIME type, file bytes and integrity. Sharing must not mutate, recompress, resize, move, archive, hide, favourite, or remove the original item.
+- Support multi-selection and folder sharing where the destination/platform permits it; otherwise clearly explain the supported selection constraints.
+- Keep the same direct-share behavior available from Files, Gallery, Archived, Hidden, Trash (only where safe/meaningful), Offline and Favourites, respecting each view's state rules.
+
+Acceptance checks:
+- Tapping Share on a cloud-only file opens the share flow immediately and does not create a full local download first.
+- A target that accepts a remote link receives a valid link that the intended recipient can actually open.
+- A target that requests file bytes can read them through the supported streaming/provider path without TeleDrive first saving a complete duplicate into its normal Downloads location.
+- If a destination cannot accept a remote link or streamed content, TeleDrive reports that limitation before any user-confirmed fallback download.
+- Local-only and already-offline files continue to share normally without an unnecessary second download.
+- The source file remains unchanged and its SHA-256 stays the same after sharing.
+
 ## B. The complete required 13-capability scope
 
 These are all required before the user begins building the full library. Some parts already exist; the checklist means complete and verify the overall capability, not rebuild everything from scratch.
 
 ### B1. Complete file and folder management
 - Upload individual files and whole folders while preserving relative folder structure.
-- Create, rename, copy, move, share, download, hide, archive, favorite, mark offline and move to recoverable Trash.
+- Create, rename, copy, move, share directly without forced download-first behavior, download, hide, archive, favorite, mark offline and move to recoverable Trash (see A9).
 - Support recursive folder copy/move, empty folders and conflict-safe operations.
 - Grid, List and Details views, sorting, multi-selection, keyboard navigation, right-click context menus at the pointer, breadcrumbs and folder-tree navigation.
 - Consistent actions across Files, Gallery, Search, Collections and all special views where relevant.
@@ -231,7 +253,7 @@ These are all required before the user begins building the full library. Some pa
 
 ### B9. Complete upload/download/copy/move/share/delete workflows
 - Make workflows available for both files and folders where meaningful.
-- No partial share of mixed selections: explain when a cloud-only item needs download first.
+- Share cloud-backed items directly through valid remote references/links or an on-demand streaming provider where supported; do not force a prior full download. Be explicit about destinations that require a user-confirmed download fallback (see A9).
 - Use verified remote copies before offering safe local-space cleanup.
 - Keep ordinary deletion recoverable through Trash.
 
@@ -291,7 +313,8 @@ Do not mix these into the practical build:
 7. Confirm file hashes after representative upload/download/copy/restore workflows.
 8. Verify Archived, Hidden, Trash, Offline and Favourites as full Gallery scopes: categories, scoped search/filters, Grid/List/Details, folder navigation, original-quality image viewing, video/audio playback, document/archive previews, and scope-appropriate actions.
 9. Verify overlapping attributes (Favourite + Offline, Archived + Favourite, etc.), independent status changes, Trash restore preservation, permanent deletion safeguards and offline-only playback without network fallback.
-10. Build and runtime-test Android and Linux separately. Do not mark those platforms complete after desktop-only tests.
+10. Verify direct sharing for cloud-only, local-only and offline files on Android, Windows and Linux. Confirm cloud-only Share opens immediately without a forced full download, destination links are genuinely accessible, streaming providers preserve file bytes, and unsupported destinations offer only an explicit download fallback.
+11. Build and runtime-test Android and Linux separately. Do not mark those platforms complete after desktop-only tests.
 
 ## E. Current implementation-status snapshot
 
