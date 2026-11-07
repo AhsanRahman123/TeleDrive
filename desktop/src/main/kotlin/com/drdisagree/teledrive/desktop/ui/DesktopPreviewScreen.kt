@@ -76,8 +76,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.LocalPlatformContext
-import coil3.request.ImageRequest
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
@@ -149,9 +149,8 @@ import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import me.saket.telephoto.zoomable.ZoomSpec
-import me.saket.telephoto.zoomable.rememberZoomableImageState
 import me.saket.telephoto.zoomable.rememberZoomableState
-import me.saket.telephoto.zoomable.coil3.ZoomableAsyncImage
+import me.saket.telephoto.zoomable.zoomable
 import java.awt.Desktop
 import java.io.File
 import com.drdisagree.teledrive.desktop.resources.Res as DesktopRes
@@ -584,13 +583,6 @@ private fun PreviewPane(
                     zoomSpec = ZoomSpec(maxZoomFactor = 6f)
                 )
                 val zoomScope = rememberCoroutineScope()
-                val platformContext = LocalPlatformContext.current
-                val imageRequest = remember(current.model) {
-                    ImageRequest.Builder(platformContext)
-                        .data(current.model)
-                        .listener(onError = { _, _ -> undecodable = true })
-                        .build()
-                }
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (undecodable) {
                         EmptyState(
@@ -598,11 +590,16 @@ private fun PreviewPane(
                             title = stringResource(Res.string.preview_image_undecodable)
                         )
                     } else {
-                        ZoomableAsyncImage(
-                            model = imageRequest,
+                        AsyncImage(
+                            model = current.model,
                             contentDescription = file.name,
-                            state = rememberZoomableImageState(zoomableState),
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zoomable(state = zoomableState),
+                            contentScale = ContentScale.Fit,
+                            onState = { state ->
+                                if (state is AsyncImagePainter.State.Error) undecodable = true
+                            }
                         )
                         Row(
                             modifier = Modifier
@@ -611,7 +608,11 @@ private fun PreviewPane(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilledIconButton(
-                                onClick = { zoomScope.launch { zoomableState.zoomBy(zoomFactor = 1.2f) } }
+                                onClick = {
+                                    zoomScope.launch {
+                                        zoomableState.zoomBy(zoomFactor = 1.2f)
+                                    }
+                                }
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.ZoomIn,
@@ -619,7 +620,11 @@ private fun PreviewPane(
                                 )
                             }
                             FilledIconButton(
-                                onClick = { zoomScope.launch { zoomableState.zoomBy(zoomFactor = 1f / 1.2f) } }
+                                onClick = {
+                                    zoomScope.launch {
+                                        zoomableState.zoomBy(zoomFactor = 1f / 1.2f)
+                                    }
+                                }
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.ZoomOut,
