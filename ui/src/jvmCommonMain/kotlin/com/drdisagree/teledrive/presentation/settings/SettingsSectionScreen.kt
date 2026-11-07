@@ -57,6 +57,7 @@ import com.drdisagree.teledrive.resources.settings_auto_remove_managed_copies
 import com.drdisagree.teledrive.resources.settings_auto_remove_managed_copies_summary
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.language_english
+import com.drdisagree.teledrive.resources.language_indonesian
 import com.drdisagree.teledrive.resources.language_labels
 import com.drdisagree.teledrive.resources.language_chinese
 import com.drdisagree.teledrive.resources.language_spanish
@@ -1098,6 +1099,7 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                     AppLanguage.PORTUGUESE_BR -> stringResource(Res.string.language_portuguese_br)
                     AppLanguage.CHINESE_SIMPLIFIED -> stringResource(Res.string.language_chinese)
                     AppLanguage.SPANISH -> stringResource(Res.string.language_spanish)
+                    AppLanguage.INDONESIAN -> stringResource(Res.string.language_indonesian)
                 },
                 onClick = { showLanguageDialog = true }
             )
