@@ -127,7 +127,8 @@ fun AppNavHost(
                         navController.navigateOnce(
                             Route.GalleryAlbum(album.folderId, album.name ?: unfiledAlbumName)
                         )
-                    }
+                    },
+                    onOpenTransfers = { navController.navigateOnce(Route.Transfers) }
                 )
             }
         }
@@ -136,7 +137,8 @@ fun AppNavHost(
                 onOpenFile = { id, sequence ->
                     navController.navigateOnce(sequence.routeFor(id))
                 },
-                onBack = { navController.popBackStackOnce() }
+                onBack = { navController.popBackStackOnce() },
+                onOpenTransfers = { navController.navigateOnce(Route.Transfers) }
             )
         }
         composable<Route.Preview>(
