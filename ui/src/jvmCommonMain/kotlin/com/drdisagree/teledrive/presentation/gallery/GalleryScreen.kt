@@ -774,7 +774,6 @@ fun GalleryScreen(
                                         file = file,
                                         selected = file.id in state.selection,
                                         compact = true,
-                                        selectionMode = selectionMode,
                                         onToggleSelection = { viewModel.toggleSelection(file.id) },
                                         onClick = {
                                             if (selectionMode) {
