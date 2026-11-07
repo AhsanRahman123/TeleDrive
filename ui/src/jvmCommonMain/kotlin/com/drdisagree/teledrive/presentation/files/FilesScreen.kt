@@ -114,6 +114,7 @@ import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
+import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.isInitialLoad
 import com.drdisagree.teledrive.presentation.common.rememberPosition
@@ -206,6 +207,7 @@ import com.drdisagree.teledrive.resources.files_search
 import com.drdisagree.teledrive.resources.files_share_destination_confirm
 import com.drdisagree.teledrive.resources.files_share_destination_title
 import com.drdisagree.teledrive.resources.files_show_in_file_manager
+import com.drdisagree.teledrive.resources.snackbar_view_downloads
 import com.drdisagree.teledrive.resources.files_sort
 import com.drdisagree.teledrive.resources.info_details
 import com.drdisagree.teledrive.resources.note_edit_action
@@ -234,6 +236,7 @@ fun FilesScreen(
     onOpenCrumb: (String?) -> Unit,
     onOpenFile: (String, PreviewSequence) -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenTransfers: () -> Unit,
     onNewNote: (String?) -> Unit,
     onEditNote: (String, String) -> Unit,
     onBack: (() -> Unit)?,
@@ -270,7 +273,22 @@ fun FilesScreen(
 
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
 
-    CollectSnackbarMessages(viewModel.messages, snackbarHostState)
+    val viewDownloadsLabel = stringResource(Res.string.snackbar_view_downloads)
+    CollectSnackbarMessages(
+        messages = viewModel.messages,
+        hostState = snackbarHostState,
+        actionLabel = { message ->
+            if (
+                message is UiText.Resource &&
+                message.resource == Res.string.files_queued_for_download
+            ) {
+                viewDownloadsLabel
+            } else {
+                null
+            }
+        },
+        onAction = { onOpenTransfers() }
+    )
     LaunchedEffect(Unit) {
         viewModel.deleteConsentRequests.collect { request ->
             deleteConsentLauncher.launch(request) { granted ->
