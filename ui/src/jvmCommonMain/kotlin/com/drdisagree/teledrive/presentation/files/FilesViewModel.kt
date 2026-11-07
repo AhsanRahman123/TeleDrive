@@ -107,6 +107,8 @@ class FilesViewModel(
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
     private val folderSelection = MutableStateFlow<Set<String>>(emptySet())
+    private val _selectionModeEnabled = MutableStateFlow(false)
+    val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
 
     private val _working = MutableStateFlow<UiText?>(null)
     val working: StateFlow<UiText?> = _working.asStateFlow()
@@ -252,6 +254,28 @@ class FilesViewModel(
         return trail.toList()
     }
 
+    fun startSelectionMode() {
+        _selectionModeEnabled.update { true }
+    }
+
+    fun selectFileForContext(fileId: String) {
+        _selectionModeEnabled.update { true }
+        _allSelected.update { false }
+        if (fileId !in selection.value) {
+            selection.update { setOf(fileId) }
+            folderSelection.update { emptySet() }
+        }
+    }
+
+    fun selectFolderForContext(folderId: String) {
+        _selectionModeEnabled.update { true }
+        _allSelected.update { false }
+        if (folderId !in folderSelection.value) {
+            selection.update { emptySet() }
+            folderSelection.update { setOf(folderId) }
+        }
+    }
+
     fun toggleSelection(fileId: String) {
         _allSelected.update { false }
         selection.update { current ->
@@ -267,6 +291,7 @@ class FilesViewModel(
     }
 
     fun clearSelection() {
+        _selectionModeEnabled.update { false }
         _allSelected.update { false }
         selection.update { emptySet() }
         folderSelection.update { emptySet() }
