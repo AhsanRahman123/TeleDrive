@@ -448,6 +448,12 @@ class GalleryViewModel(
             }
         }
 
+    fun createAlbum(name: String) {
+        viewModelScope.launch {
+            createFolderIn(parentId = null, name = name)
+        }
+    }
+
     fun moveSelected(targetFolderId: String?) {
         val ids = selection.value.toList()
         clearSelection()
