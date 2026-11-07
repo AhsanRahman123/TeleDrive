@@ -402,19 +402,19 @@ fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.Plus || (key == Key.Equals && shift) -> {
-                        setPlaybackRate(rate + RATE_STEP)
+                        setPlaybackRate(rate * 1.5f)
                         true
                     }
                     key == Key.RightBracket && !ctrl && !alt -> {
-                        setPlaybackRate(rate + RATE_STEP)
+                        setPlaybackRate(rate * FINE_RATE_FACTOR)
                         true
                     }
                     key == Key.Minus -> {
-                        setPlaybackRate(rate - RATE_STEP)
+                        setPlaybackRate(rate / 1.5f)
                         true
                     }
                     key == Key.LeftBracket && !ctrl && !alt -> {
-                        setPlaybackRate(rate - RATE_STEP)
+                        setPlaybackRate(rate / FINE_RATE_FACTOR)
                         true
                     }
                     key == Key.Equals && !shift && !ctrl && !alt -> {
@@ -489,8 +489,22 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
+                    key == Key.Z && shift && !ctrl && !alt -> {
+                        scaling = VideoScaling.FIT
+                        interactionTick++
+                        true
+                    }
+                    key == Key.Z && !ctrl && !alt -> {
+                        scaling = VideoScaling.ZOOM
+                        interactionTick++
+                        true
+                    }
                     key == Key.O && !ctrl && !alt -> {
-                        scaling = scaling.next()
+                        scaling = if (scaling == VideoScaling.FIT) {
+                            VideoScaling.FILL
+                        } else {
+                            VideoScaling.FIT
+                        }
                         interactionTick++
                         true
                     }
@@ -928,7 +942,7 @@ private const val CONTROLS_HIDE_DELAY_MS = 3_000L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val VOLUME_STEP = 5
-private const val RATE_STEP = 0.1f
+private const val FINE_RATE_FACTOR = 1.1f
 private const val SYNC_STEP_US = 50_000L
 private val THUMB_WIDTH = 5.dp
 private val THUMB_HEIGHT = 26.dp
