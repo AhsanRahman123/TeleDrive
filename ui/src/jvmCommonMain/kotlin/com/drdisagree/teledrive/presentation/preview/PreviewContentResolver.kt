@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import net.lingala.zip4j.ZipFile
+import org.apache.commons.compress.archivers.sevenz.SevenZFile
 import java.io.File
 
 /** Original local files are always plaintext; only remote copies and caches are ever encrypted. */
@@ -169,22 +170,36 @@ class PreviewContentResolver(
         PreviewContent.PlainText(String(bytes, Charsets.UTF_8), truncated)
     }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
 
-    private fun readArchive(file: DriveFile, path: String): PreviewContent {
-        if (file.mimeType != "application/zip") {
-            return PreviewContent.Unsupported(Res.string.preview_only_zip)
+    private fun readArchive(file: DriveFile, path: String): PreviewContent =
+        when (file.mimeType) {
+            "application/zip" -> runCatching {
+                val entries = ZipFile(path).fileHeaders.map { header ->
+                    ArchiveEntry(
+                        name = header.fileName,
+                        sizeBytes = header.uncompressedSize,
+                        compressedBytes = header.compressedSize,
+                        isDirectory = header.isDirectory
+                    )
+                }
+                PreviewContent.Archive(entries, "ZIP")
+            }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
+
+            "application/x-7z-compressed" -> runCatching {
+                val entries = SevenZFile.builder().setFile(File(path)).get().use { archive ->
+                    archive.entries.map { header ->
+                        ArchiveEntry(
+                            name = header.name.orEmpty(),
+                            sizeBytes = header.size.coerceAtLeast(0L),
+                            compressedBytes = header.compressedSize.coerceAtLeast(0L),
+                            isDirectory = header.isDirectory
+                        )
+                    }
+                }
+                PreviewContent.Archive(entries, "7Z")
+            }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
+
+            else -> PreviewContent.Unsupported(Res.string.preview_only_zip)
         }
-        return runCatching {
-            val entries = ZipFile(path).fileHeaders.map { header ->
-                ArchiveEntry(
-                    name = header.fileName,
-                    sizeBytes = header.uncompressedSize,
-                    compressedBytes = header.compressedSize,
-                    isDirectory = header.isDirectory
-                )
-            }
-            PreviewContent.Archive(entries, "ZIP")
-        }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
-    }
 
     private suspend fun fetchToCache(
         file: DriveFile,

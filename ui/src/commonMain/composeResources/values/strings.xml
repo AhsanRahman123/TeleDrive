@@ -451,7 +451,7 @@
     <string name="preview_no_preview">No preview</string>
     <string name="preview_no_preview_for_type">No preview for this file type</string>
     <string name="preview_nothing_to_remove">Nothing to remove</string>
-    <string name="preview_only_zip">Only ZIP archives can be browsed.</string>
+    <string name="preview_only_zip">This archive format is not supported for preview yet.</string>
     <string name="preview_open_link">Open link</string>
     <string name="preview_page_number">Page %1$d</string>
     <string name="preview_pdf_open_failed">Could not open PDF</string>

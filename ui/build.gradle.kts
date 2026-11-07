@@ -26,6 +26,8 @@ kotlin {
             dependsOn(commonMain.get())
             dependencies {
                 implementation(libs.zip4j)
+                implementation(libs.commons.compress)
+                implementation(libs.tukaani.xz)
             }
         }
         named("androidMain") {
