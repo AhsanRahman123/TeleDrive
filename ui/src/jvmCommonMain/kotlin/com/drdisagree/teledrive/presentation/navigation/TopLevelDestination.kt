@@ -22,13 +22,13 @@ import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.collection_archived_title
 import com.drdisagree.teledrive.resources.collection_favorites_title
 import com.drdisagree.teledrive.resources.collection_hidden_title
-import com.drdisagree.teledrive.resources.collection_offline_title
-import com.drdisagree.teledrive.resources.home_transfer_history
 import com.drdisagree.teledrive.resources.nav_files
 import com.drdisagree.teledrive.resources.nav_gallery
 import com.drdisagree.teledrive.resources.nav_home
+import com.drdisagree.teledrive.resources.nav_offline
 import com.drdisagree.teledrive.resources.nav_settings
 import com.drdisagree.teledrive.resources.trash
+import com.drdisagree.teledrive.resources.transfers
 
 /**
  * The desktop rail exposes the main collections and transfer destinations directly.
@@ -63,7 +63,7 @@ enum class TopLevelDestination(
     ),
     OFFLINE(
         Route.Collection(CollectionType.AVAILABLE_OFFLINE.name),
-        Res.string.collection_offline_title,
+        Res.string.nav_offline,
         Icons.Filled.OfflinePin,
         Icons.Filled.OfflinePin
     ),
@@ -81,7 +81,7 @@ enum class TopLevelDestination(
     ),
     TRANSFERS(
         Route.Transfers,
-        Res.string.home_transfer_history,
+        Res.string.transfers,
         Icons.Outlined.SwapVert,
         Icons.Outlined.SwapVert
     ),
