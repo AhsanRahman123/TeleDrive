@@ -115,6 +115,10 @@ fun TrashScreen(
     var confirmDeleteSelected by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
 
+    LaunchedEffect(selectionMode) {
+        if (!selectionMode) showSelectionOverflow = false
+    }
+
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
     state.working?.let { message ->
