@@ -47,6 +47,7 @@ import com.drdisagree.teledrive.presentation.components.zoomedOut
 import com.drdisagree.teledrive.presentation.navigation.Route
 import com.drdisagree.teledrive.presentation.preview.PreviewSequence
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,6 +55,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -65,7 +67,31 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 
-@OptIn(ExperimentalCoroutinesApi::class)
+private data class GalleryBrowseState(
+    val tab: GalleryTab,
+    val sortField: FileSortField,
+    val sortDirection: SortDirection,
+    val filters: GalleryFilters
+)
+
+private fun albumComparator(
+    field: FileSortField,
+    direction: SortDirection
+): Comparator<MediaAlbum> {
+    val ascending = when (field) {
+        FileSortField.SIZE -> compareBy<MediaAlbum> { it.itemCount }
+        FileSortField.DATE_MODIFIED, FileSortField.DATE_ADDED ->
+            compareBy<MediaAlbum> { it.latestAt }
+        else -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.name.orEmpty() }
+    }
+    return if (direction == SortDirection.ASCENDING) {
+        ascending.thenBy { it.folderId.orEmpty() }
+    } else {
+        ascending.reversed().thenBy { it.folderId.orEmpty() }
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class GalleryViewModel(
     savedStateHandle: SavedStateHandle,
     private val fileRepository: FileRepository,
@@ -105,6 +131,14 @@ class GalleryViewModel(
     private val sort = settingsRepository.preferences
         .map { it.gallerySortField to it.gallerySortDirection }
         .distinctUntilChanged()
+    private val filters = MutableStateFlow(GalleryFilters())
+    private val debouncedQuery = filters
+        .map { it.searchQuery }
+        .debounce(250.milliseconds)
+        .distinctUntilChanged()
+    private val filterOptions = filters
+        .map { it.copy(searchQuery = "") }
+        .distinctUntilChanged()
 
     val listPosition = ListPosition(savedStateHandle)
 
@@ -118,8 +152,9 @@ class GalleryViewModel(
     private val spec: Flow<FileQuerySpec> = combine(
         tab,
         sort,
-        settingsRepository.preferences
-    ) { currentTab, (field, direction), _ ->
+        debouncedQuery,
+        filterOptions
+    ) { currentTab, (field, direction), query, currentFilters ->
         FileQuerySpec(
             folderId = albumFolderId,
             filterByFolder = isAlbumView,
@@ -128,6 +163,11 @@ class GalleryViewModel(
                 GalleryTab.VIDEOS -> listOf(FileCategory.VIDEO)
                 else -> listOf(FileCategory.IMAGE, FileCategory.VIDEO)
             },
+            nameQuery = query.takeIf { it.isNotBlank() },
+            favoritesOnly = currentFilters.favoritesOnly,
+            availableOfflineOnly = currentFilters.availableOfflineOnly,
+            backedUpOnly = currentFilters.backedUpOnly,
+            notBackedUpOnly = currentFilters.notBackedUpOnly,
             showHidden = false,
             showArchived = false,
             sortField = field,
@@ -135,23 +175,43 @@ class GalleryViewModel(
         )
     }.distinctUntilChanged()
 
-    private val albums: Flow<List<MediaAlbum>> = settingsRepository.preferences
-        .map { it.showHiddenFiles to it.showArchivedFiles }
-        .distinctUntilChanged()
-        .flatMapLatest {
-            if (isAlbumView) flowOf(emptyList())
-            else fileRepository.observeAlbums(showHidden = false, showArchived = false)
+    private val albums: Flow<List<MediaAlbum>> = combine(
+        settingsRepository.preferences
+            .map { it.showHiddenFiles to it.showArchivedFiles }
+            .distinctUntilChanged(),
+        debouncedQuery,
+        sort
+    ) { visibility, query, sortValue ->
+        Triple(visibility, query, sortValue)
+    }.flatMapLatest { (visibility, query, sortValue) ->
+        val (showHidden, showArchived) = visibility
+        if (isAlbumView) {
+            flowOf(emptyList())
+        } else {
+            fileRepository.observeAlbums(showHidden = false, showArchived = false).map { rows ->
+                rows.asSequence()
+                    .filter { album ->
+                        query.isBlank() || album.name?.contains(query, ignoreCase = true) == true
+                    }
+                    .sortedWith(albumComparator(sortValue.first, sortValue.second))
+                    .toList()
+            }
         }
+    }
 
-    val previewSequence: StateFlow<PreviewSequence> = combine(tab, sort) { current, (field, dir) ->
+    val previewSequence: StateFlow<PreviewSequence> = combine(tab, sort, filters) {
+            current, (field, dir), currentFilters ->
         PreviewSequence(
             folderId = albumFolderId,
             filterByFolder = isAlbumView,
+            nameQuery = currentFilters.searchQuery.takeIf { it.isNotBlank() },
             categories = when (current) {
                 GalleryTab.PHOTOS -> listOf(FileCategory.IMAGE)
                 GalleryTab.VIDEOS -> listOf(FileCategory.VIDEO)
                 else -> listOf(FileCategory.IMAGE, FileCategory.VIDEO)
             },
+            favoritesOnly = currentFilters.favoritesOnly,
+            availableOfflineOnly = currentFilters.availableOfflineOnly,
             sortField = field,
             sortDirection = dir
         )
@@ -170,9 +230,17 @@ class GalleryViewModel(
             }
         }
 
+    private val browseState = combine(tab, sort, filters) { currentTab, sortValue, currentFilters ->
+        GalleryBrowseState(
+            tab = currentTab,
+            sortField = sortValue.first,
+            sortDirection = sortValue.second,
+            filters = currentFilters
+        )
+    }
+
     val uiState: StateFlow<GalleryUiState> = combine(
-        tab,
-        sort,
+        browseState,
         selectionCapabilities,
         settingsRepository.preferences
             .map { it.galleryGridSize to it.albumGridSize }
@@ -181,20 +249,21 @@ class GalleryViewModel(
             albums,
             settingsRepository.preferences.map { it.galleryViewMode }.distinctUntilChanged()
         ) { albumList, mode -> albumList to mode }
-    ) { currentTab, (field, direction), selectionState, sizes, extras ->
+    ) { browse, selectionState, sizes, extras ->
         val (selected, capabilities) = selectionState
         val (albumList, mode) = extras
         val (gridSize, albumGridSize) = sizes
         GalleryUiState(
-            tab = currentTab,
+            tab = browse.tab,
             albums = albumList,
             albumTitle = route?.title,
             viewMode = mode,
             isAlbumView = isAlbumView,
             gridSize = gridSize,
             albumGridSize = albumGridSize,
-            sortField = field,
-            sortDirection = direction,
+            sortField = browse.sortField,
+            sortDirection = browse.sortDirection,
+            filters = browse.filters,
             selection = selected,
             capabilities = capabilities,
             loaded = true
@@ -250,6 +319,40 @@ class GalleryViewModel(
             settingsRepository.update {
                 it.copy(gallerySortField = field, gallerySortDirection = direction)
             }
+        }
+    }
+
+    fun setSearchQuery(value: String) {
+        filters.update { it.copy(searchQuery = value) }
+    }
+
+    fun setFavoritesFilter(enabled: Boolean) {
+        filters.update { it.copy(favoritesOnly = enabled) }
+    }
+
+    fun setOfflineFilter(enabled: Boolean) {
+        filters.update { it.copy(availableOfflineOnly = enabled) }
+    }
+
+    fun setBackedUpFilter(enabled: Boolean) {
+        filters.update {
+            it.copy(backedUpOnly = enabled, notBackedUpOnly = if (enabled) false else it.notBackedUpOnly)
+        }
+    }
+
+    fun setNotBackedUpFilter(enabled: Boolean) {
+        filters.update {
+            it.copy(notBackedUpOnly = enabled, backedUpOnly = if (enabled) false else it.backedUpOnly)
+        }
+    }
+
+    fun clearFilters() {
+        filters.update { GalleryFilters() }
+    }
+
+    fun setViewMode(mode: com.drdisagree.teledrive.domain.model.ViewMode) {
+        viewModelScope.launch {
+            settingsRepository.update { it.copy(galleryViewMode = mode) }
         }
     }
 
