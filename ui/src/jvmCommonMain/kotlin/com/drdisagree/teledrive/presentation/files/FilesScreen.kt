@@ -1138,7 +1138,6 @@ private fun FilesContent(
                         else onOpenFolder(folder.id)
                     },
                     onLongClick = { viewModel.toggleFolderSelection(folder.id) },
-                    selectionMode = selectionMode,
                     onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
@@ -1157,7 +1156,6 @@ private fun FilesContent(
                         else onOpenFolder(folder.id)
                     },
                     onLongClick = { viewModel.toggleFolderSelection(folder.id) },
-                    selectionMode = selectionMode,
                     onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
@@ -1181,7 +1179,6 @@ private fun FilesContent(
                 FileGridItem(
                     file = file,
                     selected = selected,
-                    selectionMode = selectionMode,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
                         if (selectionMode) viewModel.toggleSelection(file.id)
