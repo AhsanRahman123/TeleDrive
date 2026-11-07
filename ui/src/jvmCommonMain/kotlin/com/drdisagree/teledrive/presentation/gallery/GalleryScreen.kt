@@ -29,6 +29,7 @@ import com.drdisagree.teledrive.resources.files_sort
 import com.drdisagree.teledrive.resources.preview_remove_favorites
 import androidx.compose.material3.SnackbarHostState
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
+import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
@@ -147,6 +148,8 @@ import com.drdisagree.teledrive.resources.gallery_view_list
 import com.drdisagree.teledrive.resources.gallery_search_hint
 import com.drdisagree.teledrive.resources.gallery_clear_filters
 import com.drdisagree.teledrive.resources.gallery_clear_search
+import com.drdisagree.teledrive.resources.files_queued_for_download
+import com.drdisagree.teledrive.resources.snackbar_view_downloads
 import com.drdisagree.teledrive.resources.gallery_photos_videos_appear_here
 import com.drdisagree.teledrive.resources.gallery_title
 import com.drdisagree.teledrive.resources.info_details
@@ -291,6 +294,7 @@ fun GalleryScreen(
     onOpenFile: (String, PreviewSequence) -> Unit,
     onOpenAlbum: (MediaAlbum) -> Unit = {},
     onBack: (() -> Unit)? = null,
+    onOpenTransfers: () -> Unit = {},
     viewModel: GalleryViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -322,7 +326,22 @@ fun GalleryScreen(
     }
 
 
-    CollectSnackbarMessages(viewModel.messages, snackbarHostState)
+    val viewDownloadsLabel = stringResource(Res.string.snackbar_view_downloads)
+    CollectSnackbarMessages(
+        messages = viewModel.messages,
+        hostState = snackbarHostState,
+        actionLabel = { message ->
+            if (
+                message is UiText.Resource &&
+                message.resource == Res.string.files_queued_for_download
+            ) {
+                viewDownloadsLabel
+            } else {
+                null
+            }
+        },
+        onAction = { onOpenTransfers() }
+    )
 
     if (showMovePicker) {
         FolderPickerHost(
