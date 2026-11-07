@@ -110,13 +110,13 @@ Practical enhancements requested:
 - Keep the queue responsive with thousands of items; paginate or bound completed history.
 - Respect existing flood-safe transfer pacing and concurrency controls. Avoid adding continuous background scheduling unless later justified.
 
-### A7. Full Gallery and file-viewing experience inside Archived and Hidden
+### A7. Full Gallery and file-viewing experience across all special library views
 
 Required:
-- Treat **Archived** and **Hidden** as complete library browsing scopes, not simple lists or storage bins.
+- Treat **Archived, Hidden, Trash, Offline and Favourites** as complete library browsing scopes, not simple lists or storage bins.
 - Provide the same practical Gallery and file-viewing capabilities available in the normal library, using the same shared components and behavior wherever possible.
-- Inside each scope, automatically categorize eligible items into Photos, Videos, Audio, Documents, Archives, Apps/APKs and Other using reliable MIME type/extension metadata.
-- Keep categories scoped: Archived categories show only archived content; Hidden categories show only hidden content. Do not leak these items into the ordinary Gallery or ordinary category counts.
+- Inside every scope, automatically categorize eligible items into Photos, Videos, Audio, Documents, Archives, Apps/APKs and Other using reliable MIME type/extension metadata.
+- Keep categories and counts scoped: each view shows only items that match its own membership/status, without polluting ordinary Gallery/category counts.
 - Support Grid, List and Details layouts, sorting, type/date/size filters, search within the current scope, multi-selection, breadcrumbs and navigation through nested folders.
 - Show category and folder counts that reflect the current Archived/Hidden scope.
 - Photos must open in the same original-quality viewer as ordinary Gallery images, with full-resolution zoom/pan and thumbnail-only derivatives.
@@ -124,17 +124,53 @@ Required:
 - Documents and ZIP/7z archives must use the same supported preview/viewing flows as the main library. Unsupported formats should show a clear fallback rather than a broken viewer.
 - Preserve the usual file operations where meaningful: copy, move, download, share, rename, restore/unarchive/unhide, and recoverable delete. Folder operations must work recursively where applicable.
 - Clearly expose Restore/Unarchive and Unhide actions. Browsing, previewing, searching, copying or moving an item must not silently clear its archived/hidden status; only an explicit state-changing action should do so.
-- Keep Archived and Hidden separate from one another, and make the current scope visible so users know where they are working.
-- Reuse the normal thumbnail cache, paging/virtualisation, preview pipeline and low-memory behavior. Do not load all archived/hidden media at once.
+- Keep each special view clearly labelled and make the current scope visible so users know where they are working.
+- Treat Archived, Hidden, Offline and Favourites as independent, overlapping attributes/views rather than mutually exclusive folders: a file may be both a favourite and available offline, or archived and favourited, for example. Changing one attribute must not silently clear another.
+- Trash is a deletion lifecycle state: trashed items must be excluded from ordinary active library views while deleted; restore must reinstate their prior archive/hidden/favourite/offline attributes where those still apply.
+- Reuse the normal thumbnail cache, paging/virtualisation, preview pipeline and low-memory behavior. Do not load all special-view media at once.
 - This must work consistently on Windows, Android and Linux, with platform-appropriate file pickers and context actions.
 
 Acceptance checks:
 - An archived photo appears under Archived > Photos, opens at original resolution, and remains archived after viewing.
 - A hidden video appears under Hidden > Videos, streams/plays with the same controls as a normal video, and remains hidden after playback.
-- Search, filters, sorting, Grid/List/Details and folder navigation operate only within the selected Archived or Hidden scope by default.
-- Restoring/unarchiving or unhiding explicitly removes the item from that special scope and makes it visible in the ordinary library again.
-- Copy/move/download/share/delete actions do not silently change archive/hidden state or overwrite another item.
-- Large Archived/Hidden collections remain paged and responsive.
+- Trashed photos/videos/documents appear under the correct Trash categories and can be previewed where the underlying file is still available; restore and permanent-delete actions are explicit and distinguishable.
+- Offline items appear under Offline categories and can be browsed/opened without a network connection when their local copy is complete; removing an offline copy must not delete the backed-up cloud item.
+- Favourite items appear under Favourites categories regardless of their ordinary folder location; unfavouriting must not delete or move them.
+- Search, filters, sorting, Grid/List/Details and folder navigation operate only within the selected special scope by default.
+- A single item can appear in multiple applicable views (for example Favourites and Offline) without creating duplicate file records; toggling one status does not clear the others.
+- Restoring/unarchiving or unhiding explicitly removes an item from that special scope only when its corresponding state is cleared; trash restore preserves other applicable statuses.
+- Copy/move/download/share/delete actions respect the rules of the current scope and never silently change unrelated status flags or overwrite another item.
+- Large special-view collections remain paged and responsive.
+
+### A8. Scope-specific behavior for Trash, Offline and Favourites
+
+These views share the Gallery experience in A7, but their actions must respect what each view means:
+
+**Trash**
+- Provide all media-type categories, scoped search/filter/sort, Grid/List/Details, folder navigation, multi-selection and supported previews.
+- Offer Restore as the primary reversible action and Permanent delete as a separate, clearly destructive action with confirmation. Support bulk restore and bulk permanent deletion.
+- Where the trashed original is still available locally or remotely, allow safe preview and download/export without requiring restoration first. Explain clearly when content is unavailable.
+- Do not present normal rename/move/archive/hide operations as though the item were active. Restore first for ordinary file management.
+- Preserve any other applicable attributes (favourite, offline, archived/hidden metadata) when restoring, unless the user explicitly changes them. Permanent deletion must clearly communicate that recovery is no longer available through TeleDrive.
+
+**Offline**
+- Provide the same categories and viewing modes, with scoped search/filter/sort, folder navigation, multi-selection and supported preview/playback.
+- Offline must mean a complete verified local copy that can actually be opened without network access, not merely an item queued for download or partially cached.
+- Show useful local-availability state (available, downloading, paused/failed, incomplete) without incorrectly treating incomplete transfers as offline-ready.
+- Allow Make available offline / Download and Remove offline copy actions. Removing the local copy must preserve the Telegram/cloud-backed item and all unrelated attributes.
+- Offline preview must use the local file and must not silently fall back to network streaming when the user is browsing specifically to access offline content.
+
+**Favourites**
+- Provide the same categories and viewing modes, scoped search/filter/sort, folder/path context, multi-selection and supported preview/playback.
+- Favourites is a cross-folder collection: show favourite files from anywhere in the library without flattening away their original folder/path information.
+- Allow favourite/unfavourite from the view and from other library scopes. Unfavouriting removes only the favourite status; it must not delete, move, archive, hide or remove an offline copy.
+- Favourites can overlap with Offline, Archived and Hidden. Trash items remain in Trash rather than appearing as active favourites; their favourite status should be preserved across restore.
+
+**Cross-view composition**
+- A file can be both Offline and a Favourite, or Archived and a Favourite/Offline, and should appear in every applicable view without duplicate underlying records.
+- One status change must affect only that status. Examples: Remove offline copy does not unfavourite; Unfavourite does not delete the local copy; Unarchive does not unhide; Unhide does not unarchive.
+- Trash is the exception for active visibility: while an item is trashed, it is browsed in Trash, not in ordinary active Files/Gallery/Favourites/Offline views. Restore returns it to the views matching its preserved attributes.
+- Show consistent counts, selection behavior, breadcrumbs/path context, and loading/empty/error states across all five views.
 
 ## B. The complete required 13-capability scope
 
@@ -145,20 +181,20 @@ These are all required before the user begins building the full library. Some pa
 - Create, rename, copy, move, share, download, hide, archive, favorite, mark offline and move to recoverable Trash.
 - Support recursive folder copy/move, empty folders and conflict-safe operations.
 - Grid, List and Details views, sorting, multi-selection, keyboard navigation, right-click context menus at the pointer, breadcrumbs and folder-tree navigation.
-- Consistent actions across Files, Gallery, Search, Collections and Trash where relevant.
-- Archived and Hidden each expose the same complete Gallery/file-viewing feature set in their own scoped categories and folder navigation (see A7); they must not be reduced to plain lists.
+- Consistent actions across Files, Gallery, Search, Collections and all special views where relevant.
+- Archived, Hidden, Trash, Offline and Favourites each expose the same complete Gallery/file-viewing feature set in their own scoped categories and folder navigation (see A7–A8); they must not be reduced to plain lists.
 
 ### B2. Simple automatic categorization
 - Derive useful Photos, Videos, Audio, Documents, Archives, Apps/APKs and Other views from MIME type/extension and reliable metadata.
 - Keep the user's actual folder hierarchy as the primary organization system.
 - No mandatory manual tagging of every file or photo.
-- Apply the same automatic categories inside Archived and Hidden, with category results restricted to the current scope rather than mixing archived/hidden items into the ordinary library.
+- Apply the same automatic categories inside Archived, Hidden, Trash, Offline and Favourites, with category results restricted to the current scope rather than mixing special-view items into ordinary library counts.
 
 ### B3. Global search and easy discovery
 - Search by name, extension, folder/path, type, size, date, backup/offline/favorite status.
 - Fast debounced local search against indexed metadata and paged results.
 - Helpful filters and predictable sort options.
-- Search defaults to the current browsing scope; Archived and Hidden browsing/search remain isolated unless the user explicitly chooses to include those scopes.
+- Search defaults to the current browsing scope; special-view browsing/search remain isolated unless the user explicitly chooses to search across scopes. Filters should support intersecting attributes (for example favourites that are also offline) without duplicating records.
 - AI semantic search and deep OCR/content indexing remain deferred.
 
 ### B4. Original-quality image viewer with fast loading
@@ -253,8 +289,9 @@ Do not mix these into the practical build:
 5. Test exact and perceptual duplicates with known identical, resized/recompressed, cropped and unrelated photos. Check false positives manually; never delete automatically.
 6. Test transfer queues with multiple simultaneous uploads/downloads, priorities, filtering, errors, retries, pause/resume, app restart and interrupted network.
 7. Confirm file hashes after representative upload/download/copy/restore workflows.
-8. Verify Archived and Hidden as full Gallery scopes: categories, scoped search/filters, Grid/List/Details, folder navigation, original-quality image viewing, video/audio playback, document/archive previews, file operations and explicit restore/unhide behavior.
-9. Build and runtime-test Android and Linux separately. Do not mark those platforms complete after desktop-only tests.
+8. Verify Archived, Hidden, Trash, Offline and Favourites as full Gallery scopes: categories, scoped search/filters, Grid/List/Details, folder navigation, original-quality image viewing, video/audio playback, document/archive previews, and scope-appropriate actions.
+9. Verify overlapping attributes (Favourite + Offline, Archived + Favourite, etc.), independent status changes, Trash restore preservation, permanent deletion safeguards and offline-only playback without network fallback.
+10. Build and runtime-test Android and Linux separately. Do not mark those platforms complete after desktop-only tests.
 
 ## E. Current implementation-status snapshot
 
