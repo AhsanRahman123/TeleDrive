@@ -68,8 +68,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
+import androidx.navigation.toRoute
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.window.core.layout.WindowSizeClass
@@ -208,7 +210,7 @@ private fun MainScaffold(
     val currentDestination = backStackEntry?.destination
 
     val isTopLevel = TopLevelDestination.entries.any { destination ->
-        currentDestination?.hasRoute(destination.route::class) == true
+        destination.matches(backStackEntry)
     }
     val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
     val useRail = windowSizeClass.isWidthAtLeastBreakpoint(
@@ -272,8 +274,7 @@ private fun MainScaffold(
         ) {
             NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
                 TopLevelDestination.entries.forEach { destination ->
-                    val selected =
-                        currentDestination?.hasRoute(destination.route::class) == true
+                    val selected = destination.matches(backStackEntry)
                     NavigationRailItem(
                         selected = selected,
                         onClick = { if (!selected) navigateTopLevel(navController, destination) },
@@ -312,15 +313,18 @@ private fun MainScaffold(
                 )
             }
             var navSlots by remember { mutableStateOf(emptyMap<Int, DpRect>()) }
-            val topLevelIndex = TopLevelDestination.entries.indexOfFirst { destination ->
-                currentDestination?.hasRoute(destination.route::class) == true
+            val bottomDestinations = remember {
+                TopLevelDestination.entries.filter { it.showInBottomBar }
+            }
+            val topLevelIndex = bottomDestinations.indexOfFirst { destination ->
+                destination.matches(backStackEntry)
             }
             var selectedNavIndex by remember { mutableIntStateOf(0) }
             LaunchedEffect(topLevelIndex) {
                 if (topLevelIndex >= 0) selectedNavIndex = topLevelIndex
             }
             AnimatedVisibility(
-                visible = isTopLevel,
+                visible = topLevelIndex >= 0,
                 enter = slideInVertically(barSlideSpec()) { height -> height } +
                         fadeIn(tween(BAR_SLIDE_MS)),
                 exit = slideOutVertically(barSlideSpec()) { height -> height } +
@@ -328,6 +332,7 @@ private fun MainScaffold(
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
                 FloatingNavigationBar(
+                    entries = bottomDestinations,
                     selectedIndex = selectedNavIndex,
                     onNavigate = { navigateTopLevel(navController, it) },
                     slots = navSlots,
@@ -343,13 +348,12 @@ private fun MainScaffold(
 /** A single pill slides between items instead of each item drawing its own indicator. */
 @Composable
 private fun FloatingNavigationBar(
+    entries: List<TopLevelDestination>,
     selectedIndex: Int,
     onNavigate: (TopLevelDestination) -> Unit,
     slots: Map<Int, DpRect>,
     onSlotMeasured: (Int, DpRect) -> Unit
 ) {
-    val entries = TopLevelDestination.entries
-
     val density = LocalDensity.current
     val selectedSlot = slots[selectedIndex]
 
@@ -474,6 +478,20 @@ private val BAR_HEIGHT = 64.dp
 private val PILL_HEIGHT = 44.dp
 private val BAR_PADDING = (BAR_HEIGHT - PILL_HEIGHT) / 2
 private val ITEM_PADDING = 12.dp
+
+private fun TopLevelDestination.matches(entry: NavBackStackEntry?): Boolean {
+    val currentEntry = entry ?: return false
+    val current = currentEntry.destination
+    return when (val target = route) {
+        is Route.Collection ->
+            current.hasRoute(Route.Collection::class) &&
+                    runCatching {
+                        currentEntry.toRoute<Route.Collection>().type == target.type
+                    }.getOrDefault(false)
+
+        else -> current.hasRoute(target::class)
+    }
+}
 
 private fun navigateTopLevel(
     navController: NavHostController,
