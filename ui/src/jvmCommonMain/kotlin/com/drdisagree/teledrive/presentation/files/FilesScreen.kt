@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.Info
@@ -131,6 +132,7 @@ import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.SortMenu
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileListItem
+import com.drdisagree.teledrive.presentation.components.FileDetailsItem
 import com.drdisagree.teledrive.presentation.components.FolderGridItem
 import com.drdisagree.teledrive.presentation.components.FolderInfoSheet
 import com.drdisagree.teledrive.presentation.components.FolderPickerDialog
@@ -259,6 +261,7 @@ fun FilesScreen(
     var showCreateFolder by remember { mutableStateOf(false) }
     var confirmDeleteLocal by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var showViewMenu by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
     var showMovePicker by remember { mutableStateOf(false) }
     var showCopyPicker by remember { mutableStateOf(false) }
@@ -628,6 +631,40 @@ fun FilesScreen(
                                         Icons.Filled.CreateNewFolder,
                                         contentDescription = stringResource(Res.string.files_new_folder)
                                     )
+                                }
+                                Box {
+                                    IconButton(onClick = { showViewMenu = true }) {
+                                        Icon(
+                                            Icons.Filled.ViewList,
+                                            contentDescription = "Change view"
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = showViewMenu,
+                                        onDismissRequest = { showViewMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Grid") },
+                                            onClick = {
+                                                showViewMenu = false
+                                                viewModel.setViewMode(ViewMode.GRID)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("List") },
+                                            onClick = {
+                                                showViewMenu = false
+                                                viewModel.setViewMode(ViewMode.LIST)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Details") },
+                                            onClick = {
+                                                showViewMenu = false
+                                                viewModel.setViewMode(ViewMode.DETAILS)
+                                            }
+                                        )
+                                    }
                                 }
                                 IconButton(onClick = { showSortMenu = true }) {
                                     Icon(
@@ -1202,8 +1239,36 @@ private fun FilesContent(
                             onShowContextMenu()
                         }
                 )
-            } else {
+            } else if (state.viewMode == ViewMode.LIST) {
                 FileListItem(
+                    file = file,
+                    selected = selected,
+                    selectionMode = selectionMode,
+                    onToggleSelection = { viewModel.toggleSelection(file.id) },
+                    onClick = {
+                        if (selectionMode) viewModel.toggleSelection(file.id)
+                        else onOpenFile(
+                            file.id,
+                            PreviewSequence(
+                                folderId = state.folderId,
+                                filterByFolder = true,
+                                sortField = state.sortField,
+                                sortDirection = state.sortDirection
+                            )
+                        )
+                    },
+                    onLongClick = { viewModel.toggleSelection(file.id) },
+                    modifier = Modifier
+                        .keyboardCollectionItem(keyboard, state.folders.size + index)
+                        .animateItem()
+                        .focusHighlight(highlighted)
+                        .onDesktopContextClick {
+                            viewModel.selectFileForContext(file.id)
+                            onShowContextMenu()
+                        }
+                )
+            } else {
+                FileDetailsItem(
                     file = file,
                     selected = selected,
                     selectionMode = selectionMode,

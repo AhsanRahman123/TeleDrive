@@ -30,6 +30,13 @@ class GridZoomTest {
     }
 
     @Test
+    fun `details mode is preserved while zooming out and zooms into grid`() {
+        val details = GridZoomLevel(ViewMode.DETAILS, 3)
+        assertEquals(details, details.zoomedOut())
+        assertEquals(GridZoomLevel(ViewMode.GRID, MAX_GRID_COLUMNS), details.zoomedIn())
+    }
+
+    @Test
     fun `zooming in stops at the largest tiles`() {
         val largest = GridZoomLevel(ViewMode.GRID, MIN_GRID_COLUMNS)
         assertEquals(largest, largest.zoomedIn())

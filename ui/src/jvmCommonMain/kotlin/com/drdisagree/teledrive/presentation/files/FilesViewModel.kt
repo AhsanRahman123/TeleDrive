@@ -18,6 +18,7 @@ import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.UserPreferences
+import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.SyncRepository
@@ -329,6 +330,9 @@ class FilesViewModel(
         val next = transform(GridZoomLevel(prefs.viewMode, prefs.gridSize))
         prefs.copy(viewMode = next.viewMode, gridSize = next.gridSize)
     }
+
+    fun setViewMode(mode: ViewMode) =
+        updatePrefs { it.copy(viewMode = mode) }
 
     fun setSort(field: FileSortField, direction: SortDirection) =
         updatePrefs { it.copy(sortField = field, sortDirection = direction) }
