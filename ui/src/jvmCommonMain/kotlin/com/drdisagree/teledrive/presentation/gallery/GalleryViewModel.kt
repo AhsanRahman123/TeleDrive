@@ -175,16 +175,9 @@ class GalleryViewModel(
         )
     }.distinctUntilChanged()
 
-    private val albums: Flow<List<MediaAlbum>> = combine(
-        settingsRepository.preferences
-            .map { it.showHiddenFiles to it.showArchivedFiles }
-            .distinctUntilChanged(),
-        debouncedQuery,
-        sort
-    ) { visibility, query, sortValue ->
-        Triple(visibility, query, sortValue)
-    }.flatMapLatest { (visibility, query, sortValue) ->
-        val (showHidden, showArchived) = visibility
+    private val albums: Flow<List<MediaAlbum>> = combine(debouncedQuery, sort) { query, sortValue ->
+        query to sortValue
+    }.flatMapLatest { (query, sortValue) ->
         if (isAlbumView) {
             flowOf(emptyList())
         } else {
@@ -212,6 +205,8 @@ class GalleryViewModel(
             },
             favoritesOnly = currentFilters.favoritesOnly,
             availableOfflineOnly = currentFilters.availableOfflineOnly,
+            backedUpOnly = currentFilters.backedUpOnly,
+            notBackedUpOnly = currentFilters.notBackedUpOnly,
             sortField = field,
             sortDirection = dir
         )
@@ -323,30 +318,36 @@ class GalleryViewModel(
     }
 
     fun setSearchQuery(value: String) {
+        if (filters.value.searchQuery != value) clearSelection()
         filters.update { it.copy(searchQuery = value) }
     }
 
     fun setFavoritesFilter(enabled: Boolean) {
+        clearSelection()
         filters.update { it.copy(favoritesOnly = enabled) }
     }
 
     fun setOfflineFilter(enabled: Boolean) {
+        clearSelection()
         filters.update { it.copy(availableOfflineOnly = enabled) }
     }
 
     fun setBackedUpFilter(enabled: Boolean) {
+        clearSelection()
         filters.update {
             it.copy(backedUpOnly = enabled, notBackedUpOnly = if (enabled) false else it.notBackedUpOnly)
         }
     }
 
     fun setNotBackedUpFilter(enabled: Boolean) {
+        clearSelection()
         filters.update {
             it.copy(notBackedUpOnly = enabled, backedUpOnly = if (enabled) false else it.backedUpOnly)
         }
     }
 
     fun clearFilters() {
+        clearSelection()
         filters.update { GalleryFilters() }
     }
 
