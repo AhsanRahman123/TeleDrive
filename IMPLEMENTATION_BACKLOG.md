@@ -127,7 +127,8 @@ The user reports that the other previously tested TeleDrive features are working
 Source changes now present on `codex/file-integrity-phase-1`:
 
 - Android image preview wraps the existing Telephoto zoom state with dedicated Zoom in / Zoom out controls. The existing Telephoto pinch gesture pipeline is retained.
-- Desktop image preview uses Telephoto's `Modifier.zoomable` with dedicated zoom controls, giving double-click zoom and mouse/keyboard zoom interactions.
+- Desktop image preview uses Telephoto's Coil 3 `ZoomableAsyncImage` with tiled/sub-sampled rendering, dedicated zoom controls, double-click zoom and mouse/keyboard zoom interactions.
+- Both Android and desktop zoom buttons launch Telephoto's animated `zoomBy` operations from a remembered coroutine scope; they control the same zoom state as the gestures.
 - Android and desktop preview menus now offer Copy to… and Move to… and reuse the shared folder picker. Both actions route through the existing `FileRepository` operations.
 - The Files browser now handles right-click on unconsumed blank space by opening the same Add menu as the + button. Item context clicks are consumed by their own row handlers, so they should not trigger the blank-space action.
 - Folder imports capture an upload-queue generation. `Cancel all` advances that generation while holding the same enqueue mutex used to insert upload rows. Enqueues from an older import generation are rejected after cancellation, while imported local files remain in the library.
