@@ -416,6 +416,7 @@
     <string name="gallery_tab_photos">Fotos</string>
     <string name="gallery_tab_videos">Vídeos</string>
     <string name="gallery_title">Galeria</string>
+    <string name="gallery_new_album">Novo álbum</string>
 
     <!-- Preview -->
     <string name="preview_add_favorites">Adicionar aos favoritos</string>
