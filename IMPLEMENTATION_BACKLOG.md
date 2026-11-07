@@ -194,15 +194,53 @@ Acceptance checks:
 - Local-only and already-offline files continue to share normally without an unnecessary second download.
 - The source file remains unchanged and its SHA-256 stays the same after sharing.
 
+### A10. Compact right-click menu with direct actions and Google Drive-style folder colours
+
+User's reference:
+- Google Drive shows common actions such as Download, Rename, Share, Move, Add shortcut, Add to starred, Folder color and Folder information.
+- TeleDrive currently has Share, Rename, Copy to…, Storage >, Organize >, Info and Move to trash. The user wants the common actions they need visible together, not buried inside Storage/Organize submenus.
+- File Pilot is a reference for discoverable context actions, but TeleDrive should not copy its very large menu. Keep TeleDrive's menu compact and limited to the small set of relevant actions.
+
+Required context-menu behavior:
+- Keep the desktop right-click menu anchored at the actual pointer (see A4).
+- Put common actions directly in the menu at the top level; do not require opening a Storage or Organize submenu to reach Download, Copy, Move, Favourite or other common actions.
+- Make actions context-sensitive. Show only actions applicable to the current item type and state; for multi-selection, show actions that can safely apply to the whole selection. This keeps the menu compact instead of displaying irrelevant/disabled actions.
+- For normal files, provide the relevant direct actions: Share, Download, Rename, Copy to…, Move to…, Add to/Remove from Favourites, Make available offline/Remove offline copy, Archive/Unarchive, Hide/Unhide, Info and Move to Trash.
+- For folders, provide the relevant direct actions: Open, Share where supported, Rename, Copy to…, Move to…, Add shortcut, Add to/Remove from Favourites, Folder color, Info and Move to Trash. Include Archive/Unarchive and Hide/Unhide where those states are supported for folders.
+- Download, Copy to… and Move to… must be independently visible actions. Copy must leave the source in place; Move must relocate the selected item/folder and preserve its content and metadata. Do not treat Copy as a substitute for Move.
+- Add shortcut should create a lightweight reference to the existing item/folder in another folder, not a second uploaded copy of its bytes. Make shortcuts visually distinguishable, resolve actions/previews to the original item, and prevent dangling or recursive shortcuts. If this cannot be supported safely by the current data model, record the implementation limitation rather than pretending it is a normal copy.
+- Info should open the existing information/details presentation without hiding basic actions in a separate nested menu.
+- Preserve right-click multi-selection behavior: right-clicking an unselected item selects it; right-clicking an already-selected item keeps the multi-selection intact.
+- Keep touch/long-press and keyboard-accessible actions on Android and desktop.
+- The same action availability and state rules should apply in Files, Gallery, Archived, Hidden, Trash, Offline and Favourites where meaningful.
+
+Google Drive-style folder colour:
+- Add a small preset colour palette to folders, similar to Google Drive's Folder color menu. This is a visual organization aid, not a change to the folder's contents or name.
+- Apply the chosen colour consistently to that folder's icon/visual marker in Grid, List, Details, folder navigation/tree, breadcrumbs and folder pickers where relevant.
+- Persist folder colours across app restart and sync/restore them with folder metadata where the existing data model permits.
+- Provide a default/reset colour option. Do not add a custom colour picker; use a restrained predefined palette.
+- Folder colours must not affect file bytes, folder hierarchy, Telegram backup integrity or existing favorite/archive/hidden/offline state.
+- Colour selection must be usable from the folder context menu and remain available when browsing that folder in Archived/Hidden/Trash/Offline/Favourites where applicable.
+- Do not silently apply folder colours to files. File-level coloured labels/tags are not part of this requirement unless separately requested.
+
+Acceptance checks:
+- Right-clicking a file/folder opens a compact menu at the pointer with the appropriate direct actions; common actions are not buried inside Storage/Organize submenus.
+- Download, Copy to… and Move to… are separate, working operations and appear directly when applicable.
+- A file is not copied when the user chooses Move, and the source remains in place when the user chooses Copy.
+- Add shortcut creates a reference rather than duplicating the file data, and opening/previewing it reaches the original.
+- A chosen folder colour persists after restarting TeleDrive and appears consistently in all folder representations.
+- A mixed or multi-item selection exposes only safe, applicable shared actions without breaking selection.
+- The menu remains compact and is not expanded into a File Pilot-sized list of unrelated commands.
+
 ## B. The complete required 13-capability scope
 
 These are all required before the user begins building the full library. Some parts already exist; the checklist means complete and verify the overall capability, not rebuild everything from scratch.
 
 ### B1. Complete file and folder management
 - Upload individual files and whole folders while preserving relative folder structure.
-- Create, rename, copy, move, share directly without forced download-first behavior, download, hide, archive, favorite, mark offline and move to recoverable Trash (see A9).
+- Create, rename, copy, move, add shortcut, share directly without forced download-first behavior, download, hide, archive, favourite, mark offline, set folder colour and move to recoverable Trash (see A9–A10).
 - Support recursive folder copy/move, empty folders and conflict-safe operations.
-- Grid, List and Details views, sorting, multi-selection, keyboard navigation, right-click context menus at the pointer, breadcrumbs and folder-tree navigation.
+- Grid, List and Details views, sorting, multi-selection, keyboard navigation, compact right-click context menus at the pointer with direct Download/Copy/Move/Share and other applicable actions, persistent Google Drive-style folder colours, breadcrumbs and folder-tree navigation (see A10).
 - Consistent actions across Files, Gallery, Search, Collections and all special views where relevant.
 - Archived, Hidden, Trash, Offline and Favourites each expose the same complete Gallery/file-viewing feature set in their own scoped categories and folder navigation (see A7–A8); they must not be reduced to plain lists.
 
@@ -305,7 +343,7 @@ Do not mix these into the practical build:
 
 ### Required regression workflow after implementation
 1. Run `.\gradlew.bat :ui:desktopTest :shared:desktopTest :desktop:test :desktop:compileKotlin --console=plain`.
-2. Run the desktop app and verify Grid/List/Details, file/folder selection, context menu placement, folder copy/move and actions.
+2. Run the desktop app and verify Grid/List/Details, file/folder selection, context menu placement and compact direct actions, folder copy/move/shortcut, persistent folder colours and action behavior across special views.
 3. Test local and remote-only media, original image resolution, streaming playback, volume/brightness controls and external subtitles.
 4. Test ZIP and 7z archives with many entries and empty folders; confirm source archives remain unchanged.
 5. Test exact and perceptual duplicates with known identical, resized/recompressed, cropped and unrelated photos. Check false positives manually; never delete automatically.
