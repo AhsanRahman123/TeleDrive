@@ -103,6 +103,7 @@ fun AppNavHost(
                         navController.navigateOnce(sequence.routeFor(id))
                     },
                     onOpenSearch = { navController.navigateOnce(Route.Search) },
+                    onOpenTransfers = { navController.navigateOnce(Route.Transfers) },
                     onNewNote = { folderId ->
                         navController.navigateOnce(Route.NoteEditor(folderId = folderId))
                     },
