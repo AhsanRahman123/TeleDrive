@@ -5,6 +5,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
@@ -20,10 +21,12 @@ fun CollectSnackbarMessages(
     onAction: (UiText) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
-    LaunchedEffect(messages, hostState, actionLabel, onAction) {
+    val currentActionLabel = rememberUpdatedState(actionLabel)
+    val currentOnAction = rememberUpdatedState(onAction)
+    LaunchedEffect(messages, hostState) {
         messages.collect { message ->
             val text = message.load()
-            val label = actionLabel(message)
+            val label = currentActionLabel.value(message)
             hostState.currentSnackbarData?.dismiss()
             scope.launch {
                 val result = hostState.showSnackbar(
@@ -31,7 +34,7 @@ fun CollectSnackbarMessages(
                     actionLabel = label,
                     withDismissAction = label != null
                 )
-                if (result == SnackbarResult.ActionPerformed) onAction(message)
+                if (result == SnackbarResult.ActionPerformed) currentOnAction.value(message)
             }
         }
     }
