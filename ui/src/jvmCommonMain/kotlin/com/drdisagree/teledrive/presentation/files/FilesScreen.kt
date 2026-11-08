@@ -1203,6 +1203,7 @@ private fun FilesContent(
                     file = file,
                     selected = selected,
                     selectionMode = selectionMode,
+                    prominent = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
                         if (selectionMode) viewModel.toggleSelection(file.id)
