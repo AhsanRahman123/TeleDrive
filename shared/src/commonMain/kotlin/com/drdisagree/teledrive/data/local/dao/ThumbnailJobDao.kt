@@ -24,6 +24,9 @@ interface ThumbnailJobDao {
     @Query("DELETE FROM thumbnail_jobs WHERE fileId = :fileId")
     suspend fun delete(fileId: String)
 
+    @Query("DELETE FROM thumbnail_jobs WHERE fileId IN (:fileIds)")
+    suspend fun delete(fileIds: List<String>)
+
     @Query("DELETE FROM thumbnail_jobs")
     suspend fun deleteAll()
 
