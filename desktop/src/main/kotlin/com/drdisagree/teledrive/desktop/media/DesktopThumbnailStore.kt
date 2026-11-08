@@ -198,20 +198,29 @@ class DesktopThumbnailStore(
         val inherited = thumbnailPolicyDao.effectivePolicy(fileId)
             ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
         if (inherited == ThumbnailPolicy.MANUAL_ONLY) return
-        val now = System.currentTimeMillis()
-        thumbnailPolicyDao.upsert(
-            ThumbnailPolicyEntity(
-                targetType = TARGET_FILE,
-                targetId = fileId,
-                policy = ThumbnailPolicy.AUTOMATIC.name,
-                changedAt = now
+
+        // Only create a file-level Automatic rule when this upload has no inherited rule.
+        // If its folder is already Automatic, preserve that inheritance instead of
+        // converting every newly uploaded file into an explicit override.
+        if (inherited == null) {
+            thumbnailPolicyDao.upsert(
+                ThumbnailPolicyEntity(
+                    targetType = TARGET_FILE,
+                    targetId = fileId,
+                    policy = ThumbnailPolicy.AUTOMATIC.name,
+                    changedAt = System.currentTimeMillis()
+                )
+            )
+        }
+        thumbnailJobDao.enqueue(
+            ThumbnailJobEntity(
+                fileId = fileId,
+                queuedAt = System.currentTimeMillis(),
+                force = false
             )
         )
-        thumbnailJobDao.enqueue(
-            ThumbnailJobEntity(fileId = fileId, queuedAt = now, force = false)
-        )
         schedulingPaused = false
-            jobWakeups.trySend(Unit)
+        jobWakeups.trySend(Unit)
     }
 
     override suspend fun enqueueManual(fileId: String) {
