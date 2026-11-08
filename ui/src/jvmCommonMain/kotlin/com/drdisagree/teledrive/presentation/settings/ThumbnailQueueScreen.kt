@@ -271,6 +271,7 @@ private fun ThumbnailQueueRow(
             }
             if (item.attempts >= MAX_THUMBNAIL_ATTEMPTS) {
                 TextButton(onClick = onRetry) { Text("Retry") }
+                TextButton(onClick = onCancel) { Text("Remove") }
             } else {
                 TextButton(onClick = onCancel) { Text("Cancel") }
             }
