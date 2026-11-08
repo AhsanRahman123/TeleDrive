@@ -25,7 +25,7 @@ interface ThumbnailPolicyDao {
         """
         WITH RECURSIVE ancestors(id, parentId, depth) AS (
             SELECT folders.id, folders.parentId, 0
-              FROM files JOIN folders ON folders.id = files.folderId
+              FROM files JOIN folders ON folders.id = COALESCE(files.folderId, files.preTrashFolderId)
              WHERE files.id = :fileId
             UNION ALL
             SELECT parent.id, parent.parentId, ancestors.depth + 1
@@ -92,7 +92,7 @@ interface ThumbnailPolicyDao {
            DELETE FROM thumbnail_policies
             WHERE (targetType = 'FOLDER' AND targetId IN (SELECT id FROM child_folders))
                OR (targetType = 'FILE' AND targetId IN (
-                    SELECT id FROM files WHERE folderId IN (SELECT id FROM child_folders)
+                    SELECT id FROM files WHERE COALESCE(folderId, preTrashFolderId) IN (SELECT id FROM child_folders)
                ))"""
     )
     suspend fun deleteOverridesInFolderTree(folderId: String): Int
