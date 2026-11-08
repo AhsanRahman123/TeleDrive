@@ -376,17 +376,6 @@ fun DesktopMediaPlayer(
                         fullscreenController.toggle()
                         true
                     }
-                    // P/N are five-second seek controls; Left/Right navigate media below.
-                    key == Key.P && !ctrl && !alt && !shift -> {
-                        player.controls().skipTime(-5_000L)
-                        interactionTick++
-                        true
-                    }
-                    key == Key.N && !ctrl && !alt && !shift -> {
-                        player.controls().skipTime(5_000L)
-                        interactionTick++
-                        true
-                    }
                     key == Key.MediaNext -> {
                         onNext()
                         interactionTick++
@@ -439,12 +428,12 @@ fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.DirectionLeft && !ctrl && !alt && !shift -> {
-                        if (hasPrevious) onPrevious()
+                        player.controls().skipTime(-KEY_SEEK_STEP_MS)
                         interactionTick++
                         true
                     }
                     key == Key.DirectionRight && !ctrl && !alt && !shift -> {
-                        if (hasNext) onNext()
+                        player.controls().skipTime(KEY_SEEK_STEP_MS)
                         interactionTick++
                         true
                     }
@@ -464,11 +453,6 @@ fun DesktopMediaPlayer(
                             interactionTick++
                             true
                         }
-                    }
-                    key == Key.E && !ctrl && !alt && !shift -> {
-                        player.controls().nextFrame()
-                        interactionTick++
-                        true
                     }
                     key == Key.L && !ctrl && !alt && !shift -> {
                         repeatOne = !repeatOne
@@ -996,6 +980,7 @@ private fun TrackMenuItem(label: String, selected: Boolean, onClick: () -> Unit)
 private const val CONTROLS_HIDE_DELAY_MS = 3_000L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
+private const val KEY_SEEK_STEP_MS = 500L
 private const val VOLUME_STEP = 5
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
