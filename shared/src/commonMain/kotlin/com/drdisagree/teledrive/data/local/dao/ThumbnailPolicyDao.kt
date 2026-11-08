@@ -54,6 +54,25 @@ interface ThumbnailPolicyDao {
     suspend fun delete(targetType: String, targetId: String)
 
     @Query(
+        """WITH RECURSIVE parents(id, parentId, depth) AS (
+               SELECT id, parentId, 0 FROM folders WHERE id = :folderId
+               UNION ALL
+               SELECT parent.id, parent.parentId, parents.depth + 1
+                 FROM folders AS parent
+                 JOIN parents ON parent.id = parents.parentId
+           )
+           SELECT policies.policy
+             FROM parents
+             JOIN thumbnail_policies AS policies
+               ON policies.targetType = 'FOLDER'
+              AND policies.targetId = parents.id
+            WHERE parents.depth > 0
+            ORDER BY parents.depth ASC
+            LIMIT 1"""
+    )
+    suspend fun inheritedFolderPolicy(folderId: String): String?
+
+    @Query(
         "DELETE FROM thumbnail_policies WHERE targetType = 'FILE' AND targetId IN (:fileIds)"
     )
     suspend fun deleteFileOverrides(fileIds: List<String>)
