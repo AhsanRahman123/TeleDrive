@@ -501,6 +501,9 @@ class CacheRepositoryImpl(
     override suspend fun thumbnailQueueAllFileIds(): List<String> =
         thumbnailJobDao.allFileIds()
 
+    override suspend fun thumbnailQueueFailedFileIds(): List<String> =
+        thumbnailJobDao.failedFileIds()
+
     override suspend fun thumbnailQueuePaused(): Boolean =
         thumbnailPolicyDao.isQueuePaused()
 
