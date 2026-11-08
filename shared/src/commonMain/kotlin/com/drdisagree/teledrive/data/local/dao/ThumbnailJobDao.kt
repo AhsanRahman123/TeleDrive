@@ -54,9 +54,16 @@ interface ThumbnailJobDao {
     suspend fun recordAttempt(fileId: String, retryAt: Long)
 
     @Query(
-        """WITH RECURSIVE folder_paths(fileId, parentId, path, depth) AS (
+        """WITH RECURSIVE queued_page(fileId, queuedAt) AS (
+               SELECT fileId, queuedAt
+                 FROM thumbnail_jobs
+                ORDER BY queuedAt ASC
+                LIMIT :limit OFFSET :offset
+           ),
+           folder_paths(fileId, parentId, path, depth) AS (
                SELECT f.id, d.parentId, d.name, 0
-                 FROM files f
+                 FROM queued_page q
+                 JOIN files f ON f.id = q.fileId
                  JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
                UNION ALL
                SELECT fp.fileId, d.parentId, d.name || ' / ' || fp.path, fp.depth + 1
@@ -83,10 +90,10 @@ interface ThumbnailJobDao {
                          AND p.targetId = j.fileId
                          AND p.policy = 'PAUSED'
                   ) AS isPaused
-             FROM thumbnail_jobs j
+             FROM queued_page q
+             JOIN thumbnail_jobs j ON j.fileId = q.fileId
              LEFT JOIN files f ON f.id = j.fileId
-            ORDER BY j.queuedAt ASC
-            LIMIT :limit OFFSET :offset"""
+            ORDER BY q.queuedAt ASC, q.fileId ASC"""
     )
     suspend fun page(offset: Int, limit: Int): List<ThumbnailQueueItem>
 
