@@ -32,7 +32,7 @@ interface ThumbnailDao {
                   COALESCE(SUM(t.sizeBytes), 0) AS totalBytes
              FROM thumbnails t
              JOIN files f ON f.id = t.fileId
-            WHERE f.folderId IS NULL"""
+            WHERE COALESCE(f.folderId, f.preTrashFolderId) IS NULL"""
     )
     suspend fun unfiledAggregate(): ThumbnailUnfiledAggregate
 
@@ -47,12 +47,12 @@ interface ThumbnailDao {
     suspend fun textFileThumbnails(): List<ThumbnailEntity>
 
     @Query(
-        """SELECT f.folderId AS folderId,
+        """SELECT COALESCE(f.folderId, f.preTrashFolderId) AS folderId,
                   COUNT(*) AS cachedFiles,
                   COALESCE(SUM(t.sizeBytes), 0) AS totalBytes
              FROM thumbnails t
              JOIN files f ON f.id = t.fileId
-            GROUP BY f.folderId"""
+            GROUP BY COALESCE(f.folderId, f.preTrashFolderId)"""
     )
     suspend fun folderAggregates(): List<ThumbnailFolderAggregate>
 
@@ -62,7 +62,7 @@ interface ThumbnailDao {
                   f.mimeType AS mimeType,
                   f.category AS category,
                   f.sizeBytes AS fileSizeBytes,
-                  f.folderId AS folderId,
+                  COALESCE(f.folderId, f.preTrashFolderId) AS folderId,
                   t.sizeBytes AS thumbnailSizeBytes,
                   t.generatedAt AS generatedAt,
                   t.lastAccessAt AS lastAccessAt,
@@ -70,7 +70,7 @@ interface ThumbnailDao {
                   CASE WHEN f.trashedAt IS NULL THEN 0 ELSE 1 END AS isTrashed
              FROM files f
              LEFT JOIN thumbnails t ON t.fileId = f.id
-            WHERE f.folderId IS :folderId
+            WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
               AND (
                     f.trashedAt IS NULL
                     OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
@@ -105,7 +105,7 @@ interface ThumbnailDao {
            SELECT t.fileId AS fileId, t.path AS path
              FROM thumbnails t
              JOIN files f ON f.id = t.fileId
-            WHERE f.folderId IN (SELECT id FROM child_folders)
+            WHERE COALESCE(f.folderId, f.preTrashFolderId) IN (SELECT id FROM child_folders)
               AND (:afterFileId IS NULL OR t.fileId > :afterFileId)
             ORDER BY t.fileId ASC
             LIMIT :limit"""
@@ -185,7 +185,7 @@ interface ThumbnailDao {
            )
            DELETE FROM thumbnails
             WHERE fileId IN (
-                SELECT id FROM files WHERE folderId IN (SELECT id FROM child_folders)
+                SELECT id FROM files WHERE COALESCE(folderId, preTrashFolderId) IN (SELECT id FROM child_folders)
             )"""
     )
     suspend fun deleteFolderTree(folderId: String): Int
