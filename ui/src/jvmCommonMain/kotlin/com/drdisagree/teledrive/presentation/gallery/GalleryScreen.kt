@@ -300,6 +300,7 @@ private fun AlbumGrid(
                         .animateItem()
                 )
             }
+            }
             DesktopVerticalScrollbar(
                 state = listState,
                 modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
@@ -337,6 +338,7 @@ private fun AlbumGrid(
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
                 )
+            }
             }
             DesktopVerticalScrollbar(
                 state = gridState,
