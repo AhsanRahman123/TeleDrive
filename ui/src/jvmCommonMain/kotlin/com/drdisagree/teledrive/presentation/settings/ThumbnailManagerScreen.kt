@@ -154,6 +154,11 @@ fun ThumbnailManagerScreen(
             searchQuery = searchQuery,
             sortOrder = sortOrder.name
         )
+        if (page.isEmpty() && pageOffset > 0) {
+            pageOffset = (pageOffset - THUMBNAIL_PAGE_SIZE).coerceAtLeast(0)
+            loading = false
+            return@LaunchedEffect
+        }
         files = page.take(THUMBNAIL_PAGE_SIZE)
         hasMore = page.size > THUMBNAIL_PAGE_SIZE
         filePolicy = if (folderId == null) {
