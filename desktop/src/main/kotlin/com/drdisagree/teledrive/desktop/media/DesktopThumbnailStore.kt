@@ -22,6 +22,16 @@ import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.files.Urls
 import com.drdisagree.teledrive.core.media.ThumbnailStore
+import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
+import com.drdisagree.teledrive.data.local.dao.ThumbnailJobDao
+import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
+import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
+import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.data.local.dao.FileDao
@@ -52,35 +62,125 @@ class DesktopThumbnailStore(
     private val telegramClient: TelegramClient,
     private val streamCrypto: StreamCrypto,
     private val wrappedKeyRepository: WrappedKeyRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val thumbnailPolicyDao: ThumbnailPolicyDao,
+    private val thumbnailJobDao: ThumbnailJobDao
 ) : ThumbnailStore {
 
     private val generationSemaphore = Semaphore(3)
     private val videoThumbnailMutex = Mutex()
+    private val jobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val jobWakeups = Channel<Unit>(Channel.CONFLATED)
+
+    init {
+        jobScope.launch {
+            for (ignored in jobWakeups) processPendingJobs()
+        }
+        jobWakeups.trySend(Unit)
+    }
 
     override suspend fun thumbnailBytes(fileId: String): ByteArray? {
         if (!settingsRepository.preferences.first().linkPreviews && isNote(fileId)) {
             thumbnailDao.delete(fileId)
             return null
         }
-        thumbnailDao.byFileId(fileId)?.let { cached ->
-            val file = File(cached.path)
-            if (file.exists()) {
-                thumbnailDao.touch(fileId, System.currentTimeMillis())
-                val raw = file.readBytes()
-                return if (cached.encrypted) {
-                    runCatching {
-                        streamCrypto.decryptBytes(thumbnailKey(), raw)
-                    }.getOrNull()
-                } else raw
-            }
-            thumbnailDao.delete(fileId)
-        }
+        readCachedThumbnail(fileId)?.let { return it }
+        if (effectivePolicy(fileId) != ThumbnailPolicy.AUTOMATIC) return null
         return generationSemaphore.withPermit { generate(fileId) }
     }
 
+    override suspend fun generateNow(fileId: String): ByteArray? {
+        if (!settingsRepository.preferences.first().linkPreviews && isNote(fileId)) {
+            return null
+        }
+        readCachedThumbnail(fileId)?.let { return it }
+        return generationSemaphore.withPermit { generate(fileId) }
+    }
+
+    override fun enqueueAfterUpload(fileId: String) {
+        jobScope.launch {
+            val now = System.currentTimeMillis()
+            thumbnailPolicyDao.upsert(
+                ThumbnailPolicyEntity(
+                    targetType = TARGET_FILE,
+                    targetId = fileId,
+                    policy = ThumbnailPolicy.AUTOMATIC.name,
+                    changedAt = now
+                )
+            )
+            thumbnailJobDao.enqueue(
+                ThumbnailJobEntity(fileId = fileId, queuedAt = now, force = false)
+            )
+            jobWakeups.trySend(Unit)
+        }
+    }
+
+    override fun enqueueManual(fileId: String) {
+        jobScope.launch {
+            thumbnailJobDao.enqueue(
+                ThumbnailJobEntity(
+                    fileId = fileId,
+                    queuedAt = System.currentTimeMillis(),
+                    force = true
+                )
+            )
+            jobWakeups.trySend(Unit)
+        }
+    }
+
+    private suspend fun readCachedThumbnail(fileId: String): ByteArray? {
+        val cached = thumbnailDao.byFileId(fileId) ?: return null
+        val file = File(cached.path)
+        if (!file.exists()) {
+            thumbnailDao.delete(fileId)
+            return null
+        }
+        thumbnailDao.touch(fileId, System.currentTimeMillis())
+        val raw = file.readBytes()
+        return if (cached.encrypted) {
+            runCatching {
+                streamCrypto.decryptBytes(thumbnailKey(), raw)
+            }.getOrNull()
+        } else raw
+    }
+
+    private suspend fun effectivePolicy(fileId: String): ThumbnailPolicy =
+        thumbnailPolicyDao.effectivePolicy(fileId)
+            ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+            ?: ThumbnailPolicy.MANUAL_ONLY
+
+    private suspend fun processPendingJobs() {
+        while (true) {
+            val job = thumbnailJobDao.next(1).firstOrNull() ?: return
+            val entity = fileDao.byId(job.fileId)
+            if (entity == null || entity.trashedAt != null) {
+                thumbnailJobDao.delete(job.fileId)
+                continue
+            }
+            val cached = thumbnailDao.byFileId(job.fileId)?.let { File(it.path).exists() } == true
+            if (cached || (!job.force && effectivePolicy(job.fileId) != ThumbnailPolicy.AUTOMATIC)) {
+                thumbnailJobDao.delete(job.fileId)
+                continue
+            }
+            val bytes = runCatching {
+                generationSemaphore.withPermit { generate(job.fileId) }
+            }.getOrNull()
+            if (bytes != null) {
+                thumbnailJobDao.delete(job.fileId)
+                continue
+            }
+            thumbnailJobDao.recordAttempt(job.fileId)
+            if (job.attempts + 1 >= MAX_BACKGROUND_ATTEMPTS) {
+                thumbnailJobDao.delete(job.fileId)
+                continue
+            }
+            delay(BACKGROUND_RETRY_DELAY_MS)
+            return
+        }
+    }
+
     override suspend fun uploadThumbnailFile(fileId: String): File? {
-        val bytes = thumbnailBytes(fileId) ?: return null
+        val bytes = generateNow(fileId) ?: return null
         val dir = File(storagePaths.cacheDir, "upload-thumbs").apply { mkdirs() }
         val target = File(dir, "$fileId.jpg")
         return runCatching {
@@ -324,6 +424,9 @@ class DesktopThumbnailStore(
         wrappedKeyRepository.getOrCreate(CryptoKeys.THUMBNAIL)
 
     private companion object {
+        const val TARGET_FILE = "FILE"
+        const val MAX_BACKGROUND_ATTEMPTS = 3
+        const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024
         const val MAX_DIMENSION = 512
         const val VIDEO_FRAME_TIMEOUT_MS = 8_000L
