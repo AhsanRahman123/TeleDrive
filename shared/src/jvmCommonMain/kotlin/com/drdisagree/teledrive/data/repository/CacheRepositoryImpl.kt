@@ -228,6 +228,13 @@ class CacheRepositoryImpl(
         }
     }
 
+    override suspend fun thumbnailPolicy(
+        targetType: ThumbnailTargetType,
+        targetId: String
+    ): ThumbnailPolicy = thumbnailPolicyDao.policy(targetType.name, targetId)
+        ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+        ?: ThumbnailPolicy.INHERIT
+
     override suspend fun generateThumbnail(fileId: String) {
         thumbnailStore.enqueueManual(fileId)
     }
