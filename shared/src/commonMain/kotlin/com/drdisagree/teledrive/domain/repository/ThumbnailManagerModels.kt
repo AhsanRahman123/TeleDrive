@@ -56,4 +56,6 @@ data class ThumbnailQueueItem(
     val attempts: Int,
     val isForced: Boolean,
     val isProcessing: Boolean = false
-)
+) {
+    val isFailed: Boolean get() = attempts >= 3
+}
