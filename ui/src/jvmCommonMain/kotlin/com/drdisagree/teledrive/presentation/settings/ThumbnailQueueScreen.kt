@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -39,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailQueueItem
+import com.drdisagree.teledrive.domain.repository.ThumbnailQueueSort
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import kotlinx.coroutines.delay
@@ -66,11 +69,13 @@ fun ThumbnailQueueScreen(
     var confirmCancelAll by remember { mutableStateOf(false) }
     var selectingAll by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
+    var sortOrder by remember { mutableStateOf(ThumbnailQueueSort.OLDEST_FIRST) }
+    var selectingPage by remember { mutableStateOf(false) }
 
-    LaunchedEffect(offset) {
+    LaunchedEffect(offset, sortOrder) {
         while (true) {
             refreshing = true
-            val page = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
+            val page = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
             pendingCount = repository.thumbnailQueueCount()
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
@@ -85,6 +90,7 @@ fun ThumbnailQueueScreen(
                 }
             } else {
                 items = page
+                if (pendingCount == 0) selectedIds = emptySet()
             }
             refreshing = false
             delay(1_000L)
@@ -148,13 +154,31 @@ fun ThumbnailQueueScreen(
                 }
                 IconButton(onClick = {
                     scope.launch {
-                        items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
+                        items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
                         pendingCount = repository.thumbnailQueueCount()
                         queuePaused = repository.thumbnailQueuePaused()
                     }
                 }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh queue")
                 }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Queue sorting", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "Changes the list order only; generation continues in its existing priority order.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                ThumbnailQueueSortDropdown(
+                    value = sortOrder,
+                    onSelect = { sortOrder = it }
+                )
             }
 
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -210,13 +234,9 @@ fun ThumbnailQueueScreen(
                         enabled = items.isNotEmpty(),
                         onClick = {
                             val pageIds = items.map { it.fileId }.toSet()
-                            selectedIds = if (pageIds.all { it in selectedIds }) {
-                                selectedIds - pageIds
-                            } else {
-                                selectedIds + pageIds
-                            }
+                            selectedIds = selectedIds + pageIds
                         }
-                    ) { Text("Select page") }
+                    ) { Text("Select visible page") }
                     TextButton(
                         enabled = selectedIds.isNotEmpty(),
                         onClick = { selectedIds = emptySet() }
@@ -334,6 +354,48 @@ fun ThumbnailQueueScreen(
                 DesktopVerticalScrollbar(
                     state = scrollState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailQueueSortDropdown(
+    value: ThumbnailQueueSort,
+    onSelect: (ThumbnailQueueSort) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = when (value) {
+        ThumbnailQueueSort.OLDEST_FIRST -> "Oldest first"
+        ThumbnailQueueSort.NEWEST_FIRST -> "Newest first"
+        ThumbnailQueueSort.NAME_ASC -> "Name A–Z"
+        ThumbnailQueueSort.NAME_DESC -> "Name Z–A"
+        ThumbnailQueueSort.SOURCE_LARGEST -> "Largest file"
+        ThumbnailQueueSort.SOURCE_SMALLEST -> "Smallest file"
+        ThumbnailQueueSort.FAILED_FIRST -> "Failed first"
+    }
+    Box {
+        androidx.compose.material3.OutlinedButton(onClick = { expanded = true }) {
+            Text("Sort: $label")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            ThumbnailQueueSort.entries.forEach { option ->
+                val optionLabel = when (option) {
+                    ThumbnailQueueSort.OLDEST_FIRST -> "Oldest first"
+                    ThumbnailQueueSort.NEWEST_FIRST -> "Newest first"
+                    ThumbnailQueueSort.NAME_ASC -> "Name A–Z"
+                    ThumbnailQueueSort.NAME_DESC -> "Name Z–A"
+                    ThumbnailQueueSort.SOURCE_LARGEST -> "Largest file"
+                    ThumbnailQueueSort.SOURCE_SMALLEST -> "Smallest file"
+                    ThumbnailQueueSort.FAILED_FIRST -> "Failed first"
+                }
+                DropdownMenuItem(
+                    text = { Text(optionLabel) },
+                    onClick = {
+                        expanded = false
+                        onSelect(option)
+                    }
                 )
             }
         }
