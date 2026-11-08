@@ -31,6 +31,29 @@ interface ThumbnailDao {
         """SELECT COUNT(*) AS cachedFiles,
                   COALESCE(SUM(t.sizeBytes), 0) AS totalBytes
              FROM thumbnails t
+             LEFT JOIN files f ON f.id = t.fileId
+            WHERE f.id IS NULL"""
+    )
+    suspend fun orphanedAggregate(): ThumbnailUnfiledAggregate
+
+    @Query(
+        """SELECT t.fileId AS fileId, t.path AS path
+             FROM thumbnails t
+             LEFT JOIN files f ON f.id = t.fileId
+            WHERE f.id IS NULL
+              AND (:afterFileId IS NULL OR t.fileId > :afterFileId)
+            ORDER BY t.fileId ASC
+            LIMIT :limit"""
+    )
+    suspend fun orphanedFilePathsPage(
+        afterFileId: String?,
+        limit: Int
+    ): List<ThumbnailPathRef>
+
+    @Query(
+        """SELECT COUNT(*) AS cachedFiles,
+                  COALESCE(SUM(t.sizeBytes), 0) AS totalBytes
+             FROM thumbnails t
              JOIN files f ON f.id = t.fileId
             WHERE COALESCE(f.folderId, f.preTrashFolderId) IS NULL"""
     )
