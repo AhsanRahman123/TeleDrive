@@ -258,6 +258,32 @@ interface ThumbnailDao {
     ): List<ThumbnailFileCursor>
 
     @Query(
+        """SELECT f.id
+             FROM files f
+            WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
+              AND (
+                    f.trashedAt IS NULL
+                    OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
+                  )
+              AND (
+                    f.category IN ('IMAGE', 'VIDEO')
+                    OR f.mimeType LIKE 'text/%'
+                    OR f.mimeType IN (
+                        'application/json', 'application/xml', 'application/yaml',
+                        'application/vnd.android.package-archive'
+                    )
+                    OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
+                  )
+            ORDER BY f.name COLLATE NOCASE ASC, f.id ASC
+            LIMIT :limit OFFSET :offset"""
+    )
+    suspend fun allFileIdsInFolder(
+        folderId: String?,
+        limit: Int,
+        offset: Int
+    ): List<String>
+
+    @Query(
         """WITH RECURSIVE child_folders(id) AS (
                SELECT id FROM folders WHERE id = :folderId
                UNION ALL
