@@ -53,4 +53,8 @@ interface ThumbnailStore {
         fileIds.forEach { enqueueManual(it) }
     }
 
+
+    suspend fun storeFromDecrypted(fileId: String, plain: File) = Unit
+
+    suspend fun storeFromStream(fileId: String, parts: List<MediaPart>, encrypted: Boolean) = Unit
 }

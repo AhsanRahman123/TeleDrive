@@ -373,11 +373,7 @@ class AndroidThumbnailStore(
         }
 
         val jpegBytes = if (bitmap != null) {
-            ByteArrayOutputStream().use { output ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
-                bitmap.recycle()
-                output.toByteArray()
-            }
+            toJpeg(bitmap)
         } else {
             val iconFileId = entity.iconFileId
             if (iconFileId != null) {
@@ -386,12 +382,67 @@ class AndroidThumbnailStore(
                 fetchRemoteThumbnail(entity)
             }
         } ?: return null
+        return save(fileId, jpegBytes)
+    }
 
-        if (cacheResult) {
-            val encrypt = settingsRepository.preferences.first().encryptThumbnails
-            val stored = if (encrypt) {
-                streamCrypto.encryptBytes(thumbnailKey(), jpegBytes)
-            } else jpegBytes
+    override suspend fun storeFromDecrypted(fileId: String, plain: File) {
+        if (hasThumbnail(fileId)) return
+        val entity = fileDao.byId(fileId) ?: return
+        generationSemaphore.withPermit {
+            val bitmap = decodeThumbnail(plain, entity.mimeType) ?: return@withPermit
+            save(fileId, toJpeg(bitmap))
+        }
+    }
+
+    override suspend fun storeFromStream(fileId: String, parts: List<MediaPart>, encrypted: Boolean) {
+        if (hasThumbnail(fileId)) return
+        val key = if (encrypted) wrappedKeyRepository.get(CryptoKeys.CONTENT) ?: return else null
+        generationSemaphore.withPermit {
+            val frame = PartedMediaByteSource(telegramClient, streamCrypto, parts, encrypted, key)
+                .use { source -> runCatching { streamedVideoFrame(source) }.getOrNull() }
+                ?: return@withPermit
+            save(fileId, toJpeg(frame))
+        }
+    }
+
+    private suspend fun hasThumbnail(fileId: String): Boolean =
+        thumbnailDao.byFileId(fileId)?.let { File(it.path).exists() } == true
+
+    private fun streamedVideoFrame(source: MediaByteSource): Bitmap? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(ByteSourceMediaDataSource(source))
+            retriever.frameAtTime?.let(::scaledToFit)
+        } finally {
+            retriever.release()
+        }
+    }
+
+    private fun scaledToFit(frame: Bitmap): Bitmap {
+        val longest = maxOf(frame.width, frame.height)
+        if (longest <= MAX_DIMENSION) return frame
+        val scale = MAX_DIMENSION.toFloat() / longest
+        val scaled = Bitmap.createScaledBitmap(
+            frame,
+            (frame.width * scale).toInt().coerceAtLeast(1),
+            (frame.height * scale).toInt().coerceAtLeast(1),
+            true
+        )
+        if (scaled !== frame) frame.recycle()
+        return scaled
+    }
+
+    private fun toJpeg(bitmap: Bitmap): ByteArray = ByteArrayOutputStream().use { output ->
+        bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
+        bitmap.recycle()
+        output.toByteArray()
+    }
+
+    private suspend fun save(fileId: String, jpegBytes: ByteArray): ByteArray {
+        val encrypt = settingsRepository.preferences.first().encryptThumbnails
+        val stored = if (encrypt) {
+            streamCrypto.encryptBytes(thumbnailKey(), jpegBytes)
+        } else jpegBytes
 
             val dir = File(context.cacheDir, "thumbnails").apply { mkdirs() }
             val target = File(dir, "$fileId.thumb")
@@ -411,7 +462,6 @@ class AndroidThumbnailStore(
                 )
             )
             ThumbnailChangeNotifier.notifyChanged(fileId, stored.size.toLong(), now, encrypt)
-        }
         return jpegBytes
     }
 

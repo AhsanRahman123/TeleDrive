@@ -6,6 +6,7 @@ import com.drdisagree.teledrive.core.files.LocalCleanup
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.dispatchers.DispatcherProvider
 import com.drdisagree.teledrive.core.files.AppStoragePaths
+import com.drdisagree.teledrive.core.media.MediaPart
 import com.drdisagree.teledrive.core.media.ThumbnailStore
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.data.local.entity.FileEntity
@@ -137,6 +138,12 @@ class SplitReuploadCancelTest {
         val thumbnails = object : ThumbnailStore {
             override suspend fun thumbnailBytes(fileId: String): ByteArray? = null
             override suspend fun uploadThumbnailFile(fileId: String): File? = null
+            override suspend fun storeFromDecrypted(fileId: String, plain: File) = Unit
+            override suspend fun storeFromStream(
+                fileId: String,
+                parts: List<MediaPart>,
+                encrypted: Boolean
+            ) = Unit
         }
         val paths = object : AppStoragePaths by unused() {
             override val filesDir: File = workDir

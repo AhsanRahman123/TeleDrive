@@ -21,6 +21,7 @@ import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.files.Urls
+import com.drdisagree.teledrive.core.media.MediaPart
 import com.drdisagree.teledrive.core.media.ThumbnailStore
 import com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier
 import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
@@ -538,13 +539,30 @@ class DesktopThumbnailStore(
                 fetchRemoteThumbnail(entity)
             }
         } ?: return null
+        return save(fileId, jpegBytes)
+    }
 
-        currentCoroutineContext().ensureActive()
-        if (cacheResult) {
-            val encrypt = settingsRepository.preferences.first().encryptThumbnails
-            val stored = if (encrypt) {
-                streamCrypto.encryptBytes(thumbnailKey(), jpegBytes)
-            } else jpegBytes
+    override suspend fun storeFromDecrypted(fileId: String, plain: File) {
+        if (thumbnailDao.byFileId(fileId)?.let { File(it.path).exists() } == true) return
+        val entity = fileDao.byId(fileId) ?: return
+        if (!MimeTypes.isImage(entity.mimeType)) return
+        generationSemaphore.withPermit {
+            val image = decodeImageThumbnail(plain) ?: return@withPermit
+            save(fileId, toJpeg(image))
+        }
+    }
+
+    override suspend fun storeFromStream(
+        fileId: String,
+        parts: List<MediaPart>,
+        encrypted: Boolean
+    ) = Unit
+
+    private suspend fun save(fileId: String, jpegBytes: ByteArray): ByteArray {
+        val encrypt = settingsRepository.preferences.first().encryptThumbnails
+        val stored = if (encrypt) {
+            streamCrypto.encryptBytes(thumbnailKey(), jpegBytes)
+        } else jpegBytes
 
             val dir = File(storagePaths.cacheDir, "thumbnails").apply { mkdirs() }
             val target = File(dir, "$fileId.thumb")
@@ -564,7 +582,6 @@ class DesktopThumbnailStore(
                 )
             )
             ThumbnailChangeNotifier.notifyChanged(fileId, stored.size.toLong(), now, encrypt)
-        }
         return jpegBytes
     }
 
