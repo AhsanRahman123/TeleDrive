@@ -128,6 +128,33 @@ class DesktopThumbnailStore(
             jobWakeups.trySend(Unit)
     }
 
+    override suspend fun pauseJobs(fileIds: List<String>) {
+        schedulerMutex.withLock {
+            val jobs = fileIds.distinct().mapNotNull(runningJobs::get)
+            jobs.forEach { it.cancel(CancellationException("Thumbnail job paused by user")) }
+            jobs.joinAll()
+        }
+        jobWakeups.trySend(Unit)
+    }
+
+    override suspend fun pauseAllJobs() {
+        schedulerMutex.withLock {
+            schedulingPaused = true
+            val jobs = runningJobs.values.toList()
+            jobs.forEach { it.cancel(CancellationException("Thumbnail queue paused by user")) }
+            jobs.joinAll()
+            runningJobs.clear()
+            processingIds.clear()
+            _activeJobs.value = emptySet()
+        }
+    }
+
+    override suspend fun resumeQueue() {
+        schedulingPaused = false
+        jobWakeups.trySend(Unit)
+    }
+
+
     override suspend fun cancelAllJobs() {
         schedulerMutex.withLock {
             schedulingPaused = true
@@ -266,7 +293,7 @@ class DesktopThumbnailStore(
      * durable source of truth; in-memory jobs are only the currently executing subset.
      */
     private suspend fun processPendingJobs() = schedulerMutex.withLock {
-        if (schedulingPaused) return@withLock
+        if (schedulingPaused || thumbnailPolicyDao.isQueuePaused()) return@withLock
         val available = (MAX_PARALLEL_GENERATIONS - runningJobs.size).coerceAtLeast(0)
         if (available == 0) return@withLock
         val ready = thumbnailJobDao.nextReady(
