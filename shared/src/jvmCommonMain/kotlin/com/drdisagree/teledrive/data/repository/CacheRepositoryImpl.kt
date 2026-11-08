@@ -61,6 +61,7 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun clearThumbnails() {
+        thumbnailStore.cancelAllJobs()
         thumbnailDir().deleteRecursively()
         thumbnailDao.deleteAll()
         thumbnailJobDao.deleteAll()
@@ -390,6 +391,13 @@ class CacheRepositoryImpl(
         if (ids.isEmpty()) return
         thumbnailStore.cancelJobs(ids)
         thumbnailJobDao.delete(ids)
+    }
+
+    override suspend fun retryThumbnailJobs(fileIds: List<String>) {
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return
+        thumbnailJobDao.retry(ids, System.currentTimeMillis())
+        thumbnailStore.retryJobs(ids)
     }
 
     override suspend fun cancelAllThumbnailJobs() {
