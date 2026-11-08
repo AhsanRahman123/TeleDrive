@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -62,6 +65,7 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailManagerSummary
 import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -89,8 +93,21 @@ fun ThumbnailManagerScreen(
     var refreshKey by remember { mutableStateOf(0) }
     var confirmClearFolder by remember { mutableStateOf(false) }
     var confirmClearOrphans by remember { mutableStateOf(false) }
+    var confirmClearAll by remember { mutableStateOf(false) }
+    var confirmRemoveSelected by remember { mutableStateOf(false) }
+    var showQueue by remember { mutableStateOf(false) }
+    var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
+    val fileListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
+    val fileDragSelect = rememberDragSelect(
+        listState = fileListState,
+        onStart = { rangeSelectionBase = selectedIds },
+        onRange = { range ->
+            selectedIds = rangeSelectionBase + range.mapNotNull { files.getOrNull(it)?.fileId }
+        },
+        onEnd = { rangeSelectionBase = emptySet() }
+    )
     LaunchedEffect(folderId) { selectedIds = emptySet() }
     LaunchedEffect(folderId, refreshKey, pageOffset) {
         loading = true
@@ -127,6 +144,14 @@ fun ThumbnailManagerScreen(
             }
             delay(5_000L)
         }
+    }
+
+    if (showQueue) {
+        ThumbnailQueueScreen(
+            onBack = { showQueue = false },
+            modifier = modifier
+        )
+        return
     }
 
     // Update visible file rows as their persistent cache entries are written.
@@ -215,6 +240,54 @@ fun ThumbnailManagerScreen(
         )
     }
 
+    if (confirmClearAll) {
+        AlertDialog(
+            onDismissRequest = { confirmClearAll = false },
+            title = { Text("Delete all cached thumbnails?") },
+            text = {
+                Text(
+                    "Every thumbnail preview and queued preparation will be removed from this device. " +
+                        "Your original files and Telegram backups will remain untouched."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClearAll = false
+                    scope.launch {
+                        cacheRepository.clearThumbnails()
+                        selectedIds = emptySet()
+                        refreshKey++
+                    }
+                }) { Text("Delete all thumbnails") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearAll = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (confirmRemoveSelected) {
+        AlertDialog(
+            onDismissRequest = { confirmRemoveSelected = false },
+            title = { Text("Delete selected thumbnails?") },
+            text = { Text("The selected cached previews and any matching queued jobs will be removed. Original files will not be affected.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemoveSelected = false
+                    val ids = selectedIds.toList()
+                    scope.launch {
+                        ids.forEach { cacheRepository.removeThumbnail(it) }
+                        selectedIds = emptySet()
+                        refreshKey++
+                    }
+                }) { Text("Delete selected") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemoveSelected = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -249,6 +322,7 @@ fun ThumbnailManagerScreen(
                         maxLines = 1
                     )
                 }
+                OutlinedButton(onClick = { showQueue = true }) { Text("View queue") }
                 IconButton(onClick = { refreshKey++ }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
@@ -331,7 +405,7 @@ fun ThumbnailManagerScreen(
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         }
-                    ) { Text("Prepare missing") }
+                    ) { Text("Generate all missing") }
                     IconButton(onClick = { confirmClearFolder = true }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Clear folder thumbnails")
                     }
@@ -358,6 +432,15 @@ fun ThumbnailManagerScreen(
                             }
                         }
                     ) { Text("Prepare unfiled") }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                cacheRepository.generateAllThumbnails()
+                                summary = cacheRepository.thumbnailManagerSummary()
+                            }
+                        }
+                    ) { Text("Generate all missing") }
+                    OutlinedButton(onClick = { confirmClearAll = true }) { Text("Delete all") }
                 }
             }
 
@@ -400,6 +483,15 @@ fun ThumbnailManagerScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                if (files.isNotEmpty()) {
+                    TextButton(onClick = {
+                        val pageIds = files.map { it.fileId }.toSet()
+                        selectedIds = if (pageIds.all { it in selectedIds }) selectedIds - pageIds
+                        else selectedIds + pageIds
+                    }) {
+                        Text(if (files.isNotEmpty() && files.all { it.fileId in selectedIds }) "Deselect page" else "Select page")
+                    }
+                }
             }
 
             if (selectedIds.isNotEmpty()) {
@@ -421,14 +513,8 @@ fun ThumbnailManagerScreen(
                             }
                         }
                     ) { Text("Generate") }
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                selectedIds.forEach { cacheRepository.removeThumbnail(it) }
-                                refreshKey++
-                            }
-                        }
-                    ) { Text("Remove") }
+                    OutlinedButton(onClick = { confirmRemoveSelected = true }) { Text("Delete selected") }
+                    TextButton(onClick = { selectedIds = emptySet() }) { Text("Deselect") }
                 }
             }
 
@@ -441,37 +527,47 @@ fun ThumbnailManagerScreen(
                     modifier = Modifier.padding(vertical = 16.dp)
                 )
             } else {
-                files.forEach { file ->
-                    ThumbnailFileRow(
-                        file = file,
-                        selected = file.fileId in selectedIds,
-                        onSelectionChange = { checked ->
-                            selectedIds = if (checked) selectedIds + file.fileId
-                            else selectedIds - file.fileId
-                        },
-                        onPolicy = { policy ->
-                            scope.launch {
-                                cacheRepository.setThumbnailPolicy(
-                                    ThumbnailTargetType.FILE,
-                                    file.fileId,
-                                    policy
-                                )
-                                refreshKey++
+                LazyColumn(
+                    state = fileListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(440.dp)
+                        .then(fileDragSelect),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    itemsIndexed(files, key = { _, file -> file.fileId }) { _, file ->
+                        ThumbnailFileRow(
+                            file = file,
+                            selected = file.fileId in selectedIds,
+                            onSelectionChange = { checked ->
+                                selectedIds = if (checked) selectedIds + file.fileId
+                                else selectedIds - file.fileId
+                            },
+                            onPolicy = { policy ->
+                                scope.launch {
+                                    cacheRepository.setThumbnailPolicy(
+                                        ThumbnailTargetType.FILE,
+                                        file.fileId,
+                                        policy
+                                    )
+                                    refreshKey++
+                                }
+                            },
+                            onGenerate = {
+                                scope.launch {
+                                    cacheRepository.generateThumbnail(file.fileId)
+                                    summary = cacheRepository.thumbnailManagerSummary()
+                                }
+                            },
+                            onRemove = {
+                                scope.launch {
+                                    cacheRepository.removeThumbnail(file.fileId)
+                                    selectedIds = selectedIds - file.fileId
+                                    refreshKey++
+                                }
                             }
-                        },
-                        onGenerate = {
-                            scope.launch {
-                                cacheRepository.generateThumbnail(file.fileId)
-                                summary = cacheRepository.thumbnailManagerSummary()
-                            }
-                        },
-                        onRemove = {
-                            scope.launch {
-                                cacheRepository.removeThumbnail(file.fileId)
-                                refreshKey++
-                            }
-                        }
-                    )
+                        )
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
