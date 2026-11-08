@@ -224,6 +224,55 @@ class DesktopThumbnailStore(
         }
     }
 
+    override suspend fun cacheUploadedThumbnail(
+        fileId: String,
+        temporaryPath: String
+    ): Boolean {
+        val existing = thumbnailDao.byFileId(fileId)
+        if (existing != null) {
+            if (File(existing.path).exists()) return true
+            thumbnailDao.delete(fileId)
+        }
+
+        val inherited = thumbnailPolicyDao.effectivePolicy(fileId)
+            ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+        if (inherited == ThumbnailPolicy.MANUAL_ONLY) return false
+
+        val temporary = File(temporaryPath)
+        if (!temporary.isFile || temporary.length() == 0L) return false
+        val jpegBytes = runCatching { temporary.readBytes() }.getOrNull() ?: return false
+        val encrypt = settingsRepository.preferences.first().encryptThumbnails
+        val stored = if (encrypt) {
+            streamCrypto.encryptBytes(thumbnailKey(), jpegBytes)
+        } else jpegBytes
+        val dir = File(storagePaths.cacheDir, "thumbnails").apply { mkdirs() }
+        val target = File(dir, "$fileId.thumb")
+        if (!runCatching { target.writeBytes(stored) }.isSuccess) return false
+
+        val now = System.currentTimeMillis()
+        thumbnailDao.upsert(
+            ThumbnailEntity(
+                fileId = fileId,
+                path = target.absolutePath,
+                encrypted = encrypt,
+                width = MAX_DIMENSION,
+                height = MAX_DIMENSION,
+                sizeBytes = stored.size.toLong(),
+                generatedAt = now,
+                lastAccessAt = now
+            )
+        )
+        thumbnailPolicyDao.upsert(
+            ThumbnailPolicyEntity(
+                targetType = TARGET_FILE,
+                targetId = fileId,
+                policy = ThumbnailPolicy.AUTOMATIC.name,
+                changedAt = now
+            )
+        )
+        return true
+    }
+
     override suspend fun uploadThumbnailFile(fileId: String): File? {
         if (!settingsRepository.preferences.first().linkPreviews && isNote(fileId)) return null
         val bytes = readCachedThumbnail(fileId)
