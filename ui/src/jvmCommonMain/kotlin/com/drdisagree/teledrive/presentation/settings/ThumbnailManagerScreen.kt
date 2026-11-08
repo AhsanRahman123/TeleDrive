@@ -281,7 +281,7 @@ fun ThumbnailManagerScreen(
                                 refreshKey++
                             }
                         },
-                        currentPolicy = rememberFolderPolicy(folder.id, cacheRepository, refreshKey)
+                        currentPolicy = folder.policy
                     )
                 }
             }
@@ -403,19 +403,6 @@ fun ThumbnailManagerScreen(
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
         )
     }
-}
-
-@Composable
-private fun rememberFolderPolicy(
-    folderId: String,
-    cacheRepository: CacheRepository,
-    refreshKey: Int
-): ThumbnailPolicy {
-    var policy by remember(folderId, refreshKey) { mutableStateOf(ThumbnailPolicy.INHERIT) }
-    LaunchedEffect(folderId, refreshKey) {
-        policy = cacheRepository.thumbnailPolicy(ThumbnailTargetType.FOLDER, folderId)
-    }
-    return policy
 }
 
 @Composable
