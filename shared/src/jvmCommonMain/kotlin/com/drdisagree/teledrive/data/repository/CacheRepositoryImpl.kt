@@ -61,14 +61,18 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun clearThumbnails() {
-        thumbnailStore.cancelAllJobs()
-        thumbnailDir().deleteRecursively()
-        thumbnailDao.deleteAll()
-        thumbnailJobDao.deleteAll()
-        thumbnailPolicyDao.clearGlobalQueuePause()
-        thumbnailPolicyDao.clearAllQueueItemPauses()
-        thumbnailMemoryCache.clear()
-        refreshThumbnailStats()
+        // Stop in-flight writers temporarily, but keep the durable queue and policy rules.
+        // Queued work can resume after the cache deletion completes.
+        val wasQueuePaused = thumbnailPolicyDao.isQueuePaused()
+        thumbnailStore.pauseAllJobs()
+        try {
+            thumbnailDir().deleteRecursively()
+            thumbnailDao.deleteAll()
+            thumbnailMemoryCache.clear()
+            refreshThumbnailStats()
+        } finally {
+            if (!wasQueuePaused) thumbnailStore.resumeQueue()
+        }
     }
 
     override suspend fun clearLinkThumbnails() {
@@ -613,49 +617,54 @@ class CacheRepositoryImpl(
     override suspend fun removeThumbnails(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
-        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
-            thumbnailPolicyDao.clearQueueItemPauses(batch)
-            // Delete queue rows first so the scheduler cannot restart selected items while
-            // the running workers are being cancelled.
-            thumbnailJobDao.delete(batch)
-            thumbnailStore.cancelJobs(batch)
+        val wasQueuePaused = thumbnailPolicyDao.isQueuePaused()
+        thumbnailStore.pauseAllJobs()
+        try {
+            ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+                val removedIds = thumbnailDao.pathsForFiles(batch).filter { ref ->
+                    val cachedFile = File(ref.path)
+                    !cachedFile.exists() || cachedFile.delete()
+                }.map { it.fileId }
 
-            val removedIds = thumbnailDao.pathsForFiles(batch).filter { ref ->
-                val cachedFile = File(ref.path)
-                !cachedFile.exists() || cachedFile.delete()
-            }.map { it.fileId }
-
-            if (removedIds.isNotEmpty()) {
-                thumbnailDao.deleteAll(removedIds)
-                removedIds.forEach(thumbnailMemoryCache::remove)
+                if (removedIds.isNotEmpty()) {
+                    thumbnailDao.deleteAll(removedIds)
+                    removedIds.forEach(thumbnailMemoryCache::remove)
+                }
             }
+            refreshThumbnailStats()
+        } finally {
+            if (!wasQueuePaused) thumbnailStore.resumeQueue()
         }
-        refreshThumbnailStats()
     }
 
     override suspend fun removeFolderThumbnails(folderId: String) {
-        cancelFolderThumbnailJobs(folderId)
-        var afterFileId: String? = null
-        while (true) {
-            val batch = thumbnailDao.cachedFilePathsInFolderTreePage(
-                folderId = folderId,
-                afterFileId = afterFileId,
-                limit = JOB_BATCH_SIZE
-            )
-            if (batch.isEmpty()) break
-            val removedIds = batch.filter { ref ->
-                val cachedFile = File(ref.path)
-                !cachedFile.exists() || cachedFile.delete()
-            }.map { it.fileId }
-            if (removedIds.isNotEmpty()) {
-                thumbnailDao.deleteAll(removedIds)
-                removedIds.forEach(thumbnailMemoryCache::remove)
+        // Keep queue entries and policies intact; only stop writers during the cache sweep.
+        val wasQueuePaused = thumbnailPolicyDao.isQueuePaused()
+        thumbnailStore.pauseAllJobs()
+        try {
+            var afterFileId: String? = null
+            while (true) {
+                val batch = thumbnailDao.cachedFilePathsInFolderTreePage(
+                    folderId = folderId,
+                    afterFileId = afterFileId,
+                    limit = JOB_BATCH_SIZE
+                )
+                if (batch.isEmpty()) break
+                val removedIds = batch.filter { ref ->
+                    val cachedFile = File(ref.path)
+                    !cachedFile.exists() || cachedFile.delete()
+                }.map { it.fileId }
+                if (removedIds.isNotEmpty()) {
+                    thumbnailDao.deleteAll(removedIds)
+                    removedIds.forEach(thumbnailMemoryCache::remove)
+                }
+                afterFileId = batch.last().fileId
+                if (batch.size < JOB_BATCH_SIZE) break
             }
-            afterFileId = batch.last().fileId
-            if (batch.size < JOB_BATCH_SIZE) break
+            refreshThumbnailStats()
+        } finally {
+            if (!wasQueuePaused) thumbnailStore.resumeQueue()
         }
-        thumbnailJobDao.deleteInFolderTree(folderId)
-        refreshThumbnailStats()
     }
 
     override suspend fun clearOrphanedThumbnails() {
