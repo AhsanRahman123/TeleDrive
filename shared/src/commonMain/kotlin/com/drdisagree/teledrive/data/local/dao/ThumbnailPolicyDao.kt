@@ -58,6 +58,11 @@ interface ThumbnailPolicyDao {
     )
     suspend fun deleteFileOverrides(fileIds: List<String>)
 
+    @Query(
+        "DELETE FROM thumbnail_policies WHERE targetType = 'FOLDER' AND targetId IN (:folderIds)"
+    )
+    suspend fun deleteFolderOverrides(folderIds: List<String>)
+
     @Query("DELETE FROM thumbnail_policies")
     suspend fun deleteAll()
 }
