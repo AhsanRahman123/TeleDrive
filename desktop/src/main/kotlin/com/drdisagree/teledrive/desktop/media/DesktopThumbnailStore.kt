@@ -32,7 +32,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +60,7 @@ import com.drdisagree.teledrive.core.media.ApkIconExtractor
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.joinAll
 
 /**
  * Cache files are sealed when thumbnail encryption is on; non-images fall back to the thumbnail
@@ -110,11 +110,11 @@ class DesktopThumbnailStore(
     }
 
     override suspend fun cancelJobs(fileIds: List<String>) {
-        fileIds.distinct().forEach { id ->
-            runningJobs[id]?.cancel(CancellationException("Thumbnail job cancelled by user"))
-            processingIds.remove(id)
-            _activeJobs.update { it - id }
+        val jobs = fileIds.distinct().mapNotNull(runningJobs::get)
+        jobs.forEach {
+            it.cancel(CancellationException("Thumbnail job cancelled by user"))
         }
+        jobs.joinAll()
         jobWakeups.trySend(Unit)
     }
 
@@ -123,9 +123,11 @@ class DesktopThumbnailStore(
     }
 
     override suspend fun cancelAllJobs() {
-        runningJobs.values.toList().forEach {
+        val jobs = runningJobs.values.toList()
+        jobs.forEach {
             it.cancel(CancellationException("All thumbnail jobs cancelled by user"))
         }
+        jobs.joinAll()
         runningJobs.clear()
         processingIds.clear()
         _activeJobs.value = emptySet()
