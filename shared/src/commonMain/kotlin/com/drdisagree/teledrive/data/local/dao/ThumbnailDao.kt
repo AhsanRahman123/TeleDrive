@@ -154,6 +154,11 @@ interface ThumbnailDao {
                     OR (:policyFilter = 'EXPLICIT_AUTOMATIC' AND ep.directPolicy = 'AUTOMATIC')
                     OR (:policyFilter = 'EXPLICIT_MANUAL_ONLY' AND ep.directPolicy = 'MANUAL_ONLY')
                   )
+              AND (
+                    :effectivePolicyFilter = 'ALL'
+                    OR (:effectivePolicyFilter = 'AUTOMATIC' AND ep.effectivePolicy = 'AUTOMATIC')
+                    OR (:effectivePolicyFilter = 'MANUAL_ONLY' AND ep.effectivePolicy = 'MANUAL_ONLY')
+                  )
               AND (:searchQuery = '' OR LOWER(f.name) LIKE '%' || LOWER(:searchQuery) || '%')
             ORDER BY
                 CASE WHEN :sortOrder = 'THUMBNAIL_LARGEST' THEN t.sizeBytes END DESC,
@@ -174,6 +179,7 @@ interface ThumbnailDao {
         folderId: String?,
         cacheFilter: String,
         policyFilter: String,
+        effectivePolicyFilter: String,
         searchQuery: String,
         sortOrder: String,
         limit: Int,
@@ -241,6 +247,11 @@ interface ThumbnailDao {
                     OR (:policyFilter = 'EXPLICIT_AUTOMATIC' AND ep.directPolicy = 'AUTOMATIC')
                     OR (:policyFilter = 'EXPLICIT_MANUAL_ONLY' AND ep.directPolicy = 'MANUAL_ONLY')
                   )
+              AND (
+                    :effectivePolicyFilter = 'ALL'
+                    OR (:effectivePolicyFilter = 'AUTOMATIC' AND ep.effectivePolicy = 'AUTOMATIC')
+                    OR (:effectivePolicyFilter = 'MANUAL_ONLY' AND ep.effectivePolicy = 'MANUAL_ONLY')
+                  )
               AND (:searchQuery = '' OR LOWER(f.name) LIKE '%' || LOWER(:searchQuery) || '%')
             ORDER BY f.id ASC"""
     )
@@ -248,6 +259,7 @@ interface ThumbnailDao {
         folderId: String?,
         cacheFilter: String,
         policyFilter: String,
+        effectivePolicyFilter: String,
         searchQuery: String
     ): List<String>
 
