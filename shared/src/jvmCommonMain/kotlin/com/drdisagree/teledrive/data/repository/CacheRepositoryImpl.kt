@@ -118,12 +118,14 @@ class CacheRepositoryImpl(
             val victims = thumbnailDao.leastRecentlyUsed(64)
             if (victims.isEmpty()) break
             for (victim in victims) {
+                val cachedFile = File(victim.path)
+                if (cachedFile.exists() && !withContext(Dispatchers.IO) { cachedFile.delete() }) {
+                    continue
+                }
                 // Cache eviction must not rewrite the file's independent generation policy.
                 thumbnailJobDao.delete(victim.fileId)
                 thumbnailPolicyDao.clearQueueItemPauses(listOf(victim.fileId))
                 thumbnailStore.cancelJobs(listOf(victim.fileId))
-                val cachedFile = File(victim.path)
-                if (cachedFile.exists() && !cachedFile.delete()) continue
                 thumbnailDao.delete(victim.fileId)
                 thumbnailMemoryCache.remove(victim.fileId)
                 total -= victim.sizeBytes
