@@ -189,10 +189,21 @@ class CacheRepositoryImpl(
             }
             .toList()
         return result.map { folder ->
+            val directPolicy = thumbnailPolicyDao.policy(
+                ThumbnailTargetType.FOLDER.name,
+                folder.id
+            )?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+                ?: ThumbnailPolicy.INHERIT
+            val inheritedPolicy = thumbnailPolicyDao.inheritedFolderPolicy(folder.id)
+                ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+                ?: ThumbnailPolicy.MANUAL_ONLY
             folder.copy(
-                policy = thumbnailPolicyDao.policy(ThumbnailTargetType.FOLDER.name, folder.id)
-                    ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
-                    ?: ThumbnailPolicy.INHERIT
+                policy = directPolicy,
+                effectivePolicy = if (directPolicy == ThumbnailPolicy.INHERIT) {
+                    inheritedPolicy
+                } else {
+                    directPolicy
+                }
             )
         }.sortedWith(compareByDescending<ThumbnailFolderUsage> { it.totalBytes }
             .thenBy { it.name.lowercase() })
