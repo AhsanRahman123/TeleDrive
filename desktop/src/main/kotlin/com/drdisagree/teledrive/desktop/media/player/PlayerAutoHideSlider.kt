@@ -20,6 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +50,8 @@ internal fun PlayerAutoHideSlider(
     onButtonClick: () -> Unit,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit = {},
-    onDraggingChange: (Boolean) -> Unit = {}
+    onDraggingChange: (Boolean) -> Unit = {},
+    onActiveChange: (Boolean) -> Unit = {}
 ) {
     val groupInteraction = remember { MutableInteractionSource() }
     val isHovered by groupInteraction.collectIsHoveredAsState()
@@ -71,6 +73,14 @@ internal fun PlayerAutoHideSlider(
 
     LaunchedEffect(isDragging) {
         onDraggingChange(isDragging)
+    }
+
+    LaunchedEffect(isHovered, isDragging, hasFocus) {
+        onActiveChange(isHovered || isDragging || hasFocus)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { onActiveChange(false) }
     }
 
     Row(
