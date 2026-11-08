@@ -322,8 +322,9 @@ class CacheRepositoryImpl(
         if (targetType == ThumbnailTargetType.FOLDER &&
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
-            thumbnailPolicyDao.deleteOverridesInFolderTree(targetId)
-            cancelFolderThumbnailJobs(targetId)
+            // A folder rule must not erase more-specific child-folder or file overrides.
+            // Queued jobs re-check effective policy before generating and will be discarded
+            // without generation when their nearest rule now resolves to Manual only.
             thumbnailPolicyDao.upsert(
                 ThumbnailPolicyEntity(
                     targetType = ThumbnailTargetType.FOLDER.name,
