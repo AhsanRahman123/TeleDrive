@@ -153,6 +153,7 @@ fun FolderPickerDialog(
                                 )
                             }
                         }
+                        }
                         DesktopVerticalScrollbar(
                             state = listState,
                             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
