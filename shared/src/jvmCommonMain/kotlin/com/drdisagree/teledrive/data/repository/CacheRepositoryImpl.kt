@@ -605,10 +605,20 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun cancelAllThumbnailJobs() {
+        // Prevent new uploads/enqueues from starting while the existing queue is being cleared.
+        thumbnailPolicyDao.upsert(
+            ThumbnailPolicyEntity(
+                targetType = QUEUE_TARGET,
+                targetId = QUEUE_GLOBAL_ID,
+                policy = QUEUE_PAUSED,
+                changedAt = System.currentTimeMillis()
+            )
+        )
         thumbnailStore.cancelAllJobs()
         thumbnailJobDao.deleteAll()
-        thumbnailPolicyDao.clearGlobalQueuePause()
         thumbnailPolicyDao.clearAllQueueItemPauses()
+        thumbnailPolicyDao.clearGlobalQueuePause()
+        thumbnailStore.resumeQueue()
     }
 
     override suspend fun removeThumbnail(fileId: String) {
