@@ -12,6 +12,9 @@ interface ThumbnailPolicyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(policy: ThumbnailPolicyEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(policies: List<ThumbnailPolicyEntity>)
+
     @Query(
         "SELECT policy FROM thumbnail_policies WHERE targetType = :targetType AND targetId = :targetId"
     )
