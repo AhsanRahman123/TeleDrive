@@ -209,6 +209,7 @@ fun SettingsSectionScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var confirmLogout by remember { mutableStateOf(false) }
     var confirmClearCache by remember { mutableStateOf(false) }
+    var showThumbnailManager by remember { mutableStateOf(false) }
 
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
 
@@ -236,9 +237,14 @@ fun SettingsSectionScreen(
         topBar = {
             TopAppBar(
                 colors = liftedTopAppBarColors(lifted),
-                title = { Text(stringResource(section.titleRes)) },
+                title = { Text(if (showThumbnailManager) "Thumbnail manager" else stringResource(section.titleRes)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = {
+                            if (showThumbnailManager) showThumbnailManager = false
+                            else onBack()
+                        }
+                    ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -252,54 +258,65 @@ fun SettingsSectionScreen(
             LoadingState(modifier = Modifier.padding(padding))
             return@Scaffold
         }
-        Box(modifier = Modifier.fillMaxSize()) {
-            Column(
-            modifier = Modifier
-                .fillMaxSize().padding(end = 10.dp)
-                .padding(top = padding.calculateTopPadding())
-                .verticalScroll(scrollState)
-        ) {
-            Spacer(Modifier.height(8.dp))
-            when (section) {
-                SettingsSectionType.ACCOUNT -> AccountSection(
-                    onPickChannel = onOpenChannels,
-                    state = state,
-                    viewModel = viewModel,
-                    onLogout = { confirmLogout = true }
-                )
-
-                SettingsSectionType.BACKUP -> BackupSection(
-                    state = state,
-                    viewModel = viewModel,
-                    onOpenExclusions = onOpenExclusions
-                )
-
-                SettingsSectionType.STORAGE -> StorageSection(
-                    state = state,
-                    viewModel = viewModel,
-                    onClearCache = { confirmClearCache = true }
-                )
-
-                SettingsSectionType.PERMISSIONS ->
-                    PermissionsSection(viewModel.permissionChecker)
-
-                SettingsSectionType.SECURITY -> SecuritySection(state, viewModel)
-                SettingsSectionType.APPEARANCE -> AppearanceSection(state, viewModel)
-                SettingsSectionType.PLAYBACK -> PlaybackSection(state, viewModel)
-                SettingsSectionType.NOTIFICATIONS -> NotificationsSection(state, viewModel)
-                SettingsSectionType.ADVANCED -> AdvancedSection(
-                    state = state,
-                    viewModel = viewModel,
-                    onOpenProxy = onOpenProxy
-                )
-                SettingsSectionType.ABOUT -> AboutSection(state, viewModel)
-            }
-            Spacer(Modifier.height(24.dp + padding.calculateBottomPadding()))
-        }
-            DesktopVerticalScrollbar(
-                state = scrollState,
-                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+        if (section == SettingsSectionType.STORAGE && showThumbnailManager) {
+            ThumbnailManagerScreen(
+                onBack = { showThumbnailManager = false },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = padding.calculateTopPadding())
             )
+        } else {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 10.dp)
+                        .padding(top = padding.calculateTopPadding())
+                        .verticalScroll(scrollState)
+                ) {
+                    Spacer(Modifier.height(8.dp))
+                    when (section) {
+                        SettingsSectionType.ACCOUNT -> AccountSection(
+                            onPickChannel = onOpenChannels,
+                            state = state,
+                            viewModel = viewModel,
+                            onLogout = { confirmLogout = true }
+                        )
+
+                        SettingsSectionType.BACKUP -> BackupSection(
+                            state = state,
+                            viewModel = viewModel,
+                            onOpenExclusions = onOpenExclusions
+                        )
+
+                        SettingsSectionType.STORAGE -> StorageSection(
+                            state = state,
+                            viewModel = viewModel,
+                            onClearCache = { confirmClearCache = true },
+                            onManageThumbnails = { showThumbnailManager = true }
+                        )
+
+                        SettingsSectionType.PERMISSIONS ->
+                            PermissionsSection(viewModel.permissionChecker)
+
+                        SettingsSectionType.SECURITY -> SecuritySection(state, viewModel)
+                        SettingsSectionType.APPEARANCE -> AppearanceSection(state, viewModel)
+                        SettingsSectionType.PLAYBACK -> PlaybackSection(state, viewModel)
+                        SettingsSectionType.NOTIFICATIONS -> NotificationsSection(state, viewModel)
+                        SettingsSectionType.ADVANCED -> AdvancedSection(
+                            state = state,
+                            viewModel = viewModel,
+                            onOpenProxy = onOpenProxy
+                        )
+                        SettingsSectionType.ABOUT -> AboutSection(state, viewModel)
+                    }
+                    Spacer(Modifier.height(24.dp + padding.calculateBottomPadding()))
+                }
+                DesktopVerticalScrollbar(
+                    state = scrollState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                )
+            }
         }
     }
 
@@ -592,7 +609,8 @@ private fun BackupSection(
 private fun StorageSection(
     state: SettingsUiState,
     viewModel: SettingsViewModel,
-    onClearCache: () -> Unit
+    onClearCache: () -> Unit,
+    onManageThumbnails: () -> Unit
 ) {
     val prefs = state.preferences
     val reclaimable by viewModel.reclaimableBytes.collectAsStateWithLifecycle()
@@ -712,6 +730,13 @@ private fun StorageSection(
                 title = stringResource(Res.string.settings_clear_thumbnails_action),
                 subtitle = Formatters.bytes(state.cacheStats.thumbnailBytes),
                 onClick = { confirmClearThumbnails = true }
+            )
+        }
+        add {
+            SettingsClickRow(
+                title = "Thumbnail manager",
+                subtitle = "${Formatters.bytes(state.cacheStats.thumbnailBytes)} cached · inspect and control files and folders",
+                onClick = onManageThumbnails
             )
         }
         add {
