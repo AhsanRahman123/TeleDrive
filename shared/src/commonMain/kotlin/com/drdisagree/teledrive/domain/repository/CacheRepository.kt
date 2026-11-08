@@ -28,8 +28,20 @@ interface CacheRepository {
     suspend fun thumbnailFiles(
         folderId: String?,
         offset: Int,
-        limit: Int
+        limit: Int,
+        cacheFilter: String = "ALL",
+        policyFilter: String = "ALL",
+        searchQuery: String = "",
+        sortOrder: String = "THUMBNAIL_LARGEST"
     ): List<ThumbnailFileUsage> = emptyList()
+
+    /** One consistent snapshot of every file matching the active inventory filters. */
+    suspend fun thumbnailFileIdsMatching(
+        folderId: String?,
+        cacheFilter: String,
+        policyFilter: String,
+        searchQuery: String
+    ): List<String> = emptyList()
 
     /** Fetch IDs only when the user explicitly selects every file in a folder. */
     suspend fun thumbnailFileIds(
