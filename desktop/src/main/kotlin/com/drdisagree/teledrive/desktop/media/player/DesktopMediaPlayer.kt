@@ -108,8 +108,8 @@ import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.math.roundToInt
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -842,7 +842,7 @@ private fun PlayerControlsBar(
                     ) {
                         listOf(0.5f, 0.75f, 0.8f, 0.9f, 1.0f, 1.1f, 1.15f, 1.2f, 1.25f, 1.5f, 2.0f).forEach { value ->
                             DropdownMenuItem(
-                                text = { Text("${value}x") },
+                                text = { Text("${formatPlaybackRate(value)}x") },
                                 onClick = {
                                     showRateMenu = false
                                     onRate(value)
