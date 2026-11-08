@@ -10,6 +10,7 @@ import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormatCall
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.RenderCallback
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.format.RV32BufferFormat
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
@@ -193,7 +194,14 @@ class DesktopThumbnailStore(
 
                 if (!player.media().play(file.absolutePath)) return@withLock null
                 val rendered = withTimeoutOrNull(VIDEO_FRAME_TIMEOUT_MS) {
-                    runCatching { frameReady.await() }.isSuccess
+                    try {
+                        frameReady.await()
+                        true
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        false
+                    }
                 } ?: false
                 if (!rendered) return@withLock null
 
@@ -206,6 +214,8 @@ class DesktopThumbnailStore(
                 snapshotPath?.let { path ->
                     runCatching { ImageIO.read(File(path)) }.getOrNull()
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 null
             } finally {
