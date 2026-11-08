@@ -261,26 +261,31 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun generateFolderThumbnails(folderId: String?) {
-        var offset = 0
+        var afterAddedAt: Long? = null
+        var afterFileId: String? = null
         while (true) {
-            val fileIds = if (folderId == null) {
+            val page = if (folderId == null) {
                 thumbnailDao.unfiledFileIdsPage(
                     onlyMissing = true,
-                    limit = JOB_BATCH_SIZE,
-                    offset = offset
+                    afterAddedAt = afterAddedAt,
+                    afterFileId = afterFileId,
+                    limit = JOB_BATCH_SIZE
                 )
             } else {
                 thumbnailDao.fileIdsInFolderTreePage(
                     folderId = folderId,
                     onlyMissing = true,
-                    limit = JOB_BATCH_SIZE,
-                    offset = offset
+                    afterAddedAt = afterAddedAt,
+                    afterFileId = afterFileId,
+                    limit = JOB_BATCH_SIZE
                 )
             }
-            if (fileIds.isEmpty()) break
-            thumbnailStore.enqueueManual(fileIds)
-            offset += fileIds.size
-            if (fileIds.size < JOB_BATCH_SIZE) break
+            if (page.isEmpty()) break
+            thumbnailStore.enqueueManual(page.map { it.fileId })
+            val last = page.last()
+            afterAddedAt = last.addedAt
+            afterFileId = last.fileId
+            if (page.size < JOB_BATCH_SIZE) break
         }
     }
 
