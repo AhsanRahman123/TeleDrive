@@ -196,8 +196,15 @@ class CacheRepositoryImpl(
             .thenBy { it.name.lowercase() })
     }
 
-    override suspend fun thumbnailFileIds(folderId: String?): List<String> =
-        thumbnailDao.allFileIdsInFolder(folderId)
+    override suspend fun thumbnailFileIds(
+        folderId: String?,
+        offset: Int,
+        limit: Int
+    ): List<String> = thumbnailDao.allFileIdsInFolder(
+        folderId = folderId,
+        limit = limit.coerceIn(1, 500),
+        offset = offset.coerceAtLeast(0)
+    )
 
     override suspend fun thumbnailFiles(
         folderId: String?,
