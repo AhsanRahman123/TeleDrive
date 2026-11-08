@@ -79,15 +79,14 @@ class DesktopThumbnailStore(
     private val thumbnailJobDao: ThumbnailJobDao
 ) : ThumbnailStore {
 
-    // Keep CPU- and memory-heavy thumbnail work bounded while avoiding an overly
-    // conservative two-worker ceiling on common quad-core desktops.
-    // 1–2 logical CPUs use one worker, 3–4 use three, and larger CPUs may use four.
+    // The image decoder downsamples during decode, so each image worker uses much less heap.
+    // Keep two cores free on larger CPUs, while allowing up to six bounded workers on desktops.
     private val maxParallelGenerations = minOf(
         MAX_PARALLEL_GENERATIONS,
         when (Runtime.getRuntime().availableProcessors()) {
             in Int.MIN_VALUE..2 -> 1
             in 3..4 -> 3
-            else -> 4
+            else -> (Runtime.getRuntime().availableProcessors() * 3 / 4).coerceIn(4, 6)
         },
         (Runtime.getRuntime().maxMemory() / MIN_HEAP_PER_WORKER_BYTES).toInt().coerceAtLeast(1)
     )
@@ -656,21 +655,44 @@ class DesktopThumbnailStore(
     }
 
     private fun decodeImageThumbnail(file: File): BufferedImage? = runCatching {
-        val original = ImageIO.read(file) ?: return null
-        if (original.width <= MAX_DIMENSION && original.height <= MAX_DIMENSION) {
-            return@runCatching original
-        }
-        val scale = minOf(
-            MAX_DIMENSION.toDouble() / original.width,
-            MAX_DIMENSION.toDouble() / original.height
-        )
-        val targetW = (original.width * scale).toInt().coerceAtLeast(1)
-        val targetH = (original.height * scale).toInt().coerceAtLeast(1)
-        val scaled = original.getScaledInstance(targetW, targetH, IMAGE_SCALE_MODE)
-        BufferedImage(targetW, targetH, BufferedImage.TYPE_INT_RGB).also { copy ->
-            val graphics = copy.createGraphics()
-            graphics.drawImage(scaled, 0, 0, Color.WHITE, null)
-            graphics.dispose()
+        val imageInput = ImageIO.createImageInputStream(file) ?: return null
+        imageInput.use { input ->
+            val reader = ImageIO.getImageReaders(input).asSequence().firstOrNull() ?: return null
+            try {
+                reader.input = input
+                val sourceWidth = reader.getWidth(0)
+                val sourceHeight = reader.getHeight(0)
+
+                // Decode only enough source pixels to produce a 512px preview. ImageIO.read()
+                // first expands the full original image, which is wasteful for large photos.
+                val sample = maxOf(
+                    1,
+                    kotlin.math.ceil(
+                        maxOf(sourceWidth, sourceHeight).toDouble() / MAX_DIMENSION.toDouble()
+                    ).toInt()
+                )
+                val readParam = reader.defaultReadParam
+                if (sample > 1) readParam.setSourceSubsampling(sample, sample, 0, 0)
+                val decoded = reader.read(0, readParam) ?: return null
+
+                if (decoded.width <= MAX_DIMENSION && decoded.height <= MAX_DIMENSION) {
+                    decoded
+                } else {
+                    val scale = minOf(
+                        MAX_DIMENSION.toDouble() / decoded.width,
+                        MAX_DIMENSION.toDouble() / decoded.height
+                    )
+                    val targetW = (decoded.width * scale).toInt().coerceAtLeast(1)
+                    val targetH = (decoded.height * scale).toInt().coerceAtLeast(1)
+                    BufferedImage(targetW, targetH, BufferedImage.TYPE_INT_RGB).also { copy ->
+                        val graphics = copy.createGraphics()
+                        graphics.drawImage(decoded, 0, 0, targetW, targetH, Color.WHITE, null)
+                        graphics.dispose()
+                    }
+                }
+            } finally {
+                reader.dispose()
+            }
         }
     }.getOrNull()
 
@@ -735,8 +757,8 @@ class DesktopThumbnailStore(
     private companion object {
         const val TARGET_FILE = "FILE"
         const val MAX_BACKGROUND_ATTEMPTS = 3
-        const val MAX_PARALLEL_GENERATIONS = 4
-        const val MIN_HEAP_PER_WORKER_BYTES = 512L * 1024L * 1024L
+        const val MAX_PARALLEL_GENERATIONS = 6
+        const val MIN_HEAP_PER_WORKER_BYTES = 384L * 1024L * 1024L
         const val JOB_INSERT_BATCH_SIZE = 250
         const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024
