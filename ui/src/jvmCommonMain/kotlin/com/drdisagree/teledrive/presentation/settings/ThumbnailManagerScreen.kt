@@ -368,15 +368,15 @@ fun ThumbnailManagerScreen(
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(end = 10.dp)
-                    .verticalScroll(scrollState)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 10.dp)
+                        .verticalScroll(scrollState)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SummaryTile(
                     title = "Thumbnail cache",
@@ -728,12 +728,13 @@ fun ThumbnailManagerScreen(
                     ) { Text("Next") }
                 }
             }
+                }
+                DesktopVerticalScrollbar(
+                    state = scrollState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                )
             }
         }
-        DesktopVerticalScrollbar(
-            state = scrollState,
-            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
-        )
     }
 }
 
