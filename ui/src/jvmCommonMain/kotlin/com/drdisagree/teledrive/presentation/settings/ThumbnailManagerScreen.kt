@@ -572,6 +572,11 @@ fun ThumbnailManagerScreen(
                         ) { Text("Remove selected previews") }
                     }
                 }
+                Text(
+                    "Generate missing queues previews for selected files/folders. Set policy changes automatic/manual rules. Remove selected previews leaves original files untouched.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 if (generationMessage.isNotBlank()) {
                     Text(
                         generationMessage,
