@@ -710,6 +710,11 @@ fun ThumbnailManagerScreen(
 
             if (folders.isNotEmpty()) {
                 Text("Folders", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Tick a folder to include it and all its subfolders in bulk actions. Use the folder icon to open it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 folders.forEach { folder ->
                     ThumbnailFolderRow(
                         folder = folder,
@@ -1116,6 +1121,8 @@ private fun fileSortLabel(sort: ThumbnailFileSort): String = when (sort) {
     ThumbnailFileSort.LAST_VIEWED_OLDEST -> "Least recently viewed"
     ThumbnailFileSort.NAME_ASC -> "Name A–Z"
     ThumbnailFileSort.NAME_DESC -> "Name Z–A"
+    ThumbnailFileSort.GENERATED_FIRST -> "Generated first"
+    ThumbnailFileSort.MISSING_FIRST -> "Not generated first"
 }
 
 @Composable
