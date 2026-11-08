@@ -88,6 +88,7 @@ fun ThumbnailManagerScreen(
     var pageOffset by remember { mutableStateOf(0) }
     var refreshKey by remember { mutableStateOf(0) }
     var confirmClearFolder by remember { mutableStateOf(false) }
+    var confirmClearOrphans by remember { mutableStateOf(false) }
 
     val folderId = folderPath.lastOrNull()?.id
     LaunchedEffect(folderId) { selectedIds = emptySet() }
@@ -154,6 +155,33 @@ fun ThumbnailManagerScreen(
                 }
             }
         }
+    }
+
+    if (confirmClearOrphans) {
+        AlertDialog(
+            onDismissRequest = { confirmClearOrphans = false },
+            title = { Text("Remove unlinked thumbnails?") },
+            text = {
+                Text(
+                    "These preview files no longer have a matching TeleDrive file record. " +
+                        "Only the orphaned thumbnail cache files and metadata will be removed."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearOrphans = false
+                        scope.launch {
+                            cacheRepository.clearOrphanedThumbnails()
+                            refreshKey++
+                        }
+                    }
+                ) { Text("Remove unlinked cache") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearOrphans = false }) { Text("Cancel") }
+            }
+        )
     }
 
     if (confirmClearFolder && folderId != null) {
@@ -243,6 +271,26 @@ fun ThumbnailManagerScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (summary.orphanedCachedFiles > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Unlinked cache", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            "${summary.orphanedCachedFiles} entries · ${Formatters.bytes(summary.orphanedBytes)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(onClick = { confirmClearOrphans = true }) {
+                        Text("Clean up")
+                    }
+                }
+            }
 
             if (folderId != null) {
                 Row(
