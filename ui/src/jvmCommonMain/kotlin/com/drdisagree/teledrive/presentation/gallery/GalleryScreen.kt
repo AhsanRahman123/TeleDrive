@@ -175,6 +175,7 @@ import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileGridItem
+import com.drdisagree.teledrive.presentation.components.LocalCompactLayout
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.LoadingState
@@ -342,6 +343,9 @@ fun GalleryScreen(
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val selectionMode = state.selectionMode || selectionModeEnabled
     val media = viewModel.pagedMedia.collectAsLazyPagingItems()
+    // Fit more media previews on wide desktop windows without shrinking compact layouts.
+    val mediaGridColumns = if (LocalCompactLayout.current) state.gridSize
+        else (state.gridSize + 2).coerceAtMost(6)
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     var confirmTrash by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
@@ -912,7 +916,7 @@ fun GalleryScreen(
                 index < media.itemCount && media.peek(index) is GalleryListItem.Media
             }
             val listKeyboard = rememberKeyboardCollection(mediaListState, isItem = isMedia)
-            val gridKeyboard = rememberKeyboardCollection(mediaGridState, state.gridSize, isMedia)
+            val gridKeyboard = rememberKeyboardCollection(mediaGridState, mediaGridColumns, isMedia)
             val selectIfNone: (Int) -> Unit = { index ->
                 if (!selectionMode) mediaIdAt(index)?.let(viewModel::toggleSelection)
             }
@@ -1009,7 +1013,7 @@ fun GalleryScreen(
 
                     else -> LazyVerticalGrid(
                         state = mediaGridState,
-                        columns = GridCells.Fixed(state.gridSize),
+                        columns = GridCells.Fixed(mediaGridColumns),
                         modifier = Modifier
                             .fillMaxSize()
                             .keyboardCollection(
