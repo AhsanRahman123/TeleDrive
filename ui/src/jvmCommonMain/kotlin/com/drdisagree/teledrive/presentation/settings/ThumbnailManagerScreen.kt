@@ -797,7 +797,12 @@ private fun ThumbnailFolderRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             Text(
-                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · ${policyLabel(currentPolicy)}" +
+                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · " +
+                    (if (currentPolicy == ThumbnailPolicy.INHERIT) {
+                        "Rule: Inherit · Effective: ${policyLabel(folder.effectivePolicy)}"
+                    } else {
+                        "Rule: ${policyLabel(currentPolicy)}"
+                    }) +
                     if (folder.isTrashed) " · In Trash" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
