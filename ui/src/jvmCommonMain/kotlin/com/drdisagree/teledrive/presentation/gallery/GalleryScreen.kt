@@ -270,10 +270,12 @@ private fun AlbumGrid(
     if (viewMode == ViewMode.LIST) {
         val listState = rememberLazyListState()
         val keyboard = rememberKeyboardCollection(listState)
-        LazyColumn(
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                .padding(end = 10.dp)
                 .keyboardCollection(keyboard, albums.size),
             contentPadding = PaddingValues(
                 start = 12.dp,
@@ -295,15 +297,21 @@ private fun AlbumGrid(
                         .animateItem()
                 )
             }
+            DesktopVerticalScrollbar(
+                state = listState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
         }
     } else {
         val gridState = rememberLazyGridState()
         val keyboard = rememberKeyboardCollection(gridState, columns)
-        LazyVerticalGrid(
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(columns),
             modifier = Modifier
                 .fillMaxSize()
+                .padding(end = 10.dp)
                 .keyboardCollection(keyboard, albums.size)
                 .pinchZoom(onZoomIn = onZoomIn, onZoomOut = onZoomOut),
             contentPadding = PaddingValues(
@@ -327,6 +335,10 @@ private fun AlbumGrid(
                         .animateItem()
                 )
             }
+            DesktopVerticalScrollbar(
+                state = gridState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
         }
     }
 }
