@@ -110,7 +110,11 @@ fun ThumbnailManagerScreen(
     // Keep the pending-job count and cache total fresh while background work is running.
     LaunchedEffect(Unit) {
         while (true) {
-            summary = cacheRepository.thumbnailManagerSummary()
+            val latest = cacheRepository.thumbnailManagerSummary()
+            val cacheChanged = latest.totalBytes != summary.totalBytes ||
+                latest.cachedFiles != summary.cachedFiles
+            summary = latest
+            if (cacheChanged) refreshKey++
             delay(2_000L)
         }
     }
