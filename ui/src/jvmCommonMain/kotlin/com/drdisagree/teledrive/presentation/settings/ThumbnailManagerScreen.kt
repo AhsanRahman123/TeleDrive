@@ -452,7 +452,8 @@ private fun ThumbnailFolderRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             Text(
-                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · ${policyLabel(currentPolicy)}",
+                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · ${policyLabel(currentPolicy)}" +
+                    if (folder.isTrashed) " · In Trash" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
@@ -515,11 +516,11 @@ private fun ThumbnailFileRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(file.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
             Text(
-                if (file.isCached) {
+                (if (file.isCached) {
                     "${Formatters.bytes(file.thumbnailSizeBytes ?: 0L)} thumbnail · ${Formatters.bytes(file.fileSizeBytes)} file"
                 } else {
                     "Not cached · ${Formatters.bytes(file.fileSizeBytes)} file"
-                },
+                }) + if (file.isTrashed) " · In Trash" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
