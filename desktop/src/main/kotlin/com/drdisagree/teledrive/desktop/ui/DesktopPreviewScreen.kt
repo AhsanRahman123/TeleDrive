@@ -15,6 +15,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -172,12 +183,39 @@ fun DesktopPreviewScreen(
     var copyTarget by remember { mutableStateOf<DriveFile?>(null) }
     var moveTarget by remember { mutableStateOf<DriveFile?>(null) }
     var playerChromeVisible by remember { mutableStateOf(true) }
-    LaunchedEffect(file?.id) { playerChromeVisible = true }
+    val viewerFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(file?.id) {
+        playerChromeVisible = true
+        viewerFocusRequester.requestFocus()
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
     Scaffold(
+        modifier = Modifier
+            .focusRequester(viewerFocusRequester)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown ||
+                    event.isCtrlPressed || event.isAltPressed || event.isShiftPressed
+                ) {
+                    return@onPreviewKeyEvent false
+                }
+                when {
+                    keyOf(event) == Key.W &&
+                        file?.category in setOf(FileCategory.IMAGE, FileCategory.VIDEO) -> {
+                        if (index > 0) index--
+                        true
+                    }
+                    keyOf(event) == Key.E &&
+                        file?.category in setOf(FileCategory.IMAGE, FileCategory.VIDEO) -> {
+                        if (index < state.files.lastIndex) index++
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .focusable(),
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         @Composable
