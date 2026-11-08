@@ -242,9 +242,10 @@ class DesktopThumbnailStore(
     }
 
     override suspend fun enqueueManual(fileIds: List<String>) {
-        if (fileIds.isEmpty()) return
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return
         val timestamp = System.currentTimeMillis()
-        fileIds.distinct().chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+        ids.chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
             thumbnailJobDao.enqueue(
                 batch.map { id ->
                     ThumbnailJobEntity(
@@ -254,9 +255,9 @@ class DesktopThumbnailStore(
                     )
                 }
             )
-            schedulingPaused = false
-            jobWakeups.trySend(Unit)
         }
+        schedulingPaused = false
+        jobWakeups.trySend(Unit)
     }
 
     override suspend fun enqueueAutomatic(fileId: String) {
@@ -272,9 +273,10 @@ class DesktopThumbnailStore(
     }
 
     override suspend fun enqueueAutomatic(fileIds: List<String>) {
-        if (fileIds.isEmpty()) return
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return
         val timestamp = System.currentTimeMillis()
-        fileIds.distinct().chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+        ids.chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
             thumbnailJobDao.enqueue(
                 batch.map { id ->
                     ThumbnailJobEntity(
@@ -284,9 +286,9 @@ class DesktopThumbnailStore(
                     )
                 }
             )
-            schedulingPaused = false
-            jobWakeups.trySend(Unit)
         }
+        schedulingPaused = false
+        jobWakeups.trySend(Unit)
     }
 
     private suspend fun readCachedThumbnail(fileId: String): ByteArray? {
