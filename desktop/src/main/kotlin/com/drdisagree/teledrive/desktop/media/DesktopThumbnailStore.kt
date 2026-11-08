@@ -643,12 +643,16 @@ class DesktopThumbnailStore(
     private suspend fun fetchIconBytes(entity: FileEntity, iconFileId: String): ByteArray? {
         var readyPath: String? = null
         val rawRemoteFileId = iconFileId.substringBefore(":")
-        runCatching {
+        try {
             telegramClient.downloadDocument(rawRemoteFileId).collect { event ->
                 if (event is TelegramDownloadEvent.Completed) {
                     readyPath = event.localPath
                 }
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return null
         }
         val path = readyPath ?: return null
         val rawBytes = runCatching { File(path).readBytes() }.getOrNull() ?: return null
@@ -666,7 +670,13 @@ class DesktopThumbnailStore(
         if (MimeTypes.isText(entity.mimeType) &&
             !settingsRepository.preferences.first().linkPreviews
         ) return null
-        return runCatching { telegramClient.fetchThumbnail(chatId, messageId) }.getOrNull()
+        return try {
+            telegramClient.fetchThumbnail(chatId, messageId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun thumbnailKey(): ByteArray =
