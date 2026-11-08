@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.desktop.media.player
 
 import com.sun.jna.Native
 import com.sun.jna.platform.win32.Dxva2
+import com.sun.jna.platform.win32.LowLevelMonitorConfigurationAPI.MC_VCP_CODE_TYPE
 import com.sun.jna.platform.win32.PhysicalMonitorEnumerationAPI
 import com.sun.jna.platform.win32.User32
 import com.sun.jna.platform.win32.WinDef
@@ -11,11 +12,14 @@ import java.awt.Window
 import kotlin.math.roundToInt
 
 /**
- * Reads and writes the physical display backlight through Windows DDC/CI.
+ * Reads and writes the physical display brightness through the same two
+ * Windows DDC/CI paths used by Monitorian:
  *
- * This deliberately does not fall back to changing video pixels or applying a
- * colour/brightness overlay. A display that does not expose DDC/CI brightness
- * simply reports no hardware brightness control.
+ * 1. High-level GetMonitorBrightness / SetMonitorBrightness.
+ * 2. Low-level VCP luminance (0x10) fallback for monitors that expose only
+ *    low-level DDC/CI brightness.
+ *
+ * This never applies a brightness filter to the video image.
  */
 internal object WindowsMonitorBrightness {
 
@@ -24,8 +28,16 @@ internal object WindowsMonitorBrightness {
         val monitorDescription: String
     )
 
+    private data class RawBrightness(
+        val minimum: Int,
+        val current: Int,
+        val maximum: Int,
+        val highLevel: Boolean
+    )
+
     private const val MAX_PHYSICAL_MONITORS = 16
     private const val NEAREST_MONITOR = WinUser.MONITOR_DEFAULTTONEAREST
+    private const val VCP_LUMINANCE_CODE = 0x10
 
     @Synchronized
     fun read(): Reading? {
@@ -34,44 +46,26 @@ internal object WindowsMonitorBrightness {
         return runCatching {
             withPhysicalMonitors { monitors ->
                 monitors.firstNotNullOfOrNull { monitor ->
-                    val minimum = WinDef.DWORDByReference()
-                    val current = WinDef.DWORDByReference()
-                    val maximum = WinDef.DWORDByReference()
+                    val raw = readRawBrightness(monitor.hPhysicalMonitor)
+                        ?: return@firstNotNullOfOrNull null
+                    if (raw.maximum <= raw.minimum) return@firstNotNullOfOrNull null
 
-                    val ok = Dxva2.INSTANCE.GetMonitorBrightness(
-                        monitor.hPhysicalMonitor,
-                        minimum,
-                        current,
-                        maximum
-                    ).booleanValue()
-
-                    if (!ok) {
-                        null
-                    } else {
-                        val minValue = minimum.value.toInt()
-                        val currentValue = current.value.toInt()
-                        val maxValue = maximum.value.toInt()
-                        if (maxValue <= minValue) {
-                            null
-                        } else {
-                            Reading(
-                                percent = ((currentValue - minValue).toFloat() /
-                                        (maxValue - minValue) * 100f).coerceIn(0f, 100f),
-                                monitorDescription = String(monitor.szPhysicalMonitorDescription)
-                                    .trimEnd('\u0000')
-                                    .trim()
-                            )
-                        }
-                    }
+                    Reading(
+                        percent = ((raw.current - raw.minimum).toFloat() /
+                            (raw.maximum - raw.minimum) * 100f).coerceIn(0f, 100f),
+                        monitorDescription = String(monitor.szPhysicalMonitorDescription)
+                            .trimEnd('\u0000')
+                            .trim()
+                    )
                 }
             }
         }.getOrNull()
     }
 
     /**
-     * [percent] is normalized to 0..100 and mapped to the monitor's reported
-     * minimum/maximum. If a logical display exposes multiple physical panels,
-     * each brightness-capable panel is updated.
+     * [percent] is normalized to 0..100 and mapped to the monitor's actual
+     * reported minimum/maximum. Every brightness-capable physical panel
+     * belonging to the active logical display is updated.
      */
     @Synchronized
     fun setPercent(percent: Float): Boolean {
@@ -83,30 +77,36 @@ internal object WindowsMonitorBrightness {
                 var changedAtLeastOne = false
 
                 monitors.forEach { monitor ->
-                    val minimum = WinDef.DWORDByReference()
-                    val current = WinDef.DWORDByReference()
-                    val maximum = WinDef.DWORDByReference()
+                    val handle = monitor.hPhysicalMonitor
+                    val raw = readRawBrightness(handle) ?: return@forEach
+                    if (raw.maximum <= raw.minimum) return@forEach
 
-                    val readable = Dxva2.INSTANCE.GetMonitorBrightness(
-                        monitor.hPhysicalMonitor,
-                        minimum,
-                        current,
-                        maximum
-                    ).booleanValue()
+                    val target = raw.minimum +
+                        ((raw.maximum - raw.minimum) * (normalized / 100f)).roundToInt()
 
-                    if (readable) {
-                        val minValue = minimum.value.toInt()
-                        val maxValue = maximum.value.toInt()
-                        if (maxValue > minValue) {
-                            val target = minValue +
-                                    ((maxValue - minValue) * (normalized / 100f)).roundToInt()
-                            val applied = Dxva2.INSTANCE.SetMonitorBrightness(
-                                monitor.hPhysicalMonitor,
-                                target
-                            ).booleanValue()
-                            changedAtLeastOne = changedAtLeastOne || applied
-                        }
+                    val applied = if (raw.highLevel) {
+                        Dxva2.INSTANCE.SetMonitorBrightness(handle, target).booleanValue()
+                    } else {
+                        setVcpBrightness(handle, target)
                     }
+
+                    // Some displays advertise high-level support but reject
+                    // writes there. Give the VCP luminance path one fallback.
+                    val fallbackApplied = if (!applied && raw.highLevel) {
+                        val lowLevel = readVcpBrightness(handle)
+                        lowLevel != null &&
+                            lowLevel.maximum > lowLevel.minimum &&
+                            setVcpBrightness(
+                                handle,
+                                lowLevel.minimum +
+                                    ((lowLevel.maximum - lowLevel.minimum) *
+                                        (normalized / 100f)).roundToInt()
+                            )
+                    } else {
+                        false
+                    }
+
+                    changedAtLeastOne = changedAtLeastOne || applied || fallbackApplied
                 }
 
                 changedAtLeastOne
@@ -114,13 +114,75 @@ internal object WindowsMonitorBrightness {
         }.getOrDefault(false)
     }
 
+    private fun readRawBrightness(handle: WinDef.HANDLE): RawBrightness? {
+        val minimum = WinDef.DWORDByReference()
+        val current = WinDef.DWORDByReference()
+        val maximum = WinDef.DWORDByReference()
+
+        val highLevelSupported = Dxva2.INSTANCE.GetMonitorBrightness(
+            handle,
+            minimum,
+            current,
+            maximum
+        ).booleanValue()
+
+        if (highLevelSupported) {
+            val minValue = minimum.value.toInt()
+            val currentValue = current.value.toInt()
+            val maxValue = maximum.value.toInt()
+            if (maxValue > minValue) {
+                return RawBrightness(
+                    minimum = minValue,
+                    current = currentValue,
+                    maximum = maxValue,
+                    highLevel = true
+                )
+            }
+        }
+
+        return readVcpBrightness(handle)
+    }
+
+    private fun readVcpBrightness(handle: WinDef.HANDLE): RawBrightness? {
+        val codeType = MC_VCP_CODE_TYPE.ByReference()
+        val current = WinDef.DWORDByReference()
+        val maximum = WinDef.DWORDByReference()
+
+        val succeeded = Dxva2.INSTANCE.GetVCPFeatureAndVCPFeatureReply(
+            handle,
+            WinDef.BYTE(VCP_LUMINANCE_CODE.toLong()),
+            codeType,
+            current,
+            maximum
+        ).booleanValue()
+
+        if (!succeeded) return null
+
+        val currentValue = current.value.toInt()
+        val maxValue = maximum.value.toInt()
+        if (maxValue <= 0) return null
+
+        return RawBrightness(
+            minimum = 0,
+            current = currentValue,
+            maximum = maxValue,
+            highLevel = false
+        )
+    }
+
+    private fun setVcpBrightness(handle: WinDef.HANDLE, target: Int): Boolean =
+        Dxva2.INSTANCE.SetVCPFeature(
+            handle,
+            WinDef.BYTE(VCP_LUMINANCE_CODE.toLong()),
+            WinDef.DWORD(target.toLong())
+        ).booleanValue()
+
     private fun isWindows(): Boolean =
         System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
     private fun targetMonitor(): WinUser.HMONITOR? {
-        // Use the monitor with the greatest intersection with the active
-        // TeleDrive window. Do not silently change the primary monitor if the
-        // app has no active window: that could affect the wrong display.
+        // Use the display intersecting the active TeleDrive window. If there
+        // is no active window, do not risk changing an unrelated monitor.
         val activeWindow = runCatching {
             KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
                 ?: Window.getWindows().firstOrNull { it.isVisible && it.isActive }
@@ -151,7 +213,7 @@ internal object WindowsMonitorBrightness {
         @Suppress("UNCHECKED_CAST")
         val physicalMonitors =
             PhysicalMonitorEnumerationAPI.PHYSICAL_MONITOR().toArray(count)
-                    as Array<PhysicalMonitorEnumerationAPI.PHYSICAL_MONITOR>
+                as Array<PhysicalMonitorEnumerationAPI.PHYSICAL_MONITOR>
 
         val enumerated = Dxva2.INSTANCE.GetPhysicalMonitorsFromHMONITOR(
             logicalMonitor,
@@ -164,8 +226,7 @@ internal object WindowsMonitorBrightness {
         return try {
             action(physicalMonitors)
         } finally {
-            // Physical monitor handles are owned by this call and must always
-            // be released, including when reading or writing brightness fails.
+            // Always release the handles opened by GetPhysicalMonitorsFromHMONITOR.
             Dxva2.INSTANCE.DestroyPhysicalMonitors(count, physicalMonitors)
         }
     }
