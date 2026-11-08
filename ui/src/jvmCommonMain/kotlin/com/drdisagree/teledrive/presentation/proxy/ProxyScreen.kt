@@ -572,14 +572,17 @@ private fun ProxyEditorSheet(
             portNumber in ProxyLink.MIN_PORT..ProxyLink.MAX_PORT &&
             (type != TelegramProxyType.MTPROTO || secret.isNotBlank())
 
+    val proxyEditorScrollState = rememberScrollState()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = formSheetState(),
         contentWindowInsets = { SheetTopInset }
     ) {
-        Column(
+        Box(modifier = Modifier.fillMaxWidth()) {
+                    Column(
             modifier = Modifier
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(proxyEditorScrollState)
+                .padding(end = 10.dp)
                 .padding(horizontal = 24.dp)
                 .padding(bottom = sheetBottomPadding() + 24.dp)
         ) {
@@ -714,6 +717,11 @@ private fun ProxyEditorSheet(
                 ) { Text(stringResource(Res.string.common_save)) }
             }
         }
+            DesktopVerticalScrollbar(
+                state = proxyEditorScrollState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
+        }
     }
 }
 
@@ -722,14 +730,17 @@ private fun ProxyEditorSheet(
 private fun ImportLinkSheet(onImport: (String) -> Unit, onDismiss: () -> Unit) {
     var link by remember { mutableStateOf("") }
 
+    val importLinkScrollState = rememberScrollState()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = formSheetState(),
         contentWindowInsets = { SheetTopInset }
     ) {
-        Column(
+        Box(modifier = Modifier.fillMaxWidth()) {
+                    Column(
             modifier = Modifier
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(importLinkScrollState)
+                .padding(end = 10.dp)
                 .padding(horizontal = 24.dp)
                 .padding(bottom = sheetBottomPadding() + 24.dp)
         ) {
@@ -768,6 +779,11 @@ private fun ImportLinkSheet(onImport: (String) -> Unit, onDismiss: () -> Unit) {
                     modifier = Modifier.weight(1f)
                 ) { Text(stringResource(Res.string.proxy_import)) }
             }
+        }
+            DesktopVerticalScrollbar(
+                state = importLinkScrollState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
         }
     }
 }
