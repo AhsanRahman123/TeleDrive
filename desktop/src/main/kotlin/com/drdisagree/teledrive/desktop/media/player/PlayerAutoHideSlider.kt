@@ -51,7 +51,8 @@ internal fun PlayerAutoHideSlider(
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit = {},
     onDraggingChange: (Boolean) -> Unit = {},
-    onActiveChange: (Boolean) -> Unit = {}
+    onActiveChange: (Boolean) -> Unit = {},
+    expandOnClick: Boolean = false
 ) {
     val groupInteraction = remember { MutableInteractionSource() }
     val isHovered by groupInteraction.collectIsHoveredAsState()
@@ -61,9 +62,10 @@ internal fun PlayerAutoHideSlider(
 
     var hasFocus by remember { mutableStateOf(false) }
     var sliderVisible by remember { mutableStateOf(!autoHide) }
+    var manuallyExpanded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(autoHide, isHovered, isDragging, hasFocus, hideDelayMillis) {
-        if (!autoHide || isHovered || isDragging || hasFocus) {
+    LaunchedEffect(autoHide, isHovered, isDragging, hasFocus, manuallyExpanded, hideDelayMillis) {
+        if (!autoHide || isHovered || isDragging || hasFocus || manuallyExpanded) {
             sliderVisible = true
         } else if (sliderVisible) {
             delay(hideDelayMillis.coerceIn(500L, 10_000L))
@@ -75,8 +77,8 @@ internal fun PlayerAutoHideSlider(
         onDraggingChange(isDragging)
     }
 
-    LaunchedEffect(isHovered, isDragging, hasFocus) {
-        onActiveChange(isHovered || isDragging || hasFocus)
+    LaunchedEffect(isHovered, isDragging, hasFocus, manuallyExpanded) {
+        onActiveChange(isHovered || isDragging || hasFocus || manuallyExpanded)
     }
 
     DisposableEffect(Unit) {
@@ -89,7 +91,10 @@ internal fun PlayerAutoHideSlider(
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(
-            onClick = onButtonClick,
+            onClick = {
+                if (expandOnClick) manuallyExpanded = !manuallyExpanded
+                onButtonClick()
+            },
             modifier = Modifier
                 .size(38.dp)
                 .onFocusChanged { hasFocus = it.isFocused }
