@@ -389,8 +389,8 @@ class CacheRepositoryImpl(
     override suspend fun cancelThumbnailJobs(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
-        thumbnailStore.cancelJobs(ids)
         thumbnailJobDao.delete(ids)
+        thumbnailStore.cancelJobs(ids)
     }
 
     override suspend fun retryThumbnailJobs(fileIds: List<String>) {
