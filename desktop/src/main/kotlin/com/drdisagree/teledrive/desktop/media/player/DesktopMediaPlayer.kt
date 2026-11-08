@@ -776,9 +776,7 @@ private fun PlayerControlsBar(
     ) {
         val keepVisible = showSliderSettings ||
             volumeSliderActive ||
-            (brightnessAvailable && brightnessSliderActive) ||
-            !sliderPreferences.autoHideVolumeSlider ||
-            (brightnessAvailable && !sliderPreferences.autoHideBrightnessSlider)
+            (brightnessAvailable && brightnessSliderActive)
         onControlsKeepVisible(keepVisible)
     }
     DisposableEffect(Unit) {
