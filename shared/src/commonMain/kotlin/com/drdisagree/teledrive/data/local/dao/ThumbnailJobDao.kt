@@ -39,10 +39,25 @@ interface ThumbnailJobDao {
     suspend fun recordAttempt(fileId: String, retryAt: Long)
 
     @Query(
-        """SELECT j.fileId AS fileId,
+        """WITH RECURSIVE folder_paths(fileId, parentId, path, depth) AS (
+               SELECT f.id, d.parentId, d.name, 0
+                 FROM files f
+                 JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
+               UNION ALL
+               SELECT fp.fileId, d.parentId, d.name || ' / ' || fp.path, fp.depth + 1
+                 FROM folder_paths fp
+                 JOIN folders d ON d.id = fp.parentId
+           )
+           SELECT j.fileId AS fileId,
                   COALESCE(f.name, j.fileId) AS name,
                   COALESCE(f.mimeType, '') AS mimeType,
                   COALESCE(f.sizeBytes, 0) AS fileSizeBytes,
+                  COALESCE(
+                    (SELECT fp.path FROM folder_paths fp
+                      WHERE fp.fileId = j.fileId
+                      ORDER BY fp.depth DESC LIMIT 1),
+                    'Drive root'
+                  ) AS folderPath,
                   j.queuedAt AS queuedAt,
                   j.attempts AS attempts,
                   j.force AS isForced
