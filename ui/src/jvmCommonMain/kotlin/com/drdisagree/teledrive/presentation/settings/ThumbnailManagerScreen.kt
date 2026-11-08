@@ -353,33 +353,35 @@ fun ThumbnailManagerScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Fixed navigation header: the title and back action stay visible while scrolling.
+            // SettingsSectionScreen already supplies the main page title and back button.
+            // Keep only folder navigation here, avoiding a duplicate fixed title bar.
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 1.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = {
-                        if (folderPath.isEmpty()) onBack()
-                        else {
+                if (folderPath.isNotEmpty()) {
+                    IconButton(
+                        onClick = {
                             folderPath = folderPath.dropLast(1)
                             pageOffset = 0
                         }
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to parent folder")
                     }
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Thumbnail manager", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (folderPath.isEmpty()) "Storage overview"
-                        else folderPath.joinToString(" / ") { it.name },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
-                }
-                OutlinedButton(onClick = { showQueue = true }) { Text("View queue") }
+                Text(
+                    if (folderPath.isEmpty()) "Storage overview"
+                    else folderPath.joinToString(" / ") { it.name },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+                OutlinedButton(
+                    onClick = { showQueue = true },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.height(38.dp)
+                ) { Text("View queue") }
                 IconButton(onClick = {
                     scope.launch { scrollState.animateScrollTo(0) }
                 }) {
