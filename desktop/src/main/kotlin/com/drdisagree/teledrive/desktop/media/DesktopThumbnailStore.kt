@@ -294,7 +294,7 @@ class DesktopThumbnailStore(
     private suspend fun readCachedThumbnail(fileId: String): ByteArray? {
         val cached = thumbnailDao.byFileId(fileId) ?: return null
         val file = File(cached.path)
-        if (!file.exists()) {
+        if (!file.isFile || file.length() <= 0L) {
             thumbnailDao.delete(fileId)
             return null
         }
@@ -382,13 +382,17 @@ class DesktopThumbnailStore(
             thumbnailJobDao.delete(currentJob.fileId)
             return
         }
-        val cached = thumbnailDao.byFileId(currentJob.fileId)?.let { File(it.path).exists() } == true
+        val cachedEntry = thumbnailDao.byFileId(currentJob.fileId)
+        val cachedFile = cachedEntry?.let { File(it.path) }
+        val cached = cachedFile?.let { it.isFile && it.length() > 0L } == true
         if (cached || (!currentJob.force &&
                 effectivePolicy(currentJob.fileId) != ThumbnailPolicy.AUTOMATIC)
         ) {
             thumbnailJobDao.delete(currentJob.fileId)
             return
         }
+        // Remove stale/empty cache metadata so it cannot make an ungenerated file look complete.
+        if (cachedEntry != null) thumbnailDao.delete(currentJob.fileId)
         // A non-null byte array alone is not proof that the cache was saved:
         // generate() can return usable bytes for a viewer even when disk writing fails.
         // Keep the durable queue row until both the metadata row and the file exist.
