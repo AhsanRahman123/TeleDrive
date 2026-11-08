@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Fullscreen
@@ -62,6 +63,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -135,6 +138,8 @@ fun DesktopMediaPlayer(
     var timeMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
+    var volume by remember(mrl) { mutableIntStateOf(100) }
+    var brightness by remember(mrl) { mutableIntStateOf(100) }
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
     var trackTick by remember { mutableIntStateOf(0) }
@@ -227,6 +232,21 @@ fun DesktopMediaPlayer(
     val toggleMute: () -> Unit = {
         muted = !muted
         player.audio().isMute = muted
+    }
+    fun setPlayerVolume(value: Int, unmute: Boolean = true) {
+        val nextVolume = value.coerceIn(0, MAX_VOLUME)
+        volume = nextVolume
+        player.audio().setVolume(nextVolume)
+        if (nextVolume == 0) {
+            muted = true
+            player.audio().isMute = true
+        } else if (unmute) {
+            muted = false
+            player.audio().isMute = false
+        }
+    }
+    fun adjustPlayerVolume(delta: Int) {
+        setPlayerVolume(volume + delta, unmute = delta > 0)
     }
     fun saveVideoSnapshot() {
         if (isAudio) return
@@ -397,19 +417,13 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    ctrl && !alt && !shift && key == Key.DirectionUp -> {
-                        val volume = (player.audio().volume() + VOLUME_STEP).coerceAtMost(200)
-                        player.audio().setVolume(volume)
-                        player.audio().isMute = false
-                        muted = false
+                    !alt && !shift && key == Key.DirectionUp -> {
+                        adjustPlayerVolume(VOLUME_STEP)
                         interactionTick++
                         true
                     }
-                    ctrl && !alt && !shift && key == Key.DirectionDown -> {
-                        val volume = (player.audio().volume() - VOLUME_STEP).coerceAtLeast(0)
-                        player.audio().setVolume(volume)
-                        if (volume > 0) player.audio().isMute = false
-                        muted = volume == 0
+                    !alt && !shift && key == Key.DirectionDown -> {
+                        adjustPlayerVolume(-VOLUME_STEP)
                         interactionTick++
                         true
                     }
@@ -593,7 +607,15 @@ fun DesktopMediaPlayer(
                     bitmap = current,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = scaling.contentScale
+                    contentScale = scaling.contentScale,
+                    colorFilter = remember(brightness) {
+                        val factor = (brightness / 100f).coerceIn(0f, 2f)
+                        ColorFilter.colorMatrix(
+                            ColorMatrix().apply {
+                                setToScale(factor, factor, factor, 1f)
+                            }
+                        )
+                    }
                 )
             }
         }
@@ -616,6 +638,8 @@ fun DesktopMediaPlayer(
                 timeMs = timeMs,
                 durationMs = durationMs,
                 muted = muted,
+                volume = volume,
+                brightness = brightness,
                 rate = rate,
                 repeatOne = repeatOne,
                 trackTick = trackTick,
@@ -638,6 +662,8 @@ fun DesktopMediaPlayer(
                 onPlayPause = togglePlayback,
                 onSeekTo = { millis -> player.controls().setTime(millis) },
                 onToggleMute = toggleMute,
+                onVolumeChange = { setPlayerVolume(it) },
+                onBrightnessChange = { brightness = it.coerceIn(0, MAX_BRIGHTNESS) },
                 onRate = ::setPlaybackRate,
                 onToggleRepeat = {
                     repeatOne = !repeatOne
@@ -658,6 +684,8 @@ private fun PlayerControlsBar(
     timeMs: Long,
     durationMs: Long,
     muted: Boolean,
+    volume: Int,
+    brightness: Int,
     rate: Float,
     repeatOne: Boolean,
     trackTick: Int,
@@ -670,6 +698,8 @@ private fun PlayerControlsBar(
     onPlayPause: () -> Unit,
     onSeekTo: (Long) -> Unit,
     onToggleMute: () -> Unit,
+    onVolumeChange: (Int) -> Unit,
+    onBrightnessChange: (Int) -> Unit,
     onRate: (Float) -> Unit,
     onToggleRepeat: () -> Unit,
     onSelectAudioTrack: (VlcTrack) -> Unit,
@@ -738,6 +768,66 @@ private fun PlayerControlsBar(
             },
             modifier = Modifier.fillMaxWidth()
         )
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (muted) Icons.AutoMirrored.Filled.VolumeOff
+                    else Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+                Slider(
+                    value = volume.toFloat(),
+                    onValueChange = { value ->
+                        onInteraction()
+                        onVolumeChange(value.roundToInt())
+                    },
+                    valueRange = 0f..MAX_VOLUME.toFloat(),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    if (muted) "Muted" else "$volume%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White
+                )
+            }
+            if (!isAudio) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Brightness6,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Slider(
+                        value = brightness.toFloat(),
+                        onValueChange = { value ->
+                            onInteraction()
+                            onBrightnessChange(value.roundToInt())
+                        },
+                        valueRange = 0f..MAX_BRIGHTNESS.toFloat(),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "$brightness%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White
+                    )
+                }
+            }
+        }
 
         Box(
             modifier = Modifier
@@ -999,6 +1089,8 @@ private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
 private const val VOLUME_STEP = 5
+private const val MAX_VOLUME = 200
+private const val MAX_BRIGHTNESS = 200
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 
