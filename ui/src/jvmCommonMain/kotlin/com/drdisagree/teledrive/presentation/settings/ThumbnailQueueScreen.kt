@@ -140,7 +140,8 @@ fun ThumbnailQueueScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Thumbnail queue", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        pendingCount.toString() + " queued · " + activeJobs.size + " generating" +
+                        "${(pendingCount - activeJobs.size).coerceAtLeast(0)} waiting · " +
+                            activeJobs.size + " generating · " + pendingCount + " total" +
                             if (queuePaused) " · Paused" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -245,6 +246,12 @@ fun ThumbnailQueueScreen(
                     ) { Text("Clear selection") }
                 }
 
+                Text(
+                    "Select visible page selects the rows shown here. Select all selects every job in the queue.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -266,6 +273,12 @@ fun ThumbnailQueueScreen(
                         onClick = { confirmCancelAll = true }
                     ) { Text("Cancel all jobs") }
                 }
+
+                Text(
+                    "Pause keeps jobs for later. Cancel removes queue entries only; original files and cached previews are not deleted.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
 
                 if (selectedIds.isNotEmpty()) {
                     Text("Actions for all " + selectedIds.size + " selected jobs", style = MaterialTheme.typography.labelLarge)
