@@ -244,6 +244,7 @@ class CacheRepositoryImpl(
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
             thumbnailJobDao.delete(targetId)
+            thumbnailStore.cancelJobs(listOf(targetId))
         }
         if (targetType == ThumbnailTargetType.FILE &&
             policy == ThumbnailPolicy.AUTOMATIC
@@ -263,7 +264,7 @@ class CacheRepositoryImpl(
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
             thumbnailPolicyDao.deleteOverridesInFolderTree(targetId)
-            thumbnailJobDao.deleteInFolderTree(targetId)
+            cancelFolderThumbnailJobs(targetId)
             thumbnailPolicyDao.upsert(
                 ThumbnailPolicyEntity(
                     targetType = ThumbnailTargetType.FOLDER.name,
@@ -287,6 +288,23 @@ class CacheRepositoryImpl(
                 queueAutomaticFolderThumbnails(targetId)
             }
         }
+    }
+
+    private suspend fun cancelFolderThumbnailJobs(folderId: String) {
+        var afterFileId: String? = null
+        while (true) {
+            val ids = thumbnailJobDao.queuedFileIdsInFolderTreePage(
+                folderId = folderId,
+                afterFileId = afterFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (ids.isEmpty()) break
+            thumbnailJobDao.delete(ids)
+            thumbnailStore.cancelJobs(ids)
+            afterFileId = ids.last()
+            if (ids.size < JOB_BATCH_SIZE) break
+        }
+        thumbnailJobDao.deleteInFolderTree(folderId)
     }
 
     private suspend fun queueAutomaticFolderThumbnails(folderId: String) {
@@ -406,6 +424,8 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun removeThumbnail(fileId: String) {
+        thumbnailJobDao.delete(fileId)
+        thumbnailStore.cancelJobs(listOf(fileId))
         thumbnailDao.byFileId(fileId)?.let { cached ->
             val cachedFile = File(cached.path)
             if (!cachedFile.exists() || cachedFile.delete()) {
@@ -426,6 +446,7 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun removeFolderThumbnails(folderId: String) {
+        cancelFolderThumbnailJobs(folderId)
         var afterFileId: String? = null
         while (true) {
             val batch = thumbnailDao.cachedFilePathsInFolderTreePage(
@@ -471,8 +492,9 @@ class CacheRepositoryImpl(
                 !cachedFile.exists() || cachedFile.delete()
             }.map { it.fileId }
             if (removedIds.isNotEmpty()) {
-                thumbnailDao.deleteAll(removedIds)
                 thumbnailJobDao.delete(removedIds)
+                thumbnailStore.cancelJobs(removedIds)
+                thumbnailDao.deleteAll(removedIds)
                 thumbnailPolicyDao.deleteFileOverrides(removedIds)
                 removedIds.forEach(thumbnailMemoryCache::remove)
             }
