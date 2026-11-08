@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.onboarding
 
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.animation.AnimatedContent
@@ -1119,7 +1120,12 @@ private fun CountryPickerSheet(
                     modifier = Modifier.padding(vertical = 24.dp)
                 )
             }
-            LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            val countryListState = rememberLazyListState()
+            Box(modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+            LazyColumn(
+                state = countryListState,
+                modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp).padding(end = 10.dp)
+            ) {
                 items(matches, key = { "${it.isoCode}_${it.callingCode}" }) { country ->
                     Row(
                         modifier = Modifier
@@ -1146,6 +1152,11 @@ private fun CountryPickerSheet(
                         )
                     }
                 }
+            }
+            DesktopVerticalScrollbar(
+                state = countryListState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
             }
         }
     }
