@@ -265,6 +265,9 @@ fun DesktopMediaPlayer(
             }
         }
     }
+    DisposableEffect(audioStateUpdates) {
+        onDispose { audioStateUpdates.close() }
+    }
 
     val fullscreenController = LocalFullscreenController.current
     DisposableEffect(player, mrl) {
