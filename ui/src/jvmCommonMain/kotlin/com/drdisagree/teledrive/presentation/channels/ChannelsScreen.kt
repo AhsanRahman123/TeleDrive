@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.channels
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -222,10 +224,12 @@ fun ChannelsScreen(
             onRename = { index -> channels.getOrNull(index)?.let { renameTarget = it } },
             onBack = onBack
         )
-        LazyColumn(
+        Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                        .padding(end = 10.dp)
                 .keyboardCollection(keyboard, channels.size, shortcuts),
             contentPadding = padding.add(horizontal = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -251,6 +255,11 @@ fun ChannelsScreen(
                 )
             }
         }
+                DesktopVerticalScrollbar(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                )
+            }
     }
 }
 
