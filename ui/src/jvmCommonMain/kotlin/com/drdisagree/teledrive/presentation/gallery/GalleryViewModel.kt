@@ -189,6 +189,7 @@ class GalleryViewModel(
     private val filterOptions = filters
         .map { it.copy(searchQuery = "") }
         .distinctUntilChanged()
+        .debounce(250.milliseconds)
 
     val listPosition = ListPosition(savedStateHandle)
 
@@ -263,6 +264,12 @@ class GalleryViewModel(
             availableOfflineOnly = currentFilters.availableOfflineOnly,
             backedUpOnly = currentFilters.backedUpOnly,
             notBackedUpOnly = currentFilters.notBackedUpOnly,
+            extension = currentFilters.extensionQuery.trim().removePrefix(".")
+                .takeIf { it.isNotBlank() },
+            minSizeBytes = currentFilters.minSizeMb.toSizeBytes(),
+            maxSizeBytes = currentFilters.maxSizeMb.toSizeBytes(),
+            modifiedAfter = currentFilters.modifiedAfterDate.toStartOfDayMillis(),
+            modifiedBefore = currentFilters.modifiedBeforeDate.toEndOfDayMillis(),
             sortField = field,
             sortDirection = dir
         )
