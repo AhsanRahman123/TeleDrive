@@ -853,6 +853,80 @@ private fun ThumbnailFileRow(
 }
 
 @Composable
+private fun ThumbnailInventoryDropdown(
+    title: String,
+    value: String,
+    options: List<Pair<String, String>>,
+    onSelect: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = options.firstOrNull { it.first == value }?.second ?: value
+    Box {
+        OutlinedButton(onClick = { expanded = true }) {
+            Text("$title: $selectedLabel", maxLines = 1)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { (option, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        expanded = false
+                        onSelect(option)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailBulkPolicyMenu(onSelect: (ThumbnailPolicy) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }) { Text("Set policy") }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            listOf(
+                ThumbnailPolicy.AUTOMATIC,
+                ThumbnailPolicy.MANUAL_ONLY,
+                ThumbnailPolicy.INHERIT
+            ).forEach { policy ->
+                DropdownMenuItem(
+                    text = { Text(policyLabel(policy)) },
+                    onClick = {
+                        expanded = false
+                        onSelect(policy)
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun cacheFilterLabel(filter: ThumbnailCacheFilter): String = when (filter) {
+    ThumbnailCacheFilter.ALL -> "All files"
+    ThumbnailCacheFilter.GENERATED -> "Generated"
+    ThumbnailCacheFilter.MISSING -> "Not generated"
+}
+
+private fun policyFilterLabel(filter: ThumbnailPolicyFilter): String = when (filter) {
+    ThumbnailPolicyFilter.ALL -> "All rules"
+    ThumbnailPolicyFilter.INHERITED -> "Inherited"
+    ThumbnailPolicyFilter.EXPLICIT_AUTOMATIC -> "Explicit Automatic"
+    ThumbnailPolicyFilter.EXPLICIT_MANUAL_ONLY -> "Explicit Manual only"
+}
+
+private fun fileSortLabel(sort: ThumbnailFileSort): String = when (sort) {
+    ThumbnailFileSort.THUMBNAIL_LARGEST -> "Largest thumbnail"
+    ThumbnailFileSort.THUMBNAIL_SMALLEST -> "Smallest thumbnail"
+    ThumbnailFileSort.SOURCE_LARGEST -> "Largest original file"
+    ThumbnailFileSort.SOURCE_SMALLEST -> "Smallest original file"
+    ThumbnailFileSort.GENERATED_NEWEST -> "Recently generated"
+    ThumbnailFileSort.LAST_VIEWED_OLDEST -> "Least recently viewed"
+    ThumbnailFileSort.NAME_ASC -> "Name A–Z"
+    ThumbnailFileSort.NAME_DESC -> "Name Z–A"
+}
+
+@Composable
 private fun ThumbnailPolicyMenu(
     policy: ThumbnailPolicy,
     allowInherit: Boolean,
