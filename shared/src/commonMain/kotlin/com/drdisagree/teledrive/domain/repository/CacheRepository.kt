@@ -74,7 +74,20 @@ interface CacheRepository {
 
     suspend fun thumbnailQueueFileIds(offset: Int, limit: Int): List<String> = emptyList()
 
+    /** Stable snapshot of all queued IDs, suitable for selecting across changing queue pages. */
+    suspend fun thumbnailQueueAllFileIds(): List<String> = emptyList()
+
+    suspend fun thumbnailQueuePaused(): Boolean = false
+
     fun observeThumbnailActiveJobs(): Flow<Set<String>> = flowOf(emptySet())
+
+    suspend fun pauseThumbnailJobs(fileIds: List<String>) = Unit
+
+    suspend fun resumeThumbnailJobs(fileIds: List<String>) = Unit
+
+    suspend fun pauseAllThumbnailJobs() = Unit
+
+    suspend fun resumeAllThumbnailJobs() = Unit
 
     suspend fun cancelThumbnailJobs(fileIds: List<String>) = Unit
 
