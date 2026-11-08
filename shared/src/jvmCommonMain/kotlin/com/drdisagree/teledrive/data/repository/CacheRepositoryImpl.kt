@@ -324,8 +324,11 @@ class CacheRepositoryImpl(
 
     override suspend fun removeThumbnail(fileId: String) {
         thumbnailDao.byFileId(fileId)?.let { cached ->
-            File(cached.path).delete()
-            thumbnailDao.delete(fileId)
+            val cachedFile = File(cached.path)
+            if (!cachedFile.exists() || cachedFile.delete()) {
+                thumbnailDao.delete(fileId)
+                thumbnailMemoryCache.remove(fileId)
+            }
         }
         thumbnailJobDao.delete(fileId)
         thumbnailPolicyDao.upsert(
@@ -336,7 +339,6 @@ class CacheRepositoryImpl(
                 changedAt = System.currentTimeMillis()
             )
         )
-        thumbnailMemoryCache.remove(fileId)
         refreshThumbnailStats()
     }
 
@@ -349,9 +351,14 @@ class CacheRepositoryImpl(
                 limit = JOB_BATCH_SIZE
             )
             if (batch.isEmpty()) break
-            batch.forEach { File(it.path).delete() }
-            thumbnailDao.deleteAll(batch.map { it.fileId })
-            batch.forEach { thumbnailMemoryCache.remove(it.fileId) }
+            val removedIds = batch.filter { ref ->
+                val cachedFile = File(ref.path)
+                !cachedFile.exists() || cachedFile.delete()
+            }.map { it.fileId }
+            if (removedIds.isNotEmpty()) {
+                thumbnailDao.deleteAll(removedIds)
+                removedIds.forEach(thumbnailMemoryCache::remove)
+            }
             afterFileId = batch.last().fileId
             if (batch.size < JOB_BATCH_SIZE) break
         }
