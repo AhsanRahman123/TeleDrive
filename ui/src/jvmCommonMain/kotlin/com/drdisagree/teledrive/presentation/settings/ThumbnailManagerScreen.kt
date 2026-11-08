@@ -115,7 +115,7 @@ fun ThumbnailManagerScreen(
                 latest.cachedFiles != summary.cachedFiles
             summary = latest
             if (cacheChanged) refreshKey++
-            delay(2_000L)
+            delay(5_000L)
         }
     }
 
