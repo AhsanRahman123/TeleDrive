@@ -229,6 +229,11 @@ class CacheRepositoryImpl(
         ) {
             thumbnailJobDao.delete(targetId)
         }
+        if (targetType == ThumbnailTargetType.FILE &&
+            policy == ThumbnailPolicy.AUTOMATIC
+        ) {
+            thumbnailStore.enqueueAutomatic(targetId)
+        }
         if (targetType == ThumbnailTargetType.FOLDER &&
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
@@ -242,6 +247,31 @@ class CacheRepositoryImpl(
                     changedAt = System.currentTimeMillis()
                 )
             )
+        }
+        if (targetType == ThumbnailTargetType.FOLDER &&
+            policy == ThumbnailPolicy.AUTOMATIC
+        ) {
+            queueAutomaticFolderThumbnails(targetId)
+        }
+    }
+
+    private suspend fun queueAutomaticFolderThumbnails(folderId: String) {
+        var afterAddedAt: Long? = null
+        var afterFileId: String? = null
+        while (true) {
+            val page = thumbnailDao.fileIdsInFolderTreePage(
+                folderId = folderId,
+                onlyMissing = true,
+                afterAddedAt = afterAddedAt,
+                afterFileId = afterFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (page.isEmpty()) break
+            thumbnailStore.enqueueAutomatic(page.map { it.fileId })
+            val last = page.last()
+            afterAddedAt = last.addedAt
+            afterFileId = last.fileId
+            if (page.size < JOB_BATCH_SIZE) break
         }
     }
 
