@@ -239,6 +239,9 @@ interface ThumbnailDao {
               AND NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                   )
+              AND NOT EXISTS (
+                    SELECT 1 FROM thumbnail_jobs j WHERE j.fileId = f.id
+                  )
               AND (
                     f.category IN ('IMAGE', 'VIDEO')
                     OR f.mimeType LIKE 'text/%'
@@ -265,6 +268,9 @@ interface ThumbnailDao {
                   )
               AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
+                  ))
+              AND (:onlyMissing = 0 OR NOT EXISTS (
+                    SELECT 1 FROM thumbnail_jobs j WHERE j.fileId = f.id
                   ))
               AND (
                     :afterAddedAt IS NULL
@@ -346,6 +352,9 @@ interface ThumbnailDao {
              AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                  ))
+             AND (:onlyMissing = 0 OR NOT EXISTS (
+                    SELECT 1 FROM thumbnail_jobs j WHERE j.fileId = f.id
+                 ))
              AND (
                  :afterAddedAt IS NULL
                  OR f.addedAt < :afterAddedAt
@@ -372,6 +381,9 @@ interface ThumbnailDao {
                   ))
              AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
+                 ))
+             AND (:onlyMissing = 0 OR NOT EXISTS (
+                    SELECT 1 FROM thumbnail_jobs j WHERE j.fileId = f.id
                  ))
              AND (
                  :afterAddedAt IS NULL
