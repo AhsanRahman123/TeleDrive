@@ -35,6 +35,7 @@ import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -105,6 +106,32 @@ class TransferExecutor(
         }
     } catch (_: KeyUnavailableException) {
         TransferOutcome.Failed(messages.keyMissing)
+    }
+
+    private suspend fun cacheOrQueueUploadedThumbnail(
+        file: FileEntity,
+        temporaryPreviewPath: String?
+    ) {
+        if (!supportsThumbnail(file)) return
+        val cached = try {
+            temporaryPreviewPath?.let {
+                thumbnailStore.cacheUploadedThumbnail(file.id, it)
+            } ?: false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+        if (!cached) {
+            try {
+                thumbnailStore.enqueueAfterUpload(file.id)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A cache/queue failure must not turn an already completed Telegram upload into
+                // a failed transfer. The file remains available and can be prepared manually.
+            }
+        }
     }
 
     private fun supportsThumbnail(file: FileEntity): Boolean =
@@ -191,8 +218,8 @@ class TransferExecutor(
             } finally {
                 rawIconPath?.let { File(it).delete() }
             }
-            if (result == TransferOutcome.Completed && supportsThumbnail(entity)) {
-                thumbnailStore.enqueueAfterUpload(entity.id)
+            if (result == TransferOutcome.Completed) {
+                cacheOrQueueUploadedThumbnail(entity, rawIconPath)
             }
             return result
         }
@@ -278,8 +305,8 @@ class TransferExecutor(
                     }
                 }
             }
-            if (outcome == TransferOutcome.Completed && supportsThumbnail(entity)) {
-                thumbnailStore.enqueueAfterUpload(entity.id)
+            if (outcome == TransferOutcome.Completed) {
+                cacheOrQueueUploadedThumbnail(entity, rawIconPath)
             }
             outcome
         } catch (e: TransferControlException) {
