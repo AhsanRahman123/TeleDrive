@@ -212,6 +212,7 @@ class AndroidThumbnailStore(
             ?: ThumbnailPolicy.MANUAL_ONLY
 
     override suspend fun uploadThumbnailFile(fileId: String): File? {
+        if (!settingsRepository.preferences.first().linkPreviews && isNote(fileId)) return null
         val bytes = readCachedThumbnail(fileId)
             ?: generationSemaphore.withPermit { generate(fileId, cacheResult = false) }
             ?: return null
