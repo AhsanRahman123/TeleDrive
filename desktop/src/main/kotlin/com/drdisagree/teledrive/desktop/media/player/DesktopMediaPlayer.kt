@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Fullscreen
@@ -35,7 +36,9 @@ import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ZoomOutMap
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -51,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -103,7 +107,10 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
@@ -140,6 +147,7 @@ fun DesktopMediaPlayer(
     var trackTick by remember { mutableIntStateOf(0) }
     var scaling by remember { mutableStateOf(VideoScaling.FIT) }
     var controlsVisible by remember { mutableStateOf(true) }
+    var controlsPinned by remember { mutableStateOf(false) }
     var interactionTick by remember { mutableIntStateOf(0) }
 
     val player = remember(mrl, isAudio) {
@@ -189,6 +197,51 @@ fun DesktopMediaPlayer(
                 }
             })
         }
+    }
+
+    var volumeLevel by remember(player) {
+        mutableFloatStateOf(player.audio().volume().toFloat().coerceIn(0f, MAX_VLC_VOLUME.toFloat()))
+    }
+    var brightnessLevel by remember(mrl) { mutableFloatStateOf(0f) }
+    var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(false) }
+    var brightnessMonitor by remember(mrl) { mutableStateOf("") }
+    var brightnessDragging by remember(mrl) { mutableStateOf(false) }
+    var pendingBrightness by remember(mrl) { mutableStateOf<Float?>(null) }
+
+    // Read hardware brightness periodically so changes made in Monitorian or
+    // Windhawk are reflected in the TeleDrive slider. DDC/CI calls never run on
+    // the Compose UI thread, and polling pauses while a user is dragging.
+    LaunchedEffect(mrl, isAudio, brightnessDragging, pendingBrightness) {
+        if (isAudio || brightnessDragging || pendingBrightness != null) {
+            if (isAudio) brightnessAvailable = false
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            val reading = withContext(Dispatchers.IO) {
+                WindowsMonitorBrightness.read()
+            }
+            brightnessAvailable = reading != null
+            if (reading != null) {
+                brightnessLevel = reading.percent.coerceIn(0f, 100f)
+                brightnessMonitor = reading.monitorDescription
+            }
+            delay(BRIGHTNESS_POLL_INTERVAL_MS)
+        }
+    }
+
+    // Coalesce slider movement into at most one hardware write per short
+    // settling period. A monitor command can take tens of milliseconds.
+    LaunchedEffect(mrl, pendingBrightness) {
+        val requested = pendingBrightness ?: return@LaunchedEffect
+        delay(BRIGHTNESS_WRITE_DEBOUNCE_MS)
+        val applied = withContext(Dispatchers.IO) {
+            WindowsMonitorBrightness.setPercent(requested)
+        }
+        if (applied) {
+            brightnessAvailable = true
+            brightnessLevel = requested
+        }
+        if (pendingBrightness == requested) pendingBrightness = null
     }
 
     DisposableEffect(playing, isAudio) {
@@ -299,14 +352,10 @@ fun DesktopMediaPlayer(
         trackTick++
     }
 
-    LaunchedEffect(playing, interactionTick) {
-        if (!playing) {
-            controlsVisible = true
-            onControlsVisibilityChange(true)
-            return@LaunchedEffect
-        }
+    LaunchedEffect(playing, interactionTick, controlsPinned) {
         controlsVisible = true
         onControlsVisibilityChange(true)
+        if (!playing || controlsPinned) return@LaunchedEffect
         delay(CONTROLS_HIDE_DELAY_MS.milliseconds)
         controlsVisible = false
         onControlsVisibilityChange(false)
@@ -400,6 +449,7 @@ fun DesktopMediaPlayer(
                     ctrl && !alt && !shift && key == Key.DirectionUp -> {
                         val volume = (player.audio().volume() + VOLUME_STEP).coerceAtMost(200)
                         player.audio().setVolume(volume)
+                        volumeLevel = volume.toFloat()
                         player.audio().isMute = false
                         muted = false
                         interactionTick++
@@ -408,6 +458,7 @@ fun DesktopMediaPlayer(
                     ctrl && !alt && !shift && key == Key.DirectionDown -> {
                         val volume = (player.audio().volume() - VOLUME_STEP).coerceAtLeast(0)
                         player.audio().setVolume(volume)
+                        volumeLevel = volume.toFloat()
                         if (volume > 0) player.audio().isMute = false
                         muted = volume == 0
                         interactionTick++
@@ -620,6 +671,27 @@ fun DesktopMediaPlayer(
                 repeatOne = repeatOne,
                 trackTick = trackTick,
                 scaling = scaling,
+                volumeLevel = volumeLevel,
+                brightnessLevel = brightnessLevel,
+                brightnessAvailable = brightnessAvailable,
+                brightnessMonitor = brightnessMonitor,
+                onVolumeLevel = { value ->
+                    val safeValue = value.coerceIn(0f, MAX_VLC_VOLUME.toFloat())
+                    volumeLevel = safeValue
+                    player.audio().setVolume(safeValue.roundToInt())
+                    val shouldMute = safeValue <= 0f
+                    player.audio().isMute = shouldMute
+                    muted = shouldMute
+                    interactionTick++
+                },
+                onBrightnessLevel = { value ->
+                    val safeValue = value.coerceIn(0f, 100f)
+                    brightnessLevel = safeValue
+                    pendingBrightness = safeValue
+                    interactionTick++
+                },
+                onBrightnessDragging = { brightnessDragging = it },
+                onControlsKeepVisible = { controlsPinned = it },
                 onPrevious = onPrevious,
                 onNext = onNext,
                 hasPrevious = hasPrevious,
@@ -662,6 +734,14 @@ private fun PlayerControlsBar(
     repeatOne: Boolean,
     trackTick: Int,
     scaling: VideoScaling,
+    volumeLevel: Float,
+    brightnessLevel: Float,
+    brightnessAvailable: Boolean,
+    brightnessMonitor: String,
+    onVolumeLevel: (Float) -> Unit,
+    onBrightnessLevel: (Float) -> Unit,
+    onBrightnessDragging: (Boolean) -> Unit,
+    onControlsKeepVisible: (Boolean) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     hasPrevious: Boolean,
@@ -679,8 +759,31 @@ private fun PlayerControlsBar(
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
     var showSubtitleMenu by remember { mutableStateOf(false) }
+    var showSliderSettings by remember { mutableStateOf(false) }
     var scrubTarget by remember { mutableStateOf<Float?>(null) }
+    var sliderPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
+    var volumeSliderActive by remember { mutableStateOf(false) }
+    var brightnessSliderActive by remember { mutableStateOf(false) }
     val fullscreen = LocalFullscreenController.current
+
+    LaunchedEffect(
+        showSliderSettings,
+        volumeSliderActive,
+        brightnessSliderActive,
+        sliderPreferences.autoHideVolumeSlider,
+        sliderPreferences.autoHideBrightnessSlider,
+        brightnessAvailable
+    ) {
+        val keepVisible = showSliderSettings ||
+            volumeSliderActive ||
+            (brightnessAvailable && brightnessSliderActive) ||
+            !sliderPreferences.autoHideVolumeSlider ||
+            (brightnessAvailable && !sliderPreferences.autoHideBrightnessSlider)
+        onControlsKeepVisible(keepVisible)
+    }
+    DisposableEffect(Unit) {
+        onDispose { onControlsKeepVisible(false) }
+    }
     val trackWord = stringResource(Res.string.player_track)
     val audioTracks = remember(player, trackTick) { player.audioTracks(trackWord) }
     val textTracks = remember(player, trackTick) { player.textTracks(trackWord) }
@@ -744,6 +847,127 @@ private fun PlayerControlsBar(
                 .fillMaxWidth()
                 .height(52.dp)
         ) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                PlayerAutoHideSlider(
+                    icon = if (muted) {
+                        Icons.AutoMirrored.Filled.VolumeOff
+                    } else {
+                        Icons.AutoMirrored.Filled.VolumeUp
+                    },
+                    contentDescription = if (muted) "Unmute video" else "Mute video",
+                    value = volumeLevel,
+                    valueRange = 0f..MAX_VLC_VOLUME.toFloat(),
+                    autoHide = sliderPreferences.autoHideVolumeSlider,
+                    hideDelayMillis = sliderPreferences.hideDelayMillis,
+                    onButtonClick = {
+                        onInteraction()
+                        onToggleMute()
+                    },
+                    onValueChange = onVolumeLevel,
+                    onActiveChange = { volumeSliderActive = it }
+                )
+
+                if (!isAudio && brightnessAvailable) {
+                    PlayerAutoHideSlider(
+                        icon = Icons.Filled.BrightnessMedium,
+                        contentDescription = if (brightnessMonitor.isBlank()) {
+                            "Display brightness"
+                        } else {
+                            "Display brightness: $brightnessMonitor"
+                        },
+                        value = brightnessLevel,
+                        valueRange = 0f..100f,
+                        autoHide = sliderPreferences.autoHideBrightnessSlider,
+                        hideDelayMillis = sliderPreferences.hideDelayMillis,
+                        onButtonClick = onInteraction,
+                        onValueChange = onBrightnessLevel,
+                        onDraggingChange = onBrightnessDragging,
+                        onActiveChange = { brightnessSliderActive = it },
+                        expandOnClick = true
+                    )
+                }
+
+                Box {
+                    IconButton(
+                        onClick = {
+                            onInteraction()
+                            showSliderSettings = true
+                        },
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Player slider settings",
+                            tint = Color.White
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showSliderSettings,
+                        onDismissRequest = { showSliderSettings = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Auto-hide volume slider") },
+                            leadingIcon = {
+                                Checkbox(
+                                    checked = sliderPreferences.autoHideVolumeSlider,
+                                    onCheckedChange = null
+                                )
+                            },
+                            onClick = {
+                                sliderPreferences = sliderPreferences.copy(
+                                    autoHideVolumeSlider = !sliderPreferences.autoHideVolumeSlider
+                                )
+                                PlayerControlPreferencesStore.save(sliderPreferences)
+                                onInteraction()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Auto-hide brightness slider") },
+                            leadingIcon = {
+                                Checkbox(
+                                    checked = sliderPreferences.autoHideBrightnessSlider,
+                                    onCheckedChange = null
+                                )
+                            },
+                            onClick = {
+                                sliderPreferences = sliderPreferences.copy(
+                                    autoHideBrightnessSlider = !sliderPreferences.autoHideBrightnessSlider
+                                )
+                                PlayerControlPreferencesStore.save(sliderPreferences)
+                                onInteraction()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Auto-hide delay") },
+                            enabled = false,
+                            onClick = {}
+                        )
+                        listOf(1_000L, 2_000L, 3_000L, 5_000L, 10_000L).forEach { delay ->
+                            val selected = sliderPreferences.hideDelayMillis == delay
+                            DropdownMenuItem(
+                                text = { Text("${delay / 1_000L} seconds") },
+                                leadingIcon = {
+                                    RadioButton(selected = selected, onClick = null)
+                                },
+                                onClick = {
+                                    sliderPreferences = sliderPreferences.copy(
+                                        hideDelayMillis = delay
+                                    )
+                                    PlayerControlPreferencesStore.save(sliderPreferences)
+                                    onInteraction()
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -943,18 +1167,6 @@ private fun PlayerControlsBar(
                         )
                     }
                 }
-                IconButton(
-                    onClick = { onInteraction(); onToggleMute() },
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Icon(
-                        imageVector = if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                        contentDescription = stringResource(
-                            if (muted) Res.string.player_unmute else Res.string.player_mute
-                        ),
-                        tint = Color.White
-                    )
-                }
                 fullscreen?.let { controller ->
                     IconButton(
                         onClick = { onInteraction(); controller.toggle() },
@@ -1005,3 +1217,7 @@ private const val FINE_RATE_STEP = 0.05f
 private const val SYNC_STEP_US = 50_000L
 private val THUMB_WIDTH = 5.dp
 private val THUMB_HEIGHT = 26.dp
+
+private const val MAX_VLC_VOLUME = 200
+private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_000L
+private const val BRIGHTNESS_WRITE_DEBOUNCE_MS = 90L
