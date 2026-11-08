@@ -379,6 +379,7 @@ fun GalleryScreen(
     var confirmDeleteLocal by remember { mutableStateOf(false) }
 
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
+    val infoFolderPath by viewModel.infoFolderPath.collectAsStateWithLifecycle()
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -463,7 +464,11 @@ fun GalleryScreen(
     }
 
     infoTarget?.let { file ->
-        FileInfoSheet(file = file, onDismiss = viewModel::dismissInfo)
+        FileInfoSheet(
+            file = file,
+            folderPath = infoFolderPath,
+            onDismiss = viewModel::dismissInfo
+        )
     }
 
     if (confirmDeleteLocal) {
