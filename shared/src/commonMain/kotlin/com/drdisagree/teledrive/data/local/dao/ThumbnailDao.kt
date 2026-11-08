@@ -102,6 +102,7 @@ interface ThumbnailDao {
                SELECT f.id, d.id, d.parentId, 0
                  FROM scoped_files f
                  LEFT JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
+                WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
                UNION ALL
                SELECT a.fileId, parent.id, parent.parentId, a.depth + 1
                  FROM folder_ancestors a
@@ -124,6 +125,7 @@ interface ThumbnailDao {
                  FROM scoped_files f
                  LEFT JOIN thumbnail_policies fp
                    ON fp.targetType = 'FILE' AND fp.targetId = f.id
+                WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
            )
            SELECT f.id AS fileId,
                   f.name AS name,
