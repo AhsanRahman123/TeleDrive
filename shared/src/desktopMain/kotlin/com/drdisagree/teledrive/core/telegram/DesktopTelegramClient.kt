@@ -1038,18 +1038,45 @@ class DesktopTelegramClient(
     override suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray? {
         val message = runCatching { send(TdApi.GetMessage(chatId, messageId)) }.getOrNull()
             ?: return null
-        val document = (message.content as? TdApi.MessageDocument)?.document ?: return null
 
-        document.thumbnail?.file?.let { thumbnailFile ->
+        val (thumbnailFile, minithumbnail) = when (val content = message.content) {
+            is TdApi.MessageDocument ->
+                content.document?.thumbnail?.file to content.document?.minithumbnail?.data
+
+            is TdApi.MessageVideo ->
+                content.video?.thumbnail?.file to content.video?.minithumbnail?.data
+
+            is TdApi.MessageAnimation ->
+                content.animation?.thumbnail?.file to content.animation?.minithumbnail?.data
+
+            is TdApi.MessagePhoto -> {
+                val photo = content.photo
+                val preferredSize = photo?.sizes
+                    ?.filter { size ->
+                        size.width > 0 && size.height > 0 &&
+                            maxOf(size.width, size.height) <= MAX_THUMBNAIL_DIMENSION
+                    }
+                    ?.maxByOrNull { size -> size.width.toLong() * size.height }
+                    ?: photo?.sizes?.minByOrNull { size ->
+                        size.width.toLong() * size.height
+                    }
+                preferredSize?.photo to photo?.minithumbnail?.data
+            }
+
+            else -> return null
+        }
+
+        thumbnailFile?.let { thumbnail ->
             val downloaded = runCatching {
-                send(TdApi.DownloadFile(thumbnailFile.id, THUMBNAIL_PRIORITY, 0, 0, true))
+                send(TdApi.DownloadFile(thumbnail.id, THUMBNAIL_PRIORITY, 0, 0, true))
             }.getOrNull()
-            val path = downloaded?.local?.path?.takeIf { it.isNotEmpty() }
-            if (path != null) {
-                runCatching { File(path).readBytes() }.getOrNull()?.let { return it }
+            val localPath = downloaded?.readyPath()
+                ?: downloaded?.local?.path?.takeIf { it.isNotEmpty() && File(it).exists() }
+            if (localPath != null) {
+                runCatching { File(localPath).readBytes() }.getOrNull()?.let { return it }
             }
         }
-        return document.minithumbnail?.data
+        return minithumbnail
     }
 
     private suspend fun remoteFile(remoteFileId: String): TdApi.File = try {
@@ -1370,6 +1397,7 @@ class DesktopTelegramClient(
         private const val HISTORY_RETRIES = 3
         private const val HISTORY_RETRY_MS = 400L
         private const val PHOTO_PRIORITY = 16
+        private const val MAX_THUMBNAIL_DIMENSION = 512
         private const val MAX_LABEL_LENGTH = 48
         private const val STORAGE_CHAT_TITLE = "TeleDrive"
         private const val WRONG_DATABASE_KEY_CODE = 401
