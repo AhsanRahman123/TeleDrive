@@ -28,6 +28,7 @@ import com.drdisagree.teledrive.resources.files_hide
 import com.drdisagree.teledrive.resources.files_sort
 import com.drdisagree.teledrive.resources.preview_remove_favorites
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
@@ -115,6 +116,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.koin.compose.viewmodel.koinViewModel
+import androidx.window.core.layout.WindowSizeClass
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
@@ -175,7 +177,6 @@ import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileGridItem
-import com.drdisagree.teledrive.presentation.components.LocalCompactLayout
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.LoadingState
@@ -343,9 +344,11 @@ fun GalleryScreen(
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val selectionMode = state.selectionMode || selectionModeEnabled
     val media = viewModel.pagedMedia.collectAsLazyPagingItems()
-    // Fit more media previews on wide desktop windows without shrinking compact layouts.
-    val mediaGridColumns = if (LocalCompactLayout.current) state.gridSize
-        else (state.gridSize + 2).coerceAtMost(6)
+    // Fit more media previews on wide windows while keeping phone grids unchanged.
+    val isWideWindow = currentWindowAdaptiveInfoV2().windowSizeClass
+        .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
+    val mediaGridColumns = if (isWideWindow) (state.gridSize + 2).coerceAtMost(6)
+        else state.gridSize
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     var confirmTrash by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
