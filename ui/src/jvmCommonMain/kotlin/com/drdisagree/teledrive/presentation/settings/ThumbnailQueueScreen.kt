@@ -144,14 +144,14 @@ fun ThumbnailQueueScreen(
                 }
             }
 
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(scrollState)
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                 if (queuePaused) {
                     Text(
                         "Queue paused. Jobs are safely retained and will continue when resumed.",
@@ -215,7 +215,7 @@ fun ThumbnailQueueScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
-                        enabled = pendingCount > 0,
+                        enabled = pendingCount > 0 || queuePaused,
                         modifier = Modifier.weight(1f),
                         onClick = {
                             scope.launch {
@@ -317,12 +317,13 @@ fun ThumbnailQueueScreen(
                         ) { Text("Next") }
                     }
                 }
+                }
+                DesktopVerticalScrollbar(
+                    state = scrollState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().padding(end = 2.dp)
+                )
             }
         }
-        DesktopVerticalScrollbar(
-            state = scrollState,
-            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 2.dp)
-        )
     }
 }
 
