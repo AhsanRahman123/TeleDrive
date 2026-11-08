@@ -86,7 +86,7 @@ interface ThumbnailDao {
              FROM files f
              LEFT JOIN thumbnails t ON t.fileId = f.id
             WHERE f.trashedAt IS NULL
-              AND f.category IN ('IMAGE', 'VIDEO')
+              AND (f.category IN ('IMAGE', 'VIDEO') OR f.mimeType = 'application/vnd.android.package-archive')
             GROUP BY COALESCE(f.folderId, f.preTrashFolderId)"""
     )
     suspend fun folderStatusAggregates(): List<ThumbnailFolderStatusAggregate>
@@ -101,7 +101,7 @@ interface ThumbnailDao {
                         OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                       )
                   AND (
-                        f.category IN ('IMAGE', 'VIDEO')
+                        (f.category IN ('IMAGE', 'VIDEO') OR f.mimeType = 'application/vnd.android.package-archive')
                         OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                       )
            ),
@@ -189,7 +189,7 @@ interface ThumbnailDao {
                         OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                       )
                   AND (
-                        f.category IN ('IMAGE', 'VIDEO')
+                        (f.category IN ('IMAGE', 'VIDEO') OR f.mimeType = 'application/vnd.android.package-archive')
                         OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                       )
            ),
@@ -242,7 +242,7 @@ interface ThumbnailDao {
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                   )
               AND (
-                    f.category IN ('IMAGE', 'VIDEO')
+                    (f.category IN ('IMAGE', 'VIDEO') OR f.mimeType = 'application/vnd.android.package-archive')
                   )
             ORDER BY f.addedAt DESC, f.id ASC"""
     )
@@ -253,7 +253,7 @@ interface ThumbnailDao {
              FROM files f
             WHERE f.trashedAt IS NULL
               AND (
-                    f.category IN ('IMAGE', 'VIDEO')
+                    (f.category IN ('IMAGE', 'VIDEO') OR f.mimeType = 'application/vnd.android.package-archive')
                   )
               AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
@@ -282,7 +282,7 @@ interface ThumbnailDao {
                     OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                   )
               AND (
-                    f.category IN ('IMAGE', 'VIDEO')
+                    (f.category IN ('IMAGE', 'VIDEO') OR f.mimeType = 'application/vnd.android.package-archive')
                     OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                   )
             ORDER BY f.name COLLATE NOCASE ASC, f.id ASC
@@ -325,7 +325,7 @@ interface ThumbnailDao {
            SELECT f.id AS fileId, f.addedAt AS addedAt FROM files f
            WHERE f.folderId IN (SELECT id FROM child_folders)
              AND f.trashedAt IS NULL
-             AND (f.category IN ('IMAGE', 'VIDEO'))
+             AND ((f.category IN ('IMAGE', 'VIDEO') OR f.mimeType = 'application/vnd.android.package-archive'))
              AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                  ))
@@ -348,7 +348,7 @@ interface ThumbnailDao {
     @Query(
         """SELECT f.id AS fileId, f.addedAt AS addedAt FROM files f
            WHERE f.folderId IS NULL AND f.trashedAt IS NULL
-             AND (f.category IN ('IMAGE', 'VIDEO'))
+             AND ((f.category IN ('IMAGE', 'VIDEO') OR f.mimeType = 'application/vnd.android.package-archive'))
              AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                  ))
