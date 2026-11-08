@@ -1,0 +1,594 @@
+package com.drdisagree.teledrive.presentation.settings
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
+import com.drdisagree.teledrive.core.media.ThumbnailModel
+import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
+import com.drdisagree.teledrive.domain.repository.CacheRepository
+import com.drdisagree.teledrive.domain.repository.ThumbnailFileUsage
+import com.drdisagree.teledrive.domain.repository.ThumbnailFolderUsage
+import com.drdisagree.teledrive.domain.repository.ThumbnailManagerSummary
+import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
+import com.drdisagree.teledrive.presentation.common.Formatters
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
+
+private const val THUMBNAIL_PAGE_SIZE = 60
+
+@Composable
+fun ThumbnailManagerScreen(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val cacheRepository = koinInject<CacheRepository>()
+    val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
+
+    var summary by remember { mutableStateOf(ThumbnailManagerSummary()) }
+    var folderPath by remember { mutableStateOf(emptyList<ThumbnailFolderUsage>()) }
+    var folders by remember { mutableStateOf(emptyList<ThumbnailFolderUsage>()) }
+    var files by remember { mutableStateOf(emptyList<ThumbnailFileUsage>()) }
+    var filePolicy by remember { mutableStateOf(ThumbnailPolicy.INHERIT) }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var loading by remember { mutableStateOf(true) }
+    var hasMore by remember { mutableStateOf(false) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var refreshKey by remember { mutableStateOf(0) }
+    var confirmClearFolder by remember { mutableStateOf(false) }
+
+    val folderId = folderPath.lastOrNull()?.id
+    val currentFolderName = folderPath.lastOrNull()?.name ?: "All files"
+
+    LaunchedEffect(folderId, refreshKey) {
+        loading = true
+        summary = cacheRepository.thumbnailManagerSummary()
+        folders = cacheRepository.thumbnailFolders(folderId)
+        files = cacheRepository.thumbnailFiles(folderId, 0, THUMBNAIL_PAGE_SIZE)
+        hasMore = files.size == THUMBNAIL_PAGE_SIZE
+        selectedIds = emptySet()
+        filePolicy = if (folderId == null) {
+            ThumbnailPolicy.INHERIT
+        } else {
+            cacheRepository.thumbnailPolicy(ThumbnailTargetType.FOLDER, folderId)
+        }
+        loading = false
+    }
+
+    // Keep the pending-job count and cache total fresh while background work is running.
+    LaunchedEffect(Unit) {
+        while (true) {
+            summary = cacheRepository.thumbnailManagerSummary()
+            delay(2_000L)
+        }
+    }
+
+    if (confirmClearFolder && folderId != null) {
+        AlertDialog(
+            onDismissRequest = { confirmClearFolder = false },
+            title = { Text("Clear this folder's thumbnails?") },
+            text = {
+                Text(
+                    "Cached previews in this folder and its subfolders will be deleted. " +
+                        "Original files will not be touched, and the folder will switch to Manual only."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearFolder = false
+                        scope.launch {
+                            cacheRepository.removeFolderThumbnails(folderId)
+                            refreshKey++
+                        }
+                    }
+                ) { Text("Clear thumbnails") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearFolder = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(end = 10.dp)
+                .verticalScroll(scrollState)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        if (folderPath.isEmpty()) onBack()
+                        else folderPath = folderPath.dropLast(1)
+                    }
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Thumbnail manager", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        if (folderPath.isEmpty()) "Storage overview"
+                        else folderPath.joinToString(" / ") { it.name },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                IconButton(onClick = { refreshKey++ }) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SummaryTile(
+                    title = "Thumbnail cache",
+                    value = Formatters.bytes(summary.totalBytes),
+                    subtitle = "${summary.cachedFiles} cached files",
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryTile(
+                    title = "Background queue",
+                    value = summary.pendingJobs.toString(),
+                    subtitle = "pending preparations",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Text(
+                "Existing library files are Manual only by default. New successful uploads are " +
+                    "automatically prepared. Choose individual files or folders to prepare older previews.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (folderId != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Folder policy", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            policyLabel(filePolicy),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    ThumbnailPolicyMenu(
+                        policy = filePolicy,
+                        allowInherit = true,
+                        onSelect = { policy ->
+                            scope.launch {
+                                cacheRepository.setThumbnailPolicy(
+                                    ThumbnailTargetType.FOLDER,
+                                    folderId,
+                                    policy
+                                )
+                                refreshKey++
+                            }
+                        }
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                cacheRepository.generateFolderThumbnails(folderId)
+                                summary = cacheRepository.thumbnailManagerSummary()
+                            }
+                        }
+                    ) { Text("Prepare missing") }
+                    IconButton(onClick = { confirmClearFolder = true }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Clear folder thumbnails")
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Unfiled thumbnails", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            "${Formatters.bytes(summary.unfiledBytes)} · ${summary.unfiledCachedFiles} cached",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                cacheRepository.generateFolderThumbnails(null)
+                                summary = cacheRepository.thumbnailManagerSummary()
+                            }
+                        }
+                    ) { Text("Prepare unfiled") }
+                }
+            }
+
+            if (folders.isNotEmpty()) {
+                Text("Folders", style = MaterialTheme.typography.titleMedium)
+                folders.forEach { folder ->
+                    ThumbnailFolderRow(
+                        folder = folder,
+                        onOpen = { folderPath = folderPath + folder },
+                        onPolicy = { policy ->
+                            scope.launch {
+                                cacheRepository.setThumbnailPolicy(
+                                    ThumbnailTargetType.FOLDER,
+                                    folder.id,
+                                    policy
+                                )
+                                refreshKey++
+                            }
+                        },
+                        currentPolicy = rememberFolderPolicy(folder.id, cacheRepository, refreshKey)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        if (folderId == null) "Unfiled files" else "Files in this folder",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "${files.size}${if (hasMore) "+" else ""} shown · largest cached previews first",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (selectedIds.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${selectedIds.size} selected",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                cacheRepository.generateThumbnails(selectedIds.toList())
+                                summary = cacheRepository.thumbnailManagerSummary()
+                            }
+                        }
+                    ) { Text("Generate") }
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                selectedIds.forEach { cacheRepository.removeThumbnail(it) }
+                                refreshKey++
+                            }
+                        }
+                    ) { Text("Remove") }
+                }
+            }
+
+            if (loading) {
+                Text("Loading thumbnail inventory…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (files.isEmpty()) {
+                Text(
+                    "No eligible files in this folder.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+            } else {
+                files.forEach { file ->
+                    ThumbnailFileRow(
+                        file = file,
+                        selected = file.fileId in selectedIds,
+                        onSelectionChange = { checked ->
+                            selectedIds = if (checked) selectedIds + file.fileId
+                            else selectedIds - file.fileId
+                        },
+                        onPolicy = { policy ->
+                            scope.launch {
+                                cacheRepository.setThumbnailPolicy(
+                                    ThumbnailTargetType.FILE,
+                                    file.fileId,
+                                    policy
+                                )
+                                refreshKey++
+                            }
+                        },
+                        onGenerate = {
+                            scope.launch {
+                                cacheRepository.generateThumbnail(file.fileId)
+                                summary = cacheRepository.thumbnailManagerSummary()
+                            }
+                        },
+                        onRemove = {
+                            scope.launch {
+                                cacheRepository.removeThumbnail(file.fileId)
+                                refreshKey++
+                            }
+                        }
+                    )
+                }
+                if (hasMore) {
+                    OutlinedButton(
+                        onClick = {
+                            if (loadingMore) return@OutlinedButton
+                            loadingMore = true
+                            scope.launch {
+                                val next = cacheRepository.thumbnailFiles(
+                                    folderId,
+                                    files.size,
+                                    THUMBNAIL_PAGE_SIZE
+                                )
+                                files = files + next
+                                hasMore = next.size == THUMBNAIL_PAGE_SIZE
+                                loadingMore = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !loadingMore
+                    ) {
+                        Text(if (loadingMore) "Loading…" else "Load more files")
+                    }
+                }
+            }
+        }
+        DesktopVerticalScrollbar(
+            state = scrollState,
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+        )
+    }
+}
+
+@Composable
+private fun rememberFolderPolicy(
+    folderId: String,
+    cacheRepository: CacheRepository,
+    refreshKey: Int
+): ThumbnailPolicy {
+    var policy by remember(folderId, refreshKey) { mutableStateOf(ThumbnailPolicy.INHERIT) }
+    LaunchedEffect(folderId, refreshKey) {
+        policy = cacheRepository.thumbnailPolicy(ThumbnailTargetType.FOLDER, folderId)
+    }
+    return policy
+}
+
+@Composable
+private fun SummaryTile(
+    title: String,
+    value: String,
+    subtitle: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, style = MaterialTheme.typography.labelMedium)
+            Text(value, style = MaterialTheme.typography.headlineSmall)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailFolderRow(
+    folder: ThumbnailFolderUsage,
+    currentPolicy: ThumbnailPolicy,
+    onOpen: () -> Unit,
+    onPolicy: (ThumbnailPolicy) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            Text(
+                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+        ThumbnailPolicyMenu(currentPolicy, allowInherit = true, onSelect = onPolicy)
+    }
+}
+
+@Composable
+private fun ThumbnailFileRow(
+    file: ThumbnailFileUsage,
+    selected: Boolean,
+    onSelectionChange: (Boolean) -> Unit,
+    onPolicy: (ThumbnailPolicy) -> Unit,
+    onGenerate: () -> Unit,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerLow
+            )
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Checkbox(checked = selected, onCheckedChange = onSelectionChange)
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            contentAlignment = Alignment.Center
+        ) {
+            if (file.isCached) {
+                AsyncImage(
+                    model = ThumbnailModel(file.fileId),
+                    contentDescription = file.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    imageVector = if (file.category == "VIDEO") Icons.Filled.PlayArrow else Icons.Filled.Image,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(file.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+            Text(
+                if (file.isCached) {
+                    "${Formatters.bytes(file.thumbnailSizeBytes ?: 0L)} thumbnail · ${Formatters.bytes(file.fileSizeBytes)} file"
+                } else {
+                    "Not cached · ${Formatters.bytes(file.fileSizeBytes)} file"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+            Text(
+                policyLabel(file.policy),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        ThumbnailPolicyMenu(file.policy, allowInherit = true, onSelect = onPolicy)
+        if (file.isCached) {
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Filled.Delete, contentDescription = "Remove thumbnail")
+            }
+        } else {
+            IconButton(onClick = onGenerate) {
+                Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate thumbnail")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailPolicyMenu(
+    policy: ThumbnailPolicy,
+    allowInherit: Boolean,
+    onSelect: (ThumbnailPolicy) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Filled.Tune, contentDescription = "Thumbnail policy")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (allowInherit) {
+                DropdownMenuItem(
+                    text = { Text("Inherit") },
+                    onClick = {
+                        expanded = false
+                        onSelect(ThumbnailPolicy.INHERIT)
+                    }
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Automatic") },
+                onClick = {
+                    expanded = false
+                    onSelect(ThumbnailPolicy.AUTOMATIC)
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Manual only") },
+                onClick = {
+                    expanded = false
+                    onSelect(ThumbnailPolicy.MANUAL_ONLY)
+                }
+            )
+        }
+    }
+}
+
+private fun policyLabel(policy: ThumbnailPolicy): String = when (policy) {
+    ThumbnailPolicy.INHERIT -> "Inherit from folder"
+    ThumbnailPolicy.AUTOMATIC -> "Automatic"
+    ThumbnailPolicy.MANUAL_ONLY -> "Manual only"
+}
