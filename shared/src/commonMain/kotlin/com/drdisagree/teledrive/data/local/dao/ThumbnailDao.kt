@@ -141,6 +141,10 @@ interface ThumbnailDao {
                   )
               AND (:searchQuery = '' OR LOWER(f.name) LIKE '%' || LOWER(:searchQuery) || '%')
             ORDER BY
+                CASE WHEN :sortOrder = 'GENERATED_FIRST'
+                     THEN CASE WHEN t.fileId IS NOT NULL THEN 0 ELSE 1 END END ASC,
+                CASE WHEN :sortOrder = 'MISSING_FIRST'
+                     THEN CASE WHEN t.fileId IS NULL THEN 0 ELSE 1 END END ASC,
                 CASE WHEN :sortOrder = 'THUMBNAIL_LARGEST' THEN t.sizeBytes END DESC,
                 CASE WHEN :sortOrder = 'THUMBNAIL_SMALLEST' AND t.fileId IS NULL THEN 1 ELSE 0 END ASC,
                 CASE WHEN :sortOrder = 'THUMBNAIL_SMALLEST' THEN t.sizeBytes END ASC,
