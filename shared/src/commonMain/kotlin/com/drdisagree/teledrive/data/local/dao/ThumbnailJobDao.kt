@@ -76,6 +76,26 @@ interface ThumbnailJobDao {
     )
     suspend fun deleteInFolderTree(folderId: String): Int
 
+    @Query(
+        """WITH RECURSIVE child_folders(id) AS (
+               SELECT id FROM folders WHERE id = :folderId
+               UNION ALL
+               SELECT folders.id FROM folders
+               JOIN child_folders ON folders.parentId = child_folders.id
+           )
+           SELECT j.fileId FROM thumbnail_jobs j
+           JOIN files f ON f.id = j.fileId
+           WHERE COALESCE(f.folderId, f.preTrashFolderId) IN (SELECT id FROM child_folders)
+             AND (:afterFileId IS NULL OR j.fileId > :afterFileId)
+           ORDER BY j.fileId ASC
+           LIMIT :limit"""
+    )
+    suspend fun queuedFileIdsInFolderTreePage(
+        folderId: String,
+        afterFileId: String?,
+        limit: Int
+    ): List<String>
+
     @Query("DELETE FROM thumbnail_jobs")
     suspend fun deleteAll()
 
