@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.presentation.collection
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.Alignment
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -324,10 +327,12 @@ fun CollectionScreen(
             onBack = onBack,
             onClear = if (selectionMode) viewModel::clearSelection else null
         )
-        LazyColumn(
+        Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                        .padding(end = 10.dp)
                 .padding(top = padding.calculateTopPadding())
                 .keyboardCollection(keyboard, folders.size + files.itemCount, shortcuts)
                 .then(dragSelect),
@@ -397,5 +402,10 @@ fun CollectionScreen(
                 )
             }
         }
+                DesktopVerticalScrollbar(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                )
+            }
     }
 }
