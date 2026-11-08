@@ -98,6 +98,9 @@ class DesktopThumbnailStore(
     }
 
     override suspend fun enqueueAfterUpload(fileId: String) {
+        val inherited = thumbnailPolicyDao.effectivePolicy(fileId)
+            ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+        if (inherited == ThumbnailPolicy.MANUAL_ONLY) return
         val now = System.currentTimeMillis()
         thumbnailPolicyDao.upsert(
             ThumbnailPolicyEntity(
