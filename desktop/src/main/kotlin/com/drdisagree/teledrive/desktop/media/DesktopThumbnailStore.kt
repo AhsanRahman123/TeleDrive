@@ -207,9 +207,13 @@ class DesktopThumbnailStore(
                 thumbnailJobDao.delete(job.fileId)
                 continue
             }
-            val bytes = runCatching {
+            val bytes = try {
                 generationSemaphore.withPermit { generate(job.fileId) }
-            }.getOrNull()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
             if (bytes != null) {
                 thumbnailJobDao.delete(job.fileId)
                 continue
