@@ -128,6 +128,25 @@ class DesktopThumbnailStore(
         }
     }
 
+    override fun enqueueManual(fileIds: List<String>) {
+        if (fileIds.isEmpty()) return
+        jobScope.launch {
+            val timestamp = System.currentTimeMillis()
+            fileIds.distinct().chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+                thumbnailJobDao.enqueue(
+                    batch.map { id ->
+                        ThumbnailJobEntity(
+                            fileId = id,
+                            queuedAt = timestamp,
+                            force = true
+                        )
+                    }
+                )
+                jobWakeups.trySend(Unit)
+            }
+        }
+    }
+
     private suspend fun readCachedThumbnail(fileId: String): ByteArray? {
         val cached = thumbnailDao.byFileId(fileId) ?: return null
         val file = File(cached.path)
@@ -427,6 +446,7 @@ class DesktopThumbnailStore(
     private companion object {
         const val TARGET_FILE = "FILE"
         const val MAX_BACKGROUND_ATTEMPTS = 3
+        const val JOB_INSERT_BATCH_SIZE = 250
         const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024
         const val MAX_DIMENSION = 512
