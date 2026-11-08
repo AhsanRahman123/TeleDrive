@@ -222,7 +222,9 @@ class DesktopThumbnailStore(
     }
 
     override suspend fun uploadThumbnailFile(fileId: String): File? {
-        val bytes = generateNow(fileId) ?: return null
+        val bytes = readCachedThumbnail(fileId)
+            ?: generationSemaphore.withPermit { generate(fileId, cacheResult = false) }
+            ?: return null
         val dir = File(storagePaths.cacheDir, "upload-thumbs").apply { mkdirs() }
         val target = File(dir, "$fileId.jpg")
         return runCatching {
@@ -234,7 +236,7 @@ class DesktopThumbnailStore(
     private suspend fun isNote(fileId: String): Boolean =
         fileDao.byId(fileId)?.let { MimeTypes.isText(it.mimeType) } == true
 
-    private suspend fun generate(fileId: String): ByteArray? {
+    private suspend fun generate(fileId: String, cacheResult: Boolean = true): ByteArray? {
         val entity = fileDao.byId(fileId) ?: return null
         val local = entity.localPath?.let { path ->
             val file = File(path)
@@ -259,28 +261,30 @@ class DesktopThumbnailStore(
             }
         } ?: return null
 
-        val encrypt = settingsRepository.preferences.first().encryptThumbnails
-        val stored = if (encrypt) {
-            streamCrypto.encryptBytes(thumbnailKey(), jpegBytes)
-        } else jpegBytes
+        if (cacheResult) {
+            val encrypt = settingsRepository.preferences.first().encryptThumbnails
+            val stored = if (encrypt) {
+                streamCrypto.encryptBytes(thumbnailKey(), jpegBytes)
+            } else jpegBytes
 
-        val dir = File(storagePaths.cacheDir, "thumbnails").apply { mkdirs() }
-        val target = File(dir, "$fileId.thumb")
-        runCatching { target.writeBytes(stored) }.onFailure { return jpegBytes }
+            val dir = File(storagePaths.cacheDir, "thumbnails").apply { mkdirs() }
+            val target = File(dir, "$fileId.thumb")
+            runCatching { target.writeBytes(stored) }.onFailure { return jpegBytes }
 
-        val now = System.currentTimeMillis()
-        thumbnailDao.upsert(
-            ThumbnailEntity(
-                fileId = fileId,
-                path = target.absolutePath,
-                encrypted = encrypt,
-                width = MAX_DIMENSION,
-                height = MAX_DIMENSION,
-                sizeBytes = stored.size.toLong(),
-                generatedAt = now,
-                lastAccessAt = now
+            val now = System.currentTimeMillis()
+            thumbnailDao.upsert(
+                ThumbnailEntity(
+                    fileId = fileId,
+                    path = target.absolutePath,
+                    encrypted = encrypt,
+                    width = MAX_DIMENSION,
+                    height = MAX_DIMENSION,
+                    sizeBytes = stored.size.toLong(),
+                    generatedAt = now,
+                    lastAccessAt = now
+                )
             )
-        )
+        }
         return jpegBytes
     }
 
