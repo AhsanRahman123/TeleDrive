@@ -79,6 +79,9 @@ interface ThumbnailDao {
     )
     suspend fun folderAggregates(): List<ThumbnailFolderAggregate>
 
+    @Query("SELECT fileId, path FROM thumbnails WHERE fileId IN (:fileIds)")
+    suspend fun cachedPathsByFileIds(fileIds: List<String>): List<ThumbnailPathRef>
+
     @Query(
         """SELECT f.id AS fileId,
                   f.name AS name,
