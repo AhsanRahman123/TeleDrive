@@ -146,6 +146,26 @@ interface ThumbnailJobDao {
     @Query("SELECT fileId FROM thumbnail_jobs WHERE attempts >= 3")
     suspend fun failedFileIds(): List<String>
 
+    /**
+     * Failed non-media rows cannot produce gallery thumbnails. Prune only after all retries
+     * are exhausted; valid image/video jobs and supported APK icon jobs remain untouched.
+     */
+    @Query(
+        """SELECT j.fileId
+             FROM thumbnail_jobs j
+             LEFT JOIN files f ON f.id = j.fileId
+            WHERE j.attempts >= 3
+              AND (
+                    f.id IS NULL
+                    OR NOT (
+                        f.category IN ('IMAGE', 'VIDEO')
+                        OR f.mimeType = 'application/vnd.android.package-archive'
+                    )
+                  )
+            ORDER BY j.fileId ASC"""
+    )
+    suspend fun failedUnsupportedFileIds(): List<String>
+
 
     @Query("UPDATE thumbnail_jobs SET attempts = 0, queuedAt = :now WHERE fileId IN (:fileIds)")
     suspend fun retry(fileIds: List<String>, now: Long)
