@@ -117,18 +117,13 @@ class CacheRepositoryImpl(
             val victims = thumbnailDao.leastRecentlyUsed(64)
             if (victims.isEmpty()) break
             for (victim in victims) {
+                // Cache eviction must not rewrite the file's independent generation policy.
+                thumbnailJobDao.delete(victim.fileId)
+                thumbnailPolicyDao.clearQueueItemPauses(listOf(victim.fileId))
+                thumbnailStore.cancelJobs(listOf(victim.fileId))
                 val cachedFile = File(victim.path)
                 if (cachedFile.exists() && !cachedFile.delete()) continue
                 thumbnailDao.delete(victim.fileId)
-                thumbnailPolicyDao.upsert(
-                    ThumbnailPolicyEntity(
-                        targetType = ThumbnailTargetType.FILE.name,
-                        targetId = victim.fileId,
-                        policy = ThumbnailPolicy.MANUAL_ONLY.name,
-                        changedAt = System.currentTimeMillis()
-                    )
-                )
-                thumbnailJobDao.delete(victim.fileId)
                 thumbnailMemoryCache.remove(victim.fileId)
                 total -= victim.sizeBytes
                 if (total <= maxBytes) break
@@ -351,6 +346,7 @@ class CacheRepositoryImpl(
                 limit = JOB_BATCH_SIZE
             )
             if (ids.isEmpty()) break
+            thumbnailPolicyDao.clearQueueItemPauses(ids)
             thumbnailJobDao.delete(ids)
             thumbnailStore.cancelJobs(ids)
             afterFileId = ids.last()
@@ -631,16 +627,7 @@ class CacheRepositoryImpl(
             afterFileId = batch.last().fileId
             if (batch.size < JOB_BATCH_SIZE) break
         }
-        thumbnailPolicyDao.deleteOverridesInFolderTree(folderId)
         thumbnailJobDao.deleteInFolderTree(folderId)
-        thumbnailPolicyDao.upsert(
-            ThumbnailPolicyEntity(
-                targetType = ThumbnailTargetType.FOLDER.name,
-                targetId = folderId,
-                policy = ThumbnailPolicy.MANUAL_ONLY.name,
-                changedAt = System.currentTimeMillis()
-            )
-        )
         refreshThumbnailStats()
     }
 
