@@ -7,6 +7,7 @@ import com.sun.jna.platform.win32.PhysicalMonitorEnumerationAPI
 import com.sun.jna.platform.win32.User32
 import com.sun.jna.platform.win32.WinDef
 import com.sun.jna.platform.win32.WinUser
+import com.sun.jna.platform.win32.WinNT
 import java.awt.KeyboardFocusManager
 import java.awt.Window
 import kotlin.math.roundToInt
@@ -114,7 +115,7 @@ internal object WindowsMonitorBrightness {
         }.getOrDefault(false)
     }
 
-    private fun readRawBrightness(handle: WinDef.HANDLE): RawBrightness? {
+    private fun readRawBrightness(handle: WinNT.HANDLE): RawBrightness? {
         val minimum = WinDef.DWORDByReference()
         val current = WinDef.DWORDByReference()
         val maximum = WinDef.DWORDByReference()
@@ -143,7 +144,7 @@ internal object WindowsMonitorBrightness {
         return readVcpBrightness(handle)
     }
 
-    private fun readVcpBrightness(handle: WinDef.HANDLE): RawBrightness? {
+    private fun readVcpBrightness(handle: WinNT.HANDLE): RawBrightness? {
         val codeType = MC_VCP_CODE_TYPE.ByReference()
         val current = WinDef.DWORDByReference()
         val maximum = WinDef.DWORDByReference()
@@ -170,7 +171,7 @@ internal object WindowsMonitorBrightness {
         )
     }
 
-    private fun setVcpBrightness(handle: WinDef.HANDLE, target: Int): Boolean =
+    private fun setVcpBrightness(handle: WinNT.HANDLE, target: Int): Boolean =
         Dxva2.INSTANCE.SetVCPFeature(
             handle,
             WinDef.BYTE(VCP_LUMINANCE_CODE.toLong()),
