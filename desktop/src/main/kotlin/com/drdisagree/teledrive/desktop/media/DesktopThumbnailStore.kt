@@ -335,6 +335,8 @@ class DesktopThumbnailStore(
             }
             return@withLock
         }
+        retryWakeupJob?.cancel()
+        retryWakeupJob = null
         var slots = available
         ready.forEach { job ->
             if (slots <= 0) return@forEach
@@ -393,12 +395,8 @@ class DesktopThumbnailStore(
             System.currentTimeMillis() + BACKGROUND_RETRY_DELAY_MS
         }
         thumbnailJobDao.recordAttempt(job.fileId, retryAt)
-        if (retryAt != Long.MAX_VALUE) {
-            jobScope.launch {
-                delay(BACKGROUND_RETRY_DELAY_MS)
-                jobWakeups.trySend(Unit)
-            }
-        }
+        // The scheduler reads the earliest persisted retry time and owns one wakeup.
+        // This also restores the wakeup after an app restart.
     }
 
     override suspend fun cacheUploadedThumbnail(
