@@ -125,7 +125,7 @@ class DesktopThumbnailStore(
 
     override suspend fun retryJobs(fileIds: List<String>) {
         schedulingPaused = false
-        jobWakeups.trySend(Unit)
+            jobWakeups.trySend(Unit)
     }
 
     override suspend fun cancelAllJobs() {
@@ -177,7 +177,7 @@ class DesktopThumbnailStore(
             ThumbnailJobEntity(fileId = fileId, queuedAt = now, force = false)
         )
         schedulingPaused = false
-        jobWakeups.trySend(Unit)
+            jobWakeups.trySend(Unit)
     }
 
     override suspend fun enqueueManual(fileId: String) {
@@ -189,7 +189,7 @@ class DesktopThumbnailStore(
             )
         )
         schedulingPaused = false
-        jobWakeups.trySend(Unit)
+            jobWakeups.trySend(Unit)
     }
 
     override suspend fun enqueueManual(fileIds: List<String>) {
@@ -206,7 +206,7 @@ class DesktopThumbnailStore(
                 }
             )
             schedulingPaused = false
-        jobWakeups.trySend(Unit)
+            jobWakeups.trySend(Unit)
         }
     }
 
@@ -219,7 +219,7 @@ class DesktopThumbnailStore(
             )
         )
         schedulingPaused = false
-        jobWakeups.trySend(Unit)
+            jobWakeups.trySend(Unit)
     }
 
     override suspend fun enqueueAutomatic(fileIds: List<String>) {
@@ -236,7 +236,7 @@ class DesktopThumbnailStore(
                 }
             )
             schedulingPaused = false
-        jobWakeups.trySend(Unit)
+            jobWakeups.trySend(Unit)
         }
     }
 
@@ -641,7 +641,7 @@ class DesktopThumbnailStore(
     private companion object {
         const val TARGET_FILE = "FILE"
         const val MAX_BACKGROUND_ATTEMPTS = 3
-        const val MAX_PARALLEL_GENERATIONS = 3
+        const val MAX_PARALLEL_GENERATIONS = 4
         const val JOB_INSERT_BATCH_SIZE = 250
         const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024
