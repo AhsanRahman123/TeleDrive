@@ -224,6 +224,9 @@ fun ThumbnailManagerScreen(
                     } else file
                 }
             }
+            // Refresh the filtered/sorted page even when the changed file is off-page:
+            // it may enter/leave the current cache-status filter or change sort position.
+            refreshKey++
         }
     }
 
