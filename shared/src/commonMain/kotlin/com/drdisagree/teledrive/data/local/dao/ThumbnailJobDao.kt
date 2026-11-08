@@ -60,7 +60,8 @@ interface ThumbnailJobDao {
                   ) AS folderPath,
                   j.queuedAt AS queuedAt,
                   j.attempts AS attempts,
-                  j.force AS isForced
+                  j.force AS isForced,
+                  0 AS isProcessing
              FROM thumbnail_jobs j
              LEFT JOIN files f ON f.id = j.fileId
             ORDER BY j.queuedAt ASC
