@@ -1261,6 +1261,7 @@ private fun FilesContent(
                 )
             }
         }
+        }
         DesktopVerticalScrollbar(
             state = gridState,
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
