@@ -109,9 +109,15 @@ interface ThumbnailDao {
              AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                  ))
-           ORDER BY f.addedAt DESC"""
+           ORDER BY f.addedAt DESC
+           LIMIT :limit OFFSET :offset"""
     )
-    suspend fun fileIdsInFolderTree(folderId: String, onlyMissing: Boolean): List<String>
+    suspend fun fileIdsInFolderTreePage(
+        folderId: String,
+        onlyMissing: Boolean,
+        limit: Int,
+        offset: Int
+    ): List<String>
 
     @Query(
         """SELECT f.id FROM files f
@@ -124,9 +130,28 @@ interface ThumbnailDao {
              AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                  ))
-           ORDER BY f.addedAt DESC"""
+           ORDER BY f.addedAt DESC
+           LIMIT :limit OFFSET :offset"""
     )
-    suspend fun unfiledFileIds(onlyMissing: Boolean): List<String>
+    suspend fun unfiledFileIdsPage(
+        onlyMissing: Boolean,
+        limit: Int,
+        offset: Int
+    ): List<String>
+
+    @Query(
+        """WITH RECURSIVE child_folders(id) AS (
+               SELECT id FROM folders WHERE id = :folderId
+               UNION ALL
+               SELECT folders.id FROM folders
+               JOIN child_folders ON folders.parentId = child_folders.id
+           )
+           DELETE FROM thumbnails
+            WHERE fileId IN (
+                SELECT id FROM files WHERE folderId IN (SELECT id FROM child_folders)
+            )"""
+    )
+    suspend fun deleteFolderTree(folderId: String): Int
 
     @Query("DELETE FROM thumbnails WHERE fileId = :fileId")
     suspend fun delete(fileId: String)
