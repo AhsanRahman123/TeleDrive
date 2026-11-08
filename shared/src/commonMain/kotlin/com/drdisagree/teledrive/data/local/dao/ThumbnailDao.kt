@@ -80,9 +80,27 @@ interface ThumbnailDao {
     suspend fun folderAggregates(): List<ThumbnailFolderAggregate>
 
     @Query(
-        """WITH RECURSIVE folder_ancestors(fileId, folderId, parentId, depth) AS (
-               SELECT f.id, d.id, d.parentId, 0
+        """WITH RECURSIVE scoped_files AS (
+               SELECT f.*
                  FROM files f
+                WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
+                  AND (
+                        f.trashedAt IS NULL
+                        OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
+                      )
+                  AND (
+                        f.category IN ('IMAGE', 'VIDEO')
+                        OR f.mimeType LIKE 'text/%'
+                        OR f.mimeType IN (
+                            'application/json', 'application/xml', 'application/yaml',
+                            'application/vnd.android.package-archive'
+                        )
+                        OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
+                      )
+           ),
+           folder_ancestors(fileId, folderId, parentId, depth) AS (
+               SELECT f.id, d.id, d.parentId, 0
+                 FROM scoped_files f
                  LEFT JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
                UNION ALL
                SELECT a.fileId, parent.id, parent.parentId, a.depth + 1
@@ -103,7 +121,7 @@ interface ThumbnailDao {
                             LIMIT 1),
                           'MANUAL_ONLY'
                       )
-                 FROM files f
+                 FROM scoped_files f
                  LEFT JOIN thumbnail_policies fp
                    ON fp.targetType = 'FILE' AND fp.targetId = f.id
            )
@@ -120,24 +138,10 @@ interface ThumbnailDao {
                   CASE WHEN f.trashedAt IS NULL THEN 0 ELSE 1 END AS isTrashed,
                   ep.directPolicy AS directPolicy,
                   ep.effectivePolicy AS effectivePolicy
-             FROM files f
+             FROM scoped_files f
              JOIN effective_policies ep ON ep.fileId = f.id
              LEFT JOIN thumbnails t ON t.fileId = f.id
-            WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
-              AND (
-                    f.trashedAt IS NULL
-                    OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
-                  )
-              AND (
-                    f.category IN ('IMAGE', 'VIDEO')
-                    OR f.mimeType LIKE 'text/%'
-                    OR f.mimeType IN (
-                        'application/json', 'application/xml', 'application/yaml',
-                        'application/vnd.android.package-archive'
-                    )
-                    OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
-                  )
-              AND (
+            WHERE (
                     :cacheFilter = 'ALL'
                     OR (:cacheFilter = 'GENERATED' AND t.fileId IS NOT NULL)
                     OR (:cacheFilter = 'MISSING' AND t.fileId IS NULL)
@@ -175,9 +179,27 @@ interface ThumbnailDao {
     ): List<ThumbnailFileRow>
 
     @Query(
-        """WITH RECURSIVE folder_ancestors(fileId, folderId, parentId, depth) AS (
-               SELECT f.id, d.id, d.parentId, 0
+        """WITH RECURSIVE scoped_files AS (
+               SELECT f.*
                  FROM files f
+                WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
+                  AND (
+                        f.trashedAt IS NULL
+                        OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
+                      )
+                  AND (
+                        f.category IN ('IMAGE', 'VIDEO')
+                        OR f.mimeType LIKE 'text/%'
+                        OR f.mimeType IN (
+                            'application/json', 'application/xml', 'application/yaml',
+                            'application/vnd.android.package-archive'
+                        )
+                        OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
+                      )
+           ),
+           folder_ancestors(fileId, folderId, parentId, depth) AS (
+               SELECT f.id, d.id, d.parentId, 0
+                 FROM scoped_files f
                  LEFT JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
                UNION ALL
                SELECT a.fileId, parent.id, parent.parentId, a.depth + 1
@@ -198,26 +220,15 @@ interface ThumbnailDao {
                             LIMIT 1),
                           'MANUAL_ONLY'
                       )
-                 FROM files f
+                 FROM scoped_files f
                  LEFT JOIN thumbnail_policies fp
                    ON fp.targetType = 'FILE' AND fp.targetId = f.id
            )
            SELECT f.id
-             FROM files f
+             FROM scoped_files f
              JOIN effective_policies ep ON ep.fileId = f.id
              LEFT JOIN thumbnails t ON t.fileId = f.id
-            WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
-              AND (f.trashedAt IS NULL OR t.fileId IS NOT NULL)
-              AND (
-                    f.category IN ('IMAGE', 'VIDEO')
-                    OR f.mimeType LIKE 'text/%'
-                    OR f.mimeType IN (
-                        'application/json', 'application/xml', 'application/yaml',
-                        'application/vnd.android.package-archive'
-                    )
-                    OR t.fileId IS NOT NULL
-                  )
-              AND (
+            WHERE (
                     :cacheFilter = 'ALL'
                     OR (:cacheFilter = 'GENERATED' AND t.fileId IS NOT NULL)
                     OR (:cacheFilter = 'MISSING' AND t.fileId IS NULL)
