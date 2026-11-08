@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
@@ -108,6 +109,7 @@ fun ThumbnailManagerScreen(
     var confirmRemoveSelected by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var selectingAll by remember { mutableStateOf(false) }
+    var showAdvancedFilters by remember { mutableStateOf(false) }
     var cacheFilter by remember { mutableStateOf(ThumbnailCacheFilter.ALL) }
     var policyFilter by remember { mutableStateOf(ThumbnailPolicyFilter.ALL) }
     var effectivePolicyFilter by remember { mutableStateOf(ThumbnailEffectivePolicyFilter.ALL) }
@@ -353,7 +355,7 @@ fun ThumbnailManagerScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             // Fixed navigation header: the title and back action stay visible while scrolling.
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
@@ -368,7 +370,7 @@ fun ThumbnailManagerScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Thumbnail manager", style = MaterialTheme.typography.titleLarge)
+                    Text("Thumbnail manager", style = MaterialTheme.typography.titleMedium)
                     Text(
                         if (folderPath.isEmpty()) "Storage overview"
                         else folderPath.joinToString(" / ") { it.name },
@@ -392,46 +394,53 @@ fun ThumbnailManagerScreen(
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+            // Compact sticky toolbar: only the controls needed for frequent navigation stay pinned.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedTextField(
                     value = searchInput,
                     onValueChange = { searchInput = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f).height(48.dp),
                     singleLine = true,
-                    label = { Text("Search files in this folder") }
+                    placeholder = { Text("Search files in this folder") }
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                ThumbnailCacheStatusButton(
+                    label = "All",
+                    selected = cacheFilter == ThumbnailCacheFilter.ALL,
+                    onClick = { cacheFilter = ThumbnailCacheFilter.ALL },
+                    compact = true
+                )
+                ThumbnailCacheStatusButton(
+                    label = "Generated",
+                    selected = cacheFilter == ThumbnailCacheFilter.GENERATED,
+                    onClick = { cacheFilter = ThumbnailCacheFilter.GENERATED },
+                    compact = true
+                )
+                ThumbnailCacheStatusButton(
+                    label = "Not generated",
+                    selected = cacheFilter == ThumbnailCacheFilter.MISSING,
+                    onClick = { cacheFilter = ThumbnailCacheFilter.MISSING },
+                    compact = true
+                )
+                ThumbnailQuickSortDropdown(
+                    value = sortOrder,
+                    onSelect = { sortOrder = it }
+                )
+                OutlinedButton(
+                    onClick = { showAdvancedFilters = !showAdvancedFilters },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier.height(40.dp)
                 ) {
-                    Text("Show", style = MaterialTheme.typography.labelLarge)
-                    ThumbnailCacheStatusButton(
-                        label = "All",
-                        selected = cacheFilter == ThumbnailCacheFilter.ALL,
-                        onClick = { cacheFilter = ThumbnailCacheFilter.ALL }
-                    )
-                    ThumbnailCacheStatusButton(
-                        label = "Generated",
-                        selected = cacheFilter == ThumbnailCacheFilter.GENERATED,
-                        onClick = { cacheFilter = ThumbnailCacheFilter.GENERATED }
-                    )
-                    ThumbnailCacheStatusButton(
-                        label = "Not generated",
-                        selected = cacheFilter == ThumbnailCacheFilter.MISSING,
-                        onClick = { cacheFilter = ThumbnailCacheFilter.MISSING }
-                    )
-                    Text(
-                        "Generated = preview exists · Not generated = no preview is stored",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Text(if (showAdvancedFilters) "Hide filters" else "More filters")
                 }
+            }
+            if (showAdvancedFilters) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -451,14 +460,41 @@ fun ThumbnailManagerScreen(
                         },
                         onSelect = { effectivePolicyFilter = ThumbnailEffectivePolicyFilter.valueOf(it) }
                     )
-                    ThumbnailInventoryDropdown(
-                        title = "Sort files",
-                        description = "Changes display order only",
-                        value = sortOrder.name,
-                        options = ThumbnailFileSort.entries.map { it.name to fileSortLabel(it) },
-                        onSelect = { sortOrder = ThumbnailFileSort.valueOf(it) }
-                    )
                 }
+            }
+
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 10.dp)
+                        .verticalScroll(scrollState)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                SummaryTile(
+                    title = "Thumbnail cache",
+                    value = Formatters.bytes(summary.totalBytes),
+                    subtitle = "${summary.cachedFiles} cached files",
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryTile(
+                    title = "Background queue",
+                    value = summary.pendingJobs.toString(),
+                    subtitle = "queued + running",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Text(
+                "Existing library files are Manual only by default. New successful uploads are " +
+                    "automatically prepared. Choose individual files or folders to prepare older previews.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -466,8 +502,7 @@ fun ThumbnailManagerScreen(
                 ) {
                     Text(
                         "${selectedIds.size} files · ${selectedFolderIds.size} folders selected",
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(end = 4.dp)
+                        style = MaterialTheme.typography.labelLarge
                     )
                     TextButton(
                         enabled = !selectingAll && files.isNotEmpty(),
@@ -487,11 +522,11 @@ fun ThumbnailManagerScreen(
                                 }
                             }
                         }
-                    ) { Text(if (selectingAll) "Selecting files…" else "Select matching files") }
+                    ) { Text(if (selectingAll) "Selecting…" else "Select matching files") }
                     TextButton(
                         enabled = !selectingAll && files.isNotEmpty(),
                         onClick = { selectedIds = selectedIds + files.map { it.fileId } }
-                    ) { Text("Select visible files") }
+                    ) { Text("Select visible") }
                     TextButton(
                         enabled = folders.isNotEmpty(),
                         onClick = { selectedFolderIds = selectedFolderIds + folders.map { it.id } }
@@ -502,10 +537,10 @@ fun ThumbnailManagerScreen(
                             selectedIds = emptySet()
                             selectedFolderIds = emptySet()
                         }
-                    ) { Text("Clear selection") }
+                    ) { Text("Clear") }
                 }
                 Text(
-                    "Select visible files for this page, matching files for all filtered results, or tick folders to include their subfolders.",
+                    "Select visible files on this page, matching files across the filter, or tick folders below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -553,9 +588,7 @@ fun ThumbnailManagerScreen(
                                         }
                                         selectedFolderIds.forEach { id ->
                                             cacheRepository.setThumbnailPolicy(
-                                                ThumbnailTargetType.FOLDER,
-                                                id,
-                                                policy
+                                                ThumbnailTargetType.FOLDER, id, policy
                                             )
                                         }
                                         selectedIds = emptySet()
@@ -570,14 +603,9 @@ fun ThumbnailManagerScreen(
                         OutlinedButton(
                             enabled = !selectionBusy,
                             onClick = { confirmRemoveSelected = true }
-                        ) { Text("Remove selected previews") }
+                        ) { Text("Remove previews") }
                     }
                 }
-                Text(
-                    "Generate missing queues previews for selected files/folders. Set policy changes automatic/manual rules. Remove selected previews leaves original files untouched.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
                 if (generationMessage.isNotBlank()) {
                     Text(
                         generationMessage,
@@ -586,37 +614,6 @@ fun ThumbnailManagerScreen(
                     )
                 }
             }
-
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(end = 10.dp)
-                        .verticalScroll(scrollState)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SummaryTile(
-                    title = "Thumbnail cache",
-                    value = Formatters.bytes(summary.totalBytes),
-                    subtitle = "${summary.cachedFiles} cached files",
-                    modifier = Modifier.weight(1f)
-                )
-                SummaryTile(
-                    title = "Background queue",
-                    value = summary.pendingJobs.toString(),
-                    subtitle = "queued + running",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Text(
-                "Existing library files are Manual only by default. New successful uploads are " +
-                    "automatically prepared. Choose individual files or folders to prepare older previews.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
 
             if (summary.orphanedCachedFiles > 0) {
                 Row(
@@ -1053,6 +1050,34 @@ private fun ThumbnailFileRow(
 }
 
 @Composable
+private fun ThumbnailQuickSortDropdown(
+    value: ThumbnailFileSort,
+    onSelect: (ThumbnailFileSort) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.height(40.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+        ) {
+            Text("Sort: ${fileSortLabel(value)}", maxLines = 1)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            ThumbnailFileSort.entries.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(fileSortLabel(option)) },
+                    onClick = {
+                        expanded = false
+                        onSelect(option)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ThumbnailInventoryDropdown(
     title: String,
     description: String,
@@ -1093,16 +1118,23 @@ private fun ThumbnailInventoryDropdown(
 private fun ThumbnailCacheStatusButton(
     label: String,
     selected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    compact: Boolean = false
 ) {
     OutlinedButton(
         onClick = onClick,
+        modifier = if (compact) Modifier.height(40.dp) else Modifier,
+        contentPadding = if (compact) {
+            PaddingValues(horizontal = 9.dp, vertical = 0.dp)
+        } else {
+            PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+        },
         colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
             contentColor = if (selected) MaterialTheme.colorScheme.primary
             else MaterialTheme.colorScheme.onSurfaceVariant
         )
     ) {
-        Text(if (selected) "✓ $label" else label)
+        Text(if (selected) "✓ $label" else label, maxLines = 1)
     }
 }
 
