@@ -22,7 +22,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -45,6 +47,7 @@ fun FileListItem(
     modifier: Modifier = Modifier,
     showFavorite: Boolean = true,
     showAvailableOffline: Boolean = true,
+    prominent: Boolean = false,
     status: (@Composable () -> Unit)? = null,
     onToggleSelection: (() -> Unit)? = null,
     showSelectionCheckbox: Boolean = true
@@ -68,7 +71,7 @@ fun FileListItem(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(horizontal = 12.dp, vertical = if (compact) 4.dp else 8.dp),
+            .padding(horizontal = 12.dp, vertical = if (compact) 4.dp else if (prominent) 12.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showSelectionCheckbox) {
@@ -83,16 +86,23 @@ fun FileListItem(
                 file = file,
                 contentDescription = null,
                 modifier = Modifier
-                    .size(if (compact) 38.dp else 48.dp)
+                    .size(if (compact) 38.dp else if (prominent) 72.dp else 48.dp)
                     .clip(MaterialTheme.shapes.medium)
             )
         }
-        Spacer(Modifier.width(if (compact) 10.dp else 14.dp))
+        Spacer(Modifier.width(if (compact) 10.dp else if (prominent) 18.dp else 14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = file.name,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = if (prominent && !compact) {
+                        MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else {
+                        MaterialTheme.typography.bodyLarge
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
@@ -105,7 +115,8 @@ fun FileListItem(
                         Formatters.bytes(file.sizeBytes),
                         Formatters.date(file.modifiedAt)
                     ),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = if (prominent) MaterialTheme.typography.bodyMedium
+                    else MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -115,7 +126,7 @@ fun FileListItem(
             Icon(
                 imageVector = Icons.Filled.Star,
                 contentDescription = stringResource(Res.string.common_content_description_favorite),
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(if (prominent) 16.dp else 14.dp),
                 tint = MaterialTheme.colorScheme.tertiary
             )
         }
@@ -126,7 +137,7 @@ fun FileListItem(
                 contentDescription = stringResource(
                     Res.string.common_content_description_available_offline
                 ),
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(if (prominent) 16.dp else 14.dp),
                 tint = MaterialTheme.colorScheme.secondary
             )
         }
