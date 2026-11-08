@@ -418,11 +418,18 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun generateThumbnail(fileId: String) {
+        thumbnailPolicyDao.clearQueueItemPauses(listOf(fileId))
         thumbnailStore.enqueueManual(fileId)
     }
 
     override suspend fun generateThumbnails(fileIds: List<String>) {
-        if (fileIds.isNotEmpty()) thumbnailStore.enqueueManual(fileIds)
+        val ids = fileIds.distinct()
+        if (ids.isNotEmpty()) {
+            ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+                thumbnailPolicyDao.clearQueueItemPauses(batch)
+                thumbnailStore.enqueueManual(batch)
+            }
+        }
     }
 
     override suspend fun generateFolderThumbnails(folderId: String?) {
@@ -446,7 +453,9 @@ class CacheRepositoryImpl(
                 )
             }
             if (page.isEmpty()) break
-            thumbnailStore.enqueueManual(page.map { it.fileId })
+            val pageIds = page.map { it.fileId }
+            thumbnailPolicyDao.clearQueueItemPauses(pageIds)
+            thumbnailStore.enqueueManual(pageIds)
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
@@ -465,7 +474,9 @@ class CacheRepositoryImpl(
                 limit = JOB_BATCH_SIZE
             )
             if (page.isEmpty()) break
-            thumbnailStore.enqueueManual(page.map { it.fileId })
+            val pageIds = page.map { it.fileId }
+            thumbnailPolicyDao.clearQueueItemPauses(pageIds)
+            thumbnailStore.enqueueManual(pageIds)
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
@@ -648,6 +659,7 @@ class CacheRepositoryImpl(
             }.map { it.fileId }
             if (removedIds.isNotEmpty()) {
                 thumbnailJobDao.delete(removedIds)
+                thumbnailPolicyDao.clearQueueItemPauses(removedIds)
                 thumbnailStore.cancelJobs(removedIds)
                 thumbnailDao.deleteAll(removedIds)
                 thumbnailPolicyDao.deleteFileOverrides(removedIds)
