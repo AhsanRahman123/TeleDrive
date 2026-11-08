@@ -40,6 +40,17 @@ enum class ThumbnailFileSort {
     NAME_DESC
 }
 
+/** Queue ordering is presentation-only; it never changes job priority or execution order. */
+enum class ThumbnailQueueSort {
+    OLDEST_FIRST,
+    NEWEST_FIRST,
+    NAME_ASC,
+    NAME_DESC,
+    SOURCE_LARGEST,
+    SOURCE_SMALLEST,
+    FAILED_FIRST
+}
+
 data class ThumbnailManagerSummary(
     val totalBytes: Long = 0L,
     val cachedFiles: Int = 0,
