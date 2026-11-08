@@ -131,6 +131,10 @@ interface ThumbnailJobDao {
     )
     suspend fun fileIdsPage(offset: Int, limit: Int): List<String>
 
+    /** Return selected IDs that already have a durable queue row. */
+    @Query("SELECT fileId FROM thumbnail_jobs WHERE fileId IN (:fileIds)")
+    suspend fun existingFileIds(fileIds: List<String>): List<String>
+
     /** A single read gives Select all one consistent queue snapshot. */
     @Query("SELECT fileId FROM thumbnail_jobs ORDER BY fileId ASC")
     suspend fun allFileIds(): List<String>
