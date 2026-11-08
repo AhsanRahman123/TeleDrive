@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -94,6 +95,9 @@ fun ThumbnailManagerScreen(
     var files by remember { mutableStateOf(emptyList<ThumbnailFileUsage>()) }
     var filePolicy by remember { mutableStateOf(ThumbnailPolicy.INHERIT) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var selectedFolderIds by remember { mutableStateOf(emptySet<String>()) }
+    var selectionBusy by remember { mutableStateOf(false) }
+    var generationMessage by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
     var hasMore by remember { mutableStateOf(false) }
     var pageOffset by remember { mutableStateOf(0) }
@@ -122,7 +126,11 @@ fun ThumbnailManagerScreen(
         },
         onEnd = { rangeSelectionBase = emptySet() }
     )
-    LaunchedEffect(folderId) { selectedIds = emptySet() }
+    LaunchedEffect(folderId) {
+        selectedIds = emptySet()
+        selectedFolderIds = emptySet()
+        generationMessage = ""
+    }
     LaunchedEffect(searchInput) {
         delay(300L)
         val normalized = searchInput.trim()
@@ -313,15 +321,24 @@ fun ThumbnailManagerScreen(
     if (confirmRemoveSelected) {
         AlertDialog(
             onDismissRequest = { confirmRemoveSelected = false },
-            title = { Text("Delete selected thumbnails?") },
-            text = { Text("Only the selected cached previews will be removed. Queue entries, generation policies and original files will remain unchanged.") },
+            title = { Text("Remove selected cached thumbnails?") },
+            text = {
+                Text(
+                    "This removes cached previews for ${selectedIds.size} selected files and " +
+                        "${selectedFolderIds.size} selected folders (including their subfolders). " +
+                        "Original files and generation policies remain unchanged."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmRemoveSelected = false
                     val ids = selectedIds.toList()
+                    val folderIds = selectedFolderIds.toList()
                     scope.launch {
-                        cacheRepository.removeThumbnails(ids)
+                        if (ids.isNotEmpty()) cacheRepository.removeThumbnails(ids)
+                        folderIds.forEach { cacheRepository.removeFolderThumbnails(it) }
                         selectedIds = emptySet()
+                        selectedFolderIds = emptySet()
                         refreshKey++
                     }
                 }) { Text("Delete selected") }
@@ -375,6 +392,190 @@ fun ThumbnailManagerScreen(
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                OutlinedTextField(
+                    value = searchInput,
+                    onValueChange = { searchInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Search files in this folder") }
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Show", style = MaterialTheme.typography.labelLarge)
+                    ThumbnailCacheStatusButton(
+                        label = "All",
+                        selected = cacheFilter == ThumbnailCacheFilter.ALL,
+                        onClick = { cacheFilter = ThumbnailCacheFilter.ALL }
+                    )
+                    ThumbnailCacheStatusButton(
+                        label = "Generated",
+                        selected = cacheFilter == ThumbnailCacheFilter.GENERATED,
+                        onClick = { cacheFilter = ThumbnailCacheFilter.GENERATED }
+                    )
+                    ThumbnailCacheStatusButton(
+                        label = "Not generated",
+                        selected = cacheFilter == ThumbnailCacheFilter.MISSING,
+                        onClick = { cacheFilter = ThumbnailCacheFilter.MISSING }
+                    )
+                    Text(
+                        "Generated = preview exists · Not generated = no preview is stored",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ThumbnailInventoryDropdown(
+                        title = "Policy",
+                        description = "Direct rule on each file",
+                        value = policyFilter.name,
+                        options = ThumbnailPolicyFilter.entries.map { it.name to policyFilterLabel(it) },
+                        onSelect = { policyFilter = ThumbnailPolicyFilter.valueOf(it) }
+                    )
+                    ThumbnailInventoryDropdown(
+                        title = "Behavior",
+                        description = "Resolved automatic/manual behavior",
+                        value = effectivePolicyFilter.name,
+                        options = ThumbnailEffectivePolicyFilter.entries.map {
+                            it.name to effectivePolicyFilterLabel(it)
+                        },
+                        onSelect = { effectivePolicyFilter = ThumbnailEffectivePolicyFilter.valueOf(it) }
+                    )
+                    ThumbnailInventoryDropdown(
+                        title = "Sort files",
+                        description = "Changes display order only",
+                        value = sortOrder.name,
+                        options = ThumbnailFileSort.entries.map { it.name to fileSortLabel(it) },
+                        onSelect = { sortOrder = ThumbnailFileSort.valueOf(it) }
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${selectedIds.size} files · ${selectedFolderIds.size} folders selected",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
+                    TextButton(
+                        enabled = !selectingAll && files.isNotEmpty(),
+                        onClick = {
+                            scope.launch {
+                                selectingAll = true
+                                try {
+                                    selectedIds = cacheRepository.thumbnailFileIdsMatching(
+                                        folderId = folderId,
+                                        cacheFilter = cacheFilter.name,
+                                        policyFilter = policyFilter.name,
+                                        effectivePolicyFilter = effectivePolicyFilter.name,
+                                        searchQuery = searchQuery
+                                    ).toSet()
+                                } finally {
+                                    selectingAll = false
+                                }
+                            }
+                        }
+                    ) { Text(if (selectingAll) "Selecting files…" else "Select matching files") }
+                    TextButton(
+                        enabled = !selectingAll && files.isNotEmpty(),
+                        onClick = { selectedIds = selectedIds + files.map { it.fileId } }
+                    ) { Text("Select visible files") }
+                    TextButton(
+                        enabled = folders.isNotEmpty(),
+                        onClick = { selectedFolderIds = selectedFolderIds + folders.map { it.id } }
+                    ) { Text("Select folders") }
+                    TextButton(
+                        enabled = selectedIds.isNotEmpty() || selectedFolderIds.isNotEmpty(),
+                        onClick = {
+                            selectedIds = emptySet()
+                            selectedFolderIds = emptySet()
+                        }
+                    ) { Text("Clear selection") }
+                }
+                if (selectedIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            enabled = !selectionBusy,
+                            onClick = {
+                                scope.launch {
+                                    selectionBusy = true
+                                    try {
+                                        var count = 0
+                                        if (selectedIds.isNotEmpty()) {
+                                            count += cacheRepository.generateThumbnails(selectedIds.toList())
+                                        }
+                                        selectedFolderIds.forEach { id ->
+                                            count += cacheRepository.generateFolderThumbnails(id)
+                                        }
+                                        generationMessage = if (count > 0) {
+                                            "${count} missing thumbnail(s) added to the queue."
+                                        } else {
+                                            "Nothing new to queue: the selected items already have thumbnails or are not eligible."
+                                        }
+                                        selectedIds = emptySet()
+                                        selectedFolderIds = emptySet()
+                                        summary = cacheRepository.thumbnailManagerSummary()
+                                    } finally {
+                                        selectionBusy = false
+                                    }
+                                }
+                            }
+                        ) { Text(if (selectionBusy) "Adding…" else "Generate missing") }
+                        ThumbnailBulkPolicyMenu(
+                            onSelect = { policy ->
+                                scope.launch {
+                                    selectionBusy = true
+                                    try {
+                                        if (selectedIds.isNotEmpty()) {
+                                            cacheRepository.setThumbnailPolicies(selectedIds.toList(), policy)
+                                        }
+                                        selectedFolderIds.forEach { id ->
+                                            cacheRepository.setThumbnailPolicy(
+                                                ThumbnailTargetType.FOLDER,
+                                                id,
+                                                policy
+                                            )
+                                        }
+                                        selectedIds = emptySet()
+                                        selectedFolderIds = emptySet()
+                                        refreshKey++
+                                    } finally {
+                                        selectionBusy = false
+                                    }
+                                }
+                            }
+                        )
+                        OutlinedButton(
+                            enabled = !selectionBusy,
+                            onClick = { confirmRemoveSelected = true }
+                        ) { Text("Remove selected previews") }
+                    }
+                }
+                if (generationMessage.isNotBlank()) {
+                    Text(
+                        generationMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 Column(
                     modifier = Modifier
@@ -512,6 +713,11 @@ fun ThumbnailManagerScreen(
                 folders.forEach { folder ->
                     ThumbnailFolderRow(
                         folder = folder,
+                        selected = folder.id in selectedFolderIds,
+                        onSelectionChange = { checked ->
+                            selectedFolderIds = if (checked) selectedFolderIds + folder.id
+                            else selectedFolderIds - folder.id
+                        },
                         onOpen = {
                             folderPath = folderPath + folder
                             pageOffset = 0
@@ -538,46 +744,6 @@ fun ThumbnailManagerScreen(
                 }
             }
 
-            OutlinedTextField(
-                value = searchInput,
-                onValueChange = { searchInput = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text("Search inventory by file name") }
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                ThumbnailInventoryDropdown(
-                    title = "Cache",
-                    value = cacheFilter.name,
-                    options = ThumbnailCacheFilter.entries.map { it.name to cacheFilterLabel(it) },
-                    onSelect = { cacheFilter = ThumbnailCacheFilter.valueOf(it) }
-                )
-                ThumbnailInventoryDropdown(
-                    title = "Policy rule",
-                    value = policyFilter.name,
-                    options = ThumbnailPolicyFilter.entries.map { it.name to policyFilterLabel(it) },
-                    onSelect = { policyFilter = ThumbnailPolicyFilter.valueOf(it) }
-                )
-                ThumbnailInventoryDropdown(
-                    title = "Behavior",
-                    value = effectivePolicyFilter.name,
-                    options = ThumbnailEffectivePolicyFilter.entries.map {
-                        it.name to effectivePolicyFilterLabel(it)
-                    },
-                    onSelect = { effectivePolicyFilter = ThumbnailEffectivePolicyFilter.valueOf(it) }
-                )
-                ThumbnailInventoryDropdown(
-                    title = "Sort",
-                    value = sortOrder.name,
-                    options = ThumbnailFileSort.entries.map { it.name to fileSortLabel(it) },
-                    onSelect = { sortOrder = ThumbnailFileSort.valueOf(it) }
-                )
-            }
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -588,83 +754,10 @@ fun ThumbnailManagerScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} shown · " +
-                            "${cacheFilterLabel(cacheFilter)} · ${policyFilterLabel(policyFilter)} · " +
-                                "${effectivePolicyFilterLabel(effectivePolicyFilter)}",
+                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} shown",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                }
-                if (files.isNotEmpty()) {
-                    TextButton(
-                        enabled = !selectingAll,
-                        onClick = {
-                            scope.launch {
-                                selectingAll = true
-                                try {
-                                    selectedIds = cacheRepository.thumbnailFileIdsMatching(
-                                        folderId = folderId,
-                                        cacheFilter = cacheFilter.name,
-                                        policyFilter = policyFilter.name,
-                                        effectivePolicyFilter = effectivePolicyFilter.name,
-                                        searchQuery = searchQuery
-                                    ).toSet()
-                                } finally {
-                                    selectingAll = false
-                                }
-                            }
-                        }
-                    ) {
-                        Text(if (selectingAll) "Selecting…" else "Select all matching")
-                    }
-                    TextButton(
-                        enabled = files.isNotEmpty() && !selectingAll,
-                        onClick = {
-                            val pageIds = files.map { it.fileId }.toSet()
-                            selectedIds = if (pageIds.all { it in selectedIds }) {
-                                selectedIds - pageIds
-                            } else {
-                                selectedIds + pageIds
-                            }
-                        }
-                    ) { Text("Select page") }
-                    TextButton(
-                        enabled = selectedIds.isNotEmpty() && !selectingAll,
-                        onClick = { selectedIds = emptySet() }
-                    ) { Text("Deselect all") }
-                }
-            }
-
-            if (selectedIds.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "${selectedIds.size} selected",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                cacheRepository.generateThumbnails(selectedIds.toList())
-                                summary = cacheRepository.thumbnailManagerSummary()
-                            }
-                        }
-                    ) { Text("Generate") }
-                    ThumbnailBulkPolicyMenu(
-                        onSelect = { policy ->
-                            scope.launch {
-                                cacheRepository.setThumbnailPolicies(selectedIds.toList(), policy)
-                                selectedIds = emptySet()
-                                refreshKey++
-                            }
-                        }
-                    )
-                    OutlinedButton(onClick = { confirmRemoveSelected = true }) { Text("Delete selected") }
-                    TextButton(onClick = { selectedIds = emptySet() }) { Text("Deselect") }
                 }
             }
 
@@ -784,6 +877,8 @@ private fun SummaryTile(
 @Composable
 private fun ThumbnailFolderRow(
     folder: ThumbnailFolderUsage,
+    selected: Boolean,
+    onSelectionChange: (Boolean) -> Unit,
     currentPolicy: ThumbnailPolicy,
     onOpen: () -> Unit,
     onPolicy: (ThumbnailPolicy) -> Unit,
@@ -794,14 +889,18 @@ private fun ThumbnailFolderRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerLow
+            )
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
+        Checkbox(checked = selected, onCheckedChange = onSelectionChange)
+        IconButton(onClick = onOpen) {
+            Icon(Icons.Filled.Folder, contentDescription = "Open folder", tint = MaterialTheme.colorScheme.primary)
+        }
+        Column(modifier = Modifier.weight(1f).clickable(onClick = onOpen)) {
             Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             Text(
                 "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · " +
@@ -915,27 +1014,54 @@ private fun ThumbnailFileRow(
 @Composable
 private fun ThumbnailInventoryDropdown(
     title: String,
+    description: String,
     value: String,
     options: List<Pair<String, String>>,
     onSelect: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedLabel = options.firstOrNull { it.first == value }?.second ?: value
-    Box {
-        OutlinedButton(onClick = { expanded = true }) {
-            Text("$title: $selectedLabel", maxLines = 1)
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (option, label) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        expanded = false
-                        onSelect(option)
-                    }
-                )
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge)
+        Box {
+            OutlinedButton(onClick = { expanded = true }) {
+                Text(selectedLabel, maxLines = 1)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { (option, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label) },
+                        onClick = {
+                            expanded = false
+                            onSelect(option)
+                        }
+                    )
+                }
             }
         }
+        Text(
+            description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun ThumbnailCacheStatusButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+            contentColor = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    ) {
+        Text(if (selected) "✓ $label" else label)
     }
 }
 
