@@ -206,12 +206,12 @@ fun DesktopPreviewScreen(
                 }
                 when {
                     event.key == Key.W &&
-                        file?.category in setOf(FileCategory.IMAGE, FileCategory.VIDEO) -> {
+                        (file?.category == FileCategory.IMAGE || file?.category == FileCategory.VIDEO) -> {
                         if (index > 0) index--
                         true
                     }
                     event.key == Key.E &&
-                        file?.category in setOf(FileCategory.IMAGE, FileCategory.VIDEO) -> {
+                        (file?.category == FileCategory.IMAGE || file?.category == FileCategory.VIDEO) -> {
                         if (index < state.files.lastIndex) index++
                         true
                     }
