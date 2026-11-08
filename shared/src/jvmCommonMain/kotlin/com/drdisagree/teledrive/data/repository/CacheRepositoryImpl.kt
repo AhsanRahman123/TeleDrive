@@ -515,6 +515,8 @@ class CacheRepositoryImpl(
         }
     }
 
+    override suspend fun thumbnailQueueCount(): Int = thumbnailJobDao.count()
+
     override suspend fun thumbnailQueueFileIds(
         offset: Int,
         limit: Int
