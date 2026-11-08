@@ -98,7 +98,7 @@ interface ThumbnailDao {
                SELECT folders.id FROM folders
                JOIN child_folders ON folders.parentId = child_folders.id
            )
-           SELECT f.id FROM files f
+           SELECT f.id AS fileId, f.addedAt AS addedAt FROM files f
            WHERE f.folderId IN (SELECT id FROM child_folders)
              AND f.trashedAt IS NULL
              AND (f.category IN ('IMAGE', 'VIDEO') OR f.mimeType LIKE 'text/%'
@@ -109,18 +109,24 @@ interface ThumbnailDao {
              AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                  ))
-           ORDER BY f.addedAt DESC
-           LIMIT :limit OFFSET :offset"""
+             AND (
+                 :afterAddedAt IS NULL
+                 OR f.addedAt < :afterAddedAt
+                 OR (f.addedAt = :afterAddedAt AND f.id > :afterFileId)
+             )
+           ORDER BY f.addedAt DESC, f.id ASC
+           LIMIT :limit"""
     )
     suspend fun fileIdsInFolderTreePage(
         folderId: String,
         onlyMissing: Boolean,
-        limit: Int,
-        offset: Int
-    ): List<String>
+        afterAddedAt: Long?,
+        afterFileId: String?,
+        limit: Int
+    ): List<ThumbnailFileCursor>
 
     @Query(
-        """SELECT f.id FROM files f
+        """SELECT f.id AS fileId, f.addedAt AS addedAt FROM files f
            WHERE f.folderId IS NULL AND f.trashedAt IS NULL
              AND (f.category IN ('IMAGE', 'VIDEO') OR f.mimeType LIKE 'text/%'
                   OR f.mimeType IN (
@@ -130,14 +136,20 @@ interface ThumbnailDao {
              AND (:onlyMissing = 0 OR NOT EXISTS (
                     SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
                  ))
-           ORDER BY f.addedAt DESC
-           LIMIT :limit OFFSET :offset"""
+             AND (
+                 :afterAddedAt IS NULL
+                 OR f.addedAt < :afterAddedAt
+                 OR (f.addedAt = :afterAddedAt AND f.id > :afterFileId)
+             )
+           ORDER BY f.addedAt DESC, f.id ASC
+           LIMIT :limit"""
     )
     suspend fun unfiledFileIdsPage(
         onlyMissing: Boolean,
-        limit: Int,
-        offset: Int
-    ): List<String>
+        afterAddedAt: Long?,
+        afterFileId: String?,
+        limit: Int
+    ): List<ThumbnailFileCursor>
 
     @Query(
         """WITH RECURSIVE child_folders(id) AS (
