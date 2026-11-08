@@ -126,35 +126,32 @@ fun ThumbnailManagerScreen(
 
     // Update visible file rows as their persistent cache entries are written.
     LaunchedEffect(folderId) {
-        val accountedIds = mutableSetOf<String>()
         ThumbnailChangeNotifier.events.collect { change ->
             val existing = files.firstOrNull { it.fileId == change.fileId }
-            val wasCached = existing?.isCached == true
-            val delta = if (wasCached) {
-                change.sizeBytes - (existing?.thumbnailSizeBytes ?: 0L)
-            } else {
-                change.sizeBytes
-            }
-            if (!wasCached && change.fileId !in accountedIds) {
-                accountedIds += change.fileId
+            // Only update the visible page incrementally. Off-page events are reflected by the
+            // lightweight five-second summary refresh, avoiding an unbounded 100k-ID set.
+            if (existing != null) {
+                val wasCached = existing.isCached
+                val delta = if (wasCached) {
+                    change.sizeBytes - (existing.thumbnailSizeBytes ?: 0L)
+                } else {
+                    change.sizeBytes
+                }
                 summary = summary.copy(
                     totalBytes = (summary.totalBytes + delta).coerceAtLeast(0L),
-                    cachedFiles = summary.cachedFiles + 1
+                    cachedFiles = if (wasCached) summary.cachedFiles
+                    else summary.cachedFiles + 1
                 )
-            } else if (wasCached) {
-                summary = summary.copy(
-                    totalBytes = (summary.totalBytes + delta).coerceAtLeast(0L)
-                )
-            }
-            files = files.map { file ->
-                if (file.fileId == change.fileId) {
-                    file.copy(
-                        thumbnailSizeBytes = change.sizeBytes,
-                        generatedAt = change.generatedAt,
-                        lastAccessAt = change.generatedAt,
-                        encrypted = change.encrypted
-                    )
-                } else file
+                files = files.map { file ->
+                    if (file.fileId == change.fileId) {
+                        file.copy(
+                            thumbnailSizeBytes = change.sizeBytes,
+                            generatedAt = change.generatedAt,
+                            lastAccessAt = change.generatedAt,
+                            encrypted = change.encrypted
+                        )
+                    } else file
+                }
             }
         }
     }
