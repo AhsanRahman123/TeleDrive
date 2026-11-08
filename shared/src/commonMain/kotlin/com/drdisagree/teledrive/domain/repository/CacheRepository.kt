@@ -79,6 +79,8 @@ interface CacheRepository {
     suspend fun generateAllThumbnails() = Unit
 
     suspend fun thumbnailQueue(offset: Int, limit: Int): List<ThumbnailQueueItem> = emptyList()
+    suspend fun thumbnailQueueCount(): Int = 0
+
 
     suspend fun thumbnailQueueFileIds(offset: Int, limit: Int): List<String> = emptyList()
 
