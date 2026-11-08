@@ -91,7 +91,9 @@ class DesktopThumbnailStore(
         (Runtime.getRuntime().maxMemory() / MIN_HEAP_PER_WORKER_BYTES).toInt().coerceAtLeast(1)
     )
     private val generationSemaphore = Semaphore(maxParallelGenerations)
-    private val videoThumbnailMutex = Mutex()
+    // Each video gets its own embedded VLC player. Two simultaneous decoders improve batches
+    // without allowing a large batch to overwhelm CPU, disk or native VLC resources.
+    private val videoThumbnailSemaphore = Semaphore(2)
     private val schedulerMutex = Mutex()
     @Volatile private var schedulingPaused = false
     private val jobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -556,8 +558,8 @@ class DesktopThumbnailStore(
      * Only one extraction runs at a time so opening a gallery with many videos stays bounded.
      */
     private suspend fun decodeVideoThumbnail(file: File): BufferedImage? =
-        videoThumbnailMutex.withLock {
-            val factory = VlcPlayback.factory ?: return@withLock null
+        videoThumbnailSemaphore.withPermit {
+            val factory = VlcPlayback.factory ?: return@withPermit null
             val target = File(
                 File(storagePaths.cacheDir, "thumbnail-frames").apply { mkdirs() },
                 "${file.nameWithoutExtension}-${System.nanoTime()}.png"
@@ -590,7 +592,7 @@ class DesktopThumbnailStore(
                     }
                 })
 
-                if (!player.media().play(file.absolutePath)) return@withLock null
+                if (!player.media().play(file.absolutePath)) return@withPermit null
                 val rendered = withTimeoutOrNull(VIDEO_FRAME_TIMEOUT_MS) {
                     try {
                         frameReady.await()
@@ -601,10 +603,10 @@ class DesktopThumbnailStore(
                         false
                     }
                 } ?: false
-                if (!rendered) return@withLock null
+                if (!rendered) return@withPermit null
 
                 delay(VIDEO_SNAPSHOT_DELAY_MS)
-                if (!player.snapshots().save(target, MAX_DIMENSION, 0)) return@withLock null
+                if (!player.snapshots().save(target, MAX_DIMENSION, 0)) return@withPermit null
 
                 val snapshotPath = withTimeoutOrNull(VIDEO_SNAPSHOT_TIMEOUT_MS) {
                     snapshotReady.await()
