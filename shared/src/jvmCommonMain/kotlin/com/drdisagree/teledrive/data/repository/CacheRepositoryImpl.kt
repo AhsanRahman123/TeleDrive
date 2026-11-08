@@ -207,7 +207,7 @@ class CacheRepositoryImpl(
                 )
             }
             .toList()
-        return result.map { folder ->
+        val withPolicies = result.map { folder ->
             val directPolicy = thumbnailPolicyDao.policy(
                 ThumbnailTargetType.FOLDER.name,
                 folder.id
@@ -226,23 +226,26 @@ class CacheRepositoryImpl(
             )
         }
         return when (sortOrder) {
-            "MOST_GENERATED" -> result.sortedWith(
+            "MOST_GENERATED" -> withPolicies.sortedWith(
                 compareByDescending<ThumbnailFolderUsage> { it.generatedFiles }.thenBy { it.name.lowercase() }
             )
-            "MISSING_FIRST" -> result.sortedWith(
+            "MISSING_FIRST" -> withPolicies.sortedWith(
                 compareByDescending<ThumbnailFolderUsage> { it.missingFiles > 0 }
                     .thenByDescending { it.missingFiles }.thenBy { it.name.lowercase() }
             )
-            "GENERATED_FIRST" -> result.sortedWith(
+            "GENERATED_FIRST" -> withPolicies.sortedWith(
                 compareByDescending<ThumbnailFolderUsage> { it.eligibleFiles > 0 && it.missingFiles == 0 }
                     .thenByDescending { it.generatedFiles }.thenBy { it.name.lowercase() }
             )
-            "CACHE_SMALLEST" -> result.sortedWith(
+            "CACHE_LARGEST" -> withPolicies.sortedWith(
+                compareByDescending<ThumbnailFolderUsage> { it.totalBytes }.thenBy { it.name.lowercase() }
+            )
+            "CACHE_SMALLEST" -> withPolicies.sortedWith(
                 compareBy<ThumbnailFolderUsage> { it.totalBytes }.thenBy { it.name.lowercase() }
             )
-            "NAME_ASC" -> result.sortedBy { it.name.lowercase() }
-            "NAME_DESC" -> result.sortedByDescending { it.name.lowercase() }
-            else -> result.sortedWith(
+            "NAME_ASC" -> withPolicies.sortedBy { it.name.lowercase() }
+            "NAME_DESC" -> withPolicies.sortedByDescending { it.name.lowercase() }
+            else -> withPolicies.sortedWith(
                 compareByDescending<ThumbnailFolderUsage> { it.missingFiles }
                     .thenByDescending { it.totalBytes }.thenBy { it.name.lowercase() }
             )
