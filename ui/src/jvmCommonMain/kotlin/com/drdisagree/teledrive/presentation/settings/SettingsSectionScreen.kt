@@ -714,7 +714,7 @@ private fun StorageSection(
                 title = stringResource(Res.string.settings_clear_cache_action),
                 subtitle = stringResource(
                     Res.string.settings_cache_current_size,
-                    Formatters.bytes(state.cacheStats.totalBytes)
+                    Formatters.bytes(state.cacheStats.nonThumbnailBytes)
                 ),
                 onClick = onClearCache
             )
