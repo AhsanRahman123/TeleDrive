@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.proxy
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -204,10 +206,11 @@ fun ProxyScreen(
             onDelete = { index -> state.proxies.getOrNull(index - proxyStart)?.let { pendingDelete = it } },
             onBack = onBack
         )
-        LazyColumn(
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
             state = listState,
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxSize().padding(end = 10.dp)
                 .keyboardCollection(keyboard, state.proxies.size, shortcuts),
             contentPadding = padding.add(top = 8.dp, bottom = 96.dp)
         ) {
@@ -264,6 +267,11 @@ fun ProxyScreen(
                     )
                 }
             }
+        }
+            DesktopVerticalScrollbar(
+                state = listState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
         }
     }
 
