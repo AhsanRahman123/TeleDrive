@@ -20,15 +20,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -49,7 +48,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -90,8 +88,6 @@ fun ThumbnailManagerScreen(
     var confirmClearFolder by remember { mutableStateOf(false) }
 
     val folderId = folderPath.lastOrNull()?.id
-    val currentFolderName = folderPath.lastOrNull()?.name ?: "All files"
-
     LaunchedEffect(folderId, refreshKey) {
         loading = true
         summary = cacheRepository.thumbnailManagerSummary()
@@ -454,7 +450,7 @@ private fun ThumbnailFolderRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             Text(
-                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)}",
+                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · ${policyLabel(currentPolicy)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
@@ -554,6 +550,11 @@ private fun ThumbnailPolicyMenu(
             if (allowInherit) {
                 DropdownMenuItem(
                     text = { Text("Inherit") },
+                    trailingIcon = {
+                        if (policy == ThumbnailPolicy.INHERIT) {
+                            Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    },
                     onClick = {
                         expanded = false
                         onSelect(ThumbnailPolicy.INHERIT)
@@ -562,6 +563,11 @@ private fun ThumbnailPolicyMenu(
             }
             DropdownMenuItem(
                 text = { Text("Automatic") },
+                trailingIcon = {
+                    if (policy == ThumbnailPolicy.AUTOMATIC) {
+                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                },
                 onClick = {
                     expanded = false
                     onSelect(ThumbnailPolicy.AUTOMATIC)
@@ -569,6 +575,11 @@ private fun ThumbnailPolicyMenu(
             )
             DropdownMenuItem(
                 text = { Text("Manual only") },
+                trailingIcon = {
+                    if (policy == ThumbnailPolicy.MANUAL_ONLY) {
+                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                    }
+                },
                 onClick = {
                     expanded = false
                     onSelect(ThumbnailPolicy.MANUAL_ONLY)
