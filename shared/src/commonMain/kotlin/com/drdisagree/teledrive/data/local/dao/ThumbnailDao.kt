@@ -270,6 +270,9 @@ interface ThumbnailDao {
     )
     suspend fun deleteFolderTree(folderId: String): Int
 
+    @Query("SELECT fileId AS fileId, path AS path FROM thumbnails WHERE fileId IN (:fileIds)")
+    suspend fun pathsForFiles(fileIds: List<String>): List<ThumbnailPathRef>
+
     @Query("DELETE FROM thumbnails WHERE fileId = :fileId")
     suspend fun delete(fileId: String)
 
