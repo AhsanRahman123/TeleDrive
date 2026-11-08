@@ -10,6 +10,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
@@ -37,6 +38,7 @@ internal fun PlayerAutoHideSeekSlider(
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
     onActiveChange: (Boolean) -> Unit,
+    thumb: @Composable () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -64,6 +66,7 @@ internal fun PlayerAutoHideSeekSlider(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .height(30.dp)
             .hoverable(interaction)
     ) {
         AnimatedVisibility(
@@ -77,6 +80,7 @@ internal fun PlayerAutoHideSeekSlider(
                 onValueChangeFinished = onValueChangeFinished,
                 valueRange = valueRange,
                 interactionSource = interaction,
+                thumb = thumb,
                 modifier = Modifier
                     .fillMaxWidth()
                     .onFocusChanged { hasFocus = it.isFocused }
