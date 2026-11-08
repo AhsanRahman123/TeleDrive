@@ -97,11 +97,19 @@ interface ThumbnailDao {
                SELECT folders.id FROM folders
                JOIN child_folders ON folders.parentId = child_folders.id
            )
-           SELECT t.* FROM thumbnails t
-           JOIN files f ON f.id = t.fileId
-           WHERE f.folderId IN (SELECT id FROM child_folders)"""
+           SELECT t.fileId AS fileId, t.path AS path
+             FROM thumbnails t
+             JOIN files f ON f.id = t.fileId
+            WHERE f.folderId IN (SELECT id FROM child_folders)
+              AND (:afterFileId IS NULL OR t.fileId > :afterFileId)
+            ORDER BY t.fileId ASC
+            LIMIT :limit"""
     )
-    suspend fun cachedFilesInFolderTree(folderId: String): List<ThumbnailEntity>
+    suspend fun cachedFilePathsInFolderTreePage(
+        folderId: String,
+        afterFileId: String?,
+        limit: Int
+    ): List<ThumbnailPathRef>
 
     @Query(
         """WITH RECURSIVE child_folders(id) AS (
