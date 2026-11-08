@@ -51,7 +51,10 @@ data class ThumbnailFolderUsage(
     val cachedFiles: Int,
     val directBytes: Long,
     val directCachedFiles: Int,
+    /** Folder-level rule; INHERIT means defer to the closest parent rule. */
     val policy: ThumbnailPolicy = ThumbnailPolicy.INHERIT,
+    /** Effective behavior after resolving this folder and its ancestors. */
+    val effectivePolicy: ThumbnailPolicy = policy,
     val isTrashed: Boolean = false
 )
 
