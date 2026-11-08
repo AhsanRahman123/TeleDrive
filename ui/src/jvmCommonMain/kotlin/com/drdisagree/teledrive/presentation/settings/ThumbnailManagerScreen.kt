@@ -119,16 +119,38 @@ fun ThumbnailManagerScreen(
     var searchInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
+    var rangeSelectionModeKnown by remember { mutableStateOf(false) }
+    var rangeSelectionDeselect by remember { mutableStateOf(false) }
     val fileListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
     val fileDragSelect = rememberDragSelect(
         listState = fileListState,
-        onStart = { rangeSelectionBase = selectedIds },
-        onRange = { range ->
-            selectedIds = rangeSelectionBase + range.mapNotNull { files.getOrNull(it)?.fileId }
+        onStart = {
+            rangeSelectionBase = selectedIds
+            rangeSelectionModeKnown = false
+            rangeSelectionDeselect = false
         },
-        onEnd = { rangeSelectionBase = emptySet() }
+        onRange = { range ->
+            // Match desktop file managers: the anchor's original state decides whether
+            // this drag adds the range or removes it. The mode stays fixed for the gesture.
+            if (!rangeSelectionModeKnown) {
+                val anchorId = files.getOrNull(range.first)?.fileId
+                rangeSelectionDeselect = anchorId != null && anchorId in rangeSelectionBase
+                rangeSelectionModeKnown = true
+            }
+            val rangeIds = range.mapNotNull { files.getOrNull(it)?.fileId }.toSet()
+            selectedIds = if (rangeSelectionDeselect) {
+                rangeSelectionBase - rangeIds
+            } else {
+                rangeSelectionBase + rangeIds
+            }
+        },
+        onEnd = {
+            rangeSelectionBase = emptySet()
+            rangeSelectionModeKnown = false
+            rangeSelectionDeselect = false
+        }
     )
     LaunchedEffect(folderId) {
         selectedIds = emptySet()
