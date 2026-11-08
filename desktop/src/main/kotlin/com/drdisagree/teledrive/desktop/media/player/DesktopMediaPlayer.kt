@@ -109,6 +109,7 @@ import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -134,7 +135,7 @@ fun DesktopMediaPlayer(
     var timeMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
-    var rate by remember { mutableStateOf(1.0f) }
+    var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
     var trackTick by remember { mutableIntStateOf(0) }
     var scaling by remember { mutableStateOf(VideoScaling.FIT) }
@@ -238,7 +239,7 @@ fun DesktopMediaPlayer(
         player.snapshots().save()
     }
     fun setPlaybackRate(value: Float) {
-        rate = value.coerceIn(0.25f, 4f)
+        rate = normalizePlaybackRate(value)
         player.controls().setRate(rate)
         interactionTick++
     }
@@ -375,13 +376,14 @@ fun DesktopMediaPlayer(
                         fullscreenController.toggle()
                         true
                     }
-                    key == Key.N && !ctrl && !alt && !shift -> {
-                        onNext()
+                    // P/N are five-second seek controls; Left/Right navigate media below.
+                    key == Key.P && !ctrl && !alt && !shift -> {
+                        player.controls().skipTime(-5_000L)
                         interactionTick++
                         true
                     }
-                    key == Key.P && !ctrl && !alt && !shift -> {
-                        onPrevious()
+                    key == Key.N && !ctrl && !alt && !shift -> {
+                        player.controls().skipTime(5_000L)
                         interactionTick++
                         true
                     }
@@ -421,7 +423,7 @@ fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.RightBracket && !ctrl && !alt && !shift -> {
-                        setPlaybackRate(rate * FINE_RATE_FACTOR)
+                        setPlaybackRate(rate + FINE_RATE_STEP)
                         true
                     }
                     key == Key.Minus && !ctrl && !alt && !shift -> {
@@ -429,11 +431,21 @@ fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.LeftBracket && !ctrl && !alt && !shift -> {
-                        setPlaybackRate(rate / FINE_RATE_FACTOR)
+                        setPlaybackRate(rate - FINE_RATE_STEP)
                         true
                     }
                     key == Key.Equals && !shift && !ctrl && !alt -> {
                         setPlaybackRate(1f)
+                        true
+                    }
+                    key == Key.DirectionLeft && !ctrl && !alt && !shift -> {
+                        if (hasPrevious) onPrevious()
+                        interactionTick++
+                        true
+                    }
+                    key == Key.DirectionRight && !ctrl && !alt && !shift -> {
+                        if (hasNext) onNext()
+                        interactionTick++
                         true
                     }
                     key == Key.DirectionLeft || key == Key.DirectionRight -> {
@@ -714,12 +726,24 @@ private fun PlayerControlsBar(
                 .fillMaxWidth()
                 .height(52.dp)
         ) {
+            val displayedTimeMs = (scrubTarget?.toLong() ?: timeMs)
+                .coerceAtLeast(0L)
+                .let { position -> if (durationMs > 0L) position.coerceAtMost(durationMs) else position }
             Text(
-                text = Formatters.duration(scrubTarget?.toLong() ?: timeMs) +
-                        " / " + Formatters.duration(durationMs),
+                text = Formatters.duration(displayedTimeMs),
                 style = MaterialTheme.typography.labelMedium,
                 color = Color.White,
                 modifier = Modifier.align(Alignment.CenterStart)
+            )
+            Text(
+                text = if (durationMs > 0L) {
+                    "-${Formatters.duration((durationMs - displayedTimeMs).coerceAtLeast(0L))}"
+                } else {
+                    "--:--"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White,
+                modifier = Modifier.align(Alignment.CenterEnd)
             )
 
             Row(
@@ -807,13 +831,13 @@ private fun PlayerControlsBar(
                         onInteraction()
                         showRateMenu = true
                     }) {
-                        Text(text = "${rate}x", color = Color.White)
+                        Text(text = "${formatPlaybackRate(rate)}x", color = Color.White)
                     }
                     DropdownMenu(
                         expanded = showRateMenu,
                         onDismissRequest = { showRateMenu = false }
                     ) {
-                        listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { value ->
+                        listOf(0.5f, 0.75f, 0.8f, 0.9f, 1.0f, 1.1f, 1.15f, 1.2f, 1.25f, 1.5f, 2.0f).forEach { value ->
                             DropdownMenuItem(
                                 text = { Text("${value}x") },
                                 onClick = {
@@ -970,7 +994,15 @@ private const val CONTROLS_HIDE_DELAY_MS = 3_000L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val VOLUME_STEP = 5
-private const val FINE_RATE_FACTOR = 1.1f
+private fun normalizePlaybackRate(value: Float): Float =
+    (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
+
+private fun formatPlaybackRate(value: Float): String =
+    String.format(java.util.Locale.ROOT, "%.2f", normalizePlaybackRate(value))
+        .trimEnd('0')
+        .trimEnd('.')
+
+private const val FINE_RATE_STEP = 0.05f
 private const val SYNC_STEP_US = 50_000L
 private val THUMB_WIDTH = 5.dp
 private val THUMB_HEIGHT = 26.dp
