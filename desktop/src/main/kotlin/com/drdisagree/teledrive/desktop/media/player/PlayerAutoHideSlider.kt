@@ -77,8 +77,10 @@ internal fun PlayerAutoHideSlider(
         onDraggingChange(isDragging)
     }
 
-    LaunchedEffect(isHovered, isDragging, hasFocus, manuallyExpanded) {
-        onActiveChange(isHovered || isDragging || hasFocus || manuallyExpanded)
+    LaunchedEffect(isHovered, isDragging, hasFocus, manuallyExpanded, sliderVisible) {
+        // Keep the parent player chrome alive until this slider has finished
+        // its own configured hide delay.
+        onActiveChange(isHovered || isDragging || hasFocus || manuallyExpanded || sliderVisible)
     }
 
     DisposableEffect(Unit) {
