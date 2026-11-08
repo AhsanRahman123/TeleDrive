@@ -85,17 +85,22 @@ fun ThumbnailManagerScreen(
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var loading by remember { mutableStateOf(true) }
     var hasMore by remember { mutableStateOf(false) }
-    var loadingMore by remember { mutableStateOf(false) }
+    var pageOffset by remember { mutableStateOf(0) }
     var refreshKey by remember { mutableStateOf(0) }
     var confirmClearFolder by remember { mutableStateOf(false) }
 
     val folderId = folderPath.lastOrNull()?.id
-    LaunchedEffect(folderId, refreshKey) {
+    LaunchedEffect(folderId, refreshKey, pageOffset) {
         loading = true
         summary = cacheRepository.thumbnailManagerSummary()
         folders = cacheRepository.thumbnailFolders(folderId)
-        files = cacheRepository.thumbnailFiles(folderId, 0, THUMBNAIL_PAGE_SIZE)
-        hasMore = files.size == THUMBNAIL_PAGE_SIZE
+        val page = cacheRepository.thumbnailFiles(
+            folderId,
+            pageOffset,
+            THUMBNAIL_PAGE_SIZE + 1
+        )
+        files = page.take(THUMBNAIL_PAGE_SIZE)
+        hasMore = page.size > THUMBNAIL_PAGE_SIZE
         selectedIds = emptySet()
         filePolicy = if (folderId == null) {
             ThumbnailPolicy.INHERIT
@@ -160,7 +165,10 @@ fun ThumbnailManagerScreen(
                 IconButton(
                     onClick = {
                         if (folderPath.isEmpty()) onBack()
-                        else folderPath = folderPath.dropLast(1)
+                        else {
+                            folderPath = folderPath.dropLast(1)
+                            pageOffset = 0
+                        }
                     }
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -272,7 +280,10 @@ fun ThumbnailManagerScreen(
                 folders.forEach { folder ->
                     ThumbnailFolderRow(
                         folder = folder,
-                        onOpen = { folderPath = folderPath + folder },
+                        onOpen = {
+                            folderPath = folderPath + folder
+                            pageOffset = 0
+                        },
                         onPolicy = { policy ->
                             scope.launch {
                                 cacheRepository.setThumbnailPolicy(
@@ -298,7 +309,7 @@ fun ThumbnailManagerScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        "${files.size}${if (hasMore) "+" else ""} shown · largest cached previews first",
+                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} files · largest cached previews first",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -376,27 +387,25 @@ fun ThumbnailManagerScreen(
                         }
                     )
                 }
-                if (hasMore) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     OutlinedButton(
                         onClick = {
-                            if (loadingMore) return@OutlinedButton
-                            loadingMore = true
-                            scope.launch {
-                                val next = cacheRepository.thumbnailFiles(
-                                    folderId,
-                                    files.size,
-                                    THUMBNAIL_PAGE_SIZE
-                                )
-                                files = files + next
-                                hasMore = next.size == THUMBNAIL_PAGE_SIZE
-                                loadingMore = false
-                            }
+                            pageOffset = (pageOffset - THUMBNAIL_PAGE_SIZE).coerceAtLeast(0)
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !loadingMore
-                    ) {
-                        Text(if (loadingMore) "Loading…" else "Load more files")
-                    }
+                        enabled = pageOffset > 0
+                    ) { Text("Previous") }
+                    Text(
+                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1}",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    OutlinedButton(
+                        onClick = { pageOffset += THUMBNAIL_PAGE_SIZE },
+                        enabled = hasMore
+                    ) { Text("Next") }
                 }
             }
         }
