@@ -24,6 +24,8 @@ import com.drdisagree.teledrive.data.local.entity.CacheEntryType
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.CacheStats
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -63,7 +65,7 @@ class CacheRepositoryImpl(
     override suspend fun clearThumbnails() {
         withThumbnailQueueTemporarilyPaused {
             // Keep durable queue entries and generation policy rules. Only cache files are deleted.
-            thumbnailDir().deleteRecursively()
+            withContext(Dispatchers.IO) { thumbnailDir().deleteRecursively() }
             thumbnailDao.deleteAll()
             thumbnailMemoryCache.clear()
             refreshThumbnailStats()
@@ -614,10 +616,13 @@ class CacheRepositoryImpl(
         if (ids.isEmpty()) return
         withThumbnailQueueTemporarilyPaused {
             ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
-                val removedIds = thumbnailDao.pathsForFiles(batch).filter { ref ->
-                    val cachedFile = File(ref.path)
-                    !cachedFile.exists() || cachedFile.delete()
-                }.map { it.fileId }
+                val paths = thumbnailDao.pathsForFiles(batch)
+                val removedIds = withContext(Dispatchers.IO) {
+                    paths.filter { ref ->
+                        val cachedFile = File(ref.path)
+                        !cachedFile.exists() || cachedFile.delete()
+                    }.map { it.fileId }
+                }
 
                 if (removedIds.isNotEmpty()) {
                     thumbnailDao.deleteAll(removedIds)
@@ -639,10 +644,12 @@ class CacheRepositoryImpl(
                     limit = JOB_BATCH_SIZE
                 )
                 if (batch.isEmpty()) break
-                val removedIds = batch.filter { ref ->
-                    val cachedFile = File(ref.path)
-                    !cachedFile.exists() || cachedFile.delete()
-                }.map { it.fileId }
+                val removedIds = withContext(Dispatchers.IO) {
+                    batch.filter { ref ->
+                        val cachedFile = File(ref.path)
+                        !cachedFile.exists() || cachedFile.delete()
+                    }.map { it.fileId }
+                }
                 if (removedIds.isNotEmpty()) {
                     thumbnailDao.deleteAll(removedIds)
                     removedIds.forEach(thumbnailMemoryCache::remove)
@@ -691,10 +698,12 @@ class CacheRepositoryImpl(
                 limit = JOB_BATCH_SIZE
             )
             if (batch.isEmpty()) break
-            val removedIds = batch.filter { ref ->
-                val cachedFile = File(ref.path)
-                !cachedFile.exists() || cachedFile.delete()
-            }.map { it.fileId }
+            val removedIds = withContext(Dispatchers.IO) {
+                batch.filter { ref ->
+                    val cachedFile = File(ref.path)
+                    !cachedFile.exists() || cachedFile.delete()
+                }.map { it.fileId }
+            }
             if (removedIds.isNotEmpty()) {
                 thumbnailJobDao.delete(removedIds)
                 thumbnailPolicyDao.clearQueueItemPauses(removedIds)
