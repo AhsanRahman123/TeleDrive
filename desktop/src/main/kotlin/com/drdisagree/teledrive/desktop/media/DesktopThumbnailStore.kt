@@ -104,12 +104,10 @@ class DesktopThumbnailStore(
                         error
                     )
                     delay(BACKGROUND_RETRY_DELAY_MS)
-                    schedulingPaused = false
-        jobWakeups.trySend(Unit)
+                    jobWakeups.trySend(Unit)
                 }
             }
         }
-        schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
 
@@ -119,12 +117,10 @@ class DesktopThumbnailStore(
             it.cancel(CancellationException("Thumbnail job cancelled by user"))
         }
         jobs.joinAll()
-        schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
 
     override suspend fun retryJobs(fileIds: List<String>) {
-        schedulingPaused = false
         schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
@@ -294,8 +290,7 @@ class DesktopThumbnailStore(
                     runningJobs.remove(job.fileId)
                     processingIds.remove(job.fileId)
                     _activeJobs.update { it - job.fileId }
-                    schedulingPaused = false
-        jobWakeups.trySend(Unit)
+                    jobWakeups.trySend(Unit)
                 }
             }
             runningJobs[job.fileId] = worker
@@ -334,8 +329,7 @@ class DesktopThumbnailStore(
         if (retryAt != Long.MAX_VALUE) {
             jobScope.launch {
                 delay(BACKGROUND_RETRY_DELAY_MS)
-                schedulingPaused = false
-        jobWakeups.trySend(Unit)
+                jobWakeups.trySend(Unit)
             }
         }
     }
