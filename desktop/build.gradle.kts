@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.koin.compose)
     implementation(libs.jna.platform)
     implementation(libs.vlcj)
+    implementation(libs.twelvemonkeys.webp)
     testImplementation(libs.junit)
     testImplementation(libs.koin.test)
 }
