@@ -97,7 +97,6 @@ fun ThumbnailManagerScreen(
     var confirmRemoveSelected by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var selectingAll by remember { mutableStateOf(false) }
-    var selectingAll by remember { mutableStateOf(false) }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
     val fileListState = rememberLazyListState()
 
@@ -500,7 +499,19 @@ fun ThumbnailManagerScreen(
                             scope.launch {
                                 selectingAll = true
                                 try {
-                                    selectedIds = cacheRepository.thumbnailFileIds(folderId).toSet()
+                                    val allIds = mutableSetOf<String>()
+                                    var offset = 0
+                                    while (true) {
+                                        val page = cacheRepository.thumbnailFileIds(
+                                            folderId = folderId,
+                                            offset = offset,
+                                            limit = 500
+                                        )
+                                        allIds.addAll(page)
+                                        if (page.size < 500) break
+                                        offset += page.size
+                                    }
+                                    selectedIds = allIds
                                 } finally {
                                     selectingAll = false
                                 }
