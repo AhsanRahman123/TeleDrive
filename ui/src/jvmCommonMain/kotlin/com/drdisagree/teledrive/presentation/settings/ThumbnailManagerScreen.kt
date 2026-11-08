@@ -798,11 +798,7 @@ private fun ThumbnailFolderRow(
             Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             Text(
                 "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · " +
-                    (if (currentPolicy == ThumbnailPolicy.INHERIT) {
-                        "Rule: Inherit · Effective: ${policyLabel(folder.effectivePolicy)}"
-                    } else {
-                        "Rule: ${policyLabel(currentPolicy)}"
-                    }) +
+                    "Rule: ${policyLabel(currentPolicy)} · Effective: ${policyLabel(folder.effectivePolicy)}" +
                     if (folder.isTrashed) " · In Trash" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -882,11 +878,7 @@ private fun ThumbnailFileRow(
                 maxLines = 1
             )
             Text(
-                if (file.policy == ThumbnailPolicy.INHERIT) {
-                    "Rule: Inherit · Effective: ${policyLabel(file.effectivePolicy)}"
-                } else {
-                    "Rule: ${policyLabel(file.policy)}"
-                },
+                "Rule: ${policyLabel(file.policy)} · Effective: ${policyLabel(file.effectivePolicy)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary
             )
