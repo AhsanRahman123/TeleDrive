@@ -12,6 +12,7 @@ import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
 import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
 import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
+import com.drdisagree.teledrive.domain.repository.ThumbnailEnqueueResult
 import com.drdisagree.teledrive.domain.repository.ThumbnailFileUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailFolderUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailManagerSummary
@@ -440,28 +441,34 @@ class CacheRepositoryImpl(
         thumbnailStore.enqueueManual(missingIds)
     }
 
-    override suspend fun generateThumbnails(fileIds: List<String>): Int {
+    override suspend fun generateThumbnails(fileIds: List<String>): ThumbnailEnqueueResult {
         val ids = fileIds.distinct()
-        if (ids.isEmpty()) return 0
+        if (ids.isEmpty()) return ThumbnailEnqueueResult()
 
-        // Filter in safe SQLite-sized batches, then submit the complete selection once.
-        // Cached files are excluded so the displayed queue count matches real work.
+        // Filter in safe SQLite-sized batches. A selected item already in the queue is
+        // refreshed as a forced manual job, never inserted as a duplicate row.
         val missingIds = ids.chunked(JOB_BATCH_SIZE)
             .flatMap { batch -> thumbnailDao.missingEligibleFileIds(batch) }
             .distinct()
-        if (missingIds.isEmpty()) return 0
+        if (missingIds.isEmpty()) return ThumbnailEnqueueResult()
 
+        var alreadyQueued = 0
         missingIds.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            alreadyQueued += thumbnailJobDao.existingFileIds(batch).size
             thumbnailPolicyDao.clearQueueItemPauses(batch)
         }
         thumbnailStore.enqueueManual(missingIds)
-        return missingIds.size
+        return ThumbnailEnqueueResult(
+            newlyQueued = (missingIds.size - alreadyQueued).coerceAtLeast(0),
+            alreadyQueued = alreadyQueued
+        )
     }
 
-    override suspend fun generateFolderThumbnails(folderId: String?): Int {
+    override suspend fun generateFolderThumbnails(folderId: String?): ThumbnailEnqueueResult {
         var afterAddedAt: Long? = null
         var afterFileId: String? = null
-        var acceptedCount = 0
+        var newlyQueued = 0
+        var alreadyQueued = 0
         while (true) {
             val page = if (folderId == null) {
                 thumbnailDao.unfiledFileIdsPage(
@@ -481,21 +488,24 @@ class CacheRepositoryImpl(
             }
             if (page.isEmpty()) break
             val pageIds = page.map { it.fileId }
+            val existingIds = thumbnailJobDao.existingFileIds(pageIds).toSet()
+            newlyQueued += pageIds.count { it !in existingIds }
+            alreadyQueued += existingIds.size
             thumbnailPolicyDao.clearQueueItemPauses(pageIds)
             thumbnailStore.enqueueManual(pageIds)
-            acceptedCount += pageIds.size
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
-        return acceptedCount
+        return ThumbnailEnqueueResult(newlyQueued, alreadyQueued)
     }
 
-    override suspend fun generateAllThumbnails(): Int {
+    override suspend fun generateAllThumbnails(): ThumbnailEnqueueResult {
         var afterAddedAt: Long? = null
         var afterFileId: String? = null
-        var acceptedCount = 0
+        var newlyQueued = 0
+        var alreadyQueued = 0
         while (true) {
             val page = thumbnailDao.allEligibleFileIdsPage(
                 onlyMissing = true,
@@ -505,15 +515,17 @@ class CacheRepositoryImpl(
             )
             if (page.isEmpty()) break
             val pageIds = page.map { it.fileId }
+            val existingIds = thumbnailJobDao.existingFileIds(pageIds).toSet()
+            newlyQueued += pageIds.count { it !in existingIds }
+            alreadyQueued += existingIds.size
             thumbnailPolicyDao.clearQueueItemPauses(pageIds)
             thumbnailStore.enqueueManual(pageIds)
-            acceptedCount += pageIds.size
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
-        return acceptedCount
+        return ThumbnailEnqueueResult(newlyQueued, alreadyQueued)
     }
 
     override suspend fun thumbnailQueue(
