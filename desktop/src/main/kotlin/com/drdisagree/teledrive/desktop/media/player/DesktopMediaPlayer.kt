@@ -386,6 +386,17 @@ fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
+                    // W/E are reserved for media navigation; Left/Right remain seek keys.
+                    key == Key.W && !ctrl && !alt && !shift -> {
+                        if (hasPrevious) onPrevious()
+                        interactionTick++
+                        true
+                    }
+                    key == Key.E && !ctrl && !alt && !shift -> {
+                        if (hasNext) onNext()
+                        interactionTick++
+                        true
+                    }
                     ctrl && !alt && !shift && key == Key.DirectionUp -> {
                         val volume = (player.audio().volume() + VOLUME_STEP).coerceAtMost(200)
                         player.audio().setVolume(volume)
