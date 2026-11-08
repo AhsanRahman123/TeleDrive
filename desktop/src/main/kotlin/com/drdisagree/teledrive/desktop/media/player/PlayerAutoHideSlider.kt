@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,9 +34,10 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
 /**
- * Compact video-player level control. The slider appears on hover or keyboard
- * focus and remains open while being dragged. Auto-hide can be disabled
- * independently for each control.
+ * Compact video-player level control. Hovering or keyboard-focusing the
+ * control reveals its slider. The slider remains visible while dragging and
+ * hides after the configured delay. It can also be kept expanded by
+ * disabling auto-hide, or (for brightness) by clicking the icon.
  */
 @Composable
 internal fun PlayerAutoHideSlider(
@@ -56,7 +56,6 @@ internal fun PlayerAutoHideSlider(
 ) {
     val groupInteraction = remember { MutableInteractionSource() }
     val isHovered by groupInteraction.collectIsHoveredAsState()
-
     val sliderInteraction = remember { MutableInteractionSource() }
     val isDragging by sliderInteraction.collectIsDraggedAsState()
 
@@ -77,10 +76,10 @@ internal fun PlayerAutoHideSlider(
         onDraggingChange(isDragging)
     }
 
-    LaunchedEffect(isHovered, isDragging, hasFocus, manuallyExpanded, sliderVisible) {
-        // Keep the parent player chrome alive until this slider has finished
-        // its own configured hide delay.
-        onActiveChange(isHovered || isDragging || hasFocus || manuallyExpanded || sliderVisible)
+    LaunchedEffect(isHovered, isDragging, hasFocus, manuallyExpanded) {
+        // Only active pointer/focus interaction pins the player controls.
+        // The level slider's own hide delay runs independently.
+        onActiveChange(isHovered || isDragging || hasFocus || manuallyExpanded)
     }
 
     DisposableEffect(Unit) {
