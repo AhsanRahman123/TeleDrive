@@ -30,6 +30,7 @@ import com.drdisagree.teledrive.data.remote.telegram.RemoteFileManifest
 import com.drdisagree.teledrive.data.repository.FileBase
 import com.drdisagree.teledrive.data.repository.FolderPathResolver
 import com.drdisagree.teledrive.domain.model.BackupState
+import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
@@ -105,6 +106,12 @@ class TransferExecutor(
     } catch (_: KeyUnavailableException) {
         TransferOutcome.Failed(messages.keyMissing)
     }
+
+    private fun supportsThumbnail(file: FileEntity): Boolean =
+        file.category == FileCategory.IMAGE ||
+            file.category == FileCategory.VIDEO ||
+            file.mimeType.startsWith("text/", ignoreCase = true) ||
+            file.mimeType.equals("application/vnd.android.package-archive", ignoreCase = true)
 
     private suspend fun executeUpload(transfer: TransferEntity): TransferOutcome {
         val fileId = transfer.fileId
@@ -184,7 +191,7 @@ class TransferExecutor(
             } finally {
                 rawIconPath?.let { File(it).delete() }
             }
-            if (result == TransferOutcome.Completed) {
+            if (result == TransferOutcome.Completed && supportsThumbnail(entity)) {
                 thumbnailStore.enqueueAfterUpload(entity.id)
             }
             return result
@@ -271,7 +278,7 @@ class TransferExecutor(
                     }
                 }
             }
-            if (outcome == TransferOutcome.Completed) {
+            if (outcome == TransferOutcome.Completed && supportsThumbnail(entity)) {
                 thumbnailStore.enqueueAfterUpload(entity.id)
             }
             outcome
