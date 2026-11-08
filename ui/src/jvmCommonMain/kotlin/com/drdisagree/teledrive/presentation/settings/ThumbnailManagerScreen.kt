@@ -71,6 +71,7 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailCacheFilter
 import com.drdisagree.teledrive.domain.repository.ThumbnailPolicyFilter
 import com.drdisagree.teledrive.domain.repository.ThumbnailEffectivePolicyFilter
 import com.drdisagree.teledrive.domain.repository.ThumbnailFileSort
+import com.drdisagree.teledrive.domain.repository.ThumbnailFolderSort
 import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -114,6 +115,7 @@ fun ThumbnailManagerScreen(
     var policyFilter by remember { mutableStateOf(ThumbnailPolicyFilter.ALL) }
     var effectivePolicyFilter by remember { mutableStateOf(ThumbnailEffectivePolicyFilter.ALL) }
     var sortOrder by remember { mutableStateOf(ThumbnailFileSort.THUMBNAIL_LARGEST) }
+    var folderSortOrder by remember { mutableStateOf(ThumbnailFolderSort.MOST_MISSING) }
     var searchInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
@@ -149,11 +151,11 @@ fun ThumbnailManagerScreen(
     }
 
     LaunchedEffect(
-        folderId, refreshKey, pageOffset, cacheFilter, policyFilter, effectivePolicyFilter, sortOrder, searchQuery
+        folderId, refreshKey, pageOffset, cacheFilter, policyFilter, effectivePolicyFilter, sortOrder, folderSortOrder, searchQuery
     ) {
         loading = true
         summary = cacheRepository.thumbnailManagerSummary()
-        folders = cacheRepository.thumbnailFolders(folderId)
+        folders = cacheRepository.thumbnailFolders(folderId, folderSortOrder.name)
         val page = cacheRepository.thumbnailFiles(
             folderId = folderId,
             offset = pageOffset,
@@ -191,7 +193,7 @@ fun ThumbnailManagerScreen(
                 latest.orphanedCachedFiles != summary.orphanedCachedFiles
             summary = latest
             if (cacheChanged) {
-                folders = cacheRepository.thumbnailFolders(folderId)
+                folders = cacheRepository.thumbnailFolders(folderId, folderSortOrder.name)
             }
             delay(5_000L)
         }
@@ -461,6 +463,15 @@ fun ThumbnailManagerScreen(
                             it.name to effectivePolicyFilterLabel(it)
                         },
                         onSelect = { effectivePolicyFilter = ThumbnailEffectivePolicyFilter.valueOf(it) }
+                    )
+                    ThumbnailInventoryDropdown(
+                        title = "Sort folders",
+                        description = "Show folders with most missing or generated previews first",
+                        value = folderSortOrder.name,
+                        options = ThumbnailFolderSort.entries.map {
+                            it.name to folderSortLabel(it)
+                        },
+                        onSelect = { folderSortOrder = ThumbnailFolderSort.valueOf(it) }
                     )
                 }
             }
@@ -943,13 +954,30 @@ private fun ThumbnailFolderRow(
         Column(modifier = Modifier.weight(1f).clickable(onClick = onOpen)) {
             Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             Text(
-                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · " +
-                    "Rule: ${policyLabel(currentPolicy)} · Effective: ${policyLabel(folder.effectivePolicy)}" +
-                    if (folder.isTrashed) " · In Trash" else "",
+                "${folder.eligibleFiles} image/video files · ${Formatters.bytes(folder.totalBytes)} cached",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "${folder.generatedFiles} generated",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "${folder.missingFiles} missing",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                Text(
+                    "Rule: ${policyLabel(currentPolicy)} · Effective: ${policyLabel(folder.effectivePolicy)}" +
+                        if (folder.isTrashed) " · In Trash" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
         }
         IconButton(onClick = onGenerate) {
             Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate folder thumbnails")
@@ -1172,6 +1200,17 @@ private fun enqueueResultMessage(newlyQueued: Int, alreadyQueued: Int): String =
         "Added $newlyQueued missing thumbnail jobs to the queue."
     else ->
         "Refreshed $alreadyQueued jobs already in the queue for manual generation."
+}
+
+private fun folderSortLabel(sort: ThumbnailFolderSort): String = when (sort) {
+    ThumbnailFolderSort.MOST_MISSING -> "Most missing"
+    ThumbnailFolderSort.MOST_GENERATED -> "Most generated"
+    ThumbnailFolderSort.MISSING_FIRST -> "Folders with missing"
+    ThumbnailFolderSort.GENERATED_FIRST -> "Fully generated first"
+    ThumbnailFolderSort.CACHE_LARGEST -> "Largest cache"
+    ThumbnailFolderSort.CACHE_SMALLEST -> "Smallest cache"
+    ThumbnailFolderSort.NAME_ASC -> "Name A–Z"
+    ThumbnailFolderSort.NAME_DESC -> "Name Z–A"
 }
 
 private fun cacheFilterLabel(filter: ThumbnailCacheFilter): String = when (filter) {
