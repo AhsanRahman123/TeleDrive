@@ -1,4 +1,5 @@
 <resources>
+    <string name="info_folder_path">Drive folder</string>
     <string name="settings_section_thumbnails_title">Thumbnail manager</string>
     <string name="settings_section_thumbnails_subtitle">Preview storage, generation queue and cleanup</string>
     <!-- App-wide -->
