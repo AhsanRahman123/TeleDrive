@@ -78,7 +78,6 @@ interface CacheRepository {
     suspend fun generateFolderThumbnails(folderId: String?): Int = 0
 
     /** Queue every eligible uncached file in the drive, regardless of folder. */
-    /** Returns the number of eligible, missing previews added to or already represented by the queue. */
     suspend fun generateAllThumbnails(): Int = 0
 
     suspend fun thumbnailQueue(
