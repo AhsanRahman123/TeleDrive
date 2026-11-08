@@ -52,6 +52,7 @@ data class ThumbnailQueueItem(
     val name: String,
     val mimeType: String,
     val fileSizeBytes: Long,
+    val folderPath: String = "Drive root",
     val queuedAt: Long,
     val attempts: Int,
     val isForced: Boolean,
