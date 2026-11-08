@@ -97,53 +97,47 @@ class DesktopThumbnailStore(
         return generationSemaphore.withPermit { generate(fileId) }
     }
 
-    override fun enqueueAfterUpload(fileId: String) {
-        jobScope.launch {
-            val now = System.currentTimeMillis()
-            thumbnailPolicyDao.upsert(
-                ThumbnailPolicyEntity(
-                    targetType = TARGET_FILE,
-                    targetId = fileId,
-                    policy = ThumbnailPolicy.AUTOMATIC.name,
-                    changedAt = now
-                )
+    override suspend fun enqueueAfterUpload(fileId: String) {
+        val now = System.currentTimeMillis()
+        thumbnailPolicyDao.upsert(
+            ThumbnailPolicyEntity(
+                targetType = TARGET_FILE,
+                targetId = fileId,
+                policy = ThumbnailPolicy.AUTOMATIC.name,
+                changedAt = now
             )
-            thumbnailJobDao.enqueue(
-                ThumbnailJobEntity(fileId = fileId, queuedAt = now, force = false)
-            )
-            jobWakeups.trySend(Unit)
-        }
+        )
+        thumbnailJobDao.enqueue(
+            ThumbnailJobEntity(fileId = fileId, queuedAt = now, force = false)
+        )
+        jobWakeups.trySend(Unit)
     }
 
-    override fun enqueueManual(fileId: String) {
-        jobScope.launch {
-            thumbnailJobDao.enqueue(
-                ThumbnailJobEntity(
-                    fileId = fileId,
-                    queuedAt = System.currentTimeMillis(),
-                    force = true
-                )
+    override suspend fun enqueueManual(fileId: String) {
+        thumbnailJobDao.enqueue(
+            ThumbnailJobEntity(
+                fileId = fileId,
+                queuedAt = System.currentTimeMillis(),
+                force = true
             )
-            jobWakeups.trySend(Unit)
-        }
+        )
+        jobWakeups.trySend(Unit)
     }
 
-    override fun enqueueManual(fileIds: List<String>) {
+    override suspend fun enqueueManual(fileIds: List<String>) {
         if (fileIds.isEmpty()) return
-        jobScope.launch {
-            val timestamp = System.currentTimeMillis()
-            fileIds.distinct().chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
-                thumbnailJobDao.enqueue(
-                    batch.map { id ->
-                        ThumbnailJobEntity(
-                            fileId = id,
-                            queuedAt = timestamp,
-                            force = true
-                        )
-                    }
-                )
-                jobWakeups.trySend(Unit)
-            }
+        val timestamp = System.currentTimeMillis()
+        fileIds.distinct().chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+            thumbnailJobDao.enqueue(
+                batch.map { id ->
+                    ThumbnailJobEntity(
+                        fileId = id,
+                        queuedAt = timestamp,
+                        force = true
+                    )
+                }
+            )
+            jobWakeups.trySend(Unit)
         }
     }
 
