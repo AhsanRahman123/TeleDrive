@@ -173,7 +173,7 @@ class DesktopThumbnailStore(
                 })
                 player.audio().isMute = true
                 player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
-                    override fun screenshotTaken(mediaPlayer: MediaPlayer, filename: String) {
+                    override fun snapshotTaken(mediaPlayer: MediaPlayer, filename: String) {
                         snapshotReady.complete(filename)
                     }
 
