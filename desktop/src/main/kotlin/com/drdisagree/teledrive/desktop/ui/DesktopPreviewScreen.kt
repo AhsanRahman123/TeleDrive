@@ -759,6 +759,7 @@ private fun PreviewPane(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
                     }
                     DesktopVerticalScrollbar(
                         state = previewTextScrollState,
@@ -806,6 +807,7 @@ private fun PreviewPane(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
                     }
                 }
                 DesktopVerticalScrollbar(
