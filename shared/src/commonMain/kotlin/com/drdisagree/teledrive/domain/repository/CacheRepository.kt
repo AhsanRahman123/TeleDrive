@@ -56,6 +56,12 @@ interface CacheRepository {
         policy: ThumbnailPolicy
     ) = Unit
 
+    /** Batch apply an explicit or inherited file rule to selected inventory rows. */
+    suspend fun setThumbnailPolicies(
+        fileIds: List<String>,
+        policy: ThumbnailPolicy
+    ) = Unit
+
     suspend fun thumbnailPolicy(
         targetType: ThumbnailTargetType,
         targetId: String
