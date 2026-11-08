@@ -20,9 +20,15 @@ interface ThumbnailJobDao {
     suspend fun next(limit: Int): List<ThumbnailJobEntity>
 
     @Query(
-        "SELECT * FROM thumbnail_jobs WHERE queuedAt <= :now ORDER BY queuedAt ASC LIMIT :limit"
+        """SELECT * FROM thumbnail_jobs
+            WHERE queuedAt <= :now AND attempts < :maxAttempts
+            ORDER BY queuedAt ASC LIMIT :limit"""
     )
-    suspend fun nextReady(limit: Int, now: Long): List<ThumbnailJobEntity>
+    suspend fun nextReady(
+        limit: Int,
+        now: Long,
+        maxAttempts: Int
+    ): List<ThumbnailJobEntity>
 
     @Query("SELECT MIN(queuedAt) FROM thumbnail_jobs")
     suspend fun nextQueuedAt(): Long?
@@ -46,9 +52,6 @@ interface ThumbnailJobDao {
             LIMIT :limit OFFSET :offset"""
     )
     suspend fun page(offset: Int, limit: Int): List<ThumbnailQueueItem>
-
-    @Query("UPDATE thumbnail_jobs SET attempts = attempts + 1 WHERE fileId = :fileId")
-    suspend fun recordAttempt(fileId: String)
 
     @Query("DELETE FROM thumbnail_jobs WHERE fileId = :fileId")
     suspend fun delete(fileId: String)
