@@ -186,7 +186,7 @@ fun ThumbnailQueueScreen(
                         throughputFilesPerMinute > 0.0 -> {
                             val etaSeconds = (pendingCount * 60.0 / throughputFilesPerMinute).toLong()
                                 .coerceAtLeast(1L)
-                            "Recent throughput: ${throughputFilesPerMinute.toInt()} files/min · " +
+                            "Recent queue reduction: ${throughputFilesPerMinute.toInt()} files/min · " +
                                 "Estimated remaining: ${formatThumbnailQueueEta(etaSeconds)}"
                         }
                         else -> "Estimating completion rate…"
