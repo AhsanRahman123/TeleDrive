@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.presentation.settings
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.indication
@@ -166,10 +169,11 @@ fun ExclusionsScreen(
             onDelete = { index -> exclusions.getOrNull(index)?.let { exclusionToRemove = it } },
             onBack = onBack
         )
-        LazyColumn(
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
             state = listState,
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxSize().padding(end = 10.dp)
                 .keyboardCollection(keyboard, exclusions.size, shortcuts),
             contentPadding = padding.add(top = 8.dp, bottom = 96.dp)
         ) {
@@ -214,6 +218,11 @@ fun ExclusionsScreen(
                     }
                 }
             }
+        }
+            DesktopVerticalScrollbar(
+                state = listState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
         }
     }
 
