@@ -1378,7 +1378,7 @@ class DesktopTelegramClient(
         private const val CLIENT_WAIT_STEP_MS = 10L
         private const val DOWNLOAD_PRIORITY = 16
         const val DOWNLOAD_RESUME_INTERVAL_MS = 15_000L
-        private const val THUMBNAIL_PRIORITY = 24
+        private const val THUMBNAIL_PRIORITY = 32
         private const val THUMBNAIL_EDGE = 320
         private const val DELETE_BATCH = 100
         private const val RATE_LIMIT_RETRIES = 5
