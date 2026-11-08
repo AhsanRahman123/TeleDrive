@@ -16,6 +16,34 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
     }
 }
 
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS thumbnail_policies (" +
+                "targetType TEXT NOT NULL, " +
+                "targetId TEXT NOT NULL, " +
+                "policy TEXT NOT NULL, " +
+                "changedAt INTEGER NOT NULL, " +
+                "PRIMARY KEY(targetType, targetId))"
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_thumbnail_policies_targetId " +
+                "ON thumbnail_policies(targetId)"
+        )
+        connection.execSQL(
+            "CREATE TABLE IF NOT EXISTS thumbnail_jobs (" +
+                "fileId TEXT NOT NULL PRIMARY KEY, " +
+                "queuedAt INTEGER NOT NULL, " +
+                "attempts INTEGER NOT NULL, " +
+                "force INTEGER NOT NULL)"
+        )
+        connection.execSQL(
+            "CREATE INDEX IF NOT EXISTS index_thumbnail_jobs_queuedAt " +
+                "ON thumbnail_jobs(queuedAt)"
+        )
+    }
+}
+
 val MIGRATION_15_16 = object : Migration(15, 16) {
     override fun migrate(connection: SQLiteConnection) {
         connection.execSQL("ALTER TABLE `files` ADD COLUMN `manifestExtra` TEXT")
