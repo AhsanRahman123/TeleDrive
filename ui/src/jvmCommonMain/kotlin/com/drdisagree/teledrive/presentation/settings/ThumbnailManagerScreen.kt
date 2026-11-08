@@ -504,6 +504,11 @@ fun ThumbnailManagerScreen(
                         }
                     ) { Text("Clear selection") }
                 }
+                Text(
+                    "Select visible files for this page, matching files for all filtered results, or tick folders to include their subfolders.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 if (selectedIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) {
                     Row(
                         modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -595,7 +600,7 @@ fun ThumbnailManagerScreen(
                 SummaryTile(
                     title = "Background queue",
                     value = summary.pendingJobs.toString(),
-                    subtitle = "pending preparations",
+                    subtitle = "queued + running",
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -765,6 +770,11 @@ fun ThumbnailManagerScreen(
                     )
                 }
             }
+            Text(
+                "Each file checkbox selects that item. The Generated / Not generated filter can be changed above without changing any files.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
+            )
 
             if (loading) {
                 Text("Loading thumbnail inventory…", color = MaterialTheme.colorScheme.onSurfaceVariant)
