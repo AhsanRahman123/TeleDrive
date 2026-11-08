@@ -411,6 +411,14 @@ class CacheRepositoryImpl(
         ).map { it.copy(isProcessing = it.fileId in active) }
     }
 
+    override suspend fun thumbnailQueueFileIds(
+        offset: Int,
+        limit: Int
+    ): List<String> = thumbnailJobDao.fileIdsPage(
+        offset = offset.coerceAtLeast(0),
+        limit = limit.coerceIn(1, 500)
+    )
+
     override fun observeThumbnailActiveJobs(): Flow<Set<String>> =
         thumbnailStore.observeActiveJobs()
 
