@@ -27,6 +27,8 @@ interface ThumbnailStore {
 
     suspend fun cancelAllJobs() = Unit
 
+    suspend fun retryJobs(fileIds: List<String>) = Unit
+
     /** Durable, non-blocking preparation explicitly requested by the user. */
     suspend fun enqueueManual(fileId: String) = Unit
 
