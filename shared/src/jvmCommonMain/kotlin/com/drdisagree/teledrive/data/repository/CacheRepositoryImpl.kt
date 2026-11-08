@@ -410,15 +410,19 @@ class CacheRepositoryImpl(
     override suspend fun cancelThumbnailJobs(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
-        thumbnailJobDao.delete(ids)
-        thumbnailStore.cancelJobs(ids)
+        ids.chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+            thumbnailJobDao.delete(batch)
+            thumbnailStore.cancelJobs(batch)
+        }
     }
 
     override suspend fun retryThumbnailJobs(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
-        thumbnailJobDao.retry(ids, System.currentTimeMillis())
-        thumbnailStore.retryJobs(ids)
+        ids.chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+            thumbnailJobDao.retry(batch, System.currentTimeMillis())
+            thumbnailStore.retryJobs(batch)
+        }
     }
 
     override suspend fun cancelAllThumbnailJobs() {
@@ -427,40 +431,23 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun removeThumbnail(fileId: String) {
-        thumbnailJobDao.delete(fileId)
-        thumbnailStore.cancelJobs(listOf(fileId))
-        thumbnailDao.byFileId(fileId)?.let { cached ->
-            val cachedFile = File(cached.path)
-            if (!cachedFile.exists() || cachedFile.delete()) {
-                thumbnailDao.delete(fileId)
-                thumbnailMemoryCache.remove(fileId)
-            }
-        }
-        thumbnailJobDao.delete(fileId)
-        thumbnailPolicyDao.upsert(
-            ThumbnailPolicyEntity(
-                targetType = ThumbnailTargetType.FILE.name,
-                targetId = fileId,
-                policy = ThumbnailPolicy.MANUAL_ONLY.name,
-                changedAt = System.currentTimeMillis()
-            )
-        )
-        refreshThumbnailStats()
+        removeThumbnails(listOf(fileId))
     }
 
     override suspend fun removeThumbnails(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
-        val changedAt = System.currentTimeMillis()
         ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
-            // Remove durable rows before stopping workers so cancellation cannot requeue an item.
+            // Delete queue rows first so the scheduler cannot restart selected items while
+            // the running workers are being cancelled.
             thumbnailJobDao.delete(batch)
             thumbnailStore.cancelJobs(batch)
-            val cached = thumbnailDao.cachedPathsByFileIds(batch)
-            val removedIds = cached.filter { ref ->
-                val file = File(ref.path)
-                !file.exists() || file.delete()
+
+            val removedIds = thumbnailDao.pathsForFiles(batch).filter { ref ->
+                val cachedFile = File(ref.path)
+                !cachedFile.exists() || cachedFile.delete()
             }.map { it.fileId }
+
             if (removedIds.isNotEmpty()) {
                 thumbnailDao.deleteAll(removedIds)
                 removedIds.forEach(thumbnailMemoryCache::remove)
@@ -471,7 +458,7 @@ class CacheRepositoryImpl(
                         targetType = ThumbnailTargetType.FILE.name,
                         targetId = id,
                         policy = ThumbnailPolicy.MANUAL_ONLY.name,
-                        changedAt = changedAt
+                        changedAt = System.currentTimeMillis()
                     )
                 }
             )
