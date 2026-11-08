@@ -582,7 +582,8 @@ fun ThumbnailManagerScreen(
                     )
                     Text(
                         "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} shown · " +
-                            "${cacheFilterLabel(cacheFilter)} · ${policyFilterLabel(policyFilter)}",
+                            "${cacheFilterLabel(cacheFilter)} · ${policyFilterLabel(policyFilter)} · " +
+                                "${effectivePolicyFilterLabel(effectivePolicyFilter)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -609,6 +610,17 @@ fun ThumbnailManagerScreen(
                     ) {
                         Text(if (selectingAll) "Selecting…" else "Select all matching")
                     }
+                    TextButton(
+                        enabled = files.isNotEmpty() && !selectingAll,
+                        onClick = {
+                            val pageIds = files.map { it.fileId }.toSet()
+                            selectedIds = if (pageIds.all { it in selectedIds }) {
+                                selectedIds - pageIds
+                            } else {
+                                selectedIds + pageIds
+                            }
+                        }
+                    ) { Text("Select page") }
                     TextButton(
                         enabled = selectedIds.isNotEmpty() && !selectingAll,
                         onClick = { selectedIds = emptySet() }
