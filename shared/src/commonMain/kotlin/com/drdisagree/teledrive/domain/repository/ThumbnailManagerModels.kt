@@ -53,6 +53,15 @@ enum class ThumbnailQueueSort {
     FAILED_FIRST
 }
 
+/** Counts unique missing thumbnails submitted by a manual generation request. */
+data class ThumbnailEnqueueResult(
+    val newlyQueued: Int = 0,
+    val alreadyQueued: Int = 0
+) {
+    val totalSubmitted: Int
+        get() = newlyQueued + alreadyQueued
+}
+
 data class ThumbnailManagerSummary(
     val totalBytes: Long = 0L,
     val cachedFiles: Int = 0,
