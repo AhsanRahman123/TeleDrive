@@ -464,15 +464,6 @@ fun ThumbnailManagerScreen(
                         },
                         onSelect = { effectivePolicyFilter = ThumbnailEffectivePolicyFilter.valueOf(it) }
                     )
-                    ThumbnailInventoryDropdown(
-                        title = "Sort folders",
-                        description = "Show folders with most missing or generated previews first",
-                        value = folderSortOrder.name,
-                        options = ThumbnailFolderSort.entries.map {
-                            it.name to folderSortLabel(it)
-                        },
-                        onSelect = { folderSortOrder = ThumbnailFolderSort.valueOf(it) }
-                    )
                 }
             }
 
@@ -742,7 +733,22 @@ fun ThumbnailManagerScreen(
             }
 
             if (folders.isNotEmpty()) {
-                Text("Folders", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Folders", style = MaterialTheme.typography.titleMedium)
+                    ThumbnailQuickFolderSortDropdown(
+                        value = folderSortOrder,
+                        onSelect = { folderSortOrder = it }
+                    )
+                }
+                Text(
+                    "Folder sorting uses the generated/missing counts shown on each row.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 Text(
                     "Tick a folder to include it and all its subfolders in bulk actions. Use the folder icon to open it.",
                     style = MaterialTheme.typography.bodySmall,
@@ -1097,6 +1103,34 @@ private fun ThumbnailQuickSortDropdown(
             ThumbnailFileSort.entries.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(fileSortLabel(option)) },
+                    onClick = {
+                        expanded = false
+                        onSelect(option)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailQuickFolderSortDropdown(
+    value: ThumbnailFolderSort,
+    onSelect: (ThumbnailFolderSort) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.height(38.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+        ) {
+            Text("Sort folders: ${folderSortLabel(value)}", maxLines = 1)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            ThumbnailFolderSort.entries.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(folderSortLabel(option)) },
                     onClick = {
                         expanded = false
                         onSelect(option)
