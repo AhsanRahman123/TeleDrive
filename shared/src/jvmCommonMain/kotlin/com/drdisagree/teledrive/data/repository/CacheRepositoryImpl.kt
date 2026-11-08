@@ -63,7 +63,7 @@ class CacheRepositoryImpl(
         thumbnailDao.deleteAll()
         thumbnailJobDao.deleteAll()
         thumbnailMemoryCache.clear()
-        refreshStats()
+        refreshThumbnailStats()
     }
 
     override suspend fun clearLinkThumbnails() {
@@ -72,7 +72,7 @@ class CacheRepositoryImpl(
             thumbnailDao.delete(thumbnail.fileId)
             thumbnailMemoryCache.remove(thumbnail.fileId)
         }
-        refreshStats()
+        refreshThumbnailStats()
     }
 
     override suspend fun clearTemp() {
@@ -337,7 +337,7 @@ class CacheRepositoryImpl(
             )
         )
         thumbnailMemoryCache.remove(fileId)
-        refreshStats()
+        refreshThumbnailStats()
     }
 
     override suspend fun removeFolderThumbnails(folderId: String) {
@@ -353,7 +353,7 @@ class CacheRepositoryImpl(
                 changedAt = System.currentTimeMillis()
             )
         )
-        refreshStats()
+        refreshThumbnailStats()
     }
 
     private suspend fun clearType(type: CacheEntryType) {
