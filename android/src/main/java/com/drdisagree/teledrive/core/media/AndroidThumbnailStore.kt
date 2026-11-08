@@ -328,6 +328,7 @@ class AndroidThumbnailStore(
                     lastAccessAt = now
                 )
             )
+            ThumbnailChangeNotifier.notifyChanged(fileId)
         }
         return jpegBytes
     }
