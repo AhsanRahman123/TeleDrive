@@ -71,14 +71,21 @@ interface CacheRepository {
 
     suspend fun generateThumbnail(fileId: String) = Unit
 
-    suspend fun generateThumbnails(fileIds: List<String>) = Unit
+    /** Returns the number of eligible, missing previews added to or already represented by the queue. */
+    suspend fun generateThumbnails(fileIds: List<String>): Int = 0
 
-    suspend fun generateFolderThumbnails(folderId: String?) = Unit
+    /** Returns the number of eligible, missing previews added to or already represented by the queue. */
+    suspend fun generateFolderThumbnails(folderId: String?): Int = 0
 
     /** Queue every eligible uncached file in the drive, regardless of folder. */
-    suspend fun generateAllThumbnails() = Unit
+    /** Returns the number of eligible, missing previews added to or already represented by the queue. */
+    suspend fun generateAllThumbnails(): Int = 0
 
-    suspend fun thumbnailQueue(offset: Int, limit: Int): List<ThumbnailQueueItem> = emptyList()
+    suspend fun thumbnailQueue(
+        offset: Int,
+        limit: Int,
+        sortOrder: String = "OLDEST_FIRST"
+    ): List<ThumbnailQueueItem> = emptyList()
     suspend fun thumbnailQueueCount(): Int = 0
 
 
