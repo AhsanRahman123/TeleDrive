@@ -59,6 +59,8 @@ interface CacheRepository {
 
     suspend fun cancelAllThumbnailJobs() = Unit
 
+    suspend fun retryThumbnailJobs(fileIds: List<String>) = Unit
+
     suspend fun removeThumbnail(fileId: String) = Unit
 
     suspend fun removeFolderThumbnails(folderId: String) = Unit
