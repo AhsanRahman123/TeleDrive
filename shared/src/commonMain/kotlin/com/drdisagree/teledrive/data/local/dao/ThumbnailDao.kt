@@ -24,6 +24,18 @@ interface ThumbnailDao {
     @Query("SELECT COALESCE(SUM(sizeBytes), 0) FROM thumbnails")
     suspend fun totalSizeBytes(): Long
 
+    @Query("SELECT COUNT(*) FROM thumbnails")
+    suspend fun count(): Int
+
+    @Query(
+        """SELECT COUNT(*) AS cachedFiles,
+                  COALESCE(SUM(t.sizeBytes), 0) AS totalBytes
+             FROM thumbnails t
+             JOIN files f ON f.id = t.fileId
+            WHERE f.folderId IS NULL AND f.trashedAt IS NULL"""
+    )
+    suspend fun unfiledAggregate(): ThumbnailUnfiledAggregate
+
     @Query(
         """
         SELECT t.* FROM thumbnails t
