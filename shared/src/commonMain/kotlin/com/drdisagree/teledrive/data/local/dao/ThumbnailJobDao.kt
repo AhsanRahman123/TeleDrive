@@ -16,7 +16,7 @@ interface ThumbnailJobDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun enqueue(jobs: List<ThumbnailJobEntity>)
 
-    @Query("SELECT * FROM thumbnail_jobs ORDER BY queuedAt ASC LIMIT :limit")
+    @Query("SELECT * FROM thumbnail_jobs ORDER BY queuedAt ASC, fileId ASC LIMIT :limit")
     suspend fun next(limit: Int): List<ThumbnailJobEntity>
 
     @Query(
@@ -57,7 +57,7 @@ interface ThumbnailJobDao {
         """WITH RECURSIVE queued_page(fileId, queuedAt) AS (
                SELECT fileId, queuedAt
                  FROM thumbnail_jobs
-                ORDER BY queuedAt ASC
+                ORDER BY queuedAt ASC, fileId ASC
                 LIMIT :limit OFFSET :offset
            ),
            folder_paths(fileId, parentId, path, depth) AS (
