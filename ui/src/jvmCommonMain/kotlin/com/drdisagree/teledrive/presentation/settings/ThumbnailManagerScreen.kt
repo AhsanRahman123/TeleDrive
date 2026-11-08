@@ -321,16 +321,10 @@ fun ThumbnailManagerScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(end = 10.dp)
-                .verticalScroll(scrollState)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Fixed navigation header: the title and back action stay visible while scrolling.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
@@ -359,7 +353,15 @@ fun ThumbnailManagerScreen(
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
-
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(end = 10.dp)
+                    .verticalScroll(scrollState)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SummaryTile(
                     title = "Thumbnail cache",
@@ -686,6 +688,7 @@ fun ThumbnailManagerScreen(
                         enabled = hasMore
                     ) { Text("Next") }
                 }
+            }
             }
         }
         DesktopVerticalScrollbar(
