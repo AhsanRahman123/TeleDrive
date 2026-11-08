@@ -17,6 +17,13 @@ interface ThumbnailStore {
     /** Durable, non-blocking preparation explicitly requested by the user. */
     suspend fun enqueueManual(fileId: String) = Unit
 
+    /** Queue an item only when its effective file/folder policy is Automatic. */
+    suspend fun enqueueAutomatic(fileId: String) = Unit
+
+    suspend fun enqueueAutomatic(fileIds: List<String>) {
+        fileIds.forEach { enqueueAutomatic(it) }
+    }
+
     suspend fun enqueueManual(fileIds: List<String>) {
         fileIds.forEach { enqueueManual(it) }
     }
