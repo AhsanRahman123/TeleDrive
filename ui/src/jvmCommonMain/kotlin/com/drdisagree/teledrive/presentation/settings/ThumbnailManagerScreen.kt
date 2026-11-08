@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +63,9 @@ import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailFileUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailFolderUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailManagerSummary
+import com.drdisagree.teledrive.domain.repository.ThumbnailCacheFilter
+import com.drdisagree.teledrive.domain.repository.ThumbnailPolicyFilter
+import com.drdisagree.teledrive.domain.repository.ThumbnailFileSort
 import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -97,6 +101,11 @@ fun ThumbnailManagerScreen(
     var confirmRemoveSelected by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
     var selectingAll by remember { mutableStateOf(false) }
+    var cacheFilter by remember { mutableStateOf(ThumbnailCacheFilter.ALL) }
+    var policyFilter by remember { mutableStateOf(ThumbnailPolicyFilter.ALL) }
+    var sortOrder by remember { mutableStateOf(ThumbnailFileSort.THUMBNAIL_LARGEST) }
+    var searchInput by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
     val fileListState = rememberLazyListState()
 
@@ -110,14 +119,35 @@ fun ThumbnailManagerScreen(
         onEnd = { rangeSelectionBase = emptySet() }
     )
     LaunchedEffect(folderId) { selectedIds = emptySet() }
-    LaunchedEffect(folderId, refreshKey, pageOffset) {
+    LaunchedEffect(searchInput) {
+        delay(300L)
+        val normalized = searchInput.trim()
+        if (searchQuery != normalized) {
+            searchQuery = normalized
+            pageOffset = 0
+            selectedIds = emptySet()
+        }
+    }
+
+    LaunchedEffect(cacheFilter, policyFilter, sortOrder, searchQuery) {
+        pageOffset = 0
+        selectedIds = emptySet()
+    }
+
+    LaunchedEffect(
+        folderId, refreshKey, pageOffset, cacheFilter, policyFilter, sortOrder, searchQuery
+    ) {
         loading = true
         summary = cacheRepository.thumbnailManagerSummary()
         folders = cacheRepository.thumbnailFolders(folderId)
         val page = cacheRepository.thumbnailFiles(
-            folderId,
-            pageOffset,
-            THUMBNAIL_PAGE_SIZE + 1
+            folderId = folderId,
+            offset = pageOffset,
+            limit = THUMBNAIL_PAGE_SIZE + 1,
+            cacheFilter = cacheFilter.name,
+            policyFilter = policyFilter.name,
+            searchQuery = searchQuery,
+            sortOrder = sortOrder.name
         )
         files = page.take(THUMBNAIL_PAGE_SIZE)
         hasMore = page.size > THUMBNAIL_PAGE_SIZE
@@ -477,6 +507,38 @@ fun ThumbnailManagerScreen(
                 }
             }
 
+            OutlinedTextField(
+                value = searchInput,
+                onValueChange = { searchInput = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Search inventory by file name") }
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ThumbnailInventoryDropdown(
+                    title = "Cache",
+                    value = cacheFilter.name,
+                    options = ThumbnailCacheFilter.entries.map { it.name to cacheFilterLabel(it) },
+                    onSelect = { cacheFilter = ThumbnailCacheFilter.valueOf(it) }
+                )
+                ThumbnailInventoryDropdown(
+                    title = "Policy rule",
+                    value = policyFilter.name,
+                    options = ThumbnailPolicyFilter.entries.map { it.name to policyFilterLabel(it) },
+                    onSelect = { policyFilter = ThumbnailPolicyFilter.valueOf(it) }
+                )
+                ThumbnailInventoryDropdown(
+                    title = "Sort",
+                    value = sortOrder.name,
+                    options = ThumbnailFileSort.entries.map { it.name to fileSortLabel(it) },
+                    onSelect = { sortOrder = ThumbnailFileSort.valueOf(it) }
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -487,7 +549,8 @@ fun ThumbnailManagerScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} files · largest cached previews first",
+                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} matching files · " +
+                            "${cacheFilterLabel(cacheFilter)} · ${policyFilterLabel(policyFilter)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -499,19 +562,12 @@ fun ThumbnailManagerScreen(
                             scope.launch {
                                 selectingAll = true
                                 try {
-                                    val allIds = mutableSetOf<String>()
-                                    var offset = 0
-                                    while (true) {
-                                        val page = cacheRepository.thumbnailFileIds(
-                                            folderId = folderId,
-                                            offset = offset,
-                                            limit = 500
-                                        )
-                                        allIds.addAll(page)
-                                        if (page.size < 500) break
-                                        offset += page.size
-                                    }
-                                    selectedIds = allIds
+                                    selectedIds = cacheRepository.thumbnailFileIdsMatching(
+                                        folderId = folderId,
+                                        cacheFilter = cacheFilter.name,
+                                        policyFilter = policyFilter.name,
+                                        searchQuery = searchQuery
+                                    ).toSet()
                                 } finally {
                                     selectingAll = false
                                 }
@@ -546,6 +602,14 @@ fun ThumbnailManagerScreen(
                             }
                         }
                     ) { Text("Generate") }
+                    ThumbnailBulkPolicyMenu(
+                        onSelect = { policy ->
+                            scope.launch {
+                                cacheRepository.setThumbnailPolicies(selectedIds.toList(), policy)
+                                refreshKey++
+                            }
+                        }
+                    )
                     OutlinedButton(onClick = { confirmRemoveSelected = true }) { Text("Delete selected") }
                     TextButton(onClick = { selectedIds = emptySet() }) { Text("Deselect") }
                 }
