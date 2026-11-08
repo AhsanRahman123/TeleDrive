@@ -997,7 +997,7 @@ private val PLAYBACK_RATE_PRESETS = listOf(
 private const val CONTROLS_HIDE_DELAY_MS = 3_000L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
-private const val KEY_SEEK_STEP_MS = 500L
+private const val KEY_SEEK_STEP_MS = 10_000L
 private const val VOLUME_STEP = 5
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
