@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.trash
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -295,10 +297,12 @@ fun TrashScreen(
             )
             return@Scaffold
         }
-        LazyColumn(
+        Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                        .padding(end = 10.dp)
                 .keyboardCollection(keyboard, state.rows.size, shortcuts)
                 .then(dragSelect),
             contentPadding = padding.add(horizontal = 12.dp, top = 12.dp, bottom = 12.dp)
@@ -426,6 +430,11 @@ fun TrashScreen(
                 }
             }
         }
+                DesktopVerticalScrollbar(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                )
+            }
     }
 
     if (confirmEmpty) {
