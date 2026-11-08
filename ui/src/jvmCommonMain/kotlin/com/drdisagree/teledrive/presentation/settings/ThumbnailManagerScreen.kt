@@ -675,7 +675,12 @@ fun ThumbnailManagerScreen(
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                cacheRepository.generateFolderThumbnails(folderId)
+                                val count = cacheRepository.generateFolderThumbnails(folderId)
+                                generationMessage = if (count > 0) {
+                                    "$count missing previews added to the queue."
+                                } else {
+                                    "This folder has no eligible missing previews."
+                                }
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         }
@@ -701,7 +706,12 @@ fun ThumbnailManagerScreen(
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                cacheRepository.generateFolderThumbnails(null)
+                                val count = cacheRepository.generateFolderThumbnails(null)
+                                generationMessage = if (count > 0) {
+                                    "$count unfiled missing previews added to the queue."
+                                } else {
+                                    "There are no eligible unfiled previews to generate."
+                                }
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         }
@@ -709,7 +719,12 @@ fun ThumbnailManagerScreen(
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                cacheRepository.generateAllThumbnails()
+                                val count = cacheRepository.generateAllThumbnails()
+                                generationMessage = if (count > 0) {
+                                    "$count missing previews added to the queue."
+                                } else {
+                                    "All eligible files already have previews, or none are eligible."
+                                }
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         }
@@ -750,7 +765,12 @@ fun ThumbnailManagerScreen(
                         currentPolicy = folder.policy,
                         onGenerate = {
                             scope.launch {
-                                cacheRepository.generateFolderThumbnails(folder.id)
+                                val count = cacheRepository.generateFolderThumbnails(folder.id)
+                                generationMessage = if (count > 0) {
+                                    "$count missing previews added to the queue."
+                                } else {
+                                    "This folder already has previews for all eligible files."
+                                }
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         },
@@ -820,7 +840,12 @@ fun ThumbnailManagerScreen(
                                 },
                                 onGenerate = {
                                     scope.launch {
-                                        cacheRepository.generateThumbnail(file.fileId)
+                                        val count = cacheRepository.generateThumbnails(listOf(file.fileId))
+                                        generationMessage = if (count > 0) {
+                                            "The missing preview was added to the queue."
+                                        } else {
+                                            "This file already has a preview or cannot have one generated."
+                                        }
                                         summary = cacheRepository.thumbnailManagerSummary()
                                     }
                                 },
