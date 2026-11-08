@@ -110,15 +110,52 @@ fun ThumbnailManagerScreen(
         loading = false
     }
 
-    // Keep the pending-job count and cache total fresh while background work is running.
-    LaunchedEffect(Unit) {
+    // Update totals and folder aggregates without resetting the current file page or selection.
+    LaunchedEffect(folderId) {
         while (true) {
             val latest = cacheRepository.thumbnailManagerSummary()
             val cacheChanged = latest.totalBytes != summary.totalBytes ||
                 latest.cachedFiles != summary.cachedFiles
             summary = latest
-            if (cacheChanged) refreshKey++
+            if (cacheChanged) {
+                folders = cacheRepository.thumbnailFolders(folderId)
+            }
             delay(5_000L)
+        }
+    }
+
+    // Update visible file rows as their persistent cache entries are written.
+    LaunchedEffect(folderId) {
+        val accountedIds = mutableSetOf<String>()
+        ThumbnailChangeNotifier.events.collect { change ->
+            val existing = files.firstOrNull { it.fileId == change.fileId }
+            val wasCached = existing?.isCached == true
+            val delta = if (wasCached) {
+                change.sizeBytes - (existing?.thumbnailSizeBytes ?: 0L)
+            } else {
+                change.sizeBytes
+            }
+            if (!wasCached && change.fileId !in accountedIds) {
+                accountedIds += change.fileId
+                summary = summary.copy(
+                    totalBytes = (summary.totalBytes + delta).coerceAtLeast(0L),
+                    cachedFiles = summary.cachedFiles + 1
+                )
+            } else if (wasCached) {
+                summary = summary.copy(
+                    totalBytes = (summary.totalBytes + delta).coerceAtLeast(0L)
+                )
+            }
+            files = files.map { file ->
+                if (file.fileId == change.fileId) {
+                    file.copy(
+                        thumbnailSizeBytes = change.sizeBytes,
+                        generatedAt = change.generatedAt,
+                        lastAccessAt = change.generatedAt,
+                        encrypted = change.encrypted
+                    )
+                } else file
+            }
         }
     }
 
@@ -483,8 +520,8 @@ private fun ThumbnailFileRow(
 ) {
     var thumbnailRevision by remember(file.fileId) { mutableStateOf(0L) }
     LaunchedEffect(file.fileId) {
-        ThumbnailChangeNotifier.events.collect { changedId ->
-            if (changedId == file.fileId) thumbnailRevision++
+        ThumbnailChangeNotifier.events.collect { change ->
+            if (change.fileId == file.fileId) thumbnailRevision++
         }
     }
     Row(
