@@ -1,5 +1,19 @@
 package com.drdisagree.teledrive.desktop.media
 
+import com.drdisagree.teledrive.desktop.media.player.VlcPlayback
+import uk.co.caprica.vlcj.player.base.MediaPlayer
+import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
+import uk.co.caprica.vlcj.player.embedded.videosurface.CallbackVideoSurface
+import uk.co.caprica.vlcj.player.embedded.videosurface.VideoSurfaceAdapters
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormat
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormatCallbackAdapter
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.RenderCallback
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.format.RV32BufferFormat
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
@@ -41,6 +55,7 @@ class DesktopThumbnailStore(
 ) : ThumbnailStore {
 
     private val generationSemaphore = Semaphore(3)
+    private val videoThumbnailMutex = Mutex()
 
     override suspend fun thumbnailBytes(fileId: String): ByteArray? {
         if (!settingsRepository.preferences.first().linkPreviews && isNote(fileId)) {
@@ -84,6 +99,7 @@ class DesktopThumbnailStore(
                 !file.exists() -> null
                 MimeTypes.isText(entity.mimeType) -> linkThumbnail(file)
                 MimeTypes.isImage(entity.mimeType) -> decodeImageThumbnail(file)
+                MimeTypes.isVideo(entity.mimeType) -> decodeVideoThumbnail(file)
                 MimeTypes.isApk(entity.mimeType, file.name) -> decodeApkIcon(file)
                 else -> null
             }
@@ -134,6 +150,95 @@ class DesktopThumbnailStore(
             ?.imagePath
             ?: return null
         return File(imagePath).takeIf { it.exists() }?.let(::decodeImageThumbnail)
+    }
+
+    /**
+     * Uses the already bundled/system libVLC to extract one frame from a local video.
+     * Only one extraction runs at a time so opening a gallery with many videos stays bounded.
+     */
+    private suspend fun decodeVideoThumbnail(file: File): BufferedImage? =
+        videoThumbnailMutex.withLock {
+            val factory = VlcPlayback.factory ?: return@withLock null
+            val target = File(
+                File(storagePaths.cacheDir, "thumbnail-frames").apply { mkdirs() },
+                "${file.nameWithoutExtension}-${System.nanoTime()}.png"
+            )
+            val frameReady = CompletableDeferred<Unit>()
+            val snapshotReady = CompletableDeferred<String?>()
+            val player = factory.mediaPlayers().newEmbeddedMediaPlayer()
+            try {
+                player.videoSurface().set(thumbnailVideoSurface {
+                    frameReady.complete(Unit)
+                })
+                player.audio().isMute = true
+                player.events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
+                    override fun screenshotTaken(mediaPlayer: MediaPlayer, filename: String) {
+                        snapshotReady.complete(filename)
+                    }
+
+                    override fun error(mediaPlayer: MediaPlayer) {
+                        frameReady.completeExceptionally(
+                            IllegalStateException("VLC could not decode video thumbnail")
+                        )
+                    }
+
+                    override fun finished(mediaPlayer: MediaPlayer) {
+                        if (!frameReady.isCompleted) {
+                            frameReady.completeExceptionally(
+                                IllegalStateException("Video ended before a frame was rendered")
+                            )
+                        }
+                    }
+                })
+
+                if (!player.media().play(file.absolutePath)) return@withLock null
+                val rendered = withTimeoutOrNull(VIDEO_FRAME_TIMEOUT_MS) {
+                    runCatching { frameReady.await() }.isSuccess
+                } ?: false
+                if (!rendered) return@withLock null
+
+                delay(VIDEO_SNAPSHOT_DELAY_MS)
+                if (!player.snapshots().save(target, MAX_DIMENSION, 0)) return@withLock null
+
+                val snapshotPath = withTimeoutOrNull(VIDEO_SNAPSHOT_TIMEOUT_MS) {
+                    snapshotReady.await()
+                } ?: target.absolutePath.takeIf { target.exists() }
+                snapshotPath?.let { path ->
+                    runCatching { ImageIO.read(File(path)) }.getOrNull()
+                }
+            } catch (_: Exception) {
+                null
+            } finally {
+                runCatching { player.controls().stop() }
+                runCatching { player.release() }
+                target.delete()
+            }
+        }
+
+    private fun thumbnailVideoSurface(onFrame: () -> Unit): CallbackVideoSurface {
+        val format = object : BufferFormatCallbackAdapter() {
+            override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat =
+                RV32BufferFormat(sourceWidth, sourceHeight)
+        }
+        val render = object : RenderCallback {
+            override fun lock(mediaPlayer: MediaPlayer) = Unit
+            override fun unlock(mediaPlayer: MediaPlayer) = Unit
+            override fun display(
+                mediaPlayer: MediaPlayer,
+                nativeBuffers: Array<java.nio.ByteBuffer>,
+                bufferFormat: BufferFormat,
+                displayWidth: Int,
+                displayHeight: Int
+            ) {
+                onFrame()
+            }
+        }
+        return CallbackVideoSurface(
+            format,
+            render,
+            true,
+            VideoSurfaceAdapters.getVideoSurfaceAdapter()
+        )
     }
 
     private fun decodeApkIcon(file: File): BufferedImage? {
@@ -211,6 +316,9 @@ class DesktopThumbnailStore(
     private companion object {
         const val LINK_NOTE_LIMIT = 8L * 1024
         const val MAX_DIMENSION = 512
+        const val VIDEO_FRAME_TIMEOUT_MS = 8_000L
+        const val VIDEO_SNAPSHOT_TIMEOUT_MS = 5_000L
+        const val VIDEO_SNAPSHOT_DELAY_MS = 100L
         const val IMAGE_SCALE_MODE = Image.SCALE_SMOOTH
     }
 }
