@@ -287,6 +287,17 @@ interface FolderDao {
     @Query("SELECT * FROM folders")
     suspend fun allFoldersAnyOwner(): List<FolderEntity>
 
+    @Query(
+        """WITH RECURSIVE child_folders(id) AS (
+               SELECT id FROM folders WHERE id = :folderId
+               UNION ALL
+               SELECT folders.id FROM folders
+               JOIN child_folders ON folders.parentId = child_folders.id
+           )
+           SELECT id FROM child_folders"""
+    )
+    suspend fun folderIdsInTree(folderId: String): List<String>
+
     @Query("UPDATE folders SET chatId = :chatId WHERE id = :id")
     suspend fun setChatId(id: String, chatId: Long?)
 }
