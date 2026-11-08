@@ -22,6 +22,13 @@ enum class ThumbnailPolicyFilter {
     EXPLICIT_MANUAL_ONLY
 }
 
+/** Resolved behavior after applying a file rule, then its nearest folder rule, then the default. */
+enum class ThumbnailEffectivePolicyFilter {
+    ALL,
+    AUTOMATIC,
+    MANUAL_ONLY
+}
+
 enum class ThumbnailFileSort {
     THUMBNAIL_LARGEST,
     THUMBNAIL_SMALLEST,
