@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.settings
 
+import androidx.compose.foundation.layout.height
+import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollbar
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -245,6 +247,7 @@ private fun AddExclusionDialog(
 ) {
     var type by remember { mutableStateOf(ExclusionType.FOLDER_PATH) }
     var value by remember { mutableStateOf("") }
+    val exclusionTypesScrollState = rememberScrollState()
     var pickerError by remember { mutableStateOf(false) }
     val folderPicker = LocalFolderPicker.current
     val filePicker = LocalFilePicker.current
@@ -258,8 +261,9 @@ private fun AddExclusionDialog(
         title = { Text(stringResource(Res.string.settings_add_exclusion)) },
         text = {
             Column {
+                Box(modifier = Modifier.fillMaxWidth()) {
                 Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.horizontalScroll(exclusionTypesScrollState).padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     listOf(
@@ -347,6 +351,10 @@ private fun AddExclusionDialog(
                             .padding(top = 12.dp)
                     )
                 }
+                DesktopHorizontalScrollbar(
+                    state = exclusionTypesScrollState,
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(8.dp)
+                )
             }
         },
         confirmButton = {
