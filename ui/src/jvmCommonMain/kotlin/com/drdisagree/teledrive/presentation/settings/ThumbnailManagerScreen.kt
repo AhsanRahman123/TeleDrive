@@ -96,6 +96,7 @@ fun ThumbnailManagerScreen(
     var confirmClearAll by remember { mutableStateOf(false) }
     var confirmRemoveSelected by remember { mutableStateOf(false) }
     var showQueue by remember { mutableStateOf(false) }
+    var selectingAll by remember { mutableStateOf(false) }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
     val fileListState = rememberLazyListState()
 
@@ -492,13 +493,22 @@ fun ThumbnailManagerScreen(
                     )
                 }
                 if (files.isNotEmpty()) {
-                    TextButton(onClick = {
-                        val pageIds = files.map { it.fileId }.toSet()
-                        selectedIds = if (pageIds.all { it in selectedIds }) selectedIds - pageIds
-                        else selectedIds + pageIds
-                    }) {
-                        Text(if (files.isNotEmpty() && files.all { it.fileId in selectedIds }) "Deselect page" else "Select page")
+                    TextButton(
+                        enabled = !selectingAll,
+                        onClick = {
+                            scope.launch {
+                                selectingAll = true
+                                selectedIds = cacheRepository.thumbnailFileIds(folderId).toSet()
+                                selectingAll = false
+                            }
+                        }
+                    ) {
+                        Text(if (selectingAll) "Selecting…" else "Select all")
                     }
+                    TextButton(
+                        enabled = selectedIds.isNotEmpty() && !selectingAll,
+                        onClick = { selectedIds = emptySet() }
+                    ) { Text("Deselect all") }
                 }
             }
 
