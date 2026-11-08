@@ -123,6 +123,7 @@ class GalleryViewModel(
     val infoFolderPath: StateFlow<String?> = _infoFolderPath.asStateFlow()
 
     private suspend fun folderPathFor(folderId: String?): String? {
+        if (folderId == null) return "Drive root"
         var currentId = folderId
         val visited = mutableSetOf<String>()
         val segments = mutableListOf<String>()
