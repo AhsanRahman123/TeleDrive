@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.components
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -120,12 +122,14 @@ fun FolderPickerDialog(
                 } else {
                     val listState = remember(currentId) { LazyListState() }
                     val keyboard = rememberKeyboardCollection(listState)
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .heightIn(max = 280.dp)
-                            .keyboardCollection(keyboard, children.size)
-                    ) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .heightIn(max = 280.dp)
+                                .padding(end = 10.dp)
+                                .keyboardCollection(keyboard, children.size)
+                        ) {
                         itemsIndexed(children, key = { _, it -> it.id }) { index, folder ->
                             Row(
                                 modifier = Modifier
@@ -149,6 +153,10 @@ fun FolderPickerDialog(
                                 )
                             }
                         }
+                        DesktopVerticalScrollbar(
+                            state = listState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                        )
                     }
                 }
             }
