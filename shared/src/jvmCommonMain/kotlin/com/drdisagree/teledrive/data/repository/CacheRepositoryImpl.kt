@@ -425,7 +425,7 @@ class CacheRepositoryImpl(
     override suspend fun cancelThumbnailJobs(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
-        ids.chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
             thumbnailJobDao.delete(batch)
             thumbnailStore.cancelJobs(batch)
         }
@@ -434,7 +434,7 @@ class CacheRepositoryImpl(
     override suspend fun retryThumbnailJobs(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
-        ids.chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
             thumbnailJobDao.retry(batch, System.currentTimeMillis())
             thumbnailStore.retryJobs(batch)
         }
