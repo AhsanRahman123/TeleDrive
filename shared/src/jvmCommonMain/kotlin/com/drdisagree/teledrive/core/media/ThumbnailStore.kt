@@ -17,4 +17,8 @@ interface ThumbnailStore {
     /** Durable, non-blocking preparation explicitly requested by the user. */
     fun enqueueManual(fileId: String) = Unit
 
+    fun enqueueManual(fileIds: List<String>) {
+        fileIds.forEach(::enqueueManual)
+    }
+
 }
