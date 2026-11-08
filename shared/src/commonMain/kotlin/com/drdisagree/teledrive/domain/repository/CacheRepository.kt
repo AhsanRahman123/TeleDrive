@@ -50,4 +50,5 @@ interface CacheRepository {
     suspend fun removeThumbnail(fileId: String) = Unit
 
     suspend fun removeFolderThumbnails(folderId: String) = Unit
+    suspend fun clearOrphanedThumbnails() = Unit
 }
