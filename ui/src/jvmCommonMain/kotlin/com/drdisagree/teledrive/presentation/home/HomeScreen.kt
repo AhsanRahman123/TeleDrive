@@ -214,6 +214,7 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val homeListState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
@@ -282,6 +283,7 @@ fun HomeScreen(
         }
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
+            state = homeListState,
             modifier = Modifier.fillMaxSize().padding(end = 10.dp),
             contentPadding = padding.add(
                 horizontal = 16.dp,
