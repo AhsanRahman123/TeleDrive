@@ -1,6 +1,8 @@
 package com.drdisagree.teledrive.core.media
 
 import java.io.File
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 interface ThumbnailStore {
 
@@ -16,6 +18,14 @@ interface ThumbnailStore {
 
     /** Durable, non-blocking preparation after a successful upload. */
     suspend fun enqueueAfterUpload(fileId: String) = Unit
+
+    /** Currently executing durable preparation jobs, for the manager's live queue view. */
+    fun observeActiveJobs(): Flow<Set<String>> = flowOf(emptySet())
+
+    /** Cancel queued and currently running preparation jobs. */
+    suspend fun cancelJobs(fileIds: List<String>) = Unit
+
+    suspend fun cancelAllJobs() = Unit
 
     /** Durable, non-blocking preparation explicitly requested by the user. */
     suspend fun enqueueManual(fileId: String) = Unit
