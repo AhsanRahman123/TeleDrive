@@ -36,8 +36,17 @@ interface ThumbnailJobDao {
         maxAttempts: Int
     ): List<ThumbnailJobEntity>
 
-    @Query("SELECT MIN(queuedAt) FROM thumbnail_jobs")
-    suspend fun nextQueuedAt(): Long?
+    @Query(
+        """SELECT MIN(j.queuedAt) FROM thumbnail_jobs j
+            WHERE j.attempts < :maxAttempts
+              AND NOT EXISTS (
+                  SELECT 1 FROM thumbnail_policies p
+                   WHERE p.targetType = 'QUEUE_ITEM'
+                     AND p.targetId = j.fileId
+                     AND p.policy = 'PAUSED'
+              )"""
+    )
+    suspend fun nextQueuedAt(maxAttempts: Int): Long?
 
     @Query(
         "UPDATE thumbnail_jobs SET attempts = attempts + 1, queuedAt = :retryAt WHERE fileId = :fileId"
