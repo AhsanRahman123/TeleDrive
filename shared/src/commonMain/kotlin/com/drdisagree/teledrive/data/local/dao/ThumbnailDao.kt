@@ -80,7 +80,7 @@ interface ThumbnailDao {
     suspend fun folderAggregates(): List<ThumbnailFolderAggregate>
 
     @Query(
-        """WITH RECURSIVE scoped_files AS (
+        """WITH scoped_files AS (
                SELECT f.*
                  FROM files f
                 WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
@@ -98,30 +98,10 @@ interface ThumbnailDao {
                         OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                       )
            ),
-           folder_ancestors(fileId, folderId, parentId, depth) AS (
-               SELECT f.id, d.id, d.parentId, 0
-                 FROM scoped_files f
-                 LEFT JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
-                WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
-               UNION ALL
-               SELECT a.fileId, parent.id, parent.parentId, a.depth + 1
-                 FROM folder_ancestors a
-                 JOIN folders parent ON parent.id = a.parentId
-           ),
            effective_policies(fileId, directPolicy, effectivePolicy) AS (
                SELECT f.id,
                       COALESCE(fp.policy, 'INHERIT'),
-                      COALESCE(
-                          fp.policy,
-                          (SELECT p.policy
-                             FROM folder_ancestors a
-                             JOIN thumbnail_policies p
-                               ON p.targetType = 'FOLDER' AND p.targetId = a.folderId
-                            WHERE a.fileId = f.id
-                            ORDER BY a.depth ASC
-                            LIMIT 1),
-                          'MANUAL_ONLY'
-                      )
+                      COALESCE(fp.policy, :folderEffectivePolicy)
                  FROM scoped_files f
                  LEFT JOIN thumbnail_policies fp
                    ON fp.targetType = 'FILE' AND fp.targetId = f.id
@@ -177,6 +157,7 @@ interface ThumbnailDao {
     )
     suspend fun filesInFolder(
         folderId: String?,
+        folderEffectivePolicy: String,
         cacheFilter: String,
         policyFilter: String,
         effectivePolicyFilter: String,
@@ -187,7 +168,7 @@ interface ThumbnailDao {
     ): List<ThumbnailFileRow>
 
     @Query(
-        """WITH RECURSIVE scoped_files AS (
+        """WITH scoped_files AS (
                SELECT f.*
                  FROM files f
                 WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
@@ -205,29 +186,10 @@ interface ThumbnailDao {
                         OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                       )
            ),
-           folder_ancestors(fileId, folderId, parentId, depth) AS (
-               SELECT f.id, d.id, d.parentId, 0
-                 FROM scoped_files f
-                 LEFT JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
-               UNION ALL
-               SELECT a.fileId, parent.id, parent.parentId, a.depth + 1
-                 FROM folder_ancestors a
-                 JOIN folders parent ON parent.id = a.parentId
-           ),
            effective_policies(fileId, directPolicy, effectivePolicy) AS (
                SELECT f.id,
                       COALESCE(fp.policy, 'INHERIT'),
-                      COALESCE(
-                          fp.policy,
-                          (SELECT p.policy
-                             FROM folder_ancestors a
-                             JOIN thumbnail_policies p
-                               ON p.targetType = 'FOLDER' AND p.targetId = a.folderId
-                            WHERE a.fileId = f.id
-                            ORDER BY a.depth ASC
-                            LIMIT 1),
-                          'MANUAL_ONLY'
-                      )
+                      COALESCE(fp.policy, :folderEffectivePolicy)
                  FROM scoped_files f
                  LEFT JOIN thumbnail_policies fp
                    ON fp.targetType = 'FILE' AND fp.targetId = f.id
@@ -257,6 +219,7 @@ interface ThumbnailDao {
     )
     suspend fun fileIdsMatching(
         folderId: String?,
+        folderEffectivePolicy: String,
         cacheFilter: String,
         policyFilter: String,
         effectivePolicyFilter: String,
