@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.presentation.settings
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -249,9 +252,10 @@ fun SettingsSectionScreen(
             LoadingState(modifier = Modifier.padding(padding))
             return@Scaffold
         }
-        Column(
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxSize().padding(end = 10.dp)
                 .padding(top = padding.calculateTopPadding())
                 .verticalScroll(scrollState)
         ) {
@@ -291,6 +295,11 @@ fun SettingsSectionScreen(
                 SettingsSectionType.ABOUT -> AboutSection(state, viewModel)
             }
             Spacer(Modifier.height(24.dp + padding.calculateBottomPadding()))
+        }
+            DesktopVerticalScrollbar(
+                state = scrollState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
         }
     }
 
