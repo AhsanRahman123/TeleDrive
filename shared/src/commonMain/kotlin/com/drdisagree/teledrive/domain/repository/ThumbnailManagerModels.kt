@@ -12,7 +12,9 @@ data class ThumbnailManagerSummary(
     val cachedFiles: Int = 0,
     val pendingJobs: Int = 0,
     val unfiledBytes: Long = 0L,
-    val unfiledCachedFiles: Int = 0
+    val unfiledCachedFiles: Int = 0,
+    val orphanedBytes: Long = 0L,
+    val orphanedCachedFiles: Int = 0
 )
 
 data class ThumbnailFolderUsage(
