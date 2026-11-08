@@ -42,6 +42,17 @@ enum class ThumbnailFileSort {
     MISSING_FIRST
 }
 
+enum class ThumbnailFolderSort {
+    MOST_MISSING,
+    MOST_GENERATED,
+    MISSING_FIRST,
+    GENERATED_FIRST,
+    CACHE_LARGEST,
+    CACHE_SMALLEST,
+    NAME_ASC,
+    NAME_DESC
+}
+
 /** Queue ordering is presentation-only; it never changes job priority or execution order. */
 enum class ThumbnailQueueSort {
     OLDEST_FIRST,
@@ -80,6 +91,12 @@ data class ThumbnailFolderUsage(
     val cachedFiles: Int,
     val directBytes: Long,
     val directCachedFiles: Int,
+    /** Eligible image/video files across this folder and all descendants. */
+    val eligibleFiles: Int = 0,
+    /** Eligible image/video files that already have a cached thumbnail. */
+    val generatedFiles: Int = 0,
+    /** Eligible image/video files without a cached thumbnail. */
+    val missingFiles: Int = 0,
     /** Folder-level rule; INHERIT means defer to the closest parent rule. */
     val policy: ThumbnailPolicy = ThumbnailPolicy.INHERIT,
     /** Effective behavior after resolving this folder and its ancestors. */
