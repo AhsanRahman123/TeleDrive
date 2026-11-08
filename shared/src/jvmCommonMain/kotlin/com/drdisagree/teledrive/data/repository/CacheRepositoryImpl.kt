@@ -154,7 +154,7 @@ class CacheRepositoryImpl(
                 current = byId[current]?.parentId
             }
         }
-        return folders.asSequence()
+        val result = folders.asSequence()
             .filter { it.parentId == parentId && it.trashedAt == null }
             .map { folder ->
                 val usage = totals[folder.id] ?: (0L to 0)
@@ -169,9 +169,15 @@ class CacheRepositoryImpl(
                     directCachedFiles = own?.cachedFiles ?: 0
                 )
             }
-            .sortedWith(compareByDescending<ThumbnailFolderUsage> { it.totalBytes }
-                .thenBy { it.name.lowercase() })
             .toList()
+        return result.map { folder ->
+            folder.copy(
+                policy = thumbnailPolicyDao.policy(ThumbnailTargetType.FOLDER.name, folder.id)
+                    ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+                    ?: ThumbnailPolicy.INHERIT
+            )
+        }.sortedWith(compareByDescending<ThumbnailFolderUsage> { it.totalBytes }
+            .thenBy { it.name.lowercase() })
     }
 
     override suspend fun thumbnailFiles(
