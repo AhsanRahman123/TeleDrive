@@ -413,7 +413,14 @@ fun ThumbnailManagerScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Folder policy", style = MaterialTheme.typography.labelLarge)
                         Text(
-                            policyLabel(filePolicy),
+                            if (filePolicy == ThumbnailPolicy.INHERIT) {
+                                "Rule: Inherit · Effective: " + policyLabel(
+                                    folderPath.lastOrNull()?.effectivePolicy
+                                        ?: ThumbnailPolicy.MANUAL_ONLY
+                                )
+                            } else {
+                                "Rule: " + policyLabel(filePolicy)
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -551,7 +558,7 @@ fun ThumbnailManagerScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} matching files · " +
+                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} shown · " +
                             "${cacheFilterLabel(cacheFilter)} · ${policyFilterLabel(policyFilter)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -576,7 +583,7 @@ fun ThumbnailManagerScreen(
                             }
                         }
                     ) {
-                        Text(if (selectingAll) "Selecting…" else "Select all")
+                        Text(if (selectingAll) "Selecting…" else "Select all matching")
                     }
                     TextButton(
                         enabled = selectedIds.isNotEmpty() && !selectingAll,
@@ -608,6 +615,7 @@ fun ThumbnailManagerScreen(
                         onSelect = { policy ->
                             scope.launch {
                                 cacheRepository.setThumbnailPolicies(selectedIds.toList(), policy)
+                                selectedIds = emptySet()
                                 refreshKey++
                             }
                         }
@@ -816,16 +824,20 @@ private fun ThumbnailFileRow(
             Text(file.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
             Text(
                 (if (file.isCached) {
-                    "${Formatters.bytes(file.thumbnailSizeBytes ?: 0L)} thumbnail · ${Formatters.bytes(file.fileSizeBytes)} file"
+                    "Generated · ${Formatters.bytes(file.thumbnailSizeBytes ?: 0L)} thumbnail · ${Formatters.bytes(file.fileSizeBytes)} file"
                 } else {
-                    "Not cached · ${Formatters.bytes(file.fileSizeBytes)} file"
+                    "Not generated · ${Formatters.bytes(file.fileSizeBytes)} file"
                 }) + if (file.isTrashed) " · In Trash" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
             )
             Text(
-                policyLabel(file.policy),
+                if (file.policy == ThumbnailPolicy.INHERIT) {
+                    "Rule: Inherit · Effective: ${policyLabel(file.effectivePolicy)}"
+                } else {
+                    "Rule: ${policyLabel(file.policy)}"
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary
             )
