@@ -48,6 +48,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
+
+private fun formatThumbnailQueueEta(totalSeconds: Long): String {
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return when {
+        hours > 0L -> "${hours}h ${minutes}m"
+        minutes > 0L -> "${minutes}m ${seconds}s"
+        else -> "${seconds}s"
+    }
+}
+
 private const val THUMBNAIL_QUEUE_PAGE_SIZE = 100
 private const val MAX_THUMBNAIL_ATTEMPTS = 3
 
@@ -70,14 +82,39 @@ fun ThumbnailQueueScreen(
     var selectingAll by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var sortOrder by remember { mutableStateOf(ThumbnailQueueSort.OLDEST_FIRST) }
+    var throughputFilesPerMinute by remember { mutableStateOf(0.0) }
 
     LaunchedEffect(offset, sortOrder) {
+        var previousCount = -1
+        var previousSampleAt = 0L
+        throughputFilesPerMinute = 0.0
         while (true) {
             refreshing = true
             val page = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
             pendingCount = repository.thumbnailQueueCount()
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
+
+            val sampleAt = System.currentTimeMillis()
+            if (queuePaused) {
+                throughputFilesPerMinute = 0.0
+            } else if (previousCount >= 0 && previousSampleAt > 0L) {
+                val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
+                val removed = previousCount - pendingCount
+                if (removed > 0) {
+                    val sampleRate = removed * 60_000.0 / elapsed
+                    throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
+                        sampleRate
+                    } else {
+                        throughputFilesPerMinute * 0.65 + sampleRate * 0.35
+                    }
+                } else if (pendingCount > previousCount) {
+                    throughputFilesPerMinute = 0.0
+                }
+            }
+            previousCount = pendingCount
+            previousSampleAt = sampleAt
+
             if (page.isEmpty() && offset > 0) {
                 // The live queue shrank while this page was open. Move to the last valid page,
                 // including page zero when the queue has become empty.
@@ -140,6 +177,22 @@ fun ThumbnailQueueScreen(
                         "${(pendingCount - activeJobs.size).coerceAtLeast(0)} waiting · " +
                             activeJobs.size + " generating · " + pendingCount + " total" +
                             if (queuePaused) " · Paused" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    val queueEstimate = when {
+                        queuePaused -> "ETA unavailable while paused"
+                        pendingCount == 0 -> "All queued jobs completed"
+                        throughputFilesPerMinute > 0.0 -> {
+                            val etaSeconds = (pendingCount * 60.0 / throughputFilesPerMinute).toLong()
+                                .coerceAtLeast(1L)
+                            "Recent throughput: ${throughputFilesPerMinute.toInt()} files/min · " +
+                                "Estimated remaining: ${formatThumbnailQueueEta(etaSeconds)}"
+                        }
+                        else -> "Estimating completion rate…"
+                    }
+                    Text(
+                        queueEstimate,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
