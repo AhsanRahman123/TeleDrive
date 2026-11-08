@@ -95,6 +95,7 @@ class DesktopThumbnailStore(
     private val jobWakeups = Channel<Unit>(Channel.CONFLATED)
     private val runningJobs = ConcurrentHashMap<String, Job>()
     private val processingIds = ConcurrentHashMap.newKeySet<String>()
+    private var retryWakeupJob: Job? = null
     private val _activeJobs = MutableStateFlow<Set<String>>(emptySet())
 
     override fun observeActiveJobs(): Flow<Set<String>> = _activeJobs.asStateFlow()
@@ -313,13 +314,32 @@ class DesktopThumbnailStore(
         if (schedulingPaused || thumbnailPolicyDao.isQueuePaused()) return@withLock
         val available = (maxParallelGenerations - runningJobs.size).coerceAtLeast(0)
         if (available == 0) return@withLock
+        val now = System.currentTimeMillis()
+        // Include already-running rows in the result window, then skip them in memory.
+        // Fetching only "available" rows could waste every slot on the active jobs at the
+        // head of the durable queue and leave a worker slot idle.
         val ready = thumbnailJobDao.nextReady(
-            limit = available,
-            now = System.currentTimeMillis(),
+            limit = maxParallelGenerations,
+            now = now,
             maxAttempts = MAX_BACKGROUND_ATTEMPTS
         )
+        if (ready.isEmpty()) {
+            val nextAt = thumbnailJobDao.nextQueuedAt(MAX_BACKGROUND_ATTEMPTS)
+            if (runningJobs.isEmpty() && nextAt != null && nextAt > now) {
+                if (retryWakeupJob?.isActive != true) {
+                    retryWakeupJob = jobScope.launch {
+                        delay((nextAt - System.currentTimeMillis()).coerceAtLeast(1L))
+                        jobWakeups.trySend(Unit)
+                    }
+                }
+            }
+            return@withLock
+        }
+        var slots = available
         ready.forEach { job ->
+            if (slots <= 0) return@forEach
             if (!processingIds.add(job.fileId)) return@forEach
+            slots--
             val worker = jobScope.launch(start = CoroutineStart.LAZY) {
                 _activeJobs.update { it + job.fileId }
                 try {
