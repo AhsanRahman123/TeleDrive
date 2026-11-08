@@ -25,6 +25,13 @@ interface ThumbnailStore {
     /** Cancel queued and currently running preparation jobs. */
     suspend fun cancelJobs(fileIds: List<String>) = Unit
 
+    /** Pause without deleting durable queue records. */
+    suspend fun pauseJobs(fileIds: List<String>) = Unit
+
+    suspend fun pauseAllJobs() = Unit
+
+    suspend fun resumeQueue() = Unit
+
     suspend fun cancelAllJobs() = Unit
 
     suspend fun retryJobs(fileIds: List<String>) = Unit
