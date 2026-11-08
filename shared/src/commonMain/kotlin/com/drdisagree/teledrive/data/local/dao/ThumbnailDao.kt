@@ -32,7 +32,7 @@ interface ThumbnailDao {
                   COALESCE(SUM(t.sizeBytes), 0) AS totalBytes
              FROM thumbnails t
              JOIN files f ON f.id = t.fileId
-            WHERE f.folderId IS NULL AND f.trashedAt IS NULL"""
+            WHERE f.folderId IS NULL"""
     )
     suspend fun unfiledAggregate(): ThumbnailUnfiledAggregate
 
@@ -52,7 +52,6 @@ interface ThumbnailDao {
                   COALESCE(SUM(t.sizeBytes), 0) AS totalBytes
              FROM thumbnails t
              JOIN files f ON f.id = t.fileId
-            WHERE f.trashedAt IS NULL
             GROUP BY f.folderId"""
     )
     suspend fun folderAggregates(): List<ThumbnailFolderAggregate>
@@ -70,7 +69,11 @@ interface ThumbnailDao {
                   t.encrypted AS encrypted
              FROM files f
              LEFT JOIN thumbnails t ON t.fileId = f.id
-            WHERE f.folderId IS :folderId AND f.trashedAt IS NULL
+            WHERE f.folderId IS :folderId
+              AND (
+                    f.trashedAt IS NULL
+                    OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
+                  )
               AND (
                     f.category IN ('IMAGE', 'VIDEO')
                     OR f.mimeType LIKE 'text/%'
@@ -78,6 +81,7 @@ interface ThumbnailDao {
                         'application/json', 'application/xml', 'application/yaml',
                         'application/vnd.android.package-archive'
                     )
+                    OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                   )
             ORDER BY CASE WHEN t.fileId IS NULL THEN 1 ELSE 0 END,
                      t.sizeBytes DESC,
