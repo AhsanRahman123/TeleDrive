@@ -112,7 +112,8 @@ class CacheRepositoryImpl(
             val victims = thumbnailDao.leastRecentlyUsed(64)
             if (victims.isEmpty()) break
             for (victim in victims) {
-                File(victim.path).delete()
+                val cachedFile = File(victim.path)
+                if (cachedFile.exists() && !cachedFile.delete()) continue
                 thumbnailDao.delete(victim.fileId)
                 thumbnailPolicyDao.upsert(
                     ThumbnailPolicyEntity(
@@ -123,6 +124,7 @@ class CacheRepositoryImpl(
                     )
                 )
                 thumbnailJobDao.delete(victim.fileId)
+                thumbnailMemoryCache.remove(victim.fileId)
                 total -= victim.sizeBytes
                 if (total <= maxBytes) break
             }
