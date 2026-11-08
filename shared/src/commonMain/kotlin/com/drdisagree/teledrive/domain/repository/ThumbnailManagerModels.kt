@@ -37,7 +37,9 @@ enum class ThumbnailFileSort {
     GENERATED_NEWEST,
     LAST_VIEWED_OLDEST,
     NAME_ASC,
-    NAME_DESC
+    NAME_DESC,
+    GENERATED_FIRST,
+    MISSING_FIRST
 }
 
 /** Queue ordering is presentation-only; it never changes job priority or execution order. */
