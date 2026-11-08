@@ -55,6 +55,9 @@ internal fun PlayerAutoHideSeekSlider(
     }
 
     LaunchedEffect(isHovered, isDragging, hasFocus, visible, autoHide) {
+        // When auto-hide is enabled, keep the player chrome alive for this
+        // slider's full hide delay. When disabled, the player itself can still
+        // auto-hide normally.
         onActiveChange(isHovered || isDragging || hasFocus || (autoHide && visible))
     }
 
