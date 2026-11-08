@@ -374,29 +374,34 @@ class DesktopThumbnailStore(
     }
 
     private suspend fun processSingleJob(job: ThumbnailJobEntity) {
-        val entity = fileDao.byId(job.fileId)
+        // A manual request may replace an automatic queue row just before this worker starts.
+        // Read the durable row again so the current force flag and retry counter are honored.
+        val currentJob = thumbnailJobDao.byFileId(job.fileId) ?: return
+        val entity = fileDao.byId(currentJob.fileId)
         if (entity == null || entity.trashedAt != null) {
-            thumbnailJobDao.delete(job.fileId)
+            thumbnailJobDao.delete(currentJob.fileId)
             return
         }
-        val cached = thumbnailDao.byFileId(job.fileId)?.let { File(it.path).exists() } == true
-        if (cached || (!job.force && effectivePolicy(job.fileId) != ThumbnailPolicy.AUTOMATIC)) {
-            thumbnailJobDao.delete(job.fileId)
+        val cached = thumbnailDao.byFileId(currentJob.fileId)?.let { File(it.path).exists() } == true
+        if (cached || (!currentJob.force &&
+                effectivePolicy(currentJob.fileId) != ThumbnailPolicy.AUTOMATIC)
+        ) {
+            thumbnailJobDao.delete(currentJob.fileId)
             return
         }
         // A non-null byte array alone is not proof that the cache was saved:
         // generate() can return usable bytes for a viewer even when disk writing fails.
         // Keep the durable queue row until both the metadata row and the file exist.
-        generationSemaphore.withPermit { generate(job.fileId) }
+        generationSemaphore.withPermit { generate(currentJob.fileId) }
         currentCoroutineContext().ensureActive()
-        val saved = thumbnailDao.byFileId(job.fileId)?.let { cached ->
+        val saved = thumbnailDao.byFileId(currentJob.fileId)?.let { cached ->
             val target = File(cached.path)
             target.isFile && target.length() > 0L
         } == true
         if (saved) {
-            thumbnailJobDao.delete(job.fileId)
+            thumbnailJobDao.delete(currentJob.fileId)
         } else {
-            scheduleRetry(job)
+            scheduleRetry(currentJob)
         }
     }
 
