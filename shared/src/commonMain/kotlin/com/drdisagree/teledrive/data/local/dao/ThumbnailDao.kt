@@ -66,7 +66,8 @@ interface ThumbnailDao {
                   t.sizeBytes AS thumbnailSizeBytes,
                   t.generatedAt AS generatedAt,
                   t.lastAccessAt AS lastAccessAt,
-                  t.encrypted AS encrypted
+                  t.encrypted AS encrypted,
+                  CASE WHEN f.trashedAt IS NULL THEN 0 ELSE 1 END AS isTrashed
              FROM files f
              LEFT JOIN thumbnails t ON t.fileId = f.id
             WHERE f.folderId IS :folderId
