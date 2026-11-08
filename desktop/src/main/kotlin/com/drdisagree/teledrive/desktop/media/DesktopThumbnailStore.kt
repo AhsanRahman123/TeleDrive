@@ -31,6 +31,7 @@ import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
@@ -254,7 +255,7 @@ class DesktopThumbnailStore(
         )
         ready.forEach { job ->
             if (!processingIds.add(job.fileId)) return@forEach
-            val worker = jobScope.launch {
+            val worker = jobScope.launch(start = CoroutineStart.LAZY) {
                 _activeJobs.update { it + job.fileId }
                 try {
                     processSingleJob(job)
@@ -275,6 +276,7 @@ class DesktopThumbnailStore(
                 }
             }
             runningJobs[job.fileId] = worker
+            worker.start()
         }
     }
 
