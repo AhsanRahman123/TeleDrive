@@ -308,6 +308,7 @@ class PreviewContentResolver(
             target.delete()
             return null
         }
+        runCatching { telegramClient.deleteLocalCopy(file.remoteFileId ?: return@runCatching) }
         val now = System.currentTimeMillis()
         cacheDao.upsert(
             CacheEntryEntity(
