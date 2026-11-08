@@ -22,6 +22,7 @@ import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.files.Urls
 import com.drdisagree.teledrive.core.media.ThumbnailStore
+import com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier
 import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailJobDao
 import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
@@ -337,6 +338,7 @@ class DesktopThumbnailStore(
                     lastAccessAt = now
                 )
             )
+            ThumbnailChangeNotifier.notifyChanged(fileId)
         }
         return jpegBytes
     }
