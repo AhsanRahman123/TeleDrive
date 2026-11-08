@@ -74,10 +74,15 @@ fun ThumbnailQueueScreen(
             pendingCount = repository.thumbnailManagerSummary().pendingJobs
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
-            if (page.isEmpty() && offset > 0 && pendingCount > 0) {
-                // The live queue shrank while this page was open. Move to the last valid page.
-                offset = ((pendingCount - 1) / THUMBNAIL_QUEUE_PAGE_SIZE) *
-                    THUMBNAIL_QUEUE_PAGE_SIZE
+            if (page.isEmpty() && offset > 0) {
+                // The live queue shrank while this page was open. Move to the last valid page,
+                // including page zero when the queue has become empty.
+                offset = if (pendingCount > 0) {
+                    ((pendingCount - 1) / THUMBNAIL_QUEUE_PAGE_SIZE) *
+                        THUMBNAIL_QUEUE_PAGE_SIZE
+                } else {
+                    0
+                }
             } else {
                 items = page
             }
