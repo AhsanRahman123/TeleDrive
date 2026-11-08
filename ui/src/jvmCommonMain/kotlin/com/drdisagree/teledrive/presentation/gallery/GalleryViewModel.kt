@@ -71,6 +71,33 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.time.Duration.Companion.milliseconds
 
+private const val BYTES_PER_MEGABYTE = 1024L * 1024L
+
+private fun String.toSizeBytes(): Long? = trim().toLongOrNull()
+    ?.takeIf { it >= 0L }
+    ?.coerceAtMost(Long.MAX_VALUE / BYTES_PER_MEGABYTE)
+    ?.times(BYTES_PER_MEGABYTE)
+
+private fun String.toStartOfDayMillis(): Long? = trim().takeIf { it.isNotEmpty() }
+    ?.let { value ->
+        runCatching {
+            java.time.LocalDate.parse(value)
+                .atStartOfDay(java.time.ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        }.getOrNull()
+    }
+
+private fun String.toEndOfDayMillis(): Long? = trim().takeIf { it.isNotEmpty() }
+    ?.let { value ->
+        runCatching {
+            java.time.LocalDate.parse(value).plusDays(1)
+                .atStartOfDay(java.time.ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli() - 1L
+        }.getOrNull()
+    }
+
 private data class GalleryBrowseState(
     val tab: GalleryTab,
     val sortField: FileSortField,
@@ -119,6 +146,21 @@ class GalleryViewModel(
 
     private val _infoTarget = MutableStateFlow<DriveFile?>(null)
     val infoTarget: StateFlow<DriveFile?> = _infoTarget.asStateFlow()
+    private val _infoFolderPath = MutableStateFlow<String?>(null)
+    val infoFolderPath: StateFlow<String?> = _infoFolderPath.asStateFlow()
+
+    private suspend fun folderPathFor(folderId: String?): String? {
+        if (folderId == null) return "Drive root"
+        var currentId = folderId
+        val visited = mutableSetOf<String>()
+        val segments = mutableListOf<String>()
+        while (currentId != null && visited.add(currentId)) {
+            val folder = fileRepository.getFolder(currentId) ?: break
+            segments += folder.name
+            currentId = folder.parentId
+        }
+        return segments.asReversed().joinToString(" / ").takeIf { it.isNotBlank() }
+    }
 
     private fun report(error: AppError) {
         _messages.tryEmit(error.toUiText())
@@ -147,6 +189,7 @@ class GalleryViewModel(
     private val filterOptions = filters
         .map { it.copy(searchQuery = "") }
         .distinctUntilChanged()
+        .debounce(250.milliseconds)
 
     val listPosition = ListPosition(savedStateHandle)
 
@@ -176,6 +219,12 @@ class GalleryViewModel(
             availableOfflineOnly = currentFilters.availableOfflineOnly,
             backedUpOnly = currentFilters.backedUpOnly,
             notBackedUpOnly = currentFilters.notBackedUpOnly,
+            extension = currentFilters.extensionQuery.trim().removePrefix(".")
+                .takeIf { it.isNotBlank() },
+            minSizeBytes = currentFilters.minSizeMb.toSizeBytes(),
+            maxSizeBytes = currentFilters.maxSizeMb.toSizeBytes(),
+            modifiedAfter = currentFilters.modifiedAfterDate.toStartOfDayMillis(),
+            modifiedBefore = currentFilters.modifiedBeforeDate.toEndOfDayMillis(),
             showHidden = false,
             showArchived = false,
             sortField = field,
@@ -215,6 +264,12 @@ class GalleryViewModel(
             availableOfflineOnly = currentFilters.availableOfflineOnly,
             backedUpOnly = currentFilters.backedUpOnly,
             notBackedUpOnly = currentFilters.notBackedUpOnly,
+            extension = currentFilters.extensionQuery.trim().removePrefix(".")
+                .takeIf { it.isNotBlank() },
+            minSizeBytes = currentFilters.minSizeMb.toSizeBytes(),
+            maxSizeBytes = currentFilters.maxSizeMb.toSizeBytes(),
+            modifiedAfter = currentFilters.modifiedAfterDate.toStartOfDayMillis(),
+            modifiedBefore = currentFilters.modifiedBeforeDate.toEndOfDayMillis(),
             sortField = field,
             sortDirection = dir
         )
@@ -351,6 +406,25 @@ class GalleryViewModel(
         clearSelection()
         filters.update {
             it.copy(notBackedUpOnly = enabled, backedUpOnly = if (enabled) false else it.backedUpOnly)
+        }
+    }
+
+    fun setAdvancedFilters(
+        extension: String = filters.value.extensionQuery,
+        minSizeMb: String = filters.value.minSizeMb,
+        maxSizeMb: String = filters.value.maxSizeMb,
+        modifiedAfterDate: String = filters.value.modifiedAfterDate,
+        modifiedBeforeDate: String = filters.value.modifiedBeforeDate
+    ) {
+        clearSelection()
+        filters.update {
+            it.copy(
+                extensionQuery = extension,
+                minSizeMb = minSizeMb,
+                maxSizeMb = maxSizeMb,
+                modifiedAfterDate = modifiedAfterDate,
+                modifiedBeforeDate = modifiedBeforeDate
+            )
         }
     }
 
@@ -552,13 +626,18 @@ class GalleryViewModel(
     fun showInfoForSelection() {
         val fileId = selection.value.singleOrNull() ?: return
         viewModelScope.launch {
-            fileRepository.getFile(fileId)?.let { _infoTarget.value = it }
+            val file = fileRepository.getFile(fileId)
+            if (file != null) {
+                _infoTarget.value = file
+                _infoFolderPath.value = folderPathFor(file.folderId)
+            }
             clearSelection()
         }
     }
 
     fun dismissInfo() {
         _infoTarget.value = null
+        _infoFolderPath.value = null
     }
 
     fun downloadSelected() {

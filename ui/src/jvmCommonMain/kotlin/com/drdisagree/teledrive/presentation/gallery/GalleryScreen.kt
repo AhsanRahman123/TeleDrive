@@ -377,8 +377,10 @@ fun GalleryScreen(
     var showCreateAlbum by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var confirmDeleteLocal by remember { mutableStateOf(false) }
+    var advancedFiltersExpanded by remember { mutableStateOf(false) }
 
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
+    val infoFolderPath by viewModel.infoFolderPath.collectAsStateWithLifecycle()
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -463,7 +465,11 @@ fun GalleryScreen(
     }
 
     infoTarget?.let { file ->
-        FileInfoSheet(file = file, onDismiss = viewModel::dismissInfo)
+        FileInfoSheet(
+            file = file,
+            onDismiss = viewModel::dismissInfo,
+            folderPath = infoFolderPath
+        )
     }
 
     if (confirmDeleteLocal) {
@@ -745,6 +751,70 @@ fun GalleryScreen(
                                 )
                             }
                         }
+                        IconButton(
+                            onClick = {
+                                viewModel.setViewMode(
+                                    if (state.viewMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
+                                )
+                            }
+                        ) {
+                            Icon(
+                                imageVector = if (state.viewMode == ViewMode.GRID) {
+                                    Icons.Filled.ViewList
+                                } else {
+                                    Icons.Filled.GridView
+                                },
+                                contentDescription = stringResource(
+                                    if (state.viewMode == ViewMode.GRID) {
+                                        Res.string.gallery_view_list
+                                    } else {
+                                        Res.string.gallery_view_grid
+                                    }
+                                )
+                            )
+                        }
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = stringResource(Res.string.files_sort)
+                            )
+                        }
+                        SortMenu(
+                            expanded = showSortMenu,
+                            current = state.sortField,
+                            direction = state.sortDirection,
+                            onDismiss = { showSortMenu = false },
+                            onSelect = { field, direction ->
+                                showSortMenu = false
+                                viewModel.setSort(field, direction)
+                            },
+                            fields = if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                                listOf(
+                                    FileSortField.NAME,
+                                    FileSortField.SIZE,
+                                    FileSortField.DATE_MODIFIED
+                                )
+                            } else {
+                                FileSortField.entries
+                            }
+                        )
+                        RefreshAction(refreshing = refreshing, onRefresh = viewModel::refresh)
+            if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                            IconButton(onClick = { showCreateAlbum = true }) {
+                                Icon(
+                                    Icons.Filled.CreateNewFolder,
+                                    contentDescription = stringResource(Res.string.gallery_new_album)
+                                )
+                            }
+                        }
+                        if (state.isAlbumView || state.tab != GalleryTab.ALBUMS) {
+                            IconButton(onClick = viewModel::startSelectionMode) {
+                                Icon(
+                                    Icons.Filled.CheckBoxOutlineBlank,
+                                    contentDescription = stringResource(Res.string.common_select)
+                                )
+                            }
+                        }
                             IconButton(
                                 onClick = {
                                     viewModel.setViewMode(
@@ -893,6 +963,11 @@ fun GalleryScreen(
                         onClick = { viewModel.setNotBackedUpFilter(!state.filters.notBackedUpOnly) },
                         label = { Text(stringResource(Res.string.gallery_filter_not_backed_up)) }
                     )
+                    FilterChip(
+                        selected = advancedFiltersExpanded,
+                        onClick = { advancedFiltersExpanded = !advancedFiltersExpanded },
+                        label = { Text("Advanced filters") }
+                    )
                     if (state.hasActiveFilters) {
                         TextButton(onClick = viewModel::clearFilters) {
                             Text(stringResource(Res.string.gallery_clear_filters))
@@ -902,6 +977,63 @@ fun GalleryScreen(
                     DesktopHorizontalScrollbar(
                         state = galleryFiltersScrollState,
                         modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(8.dp)
+                    )
+                }
+            }
+
+            if (advancedFiltersExpanded && state.tab != GalleryTab.ALBUMS) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = state.filters.extensionQuery,
+                            onValueChange = { viewModel.setAdvancedFilters(extension = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Extension") },
+                            placeholder = { Text("jpg") }
+                        )
+                        OutlinedTextField(
+                            value = state.filters.minSizeMb,
+                            onValueChange = { viewModel.setAdvancedFilters(minSizeMb = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Min size (MB)") }
+                        )
+                        OutlinedTextField(
+                            value = state.filters.maxSizeMb,
+                            onValueChange = { viewModel.setAdvancedFilters(maxSizeMb = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Max size (MB)") }
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = state.filters.modifiedAfterDate,
+                            onValueChange = { viewModel.setAdvancedFilters(modifiedAfterDate = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Modified from") },
+                            placeholder = { Text("YYYY-MM-DD") }
+                        )
+                        OutlinedTextField(
+                            value = state.filters.modifiedBeforeDate,
+                            onValueChange = { viewModel.setAdvancedFilters(modifiedBeforeDate = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Modified to") },
+                            placeholder = { Text("YYYY-MM-DD") }
+                        )
+                    }
+                    Text(
+                        "Use a file extension, size range in MB, and dates in YYYY-MM-DD format.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

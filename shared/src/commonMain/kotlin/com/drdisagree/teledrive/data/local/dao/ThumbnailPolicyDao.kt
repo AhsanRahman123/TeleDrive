@@ -12,6 +12,9 @@ interface ThumbnailPolicyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(policy: ThumbnailPolicyEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(policies: List<ThumbnailPolicyEntity>)
+
     @Query(
         "SELECT policy FROM thumbnail_policies WHERE targetType = :targetType AND targetId = :targetId"
     )
@@ -96,6 +99,27 @@ interface ThumbnailPolicyDao {
                ))"""
     )
     suspend fun deleteOverridesInFolderTree(folderId: String): Int
+
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM thumbnail_policies WHERE targetType = 'QUEUE' AND targetId = 'GLOBAL' AND policy = 'PAUSED')"
+    )
+    suspend fun isQueuePaused(): Boolean
+
+    @Query(
+        "SELECT targetId FROM thumbnail_policies WHERE targetType = 'QUEUE_ITEM' AND policy = 'PAUSED'"
+    )
+    suspend fun pausedQueueItemIds(): List<String>
+
+    @Query(
+        "DELETE FROM thumbnail_policies WHERE targetType = 'QUEUE_ITEM' AND targetId IN (:fileIds)"
+    )
+    suspend fun clearQueueItemPauses(fileIds: List<String>)
+
+    @Query("DELETE FROM thumbnail_policies WHERE targetType = 'QUEUE_ITEM'")
+    suspend fun clearAllQueueItemPauses()
+
+    @Query("DELETE FROM thumbnail_policies WHERE targetType = 'QUEUE' AND targetId = 'GLOBAL'")
+    suspend fun clearGlobalQueuePause()
 
     @Query("DELETE FROM thumbnail_policies")
     suspend fun deleteAll()

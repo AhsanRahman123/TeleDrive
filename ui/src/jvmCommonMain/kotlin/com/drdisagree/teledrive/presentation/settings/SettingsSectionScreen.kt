@@ -209,7 +209,6 @@ fun SettingsSectionScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var confirmLogout by remember { mutableStateOf(false) }
     var confirmClearCache by remember { mutableStateOf(false) }
-    var showThumbnailManager by remember { mutableStateOf(false) }
 
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
 
@@ -237,14 +236,9 @@ fun SettingsSectionScreen(
         topBar = {
             TopAppBar(
                 colors = liftedTopAppBarColors(lifted),
-                title = { Text(if (showThumbnailManager) "Thumbnail manager" else stringResource(section.titleRes)) },
+                title = { Text(if (section == SettingsSectionType.THUMBNAILS) "Thumbnail manager" else stringResource(section.titleRes)) },
                 navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            if (showThumbnailManager) showThumbnailManager = false
-                            else onBack()
-                        }
-                    ) {
+                    IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -258,9 +252,9 @@ fun SettingsSectionScreen(
             LoadingState(modifier = Modifier.padding(padding))
             return@Scaffold
         }
-        if (section == SettingsSectionType.STORAGE && showThumbnailManager) {
+        if (section == SettingsSectionType.THUMBNAILS) {
             ThumbnailManagerScreen(
-                onBack = { showThumbnailManager = false },
+                onBack = onBack,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = padding.calculateTopPadding())
@@ -292,9 +286,10 @@ fun SettingsSectionScreen(
                         SettingsSectionType.STORAGE -> StorageSection(
                             state = state,
                             viewModel = viewModel,
-                            onClearCache = { confirmClearCache = true },
-                            onManageThumbnails = { showThumbnailManager = true }
+                            onClearCache = { confirmClearCache = true }
                         )
+
+                        SettingsSectionType.THUMBNAILS -> Unit
 
                         SettingsSectionType.PERMISSIONS ->
                             PermissionsSection(viewModel.permissionChecker)
@@ -609,8 +604,7 @@ private fun BackupSection(
 private fun StorageSection(
     state: SettingsUiState,
     viewModel: SettingsViewModel,
-    onClearCache: () -> Unit,
-    onManageThumbnails: () -> Unit
+    onClearCache: () -> Unit
 ) {
     val prefs = state.preferences
     val reclaimable by viewModel.reclaimableBytes.collectAsStateWithLifecycle()
@@ -730,13 +724,6 @@ private fun StorageSection(
                 title = stringResource(Res.string.settings_clear_thumbnails_action),
                 subtitle = Formatters.bytes(state.cacheStats.thumbnailBytes),
                 onClick = { confirmClearThumbnails = true }
-            )
-        }
-        add {
-            SettingsClickRow(
-                title = "Thumbnail manager",
-                subtitle = "${Formatters.bytes(state.cacheStats.thumbnailBytes)} cached · inspect and control files and folders",
-                onClick = onManageThumbnails
             )
         }
         add {

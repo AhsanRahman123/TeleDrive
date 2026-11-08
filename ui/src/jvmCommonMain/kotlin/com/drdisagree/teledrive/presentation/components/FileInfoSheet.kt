@@ -28,6 +28,7 @@ import com.drdisagree.teledrive.resources.info_created
 import com.drdisagree.teledrive.resources.info_duration
 import com.drdisagree.teledrive.resources.info_encrypted
 import com.drdisagree.teledrive.resources.info_extension
+import com.drdisagree.teledrive.resources.info_folder_path
 import com.drdisagree.teledrive.resources.info_local_copy
 import com.drdisagree.teledrive.resources.info_modified
 import com.drdisagree.teledrive.resources.info_no
@@ -46,7 +47,8 @@ import java.util.Locale
 @Composable
 fun FileInfoSheet(
     file: DriveFile,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    folderPath: String? = null
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -80,6 +82,9 @@ fun FileInfoSheet(
             InfoRow(stringResource(Res.string.info_created), Formatters.dateTime(file.createdAt))
             InfoRow(stringResource(Res.string.info_modified), Formatters.dateTime(file.modifiedAt))
             InfoRow(stringResource(Res.string.info_added), Formatters.dateTime(file.addedAt))
+            folderPath?.takeIf { it.isNotBlank() }?.let {
+                InfoRow(stringResource(Res.string.info_folder_path), it)
+            }
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
 

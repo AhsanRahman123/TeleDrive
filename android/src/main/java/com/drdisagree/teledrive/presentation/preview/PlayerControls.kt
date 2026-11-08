@@ -728,7 +728,11 @@ private fun playerSecondaryColor(): Color =
 private fun speedLabel(speed: Float): String =
     if (speed % 1f == 0f) "${speed.toInt()}x" else "${speed}x"
 
-private val SPEEDS = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+private val SPEEDS = listOf(
+    0.5f, 0.6f, 0.7f, 0.8f, 0.9f,
+    1f, 1.15f, 1.2f, 1.25f, 1.3f, 1.4f, 1.5f, 1.75f,
+    2f, 2.5f, 3f, 4f
+)
 private const val SEEK_STEP_MS = 10_000L
 private const val PROGRESS_INTERVAL_MS = 250L
 private const val SEEK_TOLERANCE_MS = 500L
