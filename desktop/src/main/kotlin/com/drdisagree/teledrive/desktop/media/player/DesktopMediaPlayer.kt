@@ -107,6 +107,7 @@ import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -248,6 +249,23 @@ fun DesktopMediaPlayer(
         onDispose { ScreenAwake.keepAwake(false) }
     }
 
+    // Keep native VLC audio calls off the Compose UI thread. A conflated channel
+    // drops stale intermediate slider positions so the latest drag value is applied
+    // immediately without building a backlog of JNI calls.
+    val audioStateUpdates = remember(player) {
+        Channel<Pair<Int, Boolean>>(Channel.CONFLATED)
+    }
+    LaunchedEffect(player) {
+        for ((level, shouldMute) in audioStateUpdates) {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    player.audio().setVolume(level.coerceIn(0, MAX_VOLUME))
+                    player.audio().isMute = shouldMute || level <= 0
+                }
+            }
+        }
+    }
+
     val fullscreenController = LocalFullscreenController.current
     DisposableEffect(player, mrl) {
         // Set the initial audio state before starting the media.
@@ -271,10 +289,7 @@ fun DesktopMediaPlayer(
     // user changes volume or mute state. This avoids requiring a slider drag
     // to initialise the audio output.
     LaunchedEffect(player, mrl, playing, volume, muted) {
-        if (playing) {
-            player.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
-            player.audio().isMute = muted || volume <= 0
-        }
+        if (playing) audioStateUpdates.trySend(volume to muted)
     }
 
     val trackWord = stringResource(Res.string.player_track)
@@ -293,19 +308,17 @@ fun DesktopMediaPlayer(
     }
     val toggleMute: () -> Unit = {
         muted = !muted
-        player.audio().isMute = muted
+        audioStateUpdates.trySend(volume to muted)
     }
     fun setPlayerVolume(value: Int, unmute: Boolean = true) {
         val nextVolume = value.coerceIn(0, MAX_VOLUME)
         volume = nextVolume
-        player.audio().setVolume(nextVolume)
         if (nextVolume == 0) {
             muted = true
-            player.audio().isMute = true
         } else if (unmute) {
             muted = false
-            player.audio().isMute = false
         }
+        audioStateUpdates.trySend(nextVolume to muted)
     }
     fun adjustPlayerVolume(delta: Int) {
         setPlayerVolume(volume + delta, unmute = delta > 0)
