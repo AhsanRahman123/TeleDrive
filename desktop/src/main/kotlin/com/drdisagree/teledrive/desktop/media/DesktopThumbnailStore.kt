@@ -79,7 +79,14 @@ class DesktopThumbnailStore(
     private val thumbnailJobDao: ThumbnailJobDao
 ) : ThumbnailStore {
 
-    private val generationSemaphore = Semaphore(MAX_PARALLEL_GENERATIONS)
+    // Keep CPU- and memory-heavy thumbnail work bounded. On a typical 4-core / 8-thread
+    // desktop with a 2 GB JVM heap this resolves to four workers; weaker machines scale down.
+    private val maxParallelGenerations = minOf(
+        MAX_PARALLEL_GENERATIONS,
+        (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1),
+        (Runtime.getRuntime().maxMemory() / MIN_HEAP_PER_WORKER_BYTES).toInt().coerceAtLeast(1)
+    )
+    private val generationSemaphore = Semaphore(maxParallelGenerations)
     private val videoThumbnailMutex = Mutex()
     private val schedulerMutex = Mutex()
     @Volatile private var schedulingPaused = false
@@ -294,7 +301,7 @@ class DesktopThumbnailStore(
      */
     private suspend fun processPendingJobs() = schedulerMutex.withLock {
         if (schedulingPaused || thumbnailPolicyDao.isQueuePaused()) return@withLock
-        val available = (MAX_PARALLEL_GENERATIONS - runningJobs.size).coerceAtLeast(0)
+        val available = (maxParallelGenerations - runningJobs.size).coerceAtLeast(0)
         if (available == 0) return@withLock
         val ready = thumbnailJobDao.nextReady(
             limit = available,
@@ -669,6 +676,7 @@ class DesktopThumbnailStore(
         const val TARGET_FILE = "FILE"
         const val MAX_BACKGROUND_ATTEMPTS = 3
         const val MAX_PARALLEL_GENERATIONS = 4
+        const val MIN_HEAP_PER_WORKER_BYTES = 512L * 1024L * 1024L
         const val JOB_INSERT_BATCH_SIZE = 250
         const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024
