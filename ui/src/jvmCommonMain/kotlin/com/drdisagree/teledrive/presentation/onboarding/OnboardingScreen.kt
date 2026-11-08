@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.onboarding
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.CubicBezierEasing
@@ -224,6 +226,7 @@ fun OnboardingScreen(
     viewModel: OnboardingViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val onboardingScrollState = rememberScrollState()
 
     if (state.step == OnboardingStep.DONE) {
         onFinished()
@@ -244,9 +247,11 @@ fun OnboardingScreen(
             )
             BoxWithConstraints(modifier = Modifier.weight(1f)) {
                 val availableHeight = maxHeight
-                Column(
+                Box(modifier = Modifier.fillMaxSize()) {
+                                    Column(
                     modifier = Modifier
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(onboardingScrollState)
+                        .padding(end = 10.dp)
                         .heightIn(min = availableHeight),
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -361,6 +366,11 @@ fun OnboardingScreen(
                         }
                     }
                     Spacer(Modifier.height(32.dp + padding.calculateBottomPadding()))
+                }
+                    DesktopVerticalScrollbar(
+                        state = onboardingScrollState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                    )
                 }
             }
         }
