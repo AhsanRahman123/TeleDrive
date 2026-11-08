@@ -203,6 +203,18 @@ fun ThumbnailManagerScreen(
         loading = false
     }
 
+    // Keep the queue total in sync with the queue screen's one-second live count.
+    // The heavier cache/folder aggregates continue on their separate five-second refresh.
+    LaunchedEffect(folderId) {
+        while (true) {
+            val liveQueueCount = cacheRepository.thumbnailQueueCount()
+            if (summary.pendingJobs != liveQueueCount) {
+                summary = summary.copy(pendingJobs = liveQueueCount)
+            }
+            delay(1_000L)
+        }
+    }
+
     // Update totals and folder aggregates without resetting the current file page or selection.
     LaunchedEffect(folderId, folderSortOrder) {
         while (true) {
