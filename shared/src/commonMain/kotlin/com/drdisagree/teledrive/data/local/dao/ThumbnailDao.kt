@@ -228,6 +228,26 @@ interface ThumbnailDao {
     ): List<String>
 
     @Query(
+        """SELECT f.id
+             FROM files f
+            WHERE f.id IN (:fileIds)
+              AND f.trashedAt IS NULL
+              AND NOT EXISTS (
+                    SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
+                  )
+              AND (
+                    f.category IN ('IMAGE', 'VIDEO')
+                    OR f.mimeType LIKE 'text/%'
+                    OR f.mimeType IN (
+                        'application/json', 'application/xml', 'application/yaml',
+                        'application/vnd.android.package-archive'
+                    )
+                  )
+            ORDER BY f.addedAt DESC, f.id ASC"""
+    )
+    suspend fun missingEligibleFileIds(fileIds: List<String>): List<String>
+
+    @Query(
         """SELECT f.id AS fileId, f.addedAt AS addedAt
              FROM files f
             WHERE f.trashedAt IS NULL
