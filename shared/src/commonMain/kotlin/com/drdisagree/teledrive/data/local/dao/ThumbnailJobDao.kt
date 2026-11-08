@@ -22,6 +22,12 @@ interface ThumbnailJobDao {
     @Query(
         """SELECT * FROM thumbnail_jobs
             WHERE queuedAt <= :now AND attempts < :maxAttempts
+              AND NOT EXISTS (
+                  SELECT 1 FROM thumbnail_policies p
+                   WHERE p.targetType = 'QUEUE_ITEM'
+                     AND p.targetId = thumbnail_jobs.fileId
+                     AND p.policy = 'PAUSED'
+              )
             ORDER BY queuedAt ASC LIMIT :limit"""
     )
     suspend fun nextReady(
@@ -61,7 +67,13 @@ interface ThumbnailJobDao {
                   j.queuedAt AS queuedAt,
                   j.attempts AS attempts,
                   j.force AS isForced,
-                  0 AS isProcessing
+                  0 AS isProcessing,
+                  EXISTS (
+                      SELECT 1 FROM thumbnail_policies p
+                       WHERE p.targetType = 'QUEUE_ITEM'
+                         AND p.targetId = j.fileId
+                         AND p.policy = 'PAUSED'
+                  ) AS isPaused
              FROM thumbnail_jobs j
              LEFT JOIN files f ON f.id = j.fileId
             ORDER BY j.queuedAt ASC
@@ -75,6 +87,22 @@ interface ThumbnailJobDao {
             LIMIT :limit OFFSET :offset"""
     )
     suspend fun fileIdsPage(offset: Int, limit: Int): List<String>
+
+    @Query("SELECT MAX(fileId) FROM thumbnail_jobs")
+    suspend fun maxFileId(): String?
+
+    @Query(
+        """SELECT fileId FROM thumbnail_jobs
+            WHERE fileId > :afterFileId AND fileId <= :throughFileId
+            ORDER BY fileId ASC
+            LIMIT :limit"""
+    )
+    suspend fun fileIdsAfter(
+        afterFileId: String,
+        throughFileId: String,
+        limit: Int
+    ): List<String>
+
 
     @Query("UPDATE thumbnail_jobs SET attempts = 0, queuedAt = :now WHERE fileId IN (:fileIds)")
     suspend fun retry(fileIds: List<String>, now: Long)
