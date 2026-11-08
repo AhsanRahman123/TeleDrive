@@ -5,6 +5,9 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.drdisagree.teledrive.core.telegram.TelegramProxyType
 import com.drdisagree.teledrive.data.local.database.TeleDriveDatabase
 import com.drdisagree.teledrive.data.local.entity.ProxyEntity
+import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
+import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
+import com.drdisagree.teledrive.data.local.entity.ThumbnailEntity
 import com.drdisagree.teledrive.data.local.entity.FileEntity
 import com.drdisagree.teledrive.data.local.entity.FolderEntity
 import com.drdisagree.teledrive.domain.model.BackupState
@@ -167,6 +170,159 @@ class DesktopDatabaseTest {
             assertEquals("photo", albums.first().coverFileId)
             assertEquals("empty-album", albums.last().folderId)
             assertEquals(0, albums.last().itemCount)
+        } finally {
+            database.close()
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `thumbnail policy chooses the nearest folder rule and then file override`() = runBlocking {
+        val file = File.createTempFile("teledrive", ".db")
+        val database = openDatabase(file)
+        try {
+            database.folderDao().upsert(
+                FolderEntity(
+                    id = "parent",
+                    chatId = 7L,
+                    parentId = null,
+                    name = "Parent",
+                    createdAt = 1L,
+                    modifiedAt = 1L
+                )
+            )
+            database.folderDao().upsert(
+                FolderEntity(
+                    id = "child",
+                    chatId = 7L,
+                    parentId = "parent",
+                    name = "Child",
+                    createdAt = 1L,
+                    modifiedAt = 1L
+                )
+            )
+            database.fileDao().upsert(
+                FileEntity(
+                    id = "photo",
+                    folderId = "child",
+                    name = "photo.jpg",
+                    sizeBytes = 1024L,
+                    mimeType = "image/jpeg",
+                    category = FileCategory.IMAGE,
+                    localPath = null,
+                    contentHash = null,
+                    chatId = 7L,
+                    messageId = null,
+                    remoteFileId = null,
+                    remoteUniqueId = null,
+                    backupState = BackupState.NONE,
+                    createdAt = 1L,
+                    modifiedAt = 1L,
+                    addedAt = 1L
+                )
+            )
+            val policies = database.thumbnailPolicyDao()
+            policies.upsert(
+                ThumbnailPolicyEntity("FOLDER", "parent", "AUTOMATIC", 1L)
+            )
+            assertEquals("AUTOMATIC", policies.effectivePolicy("photo"))
+
+            policies.upsert(
+                ThumbnailPolicyEntity("FOLDER", "child", "MANUAL_ONLY", 2L)
+            )
+            assertEquals("MANUAL_ONLY", policies.effectivePolicy("photo"))
+
+            policies.upsert(
+                ThumbnailPolicyEntity("FILE", "photo", "AUTOMATIC", 3L)
+            )
+            assertEquals("AUTOMATIC", policies.effectivePolicy("photo"))
+        } finally {
+            database.close()
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `thumbnail jobs are durable database rows`() = runBlocking {
+        val file = File.createTempFile("teledrive", ".db")
+        val database = openDatabase(file)
+        try {
+            val job = ThumbnailJobEntity(
+                fileId = "photo",
+                queuedAt = 123L,
+                attempts = 1,
+                force = true
+            )
+            database.thumbnailJobDao().enqueue(job)
+
+            assertEquals(listOf(job), database.thumbnailJobDao().next(10))
+            assertEquals(1, database.thumbnailJobDao().count())
+
+            database.thumbnailJobDao().recordAttempt("photo")
+            assertEquals(2, database.thumbnailJobDao().next(1).single().attempts)
+            database.thumbnailJobDao().delete("photo")
+            assertEquals(0, database.thumbnailJobDao().count())
+        } finally {
+            database.close()
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `thumbnail folder inventory reports per-file cache bytes`() = runBlocking {
+        val file = File.createTempFile("teledrive", ".db")
+        val database = openDatabase(file)
+        try {
+            database.folderDao().upsert(
+                FolderEntity(
+                    id = "album",
+                    chatId = 7L,
+                    parentId = null,
+                    name = "Album",
+                    createdAt = 1L,
+                    modifiedAt = 1L
+                )
+            )
+            database.fileDao().upsert(
+                FileEntity(
+                    id = "photo",
+                    folderId = "album",
+                    name = "photo.jpg",
+                    sizeBytes = 4096L,
+                    mimeType = "image/jpeg",
+                    category = FileCategory.IMAGE,
+                    localPath = null,
+                    contentHash = null,
+                    chatId = 7L,
+                    messageId = null,
+                    remoteFileId = null,
+                    remoteUniqueId = null,
+                    backupState = BackupState.NONE,
+                    createdAt = 1L,
+                    modifiedAt = 1L,
+                    addedAt = 1L
+                )
+            )
+            database.thumbnailDao().upsert(
+                ThumbnailEntity(
+                    fileId = "photo",
+                    path = "/cache/photo.thumb",
+                    encrypted = true,
+                    width = 512,
+                    height = 512,
+                    sizeBytes = 12_345L,
+                    generatedAt = 10L,
+                    lastAccessAt = 20L
+                )
+            )
+
+            val rows = database.thumbnailDao().filesInFolder("album", 60, 0)
+            assertEquals(1, rows.size)
+            assertEquals("photo", rows.single().fileId)
+            assertEquals(12_345L, rows.single().thumbnailSizeBytes)
+            assertEquals(4096L, rows.single().fileSizeBytes)
+            assertEquals(true, rows.single().encrypted)
+            assertEquals(12_345L, database.thumbnailDao().folderAggregates().single().totalBytes)
         } finally {
             database.close()
             file.delete()
