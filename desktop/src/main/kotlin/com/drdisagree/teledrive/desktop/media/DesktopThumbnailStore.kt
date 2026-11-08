@@ -665,12 +665,7 @@ class DesktopThumbnailStore(
 
                 // Decode only enough source pixels to produce a 512px preview. ImageIO.read()
                 // first expands the full original image, which is wasteful for large photos.
-                val sample = maxOf(
-                    1,
-                    kotlin.math.ceil(
-                        maxOf(sourceWidth, sourceHeight).toDouble() / MAX_DIMENSION.toDouble()
-                    ).toInt()
-                )
+                val sample = maxOf(1, maxOf(sourceWidth, sourceHeight) / MAX_DIMENSION)
                 val readParam = reader.defaultReadParam
                 if (sample > 1) readParam.setSourceSubsampling(sample, sample, 0, 0)
                 val decoded = reader.read(0, readParam) ?: return null
