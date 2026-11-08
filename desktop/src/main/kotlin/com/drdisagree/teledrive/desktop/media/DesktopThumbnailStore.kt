@@ -338,7 +338,7 @@ class DesktopThumbnailStore(
                     lastAccessAt = now
                 )
             )
-            ThumbnailChangeNotifier.notifyChanged(fileId)
+            ThumbnailChangeNotifier.notifyChanged(fileId, stored.size.toLong(), now, encrypt)
         }
         return jpegBytes
     }
