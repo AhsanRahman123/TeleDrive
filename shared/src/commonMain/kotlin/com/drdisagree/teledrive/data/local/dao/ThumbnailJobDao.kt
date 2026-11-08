@@ -68,6 +68,13 @@ interface ThumbnailJobDao {
     )
     suspend fun page(offset: Int, limit: Int): List<ThumbnailQueueItem>
 
+    @Query(
+        """SELECT fileId FROM thumbnail_jobs
+            ORDER BY queuedAt ASC, fileId ASC
+            LIMIT :limit OFFSET :offset"""
+    )
+    suspend fun fileIdsPage(offset: Int, limit: Int): List<String>
+
     @Query("UPDATE thumbnail_jobs SET attempts = 0, queuedAt = :now WHERE fileId IN (:fileIds)")
     suspend fun retry(fileIds: List<String>, now: Long)
 
