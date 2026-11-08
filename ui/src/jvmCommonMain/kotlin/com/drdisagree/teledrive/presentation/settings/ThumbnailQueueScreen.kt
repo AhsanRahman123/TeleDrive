@@ -149,7 +149,7 @@ fun ThumbnailQueueScreen(
                 IconButton(onClick = {
                     scope.launch {
                         items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
-                        pendingCount = repository.thumbnailManagerSummary().pendingJobs
+                        pendingCount = repository.thumbnailQueueCount()
                         queuePaused = repository.thumbnailQueuePaused()
                     }
                 }) {
