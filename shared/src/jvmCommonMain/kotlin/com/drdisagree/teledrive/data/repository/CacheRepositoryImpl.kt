@@ -206,17 +206,40 @@ class CacheRepositoryImpl(
         offset = offset.coerceAtLeast(0)
     )
 
+    override suspend fun thumbnailFileIdsMatching(
+        folderId: String?,
+        cacheFilter: String,
+        policyFilter: String,
+        searchQuery: String
+    ): List<String> = thumbnailDao.fileIdsMatching(
+        folderId = folderId,
+        cacheFilter = cacheFilter,
+        policyFilter = policyFilter,
+        searchQuery = searchQuery.trim()
+    )
+
     override suspend fun thumbnailFiles(
         folderId: String?,
         offset: Int,
-        limit: Int
+        limit: Int,
+        cacheFilter: String,
+        policyFilter: String,
+        searchQuery: String,
+        sortOrder: String
     ): List<ThumbnailFileUsage> = thumbnailDao.filesInFolder(
         folderId = folderId,
+        cacheFilter = cacheFilter,
+        policyFilter = policyFilter,
+        searchQuery = searchQuery.trim(),
+        sortOrder = sortOrder,
         limit = limit.coerceIn(1, 500),
         offset = offset.coerceAtLeast(0)
     ).map { row ->
-        val stored = thumbnailPolicyDao.effectivePolicy(row.fileId)
-        val policy = stored?.let { runCatching { ThumbnailPolicy.valueOf(it) }.getOrNull() }
+        val directPolicy = row.directPolicy
+            .let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+            ?: ThumbnailPolicy.INHERIT
+        val effectivePolicy = row.effectivePolicy
+            .let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
             ?: ThumbnailPolicy.MANUAL_ONLY
         ThumbnailFileUsage(
             fileId = row.fileId,
@@ -228,7 +251,8 @@ class CacheRepositoryImpl(
             generatedAt = row.generatedAt,
             lastAccessAt = row.lastAccessAt,
             encrypted = row.encrypted,
-            policy = policy,
+            policy = directPolicy,
+            effectivePolicy = effectivePolicy,
             isTrashed = row.isTrashed
         )
     }
