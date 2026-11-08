@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.home
 
+import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -369,10 +370,11 @@ fun HomeScreen(
                         Spacer(Modifier.height(8.dp))
                         val recentState = rememberLazyListState()
                         val recentKeyboard = rememberKeyboardCollection(recentState, horizontal = true)
-                        LazyRow(
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                                                    LazyRow(
                             state = recentState,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.keyboardCollection(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp).keyboardCollection(
                                 recentKeyboard,
                                 state.recentFiles.size
                             )
@@ -412,6 +414,11 @@ fun HomeScreen(
                                     )
                                 }
                             }
+                        }
+                            DesktopHorizontalScrollbar(
+                                state = recentState,
+                                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(8.dp)
+                            )
                         }
                     }
                 }
