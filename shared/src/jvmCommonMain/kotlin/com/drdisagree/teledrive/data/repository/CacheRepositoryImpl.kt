@@ -65,6 +65,8 @@ class CacheRepositoryImpl(
         thumbnailDir().deleteRecursively()
         thumbnailDao.deleteAll()
         thumbnailJobDao.deleteAll()
+        thumbnailPolicyDao.clearGlobalQueuePause()
+        thumbnailPolicyDao.clearAllQueueItemPauses()
         thumbnailMemoryCache.clear()
         refreshThumbnailStats()
     }
@@ -278,6 +280,7 @@ class CacheRepositoryImpl(
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
             thumbnailJobDao.delete(targetId)
+            thumbnailPolicyDao.clearQueueItemPauses(listOf(targetId))
             thumbnailStore.cancelJobs(listOf(targetId))
         }
         if (targetType == ThumbnailTargetType.FILE &&
@@ -429,10 +432,16 @@ class CacheRepositoryImpl(
         limit: Int
     ): List<ThumbnailQueueItem> {
         val active = thumbnailStore.observeActiveJobs().first()
+        val allPaused = thumbnailPolicyDao.isQueuePaused()
         return thumbnailJobDao.page(
             offset = offset.coerceAtLeast(0),
             limit = limit.coerceIn(1, 200)
-        ).map { it.copy(isProcessing = it.fileId in active) }
+        ).map {
+            it.copy(
+                isProcessing = it.fileId in active,
+                isPaused = allPaused || it.isPaused
+            )
+        }
     }
 
     override suspend fun thumbnailQueueFileIds(
@@ -443,14 +452,81 @@ class CacheRepositoryImpl(
         limit = limit.coerceIn(1, 500)
     )
 
+    override suspend fun thumbnailQueueAllFileIds(): List<String> {
+        val throughFileId = thumbnailJobDao.maxFileId() ?: return emptyList()
+        val result = mutableListOf<String>()
+        var afterFileId = ""
+        while (true) {
+            val page = thumbnailJobDao.fileIdsAfter(
+                afterFileId = afterFileId,
+                throughFileId = throughFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (page.isEmpty()) break
+            result.addAll(page)
+            afterFileId = page.last()
+            if (page.size < JOB_BATCH_SIZE) break
+        }
+        return result
+    }
+
+    override suspend fun thumbnailQueuePaused(): Boolean =
+        thumbnailPolicyDao.isQueuePaused()
+
     override fun observeThumbnailActiveJobs(): Flow<Set<String>> =
         thumbnailStore.observeActiveJobs()
+
+    override suspend fun pauseThumbnailJobs(fileIds: List<String>) {
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            val now = System.currentTimeMillis()
+            thumbnailPolicyDao.upsert(
+                batch.map { id ->
+                    ThumbnailPolicyEntity(
+                        targetType = QUEUE_ITEM_TARGET,
+                        targetId = id,
+                        policy = QUEUE_PAUSED,
+                        changedAt = now
+                    )
+                }
+            )
+            thumbnailStore.pauseJobs(batch)
+        }
+    }
+
+    override suspend fun resumeThumbnailJobs(fileIds: List<String>) {
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
+        }
+        thumbnailStore.resumeQueue()
+    }
+
+    override suspend fun pauseAllThumbnailJobs() {
+        thumbnailPolicyDao.upsert(
+            ThumbnailPolicyEntity(
+                targetType = QUEUE_TARGET,
+                targetId = QUEUE_GLOBAL_ID,
+                policy = QUEUE_PAUSED,
+                changedAt = System.currentTimeMillis()
+            )
+        )
+        thumbnailStore.pauseAllJobs()
+    }
+
+    override suspend fun resumeAllThumbnailJobs() {
+        thumbnailPolicyDao.clearGlobalQueuePause()
+        thumbnailStore.resumeQueue()
+    }
 
     override suspend fun cancelThumbnailJobs(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
         ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
             thumbnailJobDao.delete(batch)
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
             thumbnailStore.cancelJobs(batch)
         }
     }
@@ -459,6 +535,7 @@ class CacheRepositoryImpl(
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
         ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
             thumbnailJobDao.retry(batch, System.currentTimeMillis())
             thumbnailStore.retryJobs(batch)
         }
@@ -467,6 +544,8 @@ class CacheRepositoryImpl(
     override suspend fun cancelAllThumbnailJobs() {
         thumbnailStore.cancelAllJobs()
         thumbnailJobDao.deleteAll()
+        thumbnailPolicyDao.clearGlobalQueuePause()
+        thumbnailPolicyDao.clearAllQueueItemPauses()
     }
 
     override suspend fun removeThumbnail(fileId: String) {
@@ -477,6 +556,7 @@ class CacheRepositoryImpl(
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
         ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
             // Delete queue rows first so the scheduler cannot restart selected items while
             // the running workers are being cancelled.
             thumbnailJobDao.delete(batch)
@@ -590,5 +670,9 @@ class CacheRepositoryImpl(
     private companion object {
         const val TAG = "CacheRepository"
         const val JOB_BATCH_SIZE = 250
+        const val QUEUE_TARGET = "QUEUE"
+        const val QUEUE_GLOBAL_ID = "GLOBAL"
+        const val QUEUE_ITEM_TARGET = "QUEUE_ITEM"
+        const val QUEUE_PAUSED = "PAUSED"
     }
 }
