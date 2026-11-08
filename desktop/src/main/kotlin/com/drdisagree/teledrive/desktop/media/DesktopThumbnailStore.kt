@@ -30,9 +30,18 @@ import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.update
+import java.util.concurrent.ConcurrentHashMap
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.data.local.dao.FileDao
@@ -68,16 +77,53 @@ class DesktopThumbnailStore(
     private val thumbnailJobDao: ThumbnailJobDao
 ) : ThumbnailStore {
 
-    private val generationSemaphore = Semaphore(3)
+    private val generationSemaphore = Semaphore(MAX_PARALLEL_GENERATIONS)
     private val videoThumbnailMutex = Mutex()
     private val jobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobWakeups = Channel<Unit>(Channel.CONFLATED)
+    private val runningJobs = ConcurrentHashMap<String, Job>()
+    private val processingIds = ConcurrentHashMap.newKeySet<String>()
+    private val _activeJobs = MutableStateFlow<Set<String>>(emptySet())
+
+    override fun observeActiveJobs(): Flow<Set<String>> = _activeJobs.asStateFlow()
 
     init {
         jobScope.launch {
-            for (ignored in jobWakeups) processPendingJobs()
+            for (ignored in jobWakeups) {
+                try {
+                    processPendingJobs()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    com.drdisagree.teledrive.core.common.SafeLog.w(
+                        "DesktopThumbnailStore",
+                        "Thumbnail queue scheduler recovered from an error",
+                        error
+                    )
+                    delay(BACKGROUND_RETRY_DELAY_MS)
+                    jobWakeups.trySend(Unit)
+                }
+            }
         }
         jobWakeups.trySend(Unit)
+    }
+
+    override suspend fun cancelJobs(fileIds: List<String>) {
+        fileIds.distinct().forEach { id ->
+            runningJobs[id]?.cancel(CancellationException("Thumbnail job cancelled by user"))
+            processingIds.remove(id)
+            _activeJobs.update { it - id }
+        }
+        jobWakeups.trySend(Unit)
+    }
+
+    override suspend fun cancelAllJobs() {
+        runningJobs.values.toList().forEach {
+            it.cancel(CancellationException("All thumbnail jobs cancelled by user"))
+        }
+        runningJobs.clear()
+        processingIds.clear()
+        _activeJobs.value = emptySet()
     }
 
     override suspend fun thumbnailBytes(fileId: String): ByteArray? {
@@ -194,38 +240,77 @@ class DesktopThumbnailStore(
             ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
             ?: ThumbnailPolicy.MANUAL_ONLY
 
+    /**
+     * Schedule up to MAX_PARALLEL_GENERATIONS independent jobs. The database remains the
+     * durable source of truth; in-memory jobs are only the currently executing subset.
+     */
     private suspend fun processPendingJobs() {
-        while (true) {
-            val job = thumbnailJobDao.next(1).firstOrNull() ?: return
-            val entity = fileDao.byId(job.fileId)
-            if (entity == null || entity.trashedAt != null) {
-                thumbnailJobDao.delete(job.fileId)
-                continue
+        val available = (MAX_PARALLEL_GENERATIONS - runningJobs.size).coerceAtLeast(0)
+        if (available == 0) return
+        val ready = thumbnailJobDao.nextReady(
+            limit = available,
+            now = System.currentTimeMillis(),
+            maxAttempts = MAX_BACKGROUND_ATTEMPTS
+        )
+        ready.forEach { job ->
+            if (!processingIds.add(job.fileId)) return@forEach
+            val worker = jobScope.launch {
+                _activeJobs.update { it + job.fileId }
+                try {
+                    processSingleJob(job)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    com.drdisagree.teledrive.core.common.SafeLog.w(
+                        "DesktopThumbnailStore",
+                        "Thumbnail preparation failed for ${job.fileId}",
+                        error
+                    )
+                    scheduleRetry(job)
+                } finally {
+                    runningJobs.remove(job.fileId)
+                    processingIds.remove(job.fileId)
+                    _activeJobs.update { it - job.fileId }
+                    jobWakeups.trySend(Unit)
+                }
             }
-            val cached = thumbnailDao.byFileId(job.fileId)?.let { File(it.path).exists() } == true
-            if (cached || (!job.force && effectivePolicy(job.fileId) != ThumbnailPolicy.AUTOMATIC)) {
-                thumbnailJobDao.delete(job.fileId)
-                continue
-            }
-            val bytes = try {
-                generationSemaphore.withPermit { generate(job.fileId) }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                null
-            }
-            if (bytes != null) {
-                thumbnailJobDao.delete(job.fileId)
-                continue
-            }
-            thumbnailJobDao.recordAttempt(job.fileId)
-            if (job.attempts + 1 >= MAX_BACKGROUND_ATTEMPTS) {
-                thumbnailJobDao.delete(job.fileId)
-                continue
-            }
-            delay(BACKGROUND_RETRY_DELAY_MS)
-            jobWakeups.trySend(Unit)
+            runningJobs[job.fileId] = worker
+        }
+    }
+
+    private suspend fun processSingleJob(job: ThumbnailJobEntity) {
+        val entity = fileDao.byId(job.fileId)
+        if (entity == null || entity.trashedAt != null) {
+            thumbnailJobDao.delete(job.fileId)
             return
+        }
+        val cached = thumbnailDao.byFileId(job.fileId)?.let { File(it.path).exists() } == true
+        if (cached || (!job.force && effectivePolicy(job.fileId) != ThumbnailPolicy.AUTOMATIC)) {
+            thumbnailJobDao.delete(job.fileId)
+            return
+        }
+        val bytes = generationSemaphore.withPermit { generate(job.fileId) }
+        currentCoroutineContext().ensureActive()
+        if (bytes != null) {
+            thumbnailJobDao.delete(job.fileId)
+        } else {
+            scheduleRetry(job)
+        }
+    }
+
+    private suspend fun scheduleRetry(job: ThumbnailJobEntity) {
+        val attempts = job.attempts + 1
+        val retryAt = if (attempts >= MAX_BACKGROUND_ATTEMPTS) {
+            Long.MAX_VALUE
+        } else {
+            System.currentTimeMillis() + BACKGROUND_RETRY_DELAY_MS
+        }
+        thumbnailJobDao.recordAttempt(job.fileId, retryAt)
+        if (retryAt != Long.MAX_VALUE) {
+            jobScope.launch {
+                delay(BACKGROUND_RETRY_DELAY_MS)
+                jobWakeups.trySend(Unit)
+            }
         }
     }
 
@@ -320,6 +405,7 @@ class DesktopThumbnailStore(
             }
         } ?: return null
 
+        currentCoroutineContext().ensureActive()
         if (cacheResult) {
             val encrypt = settingsRepository.preferences.first().encryptThumbnails
             val stored = if (encrypt) {
@@ -532,6 +618,7 @@ class DesktopThumbnailStore(
     private companion object {
         const val TARGET_FILE = "FILE"
         const val MAX_BACKGROUND_ATTEMPTS = 3
+        const val MAX_PARALLEL_GENERATIONS = 3
         const val JOB_INSERT_BATCH_SIZE = 250
         const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024
