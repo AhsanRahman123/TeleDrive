@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
+import com.drdisagree.teledrive.domain.repository.ThumbnailQueueItem
 
 @Dao
 interface ThumbnailJobDao {
@@ -17,6 +18,34 @@ interface ThumbnailJobDao {
 
     @Query("SELECT * FROM thumbnail_jobs ORDER BY queuedAt ASC LIMIT :limit")
     suspend fun next(limit: Int): List<ThumbnailJobEntity>
+
+    @Query(
+        "SELECT * FROM thumbnail_jobs WHERE queuedAt <= :now ORDER BY queuedAt ASC LIMIT :limit"
+    )
+    suspend fun nextReady(limit: Int, now: Long): List<ThumbnailJobEntity>
+
+    @Query("SELECT MIN(queuedAt) FROM thumbnail_jobs")
+    suspend fun nextQueuedAt(): Long?
+
+    @Query(
+        "UPDATE thumbnail_jobs SET attempts = attempts + 1, queuedAt = :retryAt WHERE fileId = :fileId"
+    )
+    suspend fun recordAttempt(fileId: String, retryAt: Long)
+
+    @Query(
+        """SELECT j.fileId AS fileId,
+                  COALESCE(f.name, j.fileId) AS name,
+                  COALESCE(f.mimeType, '') AS mimeType,
+                  COALESCE(f.sizeBytes, 0) AS fileSizeBytes,
+                  j.queuedAt AS queuedAt,
+                  j.attempts AS attempts,
+                  j.force AS isForced
+             FROM thumbnail_jobs j
+             LEFT JOIN files f ON f.id = j.fileId
+            ORDER BY j.queuedAt ASC
+            LIMIT :limit OFFSET :offset"""
+    )
+    suspend fun page(offset: Int, limit: Int): List<ThumbnailQueueItem>
 
     @Query("UPDATE thumbnail_jobs SET attempts = attempts + 1 WHERE fileId = :fileId")
     suspend fun recordAttempt(fileId: String)
