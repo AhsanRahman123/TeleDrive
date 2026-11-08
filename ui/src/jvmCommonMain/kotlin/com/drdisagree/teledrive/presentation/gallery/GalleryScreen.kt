@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.presentation.gallery
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.Alignment
+import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollbar
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Archive
@@ -358,6 +361,7 @@ fun GalleryScreen(
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val selectionMode = state.selectionMode || selectionModeEnabled
     val media = viewModel.pagedMedia.collectAsLazyPagingItems()
+    val galleryFiltersScrollState = rememberScrollState()
     // Fit more media previews on wide windows while keeping phone grids unchanged.
     val isWideWindow = currentWindowAdaptiveInfoV2().windowSizeClass
         .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
@@ -858,10 +862,12 @@ fun GalleryScreen(
             )
 
             if (state.tab != GalleryTab.ALBUMS) {
-                Row(
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
+                        .horizontalScroll(galleryFiltersScrollState)
+                    .padding(bottom = 8.dp)
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -890,6 +896,11 @@ fun GalleryScreen(
                             Text(stringResource(Res.string.gallery_clear_filters))
                         }
                     }
+                }
+                    DesktopHorizontalScrollbar(
+                        state = galleryFiltersScrollState,
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(8.dp)
+                    )
                 }
             }
 
