@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -130,6 +131,7 @@ import com.drdisagree.teledrive.presentation.components.SortMenu
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.FileDetailsItem
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.FolderGridItem
 import com.drdisagree.teledrive.presentation.components.FolderInfoSheet
 import com.drdisagree.teledrive.presentation.components.FolderPickerDialog
@@ -1098,11 +1100,13 @@ private fun FilesContent(
         },
         onEnd = viewModel::endRangeSelection
     )
-    LazyVerticalGrid(
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(columns),
         modifier = Modifier
             .fillMaxSize()
+            .padding(end = 10.dp)
             .keyboardCollection(
                 keyboard,
                 itemCount,
@@ -1257,6 +1261,10 @@ private fun FilesContent(
                 )
             }
         }
+        DesktopVerticalScrollbar(
+            state = gridState,
+            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+        )
     }
 }
 
