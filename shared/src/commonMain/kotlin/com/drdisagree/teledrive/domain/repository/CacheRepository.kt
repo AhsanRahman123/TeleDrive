@@ -60,6 +60,8 @@ interface CacheRepository {
 
     suspend fun thumbnailQueue(offset: Int, limit: Int): List<ThumbnailQueueItem> = emptyList()
 
+    suspend fun thumbnailQueueFileIds(offset: Int, limit: Int): List<String> = emptyList()
+
     fun observeThumbnailActiveJobs(): Flow<Set<String>> = flowOf(emptySet())
 
     suspend fun cancelThumbnailJobs(fileIds: List<String>) = Unit
