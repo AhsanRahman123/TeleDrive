@@ -28,6 +28,7 @@ import com.drdisagree.teledrive.resources.info_created
 import com.drdisagree.teledrive.resources.info_duration
 import com.drdisagree.teledrive.resources.info_encrypted
 import com.drdisagree.teledrive.resources.info_extension
+import com.drdisagree.teledrive.resources.info_folder_path
 import com.drdisagree.teledrive.resources.info_local_copy
 import com.drdisagree.teledrive.resources.info_modified
 import com.drdisagree.teledrive.resources.info_no
