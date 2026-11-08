@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.presentation.transfers
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -251,10 +254,12 @@ fun TransfersScreen(
         val actionsFocusable: (TransferTask) -> Boolean = { transfer ->
             keyboard.current == rows.indexOf(transfer)
         }
-        LazyColumn(
+        Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                        .padding(end = 10.dp)
                 .keyboardCollection(keyboard, rows.count { it != null }, shortcuts),
             contentPadding = padding.add(horizontal = 16.dp, top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -296,6 +301,11 @@ fun TransfersScreen(
                 TransferRow(transfer = transfer, modifier = itemModifier(transfer))
             }
         }
+                DesktopVerticalScrollbar(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                )
+            }
     }
 }
 
