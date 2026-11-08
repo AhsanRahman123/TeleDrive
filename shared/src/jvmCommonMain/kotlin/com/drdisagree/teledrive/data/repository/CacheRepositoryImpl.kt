@@ -135,12 +135,15 @@ class CacheRepositoryImpl(
     override suspend fun thumbnailManagerSummary(): ThumbnailManagerSummary {
         refreshThumbnailStats()
         val unfiled = thumbnailDao.unfiledAggregate()
+        val orphaned = thumbnailDao.orphanedAggregate()
         return ThumbnailManagerSummary(
             totalBytes = thumbnailDao.totalSizeBytes(),
             cachedFiles = thumbnailDao.count(),
             pendingJobs = thumbnailJobDao.count(),
             unfiledBytes = unfiled.totalBytes,
-            unfiledCachedFiles = unfiled.cachedFiles
+            unfiledCachedFiles = unfiled.cachedFiles,
+            orphanedBytes = orphaned.totalBytes,
+            orphanedCachedFiles = orphaned.cachedFiles
         )
     }
 
@@ -397,6 +400,30 @@ class CacheRepositoryImpl(
                 changedAt = System.currentTimeMillis()
             )
         )
+        refreshThumbnailStats()
+    }
+
+    override suspend fun clearOrphanedThumbnails() {
+        var afterFileId: String? = null
+        while (true) {
+            val batch = thumbnailDao.orphanedFilePathsPage(
+                afterFileId = afterFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (batch.isEmpty()) break
+            val removedIds = batch.filter { ref ->
+                val cachedFile = File(ref.path)
+                !cachedFile.exists() || cachedFile.delete()
+            }.map { it.fileId }
+            if (removedIds.isNotEmpty()) {
+                thumbnailDao.deleteAll(removedIds)
+                thumbnailJobDao.delete(removedIds)
+                thumbnailPolicyDao.deleteFileOverrides(removedIds)
+                removedIds.forEach(thumbnailMemoryCache::remove)
+            }
+            afterFileId = batch.last().fileId
+            if (batch.size < JOB_BATCH_SIZE) break
+        }
         refreshThumbnailStats()
     }
 
