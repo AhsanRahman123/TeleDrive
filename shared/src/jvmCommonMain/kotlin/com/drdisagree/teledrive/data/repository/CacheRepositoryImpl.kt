@@ -438,19 +438,24 @@ class CacheRepositoryImpl(
         thumbnailStore.enqueueManual(fileId)
     }
 
-    override suspend fun generateThumbnails(fileIds: List<String>) {
+    override suspend fun generateThumbnails(fileIds: List<String>): Int {
         val ids = fileIds.distinct()
-        if (ids.isNotEmpty()) {
-            ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
-                thumbnailPolicyDao.clearQueueItemPauses(batch)
-                thumbnailStore.enqueueManual(batch)
+        var acceptedCount = 0
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            val missingIds = thumbnailDao.missingEligibleFileIds(batch)
+            if (missingIds.isNotEmpty()) {
+                thumbnailPolicyDao.clearQueueItemPauses(missingIds)
+                thumbnailStore.enqueueManual(missingIds)
+                acceptedCount += missingIds.size
             }
         }
+        return acceptedCount
     }
 
-    override suspend fun generateFolderThumbnails(folderId: String?) {
+    override suspend fun generateFolderThumbnails(folderId: String?): Int {
         var afterAddedAt: Long? = null
         var afterFileId: String? = null
+        var acceptedCount = 0
         while (true) {
             val page = if (folderId == null) {
                 thumbnailDao.unfiledFileIdsPage(
@@ -472,16 +477,19 @@ class CacheRepositoryImpl(
             val pageIds = page.map { it.fileId }
             thumbnailPolicyDao.clearQueueItemPauses(pageIds)
             thumbnailStore.enqueueManual(pageIds)
+            acceptedCount += pageIds.size
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
+        return acceptedCount
     }
 
-    override suspend fun generateAllThumbnails() {
+    override suspend fun generateAllThumbnails(): Int {
         var afterAddedAt: Long? = null
         var afterFileId: String? = null
+        var acceptedCount = 0
         while (true) {
             val page = thumbnailDao.allEligibleFileIdsPage(
                 onlyMissing = true,
@@ -493,22 +501,26 @@ class CacheRepositoryImpl(
             val pageIds = page.map { it.fileId }
             thumbnailPolicyDao.clearQueueItemPauses(pageIds)
             thumbnailStore.enqueueManual(pageIds)
+            acceptedCount += pageIds.size
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
+        return acceptedCount
     }
 
     override suspend fun thumbnailQueue(
         offset: Int,
-        limit: Int
+        limit: Int,
+        sortOrder: String
     ): List<ThumbnailQueueItem> {
         val active = thumbnailStore.observeActiveJobs().first()
         val allPaused = thumbnailPolicyDao.isQueuePaused()
         return thumbnailJobDao.page(
             offset = offset.coerceAtLeast(0),
-            limit = limit.coerceIn(1, 200)
+            limit = limit.coerceIn(1, 200),
+            sortOrder = sortOrder
         ).map {
             it.copy(
                 isProcessing = it.fileId in active,
