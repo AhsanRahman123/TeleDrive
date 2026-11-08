@@ -28,6 +28,7 @@ internal object WindowsMonitorBrightness {
     private const val PRIMARY_MONITOR_FALLBACK = WinUser.MONITOR_DEFAULTTOPRIMARY
     private const val NEAREST_MONITOR = WinUser.MONITOR_DEFAULTTONEAREST
 
+    @Synchronized
     fun read(): Reading? {
         if (!isWindows()) return null
 
@@ -73,6 +74,7 @@ internal object WindowsMonitorBrightness {
      * minimum/maximum. If a logical display exposes multiple physical panels,
      * each brightness-capable panel is updated.
      */
+    @Synchronized
     fun setPercent(percent: Float): Boolean {
         if (!isWindows()) return false
         val normalized = percent.coerceIn(0f, 100f)
@@ -117,21 +119,17 @@ internal object WindowsMonitorBrightness {
         System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
     private fun targetMonitor(): WinUser.HMONITOR? {
+        // Use the monitor with the greatest intersection with the active
+        // TeleDrive window. Do not silently change the primary monitor if the
+        // app has no active window: that could affect the wrong display.
         val activeWindow = runCatching {
-            val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
-            focusManager.activeWindow
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
                 ?: Window.getWindows().firstOrNull { it.isVisible && it.isActive }
-        }.getOrNull()
+        }.getOrNull() ?: return null
 
-        val windowMonitor = activeWindow?.let { window ->
-            runCatching {
-                val hwnd = WinDef.HWND(Native.getWindowPointer(window))
-                User32.INSTANCE.MonitorFromWindow(hwnd, NEAREST_MONITOR)
-            }.getOrNull()
-        }
-
-        return windowMonitor ?: runCatching {
-            User32.INSTANCE.MonitorFromWindow(WinDef.HWND(), PRIMARY_MONITOR_FALLBACK)
+        return runCatching {
+            val hwnd = WinDef.HWND(Native.getWindowPointer(activeWindow))
+            User32.INSTANCE.MonitorFromWindow(hwnd, NEAREST_MONITOR)
         }.getOrNull()
     }
 
