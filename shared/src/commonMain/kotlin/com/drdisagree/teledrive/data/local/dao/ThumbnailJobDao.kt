@@ -92,6 +92,9 @@ interface ThumbnailJobDao {
     @Query("SELECT fileId FROM thumbnail_jobs ORDER BY fileId ASC")
     suspend fun allFileIds(): List<String>
 
+    @Query("SELECT fileId FROM thumbnail_jobs WHERE attempts >= 3")
+    suspend fun failedFileIds(): List<String>
+
 
     @Query("UPDATE thumbnail_jobs SET attempts = 0, queuedAt = :now WHERE fileId IN (:fileIds)")
     suspend fun retry(fileIds: List<String>, now: Long)
