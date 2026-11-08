@@ -151,19 +151,35 @@ class CacheRepositoryImpl(
         )
     }
 
-    override suspend fun thumbnailFolders(parentId: String?): List<ThumbnailFolderUsage> {
+    override suspend fun thumbnailFolders(
+        parentId: String?,
+        sortOrder: String
+    ): List<ThumbnailFolderUsage> {
         val folders = folderDao.allFoldersAnyOwner()
         val byId = folders.associateBy { it.id }
         val direct = thumbnailDao.folderAggregates()
             .filter { it.folderId != null }
             .associateBy { it.folderId!! }
+        val statusDirect = thumbnailDao.folderStatusAggregates()
+            .filter { it.folderId != null }
+            .associateBy { it.folderId!! }
         val totals = mutableMapOf<String, Pair<Long, Int>>()
+        val statusTotals = mutableMapOf<String, Pair<Int, Int>>()
         for ((folderId, aggregate) in direct) {
             var current: String? = folderId
             while (current != null) {
                 val previous = totals[current] ?: (0L to 0)
                 totals[current] = (previous.first + aggregate.totalBytes) to
                     (previous.second + aggregate.cachedFiles)
+                current = byId[current]?.parentId
+            }
+        }
+        for ((folderId, aggregate) in statusDirect) {
+            var current: String? = folderId
+            while (current != null) {
+                val previous = statusTotals[current] ?: (0 to 0)
+                statusTotals[current] = (previous.first + aggregate.eligibleFiles) to
+                    (previous.second + aggregate.generatedFiles)
                 current = byId[current]?.parentId
             }
         }
@@ -175,6 +191,7 @@ class CacheRepositoryImpl(
             .map { folder ->
                 val usage = totals[folder.id] ?: (0L to 0)
                 val own = direct[folder.id]
+                val status = statusTotals[folder.id] ?: (0 to 0)
                 ThumbnailFolderUsage(
                     id = folder.id,
                     name = folder.name,
@@ -183,6 +200,9 @@ class CacheRepositoryImpl(
                     cachedFiles = usage.second,
                     directBytes = own?.totalBytes ?: 0L,
                     directCachedFiles = own?.cachedFiles ?: 0,
+                    eligibleFiles = status.first,
+                    generatedFiles = status.second,
+                    missingFiles = (status.first - status.second).coerceAtLeast(0),
                     isTrashed = folder.trashedAt != null
                 )
             }
@@ -204,8 +224,29 @@ class CacheRepositoryImpl(
                     directPolicy
                 }
             )
-        }.sortedWith(compareByDescending<ThumbnailFolderUsage> { it.totalBytes }
-            .thenBy { it.name.lowercase() })
+        }
+        return when (sortOrder) {
+            "MOST_GENERATED" -> result.sortedWith(
+                compareByDescending<ThumbnailFolderUsage> { it.generatedFiles }.thenBy { it.name.lowercase() }
+            )
+            "MISSING_FIRST" -> result.sortedWith(
+                compareByDescending<ThumbnailFolderUsage> { it.missingFiles > 0 }
+                    .thenByDescending { it.missingFiles }.thenBy { it.name.lowercase() }
+            )
+            "GENERATED_FIRST" -> result.sortedWith(
+                compareByDescending<ThumbnailFolderUsage> { it.eligibleFiles > 0 && it.missingFiles == 0 }
+                    .thenByDescending { it.generatedFiles }.thenBy { it.name.lowercase() }
+            )
+            "CACHE_SMALLEST" -> result.sortedWith(
+                compareBy<ThumbnailFolderUsage> { it.totalBytes }.thenBy { it.name.lowercase() }
+            )
+            "NAME_ASC" -> result.sortedBy { it.name.lowercase() }
+            "NAME_DESC" -> result.sortedByDescending { it.name.lowercase() }
+            else -> result.sortedWith(
+                compareByDescending<ThumbnailFolderUsage> { it.missingFiles }
+                    .thenByDescending { it.totalBytes }.thenBy { it.name.lowercase() }
+            )
+        }
     }
 
     override suspend fun thumbnailFileIds(
