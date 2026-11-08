@@ -1049,6 +1049,9 @@ class DesktopTelegramClient(
             is TdApi.MessageAnimation ->
                 content.animation?.thumbnail?.file to content.animation?.minithumbnail?.data
 
+            is TdApi.MessageVideoNote ->
+                content.videoNote?.thumbnail?.file to content.videoNote?.minithumbnail?.data
+
             is TdApi.MessagePhoto -> {
                 val photo = content.photo
                 val preferredSize = photo?.sizes
