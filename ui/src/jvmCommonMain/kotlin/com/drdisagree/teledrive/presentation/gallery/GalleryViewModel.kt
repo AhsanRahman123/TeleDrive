@@ -119,6 +119,20 @@ class GalleryViewModel(
 
     private val _infoTarget = MutableStateFlow<DriveFile?>(null)
     val infoTarget: StateFlow<DriveFile?> = _infoTarget.asStateFlow()
+    private val _infoFolderPath = MutableStateFlow<String?>(null)
+    val infoFolderPath: StateFlow<String?> = _infoFolderPath.asStateFlow()
+
+    private suspend fun folderPathFor(folderId: String?): String? {
+        var currentId = folderId
+        val visited = mutableSetOf<String>()
+        val segments = mutableListOf<String>()
+        while (currentId != null && visited.add(currentId)) {
+            val folder = fileRepository.getFolder(currentId) ?: break
+            segments += folder.name
+            currentId = folder.parentId
+        }
+        return segments.asReversed().joinToString(" / ").takeIf { it.isNotBlank() }
+    }
 
     private fun report(error: AppError) {
         _messages.tryEmit(error.toUiText())
@@ -552,13 +566,18 @@ class GalleryViewModel(
     fun showInfoForSelection() {
         val fileId = selection.value.singleOrNull() ?: return
         viewModelScope.launch {
-            fileRepository.getFile(fileId)?.let { _infoTarget.value = it }
+            val file = fileRepository.getFile(fileId)
+            if (file != null) {
+                _infoTarget.value = file
+                _infoFolderPath.value = folderPathFor(file.folderId)
+            }
             clearSelection()
         }
     }
 
     fun dismissInfo() {
         _infoTarget.value = null
+        _infoFolderPath.value = null
     }
 
     fun downloadSelected() {
