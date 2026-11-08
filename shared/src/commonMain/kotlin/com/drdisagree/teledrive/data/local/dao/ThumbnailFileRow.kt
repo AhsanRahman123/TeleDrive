@@ -13,5 +13,7 @@ data class ThumbnailFileRow(
     @ColumnInfo(name = "generatedAt") val generatedAt: Long?,
     @ColumnInfo(name = "lastAccessAt") val lastAccessAt: Long?,
     @ColumnInfo(name = "encrypted") val encrypted: Boolean?,
-    @ColumnInfo(name = "isTrashed") val isTrashed: Boolean
+    @ColumnInfo(name = "isTrashed") val isTrashed: Boolean,
+    @ColumnInfo(name = "directPolicy") val directPolicy: String,
+    @ColumnInfo(name = "effectivePolicy") val effectivePolicy: String
 )
