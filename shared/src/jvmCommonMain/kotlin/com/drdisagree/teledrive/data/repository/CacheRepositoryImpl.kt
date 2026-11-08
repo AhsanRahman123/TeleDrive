@@ -223,11 +223,13 @@ class CacheRepositoryImpl(
         folderId: String?,
         cacheFilter: String,
         policyFilter: String,
+        effectivePolicyFilter: String,
         searchQuery: String
     ): List<String> = thumbnailDao.fileIdsMatching(
         folderId = folderId,
         cacheFilter = cacheFilter,
         policyFilter = policyFilter,
+        effectivePolicyFilter = effectivePolicyFilter,
         searchQuery = searchQuery.trim()
     )
 
@@ -237,12 +239,14 @@ class CacheRepositoryImpl(
         limit: Int,
         cacheFilter: String,
         policyFilter: String,
+        effectivePolicyFilter: String,
         searchQuery: String,
         sortOrder: String
     ): List<ThumbnailFileUsage> = thumbnailDao.filesInFolder(
         folderId = folderId,
         cacheFilter = cacheFilter,
         policyFilter = policyFilter,
+        effectivePolicyFilter = effectivePolicyFilter,
         searchQuery = searchQuery.trim(),
         sortOrder = sortOrder,
         limit = limit.coerceIn(1, 500),
