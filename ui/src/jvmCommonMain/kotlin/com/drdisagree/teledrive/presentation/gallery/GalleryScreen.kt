@@ -995,7 +995,7 @@ fun GalleryScreen(
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                             label = { Text("Extension") },
-                            placeholder = { Text("jpg, png, mp4") }
+                            placeholder = { Text("jpg") }
                         )
                         OutlinedTextField(
                             value = state.filters.minSizeMb,
