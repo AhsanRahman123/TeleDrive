@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.collect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.drdisagree.teledrive.core.media.ThumbnailModel
+import com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailFileUsage
@@ -469,6 +471,12 @@ private fun ThumbnailFileRow(
     onGenerate: () -> Unit,
     onRemove: () -> Unit
 ) {
+    var thumbnailRevision by remember(file.fileId) { mutableStateOf(0L) }
+    LaunchedEffect(file.fileId) {
+        ThumbnailChangeNotifier.events.collect { changedId ->
+            if (changedId == file.fileId) thumbnailRevision++
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -491,7 +499,7 @@ private fun ThumbnailFileRow(
         ) {
             if (file.isCached) {
                 AsyncImage(
-                    model = ThumbnailModel(file.fileId),
+                    model = ThumbnailModel(file.fileId, thumbnailRevision),
                     contentDescription = file.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
