@@ -119,6 +119,30 @@ interface ThumbnailDao {
     ): List<ThumbnailFileRow>
 
     @Query(
+        """SELECT f.id
+             FROM files f
+             LEFT JOIN thumbnails t ON t.fileId = f.id
+            WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
+              AND (
+                    f.trashedAt IS NULL
+                    OR t.fileId IS NOT NULL
+                  )
+              AND (
+                    f.category IN ('IMAGE', 'VIDEO')
+                    OR f.mimeType LIKE 'text/%'
+                    OR f.mimeType IN (
+                        'application/json', 'application/xml', 'application/yaml',
+                        'application/vnd.android.package-archive'
+                    )
+                    OR t.fileId IS NOT NULL
+                  )
+            ORDER BY CASE WHEN t.fileId IS NULL THEN 1 ELSE 0 END,
+                     t.sizeBytes DESC,
+                     f.name COLLATE NOCASE ASC"""
+    )
+    suspend fun allFileIdsInFolder(folderId: String?): List<String>
+
+    @Query(
         """SELECT f.id AS fileId, f.addedAt AS addedAt
              FROM files f
             WHERE f.trashedAt IS NULL
