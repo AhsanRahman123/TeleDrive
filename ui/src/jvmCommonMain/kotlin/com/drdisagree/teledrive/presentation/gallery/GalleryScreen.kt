@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.horizontalScroll
@@ -177,6 +178,7 @@ import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileGridItem
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.LoadingState
@@ -952,10 +954,12 @@ fun GalleryScreen(
                         description = stringResource(Res.string.gallery_photos_videos_appear_here)
                     )
 
-                    state.viewMode == ViewMode.LIST -> LazyColumn(
+                    state.viewMode == ViewMode.LIST -> Box(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
                         state = mediaListState,
                         modifier = Modifier
                             .fillMaxSize()
+                            .padding(end = 10.dp)
                             .keyboardCollection(
                                 listKeyboard,
                                 media.itemCount,
@@ -1013,12 +1017,19 @@ fun GalleryScreen(
                             }
                         }
                     }
+                        DesktopVerticalScrollbar(
+                            state = mediaListState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                        )
+                    }
 
-                    else -> LazyVerticalGrid(
+                    else -> Box(modifier = Modifier.fillMaxSize()) {
+                        LazyVerticalGrid(
                         state = mediaGridState,
                         columns = GridCells.Fixed(mediaGridColumns),
                         modifier = Modifier
                             .fillMaxSize()
+                            .padding(end = 10.dp)
                             .keyboardCollection(
                                 gridKeyboard,
                                 media.itemCount,
@@ -1084,6 +1095,11 @@ fun GalleryScreen(
                                 null -> Unit
                             }
                         }
+                    }
+                        DesktopVerticalScrollbar(
+                            state = mediaGridState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                        )
                     }
                 }
             }
