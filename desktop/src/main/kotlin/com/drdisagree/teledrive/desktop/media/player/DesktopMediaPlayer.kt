@@ -697,6 +697,29 @@ private fun PlayerControlsBar(
             .background(Color.Black.copy(alpha = 0.55f))
             .padding(horizontal = 12.dp, vertical = 4.dp)
     ) {
+        val displayedTimeMs = (scrubTarget?.toLong() ?: timeMs)
+            .coerceAtLeast(0L)
+            .let { position -> if (durationMs > 0L) position.coerceAtMost(durationMs) else position }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = Formatters.duration(displayedTimeMs),
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White
+            )
+            Text(
+                text = if (durationMs > 0L) {
+                    "-${Formatters.duration((durationMs - displayedTimeMs).coerceAtLeast(0L))}"
+                } else {
+                    "--:--"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White
+            )
+        }
         Slider(
             value = scrubTarget ?: if (durationMs > 0) timeMs.toFloat() else 0f,
             onValueChange = { value ->
@@ -726,26 +749,6 @@ private fun PlayerControlsBar(
                 .fillMaxWidth()
                 .height(52.dp)
         ) {
-            val displayedTimeMs = (scrubTarget?.toLong() ?: timeMs)
-                .coerceAtLeast(0L)
-                .let { position -> if (durationMs > 0L) position.coerceAtMost(durationMs) else position }
-            Text(
-                text = Formatters.duration(displayedTimeMs),
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White,
-                modifier = Modifier.align(Alignment.CenterStart)
-            )
-            Text(
-                text = if (durationMs > 0L) {
-                    "-${Formatters.duration((durationMs - displayedTimeMs).coerceAtLeast(0L))}"
-                } else {
-                    "--:--"
-                },
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White,
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
-
             Row(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
