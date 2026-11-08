@@ -80,7 +80,34 @@ interface ThumbnailDao {
     suspend fun folderAggregates(): List<ThumbnailFolderAggregate>
 
     @Query(
-        """SELECT f.id AS fileId,
+        """WITH RECURSIVE folder_ancestors(fileId, folderId, parentId, depth) AS (
+               SELECT f.id, d.id, d.parentId, 0
+                 FROM files f
+                 LEFT JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
+               UNION ALL
+               SELECT a.fileId, parent.id, parent.parentId, a.depth + 1
+                 FROM folder_ancestors a
+                 JOIN folders parent ON parent.id = a.parentId
+           ),
+           effective_policies(fileId, directPolicy, effectivePolicy) AS (
+               SELECT f.id,
+                      COALESCE(fp.policy, 'INHERIT'),
+                      COALESCE(
+                          fp.policy,
+                          (SELECT p.policy
+                             FROM folder_ancestors a
+                             JOIN thumbnail_policies p
+                               ON p.targetType = 'FOLDER' AND p.targetId = a.folderId
+                            WHERE a.fileId = f.id
+                            ORDER BY a.depth ASC
+                            LIMIT 1),
+                          'MANUAL_ONLY'
+                      )
+                 FROM files f
+                 LEFT JOIN thumbnail_policies fp
+                   ON fp.targetType = 'FILE' AND fp.targetId = f.id
+           )
+           SELECT f.id AS fileId,
                   f.name AS name,
                   f.mimeType AS mimeType,
                   f.category AS category,
@@ -90,8 +117,11 @@ interface ThumbnailDao {
                   t.generatedAt AS generatedAt,
                   t.lastAccessAt AS lastAccessAt,
                   t.encrypted AS encrypted,
-                  CASE WHEN f.trashedAt IS NULL THEN 0 ELSE 1 END AS isTrashed
+                  CASE WHEN f.trashedAt IS NULL THEN 0 ELSE 1 END AS isTrashed,
+                  ep.directPolicy AS directPolicy,
+                  ep.effectivePolicy AS effectivePolicy
              FROM files f
+             JOIN effective_policies ep ON ep.fileId = f.id
              LEFT JOIN thumbnails t ON t.fileId = f.id
             WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
               AND (
@@ -107,26 +137,77 @@ interface ThumbnailDao {
                     )
                     OR EXISTS (SELECT 1 FROM thumbnails cached WHERE cached.fileId = f.id)
                   )
-            ORDER BY CASE WHEN t.fileId IS NULL THEN 1 ELSE 0 END,
-                     t.sizeBytes DESC,
-                     f.name COLLATE NOCASE ASC
+              AND (
+                    :cacheFilter = 'ALL'
+                    OR (:cacheFilter = 'GENERATED' AND t.fileId IS NOT NULL)
+                    OR (:cacheFilter = 'MISSING' AND t.fileId IS NULL)
+                  )
+              AND (
+                    :policyFilter = 'ALL'
+                    OR (:policyFilter = 'INHERITED' AND ep.directPolicy = 'INHERIT')
+                    OR (:policyFilter = 'EXPLICIT_AUTOMATIC' AND ep.directPolicy = 'AUTOMATIC')
+                    OR (:policyFilter = 'EXPLICIT_MANUAL_ONLY' AND ep.directPolicy = 'MANUAL_ONLY')
+                  )
+              AND (:searchQuery = '' OR LOWER(f.name) LIKE '%' || LOWER(:searchQuery) || '%')
+            ORDER BY
+                CASE WHEN :sortOrder = 'THUMBNAIL_LARGEST' THEN t.sizeBytes END DESC,
+                CASE WHEN :sortOrder = 'THUMBNAIL_SMALLEST' AND t.fileId IS NULL THEN 1 ELSE 0 END ASC,
+                CASE WHEN :sortOrder = 'THUMBNAIL_SMALLEST' THEN t.sizeBytes END ASC,
+                CASE WHEN :sortOrder = 'SOURCE_LARGEST' THEN f.sizeBytes END DESC,
+                CASE WHEN :sortOrder = 'SOURCE_SMALLEST' THEN f.sizeBytes END ASC,
+                CASE WHEN :sortOrder = 'GENERATED_NEWEST' THEN t.generatedAt END DESC,
+                CASE WHEN :sortOrder = 'LAST_VIEWED_OLDEST' THEN t.lastAccessAt END ASC,
+                CASE WHEN :sortOrder = 'NAME_DESC' THEN f.name END COLLATE NOCASE DESC,
+                CASE WHEN :sortOrder = 'NAME_ASC' THEN f.name END COLLATE NOCASE ASC,
+                CASE WHEN :sortOrder = 'THUMBNAIL_LARGEST' THEN t.fileId END,
+                f.name COLLATE NOCASE ASC,
+                f.id ASC
             LIMIT :limit OFFSET :offset"""
     )
     suspend fun filesInFolder(
         folderId: String?,
+        cacheFilter: String,
+        policyFilter: String,
+        searchQuery: String,
+        sortOrder: String,
         limit: Int,
         offset: Int
     ): List<ThumbnailFileRow>
 
     @Query(
-        """SELECT f.id
+        """WITH RECURSIVE folder_ancestors(fileId, folderId, parentId, depth) AS (
+               SELECT f.id, d.id, d.parentId, 0
+                 FROM files f
+                 LEFT JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
+               UNION ALL
+               SELECT a.fileId, parent.id, parent.parentId, a.depth + 1
+                 FROM folder_ancestors a
+                 JOIN folders parent ON parent.id = a.parentId
+           ),
+           effective_policies(fileId, directPolicy, effectivePolicy) AS (
+               SELECT f.id,
+                      COALESCE(fp.policy, 'INHERIT'),
+                      COALESCE(
+                          fp.policy,
+                          (SELECT p.policy
+                             FROM folder_ancestors a
+                             JOIN thumbnail_policies p
+                               ON p.targetType = 'FOLDER' AND p.targetId = a.folderId
+                            WHERE a.fileId = f.id
+                            ORDER BY a.depth ASC
+                            LIMIT 1),
+                          'MANUAL_ONLY'
+                      )
+                 FROM files f
+                 LEFT JOIN thumbnail_policies fp
+                   ON fp.targetType = 'FILE' AND fp.targetId = f.id
+           )
+           SELECT f.id
              FROM files f
+             JOIN effective_policies ep ON ep.fileId = f.id
              LEFT JOIN thumbnails t ON t.fileId = f.id
             WHERE COALESCE(f.folderId, f.preTrashFolderId) IS :folderId
-              AND (
-                    f.trashedAt IS NULL
-                    OR t.fileId IS NOT NULL
-                  )
+              AND (f.trashedAt IS NULL OR t.fileId IS NOT NULL)
               AND (
                     f.category IN ('IMAGE', 'VIDEO')
                     OR f.mimeType LIKE 'text/%'
@@ -136,15 +217,25 @@ interface ThumbnailDao {
                     )
                     OR t.fileId IS NOT NULL
                   )
-            ORDER BY CASE WHEN t.fileId IS NULL THEN 1 ELSE 0 END,
-                     t.sizeBytes DESC,
-                     f.name COLLATE NOCASE ASC
-            LIMIT :limit OFFSET :offset"""
+              AND (
+                    :cacheFilter = 'ALL'
+                    OR (:cacheFilter = 'GENERATED' AND t.fileId IS NOT NULL)
+                    OR (:cacheFilter = 'MISSING' AND t.fileId IS NULL)
+                  )
+              AND (
+                    :policyFilter = 'ALL'
+                    OR (:policyFilter = 'INHERITED' AND ep.directPolicy = 'INHERIT')
+                    OR (:policyFilter = 'EXPLICIT_AUTOMATIC' AND ep.directPolicy = 'AUTOMATIC')
+                    OR (:policyFilter = 'EXPLICIT_MANUAL_ONLY' AND ep.directPolicy = 'MANUAL_ONLY')
+                  )
+              AND (:searchQuery = '' OR LOWER(f.name) LIKE '%' || LOWER(:searchQuery) || '%')
+            ORDER BY f.id ASC"""
     )
-    suspend fun allFileIdsInFolder(
+    suspend fun fileIdsMatching(
         folderId: String?,
-        limit: Int,
-        offset: Int
+        cacheFilter: String,
+        policyFilter: String,
+        searchQuery: String
     ): List<String>
 
     @Query(
