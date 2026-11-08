@@ -244,6 +244,15 @@ class CacheRepositoryImpl(
         ) {
             thumbnailStore.enqueueAutomatic(targetId)
         }
+        if (targetType == ThumbnailTargetType.FILE &&
+            policy == ThumbnailPolicy.INHERIT
+        ) {
+            val inherited = thumbnailPolicyDao.effectivePolicy(targetId)
+                ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+            if (inherited == ThumbnailPolicy.AUTOMATIC) {
+                thumbnailStore.enqueueAutomatic(targetId)
+            }
+        }
         if (targetType == ThumbnailTargetType.FOLDER &&
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
@@ -262,6 +271,15 @@ class CacheRepositoryImpl(
             policy == ThumbnailPolicy.AUTOMATIC
         ) {
             queueAutomaticFolderThumbnails(targetId)
+        }
+        if (targetType == ThumbnailTargetType.FOLDER &&
+            policy == ThumbnailPolicy.INHERIT
+        ) {
+            val inherited = thumbnailPolicyDao.inheritedFolderPolicy(targetId)
+                ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+            if (inherited == ThumbnailPolicy.AUTOMATIC) {
+                queueAutomaticFolderThumbnails(targetId)
+            }
         }
     }
 
