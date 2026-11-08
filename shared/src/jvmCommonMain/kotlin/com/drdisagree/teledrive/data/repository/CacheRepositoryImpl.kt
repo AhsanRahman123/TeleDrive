@@ -161,7 +161,10 @@ class CacheRepositoryImpl(
             }
         }
         val result = folders.asSequence()
-            .filter { it.parentId == parentId && it.trashedAt == null }
+            .filter { folder ->
+                folder.parentId == parentId &&
+                    (folder.trashedAt == null || (totals[folder.id]?.first ?: 0L) > 0L)
+            }
             .map { folder ->
                 val usage = totals[folder.id] ?: (0L to 0)
                 val own = direct[folder.id]
@@ -172,7 +175,8 @@ class CacheRepositoryImpl(
                     totalBytes = usage.first,
                     cachedFiles = usage.second,
                     directBytes = own?.totalBytes ?: 0L,
-                    directCachedFiles = own?.cachedFiles ?: 0
+                    directCachedFiles = own?.cachedFiles ?: 0,
+                    isTrashed = folder.trashedAt != null
                 )
             }
             .toList()
@@ -208,7 +212,8 @@ class CacheRepositoryImpl(
             generatedAt = row.generatedAt,
             lastAccessAt = row.lastAccessAt,
             encrypted = row.encrypted,
-            policy = policy
+            policy = policy,
+            isTrashed = row.isTrashed
         )
     }
 
