@@ -14,6 +14,8 @@ import com.drdisagree.teledrive.data.local.dao.FolderTombstoneDao
 import com.drdisagree.teledrive.data.local.dao.PendingDeleteDao
 import com.drdisagree.teledrive.data.local.dao.StorageChannelDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailDao
+import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
+import com.drdisagree.teledrive.data.local.dao.ThumbnailJobDao
 import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.data.local.entity.BackupRecordEntity
 import com.drdisagree.teledrive.data.local.entity.BackupSessionEntity
@@ -27,6 +29,8 @@ import com.drdisagree.teledrive.data.local.entity.FolderTombstoneEntity
 import com.drdisagree.teledrive.data.local.entity.PendingDeleteEntity
 import com.drdisagree.teledrive.data.local.entity.StorageChannelEntity
 import com.drdisagree.teledrive.data.local.entity.ThumbnailEntity
+import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
+import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
 
 @Database(
@@ -43,9 +47,11 @@ import com.drdisagree.teledrive.data.local.entity.TransferEntity
         PendingDeleteEntity::class,
         FilePartEntity::class,
         ProxyEntity::class,
-        FolderTombstoneEntity::class
+        FolderTombstoneEntity::class,
+        ThumbnailPolicyEntity::class,
+        ThumbnailJobEntity::class
     ],
-    version = 18,
+    version = 19,
     exportSchema = true
 )
 @ConstructedBy(TeleDriveDatabaseConstructor::class)
@@ -56,6 +62,8 @@ abstract class TeleDriveDatabase : RoomDatabase() {
     abstract fun backupDao(): BackupDao
     abstract fun exclusionDao(): ExclusionDao
     abstract fun thumbnailDao(): ThumbnailDao
+    abstract fun thumbnailPolicyDao(): ThumbnailPolicyDao
+    abstract fun thumbnailJobDao(): ThumbnailJobDao
     abstract fun cacheDao(): CacheDao
     abstract fun storageChannelDao(): StorageChannelDao
     abstract fun pendingDeleteDao(): PendingDeleteDao
