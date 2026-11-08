@@ -466,8 +466,8 @@ fun GalleryScreen(
     infoTarget?.let { file ->
         FileInfoSheet(
             file = file,
-            folderPath = infoFolderPath,
-            onDismiss = viewModel::dismissInfo
+            onDismiss = viewModel::dismissInfo,
+            folderPath = infoFolderPath
         )
     }
 
