@@ -116,7 +116,9 @@ fun ThumbnailManagerScreen(
         while (true) {
             val latest = cacheRepository.thumbnailManagerSummary()
             val cacheChanged = latest.totalBytes != summary.totalBytes ||
-                latest.cachedFiles != summary.cachedFiles
+                latest.cachedFiles != summary.cachedFiles ||
+                latest.unfiledBytes != summary.unfiledBytes ||
+                latest.unfiledCachedFiles != summary.unfiledCachedFiles
             summary = latest
             if (cacheChanged) {
                 folders = cacheRepository.thumbnailFolders(folderId)
