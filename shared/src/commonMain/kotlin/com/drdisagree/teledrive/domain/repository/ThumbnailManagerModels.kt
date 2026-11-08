@@ -22,7 +22,8 @@ data class ThumbnailFolderUsage(
     val totalBytes: Long,
     val cachedFiles: Int,
     val directBytes: Long,
-    val directCachedFiles: Int
+    val directCachedFiles: Int,
+    val policy: ThumbnailPolicy = ThumbnailPolicy.INHERIT
 )
 
 data class ThumbnailFileUsage(
