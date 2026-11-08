@@ -127,6 +127,7 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun thumbnailManagerSummary(): ThumbnailManagerSummary {
+        refreshStats()
         val aggregates = thumbnailDao.folderAggregates()
         val unfiled = aggregates.firstOrNull { it.folderId == null }
         return ThumbnailManagerSummary(
@@ -226,6 +227,11 @@ class CacheRepositoryImpl(
         if (targetType == ThumbnailTargetType.FOLDER &&
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
+            val folderIds = folderDao.folderIdsInTree(targetId)
+            val nestedFolderIds = folderIds.filterNot { it == targetId }
+            if (nestedFolderIds.isNotEmpty()) {
+                thumbnailPolicyDao.deleteFolderOverrides(nestedFolderIds)
+            }
             val fileIds = thumbnailDao.fileIdsInFolderTree(targetId, onlyMissing = false)
             if (fileIds.isNotEmpty()) {
                 thumbnailPolicyDao.deleteFileOverrides(fileIds)
@@ -280,11 +286,16 @@ class CacheRepositoryImpl(
         val cached = thumbnailDao.cachedFilesInFolderTree(folderId)
         cached.forEach { File(it.path).delete() }
         val allFileIds = thumbnailDao.fileIdsInFolderTree(folderId, onlyMissing = false)
+        val folderIds = folderDao.folderIdsInTree(folderId)
+        val nestedFolderIds = folderIds.filterNot { it == folderId }
         if (cached.isNotEmpty()) thumbnailDao.deleteAll(cached.map { it.fileId })
         if (allFileIds.isNotEmpty()) {
             thumbnailPolicyDao.deleteFileOverrides(allFileIds)
             thumbnailJobDao.delete(allFileIds)
             allFileIds.forEach(thumbnailMemoryCache::remove)
+        }
+        if (nestedFolderIds.isNotEmpty()) {
+            thumbnailPolicyDao.deleteFolderOverrides(nestedFolderIds)
         }
         thumbnailPolicyDao.upsert(
             ThumbnailPolicyEntity(
