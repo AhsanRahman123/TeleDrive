@@ -359,7 +359,7 @@ fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.MediaStop || (key == Key.S && !shift && !ctrl && !alt) -> {
-                        player.controls().stopAsync()
+                        player.controls().stop()
                         playing = false
                         finished = true
                         timeMs = 0L
