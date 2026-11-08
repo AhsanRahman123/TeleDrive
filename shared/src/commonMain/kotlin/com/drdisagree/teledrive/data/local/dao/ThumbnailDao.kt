@@ -119,6 +119,36 @@ interface ThumbnailDao {
     ): List<ThumbnailFileRow>
 
     @Query(
+        """SELECT f.id AS fileId, f.addedAt AS addedAt
+             FROM files f
+            WHERE f.trashedAt IS NULL
+              AND (
+                    f.category IN ('IMAGE', 'VIDEO')
+                    OR f.mimeType LIKE 'text/%'
+                    OR f.mimeType IN (
+                        'application/json', 'application/xml', 'application/yaml',
+                        'application/vnd.android.package-archive'
+                    )
+                  )
+              AND (:onlyMissing = 0 OR NOT EXISTS (
+                    SELECT 1 FROM thumbnails t WHERE t.fileId = f.id
+                  ))
+              AND (
+                    :afterAddedAt IS NULL
+                    OR f.addedAt < :afterAddedAt
+                    OR (f.addedAt = :afterAddedAt AND f.id > :afterFileId)
+                  )
+            ORDER BY f.addedAt DESC, f.id ASC
+            LIMIT :limit"""
+    )
+    suspend fun allEligibleFileIdsPage(
+        onlyMissing: Boolean,
+        afterAddedAt: Long?,
+        afterFileId: String?,
+        limit: Int
+    ): List<ThumbnailFileCursor>
+
+    @Query(
         """WITH RECURSIVE child_folders(id) AS (
                SELECT id FROM folders WHERE id = :folderId
                UNION ALL
