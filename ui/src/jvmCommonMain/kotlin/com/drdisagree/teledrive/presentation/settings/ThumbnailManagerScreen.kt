@@ -90,6 +90,7 @@ fun ThumbnailManagerScreen(
     var confirmClearFolder by remember { mutableStateOf(false) }
 
     val folderId = folderPath.lastOrNull()?.id
+    LaunchedEffect(folderId) { selectedIds = emptySet() }
     LaunchedEffect(folderId, refreshKey, pageOffset) {
         loading = true
         summary = cacheRepository.thumbnailManagerSummary()
@@ -101,7 +102,6 @@ fun ThumbnailManagerScreen(
         )
         files = page.take(THUMBNAIL_PAGE_SIZE)
         hasMore = page.size > THUMBNAIL_PAGE_SIZE
-        selectedIds = emptySet()
         filePolicy = if (folderId == null) {
             ThumbnailPolicy.INHERIT
         } else {
