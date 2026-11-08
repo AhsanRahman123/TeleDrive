@@ -118,6 +118,10 @@ class DesktopThumbnailStore(
         jobWakeups.trySend(Unit)
     }
 
+    override suspend fun retryJobs(fileIds: List<String>) {
+        jobWakeups.trySend(Unit)
+    }
+
     override suspend fun cancelAllJobs() {
         runningJobs.values.toList().forEach {
             it.cancel(CancellationException("All thumbnail jobs cancelled by user"))
