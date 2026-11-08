@@ -25,7 +25,6 @@ internal object WindowsMonitorBrightness {
     )
 
     private const val MAX_PHYSICAL_MONITORS = 16
-    private const val PRIMARY_MONITOR_FALLBACK = WinUser.MONITOR_DEFAULTTOPRIMARY
     private const val NEAREST_MONITOR = WinUser.MONITOR_DEFAULTTONEAREST
 
     @Synchronized
@@ -133,7 +132,7 @@ internal object WindowsMonitorBrightness {
         }.getOrNull()
     }
 
-    private inline fun <T> withPhysicalMonitors(
+    private fun <T> withPhysicalMonitors(
         action: (Array<PhysicalMonitorEnumerationAPI.PHYSICAL_MONITOR>) -> T
     ): T? {
         val logicalMonitor = targetMonitor() ?: return null
