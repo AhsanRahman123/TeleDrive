@@ -61,17 +61,12 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun clearThumbnails() {
-        // Stop in-flight writers temporarily, but keep the durable queue and policy rules.
-        // Queued work can resume after the cache deletion completes.
-        val wasQueuePaused = thumbnailPolicyDao.isQueuePaused()
-        thumbnailStore.pauseAllJobs()
-        try {
+        withThumbnailQueueTemporarilyPaused {
+            // Keep durable queue entries and generation policy rules. Only cache files are deleted.
             thumbnailDir().deleteRecursively()
             thumbnailDao.deleteAll()
             thumbnailMemoryCache.clear()
             refreshThumbnailStats()
-        } finally {
-            if (!wasQueuePaused) thumbnailStore.resumeQueue()
         }
     }
 
@@ -617,9 +612,7 @@ class CacheRepositoryImpl(
     override suspend fun removeThumbnails(fileIds: List<String>) {
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return
-        val wasQueuePaused = thumbnailPolicyDao.isQueuePaused()
-        thumbnailStore.pauseAllJobs()
-        try {
+        withThumbnailQueueTemporarilyPaused {
             ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
                 val removedIds = thumbnailDao.pathsForFiles(batch).filter { ref ->
                     val cachedFile = File(ref.path)
@@ -632,16 +625,12 @@ class CacheRepositoryImpl(
                 }
             }
             refreshThumbnailStats()
-        } finally {
-            if (!wasQueuePaused) thumbnailStore.resumeQueue()
         }
     }
 
     override suspend fun removeFolderThumbnails(folderId: String) {
-        // Keep queue entries and policies intact; only stop writers during the cache sweep.
-        val wasQueuePaused = thumbnailPolicyDao.isQueuePaused()
-        thumbnailStore.pauseAllJobs()
-        try {
+        // Keep queue entries and policies intact; only cache files are swept.
+        withThumbnailQueueTemporarilyPaused {
             var afterFileId: String? = null
             while (true) {
                 val batch = thumbnailDao.cachedFilePathsInFolderTreePage(
@@ -662,8 +651,35 @@ class CacheRepositoryImpl(
                 if (batch.size < JOB_BATCH_SIZE) break
             }
             refreshThumbnailStats()
+        }
+    }
+
+    /**
+     * Temporarily pauses the durable queue while cache files are removed. Preserve an existing
+     * user pause and always restore the previous state, including when filesystem cleanup fails.
+     */
+    private suspend fun <T> withThumbnailQueueTemporarilyPaused(
+        action: suspend () -> T
+    ): T {
+        val wasQueuePaused = thumbnailPolicyDao.isQueuePaused()
+        if (!wasQueuePaused) {
+            thumbnailPolicyDao.upsert(
+                ThumbnailPolicyEntity(
+                    targetType = QUEUE_TARGET,
+                    targetId = QUEUE_GLOBAL_ID,
+                    policy = QUEUE_PAUSED,
+                    changedAt = System.currentTimeMillis()
+                )
+            )
+        }
+        thumbnailStore.pauseAllJobs()
+        return try {
+            action()
         } finally {
-            if (!wasQueuePaused) thumbnailStore.resumeQueue()
+            if (!wasQueuePaused) {
+                thumbnailPolicyDao.clearGlobalQueuePause()
+                thumbnailStore.resumeQueue()
+            }
         }
     }
 
