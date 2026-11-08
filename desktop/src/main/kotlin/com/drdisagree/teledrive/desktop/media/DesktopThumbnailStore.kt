@@ -79,12 +79,16 @@ class DesktopThumbnailStore(
     private val thumbnailJobDao: ThumbnailJobDao
 ) : ThumbnailStore {
 
-    // Keep CPU- and memory-heavy thumbnail work bounded. Use roughly two thirds of the
-    // logical processors, with a hard cap of four and a 512 MiB heap budget per worker.
-    // On a 6–8 thread desktop this allows four concurrent jobs; weaker machines scale down.
+    // Keep CPU- and memory-heavy thumbnail work bounded while avoiding an overly
+    // conservative two-worker ceiling on common quad-core desktops.
+    // 1–2 logical CPUs use one worker, 3–4 use three, and larger CPUs may use four.
     private val maxParallelGenerations = minOf(
         MAX_PARALLEL_GENERATIONS,
-        ((Runtime.getRuntime().availableProcessors() * 2) / 3).coerceAtLeast(1),
+        when (Runtime.getRuntime().availableProcessors()) {
+            in Int.MIN_VALUE..2 -> 1
+            in 3..4 -> 3
+            else -> 4
+        },
         (Runtime.getRuntime().maxMemory() / MIN_HEAP_PER_WORKER_BYTES).toInt().coerceAtLeast(1)
     )
     private val generationSemaphore = Semaphore(maxParallelGenerations)
