@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.presentation.search
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.Alignment
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -247,10 +250,12 @@ fun SearchScreen(
                     description = stringResource(Res.string.app_nothing_matches_search)
                 )
 
-                else -> LazyColumn(
+                else -> Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
+                        .padding(end = 10.dp)
                         .keyboardCollection(
                             keyboard,
                             state.folders.size + state.results.size,
@@ -328,6 +333,11 @@ fun SearchScreen(
                         )
                     }
                 }
+                DesktopVerticalScrollbar(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                )
+            }
             }
         }
     }
