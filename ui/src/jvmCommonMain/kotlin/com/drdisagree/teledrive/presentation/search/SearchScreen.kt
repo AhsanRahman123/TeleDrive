@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.search
 
+import androidx.compose.foundation.layout.height
+import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollbar
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.Alignment
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -109,6 +111,7 @@ fun SearchScreen(
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
     val listState = rememberLazyListState()
+    val searchFiltersScrollState = rememberScrollState()
     val lifted by rememberToolbarLift(listState)
     var showSelectionMenu by remember { mutableStateOf(false) }
 
@@ -206,10 +209,12 @@ fun SearchScreen(
                 .fillMaxSize()
                 .padding(top = padding.calculateTopPadding())
         ) {
-            Row(
+            Box(modifier = Modifier.fillMaxWidth()) {
+                    Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
+                    .horizontalScroll(searchFiltersScrollState)
+                    .padding(bottom = 8.dp)
                     .padding(horizontal = 12.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -235,6 +240,11 @@ fun SearchScreen(
                     )
                 }
             }
+                    DesktopHorizontalScrollbar(
+                        state = searchFiltersScrollState,
+                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(8.dp)
+                    )
+                }
 
             when {
                 state.searching -> LoadingState()
