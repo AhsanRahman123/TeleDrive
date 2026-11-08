@@ -260,6 +260,7 @@ class AndroidThumbnailStore(
                 changedAt = now
             )
         )
+        ThumbnailChangeNotifier.notifyChanged(fileId, stored.size.toLong(), now, encrypt)
         return true
     }
 
