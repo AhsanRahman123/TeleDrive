@@ -10,6 +10,8 @@ val daosModule = module {
     single { get<TeleDriveDatabase>().backupDao() }
     single { get<TeleDriveDatabase>().exclusionDao() }
     single { get<TeleDriveDatabase>().thumbnailDao() }
+    single { get<TeleDriveDatabase>().thumbnailPolicyDao() }
+    single { get<TeleDriveDatabase>().thumbnailJobDao() }
     single { get<TeleDriveDatabase>().cacheDao() }
     single { get<TeleDriveDatabase>().pendingDeleteDao() }
     single { get<TeleDriveDatabase>().filePartDao() }
