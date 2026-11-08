@@ -91,7 +91,7 @@ fun ThumbnailManagerScreen(
     var hasMore by remember { mutableStateOf(false) }
     var pageOffset by remember { mutableStateOf(0) }
     var refreshKey by remember { mutableStateOf(0) }
-    var confirmClearFolder by remember { mutableStateOf(false) }
+    var confirmClearFolderId by remember { mutableStateOf<String?>(null) }
     var confirmClearOrphans by remember { mutableStateOf(false) }
     var confirmClearAll by remember { mutableStateOf(false) }
     var confirmRemoveSelected by remember { mutableStateOf(false) }
@@ -213,9 +213,9 @@ fun ThumbnailManagerScreen(
         )
     }
 
-    if (confirmClearFolder && folderId != null) {
+    if (confirmClearFolderId != null) {
         AlertDialog(
-            onDismissRequest = { confirmClearFolder = false },
+            onDismissRequest = { confirmClearFolderId = null },
             title = { Text("Clear this folder's thumbnails?") },
             text = {
                 Text(
@@ -226,16 +226,17 @@ fun ThumbnailManagerScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        confirmClearFolder = false
-                        scope.launch {
-                            cacheRepository.removeFolderThumbnails(folderId)
+                        val targetFolderId = confirmClearFolderId
+                        confirmClearFolderId = null
+                        if (targetFolderId != null) scope.launch {
+                            cacheRepository.removeFolderThumbnails(targetFolderId)
                             refreshKey++
                         }
                     }
                 ) { Text("Clear thumbnails") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmClearFolder = false }) { Text("Cancel") }
+                TextButton(onClick = { confirmClearFolderId = null }) { Text("Cancel") }
             }
         )
     }
@@ -406,7 +407,7 @@ fun ThumbnailManagerScreen(
                             }
                         }
                     ) { Text("Generate all missing") }
-                    IconButton(onClick = { confirmClearFolder = true }) {
+                    IconButton(onClick = { confirmClearFolderId = folderId }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Clear folder thumbnails")
                     }
                 }
@@ -463,7 +464,14 @@ fun ThumbnailManagerScreen(
                                 refreshKey++
                             }
                         },
-                        currentPolicy = folder.policy
+                        currentPolicy = folder.policy,
+                        onGenerate = {
+                            scope.launch {
+                                cacheRepository.generateFolderThumbnails(folder.id)
+                                summary = cacheRepository.thumbnailManagerSummary()
+                            }
+                        },
+                        onRemove = { confirmClearFolderId = folder.id }
                     )
                 }
             }
@@ -627,7 +635,9 @@ private fun ThumbnailFolderRow(
     folder: ThumbnailFolderUsage,
     currentPolicy: ThumbnailPolicy,
     onOpen: () -> Unit,
-    onPolicy: (ThumbnailPolicy) -> Unit
+    onPolicy: (ThumbnailPolicy) -> Unit,
+    onGenerate: () -> Unit,
+    onRemove: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -649,6 +659,12 @@ private fun ThumbnailFolderRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
             )
+        }
+        IconButton(onClick = onGenerate) {
+            Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate folder thumbnails")
+        }
+        IconButton(onClick = onRemove) {
+            Icon(Icons.Filled.Delete, contentDescription = "Delete folder thumbnails")
         }
         ThumbnailPolicyMenu(currentPolicy, allowInherit = true, onSelect = onPolicy)
     }
