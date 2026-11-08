@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.domain.repository
 
+import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import kotlinx.coroutines.flow.Flow
 
 interface CacheRepository {
