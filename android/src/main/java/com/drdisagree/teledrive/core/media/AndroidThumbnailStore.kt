@@ -19,9 +19,11 @@ import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.data.local.dao.FileDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailDao
+import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
 import com.drdisagree.teledrive.data.local.entity.FileEntity
 import com.drdisagree.teledrive.data.local.entity.ThumbnailEntity
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
+import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -39,7 +41,8 @@ class AndroidThumbnailStore(
     private val telegramClient: TelegramClient,
     private val streamCrypto: StreamCrypto,
     private val wrappedKeyRepository: WrappedKeyRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val thumbnailPolicyDao: ThumbnailPolicyDao
 ) : ThumbnailStore {
 
     private val generationSemaphore = Semaphore(3)
@@ -49,24 +52,40 @@ class AndroidThumbnailStore(
             thumbnailDao.delete(fileId)
             return null
         }
-        thumbnailDao.byFileId(fileId)?.let { cached ->
-            val file = File(cached.path)
-            if (file.exists()) {
-                thumbnailDao.touch(fileId, System.currentTimeMillis())
-                val raw = file.readBytes()
-                return if (cached.encrypted) {
-                    runCatching {
-                        streamCrypto.decryptBytes(thumbnailKey(), raw)
-                    }.getOrNull()
-                } else raw
-            }
-            thumbnailDao.delete(fileId)
-        }
+        readCachedThumbnail(fileId)?.let { return it }
+        if (effectivePolicy(fileId) != ThumbnailPolicy.AUTOMATIC) return null
         return generationSemaphore.withPermit { generate(fileId) }
     }
 
+    override suspend fun generateNow(fileId: String): ByteArray? {
+        if (!settingsRepository.preferences.first().linkPreviews && isNote(fileId)) {
+            return null
+        }
+        readCachedThumbnail(fileId)?.let { return it }
+        return generationSemaphore.withPermit { generate(fileId) }
+    }
+
+    private suspend fun readCachedThumbnail(fileId: String): ByteArray? {
+        val cached = thumbnailDao.byFileId(fileId) ?: return null
+        val file = File(cached.path)
+        if (!file.exists()) {
+            thumbnailDao.delete(fileId)
+            return null
+        }
+        thumbnailDao.touch(fileId, System.currentTimeMillis())
+        val raw = file.readBytes()
+        return if (cached.encrypted) {
+            runCatching { streamCrypto.decryptBytes(thumbnailKey(), raw) }.getOrNull()
+        } else raw
+    }
+
+    private suspend fun effectivePolicy(fileId: String): ThumbnailPolicy =
+        thumbnailPolicyDao.effectivePolicy(fileId)
+            ?.let { runCatching { ThumbnailPolicy.valueOf(it) }.getOrNull() }
+            ?: ThumbnailPolicy.MANUAL_ONLY
+
     override suspend fun uploadThumbnailFile(fileId: String): File? {
-        val bytes = thumbnailBytes(fileId) ?: return null
+        val bytes = generateNow(fileId) ?: return null
         val dir = File(context.cacheDir, "upload-thumbs").apply { mkdirs() }
         val target = File(dir, "$fileId.jpg")
         return runCatching {
