@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
@@ -34,6 +35,8 @@ import com.drdisagree.teledrive.resources.settings_section_security_subtitle
 import com.drdisagree.teledrive.resources.settings_section_security_title
 import com.drdisagree.teledrive.resources.settings_section_storage_subtitle
 import com.drdisagree.teledrive.resources.settings_section_storage_title
+import com.drdisagree.teledrive.resources.settings_section_thumbnails_subtitle
+import com.drdisagree.teledrive.resources.settings_section_thumbnails_title
 
 enum class SettingsSectionType(
     val titleRes: StringResource,
@@ -54,6 +57,11 @@ enum class SettingsSectionType(
         Res.string.settings_section_storage_title,
         Res.string.settings_section_storage_subtitle,
         Icons.Filled.Storage
+    ),
+    THUMBNAILS(
+        Res.string.settings_section_thumbnails_title,
+        Res.string.settings_section_thumbnails_subtitle,
+        Icons.Filled.Image
     ),
     PERMISSIONS(
         Res.string.settings_section_permissions_title,
