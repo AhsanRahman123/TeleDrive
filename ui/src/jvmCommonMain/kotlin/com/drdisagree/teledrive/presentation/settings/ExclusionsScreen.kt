@@ -355,6 +355,7 @@ private fun AddExclusionDialog(
                     state = exclusionTypesScrollState,
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(8.dp)
                 )
+                }
             }
         },
         confirmButton = {
