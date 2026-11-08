@@ -341,10 +341,22 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun removeFolderThumbnails(folderId: String) {
-        thumbnailDao.deleteFolderTree(folderId)
+        var afterFileId: String? = null
+        while (true) {
+            val batch = thumbnailDao.cachedFilePathsInFolderTreePage(
+                folderId = folderId,
+                afterFileId = afterFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (batch.isEmpty()) break
+            batch.forEach { File(it.path).delete() }
+            thumbnailDao.deleteAll(batch.map { it.fileId })
+            batch.forEach { thumbnailMemoryCache.remove(it.fileId) }
+            afterFileId = batch.last().fileId
+            if (batch.size < JOB_BATCH_SIZE) break
+        }
         thumbnailPolicyDao.deleteOverridesInFolderTree(folderId)
         thumbnailJobDao.deleteInFolderTree(folderId)
-        thumbnailMemoryCache.clear()
         thumbnailPolicyDao.upsert(
             ThumbnailPolicyEntity(
                 targetType = ThumbnailTargetType.FOLDER.name,
