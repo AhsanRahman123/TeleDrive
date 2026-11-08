@@ -70,7 +70,6 @@ fun ThumbnailQueueScreen(
     var selectingAll by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var sortOrder by remember { mutableStateOf(ThumbnailQueueSort.OLDEST_FIRST) }
-    var selectingPage by remember { mutableStateOf(false) }
 
     LaunchedEffect(offset, sortOrder) {
         while (true) {
@@ -79,6 +78,9 @@ fun ThumbnailQueueScreen(
             pendingCount = repository.thumbnailQueueCount()
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
+            if (selectedIds.isNotEmpty()) {
+                selectedIds = selectedIds.intersect(repository.thumbnailQueueAllFileIds().toSet())
+            }
             if (page.isEmpty() && offset > 0) {
                 // The live queue shrank while this page was open. Move to the last valid page,
                 // including page zero when the queue has become empty.
