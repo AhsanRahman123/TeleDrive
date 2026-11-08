@@ -147,6 +147,7 @@ interface ThumbnailDao {
                 CASE WHEN :sortOrder = 'SOURCE_LARGEST' THEN f.sizeBytes END DESC,
                 CASE WHEN :sortOrder = 'SOURCE_SMALLEST' THEN f.sizeBytes END ASC,
                 CASE WHEN :sortOrder = 'GENERATED_NEWEST' THEN t.generatedAt END DESC,
+                CASE WHEN :sortOrder = 'LAST_VIEWED_OLDEST' AND t.fileId IS NULL THEN 1 ELSE 0 END ASC,
                 CASE WHEN :sortOrder = 'LAST_VIEWED_OLDEST' THEN t.lastAccessAt END ASC,
                 CASE WHEN :sortOrder = 'NAME_DESC' THEN f.name END COLLATE NOCASE DESC,
                 CASE WHEN :sortOrder = 'NAME_ASC' THEN f.name END COLLATE NOCASE ASC,
