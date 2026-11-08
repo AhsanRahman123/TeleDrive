@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.presentation.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +12,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -36,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailQueueItem
 import com.drdisagree.teledrive.presentation.common.Formatters
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -50,11 +54,13 @@ fun ThumbnailQueueScreen(
 ) {
     val repository = koinInject<CacheRepository>()
     val scope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
     val activeJobs by repository.observeThumbnailActiveJobs().collectAsState(initial = emptySet())
     var items by remember { mutableStateOf(emptyList<ThumbnailQueueItem>()) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var offset by remember { mutableStateOf(0) }
     var pendingCount by remember { mutableStateOf(0) }
+    var queuePaused by remember { mutableStateOf(false) }
     var confirmCancelAll by remember { mutableStateOf(false) }
     var selectingAll by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
@@ -64,7 +70,7 @@ fun ThumbnailQueueScreen(
             refreshing = true
             items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
             pendingCount = repository.thumbnailManagerSummary().pendingJobs
-            selectedIds = selectedIds.intersect(items.map { it.fileId }.toSet())
+            queuePaused = repository.thumbnailQueuePaused()
             refreshing = false
             delay(1_000L)
         }
@@ -78,7 +84,12 @@ fun ThumbnailQueueScreen(
         AlertDialog(
             onDismissRequest = { confirmCancelAll = false },
             title = { Text("Cancel all thumbnail preparation?") },
-            text = { Text("All queued and currently running thumbnail jobs will be stopped. Existing thumbnails will remain untouched.") },
+            text = {
+                Text(
+                    "All queued and currently running thumbnail jobs will be removed. " +
+                        "Existing thumbnails and original files will remain untouched."
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmCancelAll = false
@@ -86,163 +97,232 @@ fun ThumbnailQueueScreen(
                         repository.cancelAllThumbnailJobs()
                         selectedIds = emptySet()
                         offset = 0
+                        queuePaused = false
                     }
                 }) { Text("Cancel all jobs") }
             },
             dismissButton = {
-                TextButton(onClick = { confirmCancelAll = false }) { Text("Keep running") }
+                TextButton(onClick = { confirmCancelAll = false }) { Text("Keep jobs") }
             }
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Thumbnail queue", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    pendingCount.toString() + " queued · " + activeJobs.size + " generating",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            IconButton(onClick = {
-                scope.launch {
-                    items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
-                    pendingCount = repository.thumbnailManagerSummary().pendingJobs
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-            }) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Refresh queue")
-            }
-        }
-
-        if (activeJobs.isNotEmpty()) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            Text(
-                "Working on " + activeJobs.size + " item(s) in parallel. Jobs remain queued across app restarts.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else if (pendingCount > 0) {
-            Text(
-                "No job is currently running. Failed items stay visible here and can be retried.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(selectedIds.size.toString() + " selected", modifier = Modifier.weight(1f))
-            TextButton(
-                enabled = !selectingAll && pendingCount > 0,
-                onClick = {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Thumbnail queue", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        pendingCount.toString() + " queued · " + activeJobs.size + " generating" +
+                            if (queuePaused) " · Paused" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = { scope.launch { scrollState.animateScrollTo(0) } }) {
+                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Scroll to top")
+                }
+                IconButton(onClick = {
+                    scope.launch { scrollState.animateScrollTo(scrollState.maxValue) }
+                }) {
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to bottom")
+                }
+                IconButton(onClick = {
                     scope.launch {
-                        selectingAll = true
-                        try {
-                            val allIds = mutableSetOf<String>()
-                            var pageOffset = 0
-                            while (pageOffset < pendingCount) {
-                                val page = repository.thumbnailQueue(pageOffset, 200)
-                                if (page.isEmpty()) break
-                                allIds.addAll(page.map { it.fileId })
-                                pageOffset += page.size
+                        items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
+                        pendingCount = repository.thumbnailManagerSummary().pendingJobs
+                        queuePaused = repository.thumbnailQueuePaused()
+                    }
+                }) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh queue")
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (queuePaused) {
+                    Text(
+                        "Queue paused. Jobs are safely retained and will continue when resumed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else if (activeJobs.isNotEmpty()) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text(
+                        "Working on " + activeJobs.size +
+                            " item(s) in parallel. Jobs remain queued across app restarts.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else if (pendingCount > 0) {
+                    Text(
+                        "No job is currently running. Failed items stay visible here and can be retried.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(selectedIds.size.toString() + " selected", modifier = Modifier.weight(1f))
+                    OutlinedButton(
+                        enabled = !selectingAll && pendingCount > 0,
+                        onClick = {
+                            scope.launch {
+                                selectingAll = true
+                                try {
+                                    selectedIds = repository.thumbnailQueueAllFileIds().toSet()
+                                } finally {
+                                    selectingAll = false
+                                }
                             }
-                            selectedIds = allIds
-                        } finally {
-                            selectingAll = false
+                        }
+                    ) { Text(if (selectingAll) "Selecting…" else "Select all") }
+                    TextButton(
+                        enabled = items.isNotEmpty(),
+                        onClick = {
+                            val pageIds = items.map { it.fileId }.toSet()
+                            selectedIds = if (pageIds.all { it in selectedIds }) {
+                                selectedIds - pageIds
+                            } else {
+                                selectedIds + pageIds
+                            }
+                        }
+                    ) { Text("Select page") }
+                    TextButton(
+                        enabled = selectedIds.isNotEmpty(),
+                        onClick = { selectedIds = emptySet() }
+                    ) { Text("Clear selection") }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        enabled = pendingCount > 0,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            scope.launch {
+                                if (queuePaused) repository.resumeAllThumbnailJobs()
+                                else repository.pauseAllThumbnailJobs()
+                                queuePaused = repository.thumbnailQueuePaused()
+                            }
+                        }
+                    ) { Text(if (queuePaused) "Resume all" else "Pause all") }
+                    OutlinedButton(
+                        enabled = pendingCount > 0,
+                        modifier = Modifier.weight(1f),
+                        onClick = { confirmCancelAll = true }
+                    ) { Text("Cancel all jobs") }
+                }
+
+                if (selectedIds.isNotEmpty()) {
+                    Text("Actions for all " + selectedIds.size + " selected jobs", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            val ids = selectedIds.toList()
+                            scope.launch { repository.pauseThumbnailJobs(ids) }
+                        }) { Text("Pause selected") }
+                        OutlinedButton(onClick = {
+                            val ids = selectedIds.toList()
+                            scope.launch { repository.resumeThumbnailJobs(ids) }
+                        }) { Text("Resume selected") }
+                        OutlinedButton(onClick = {
+                            val ids = selectedIds.toList()
+                            scope.launch {
+                                repository.cancelThumbnailJobs(ids)
+                                selectedIds = emptySet()
+                            }
+                        }) { Text("Cancel selected") }
+                        if (failedSelected.isNotEmpty()) {
+                            OutlinedButton(onClick = {
+                                val ids = failedSelected
+                                scope.launch {
+                                    repository.retryThumbnailJobs(ids)
+                                    selectedIds = selectedIds - ids.toSet()
+                                }
+                            }) { Text("Retry failed on page") }
                         }
                     }
                 }
-            ) { Text(if (selectingAll) "Selecting…" else "Select all") }
-            TextButton(onClick = {
-                val pageIds = items.map { it.fileId }.toSet()
-                selectedIds = if (pageIds.all { it in selectedIds }) selectedIds - pageIds
-                else selectedIds + pageIds
-            }) { Text("Select page") }
-        }
 
-        if (selectedIds.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = {
-                    val ids = selectedIds.toList()
-                    scope.launch {
-                        repository.cancelThumbnailJobs(ids)
-                        selectedIds = emptySet()
+                if (items.isEmpty()) {
+                    Text(
+                        if (refreshing) "Loading queue…" else "The thumbnail queue is empty.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    items.forEach { item ->
+                        ThumbnailQueueRow(
+                            item = item,
+                            selected = item.fileId in selectedIds,
+                            active = item.fileId in activeJobs,
+                            globallyPaused = queuePaused,
+                            onSelect = { checked ->
+                                selectedIds = if (checked) selectedIds + item.fileId
+                                else selectedIds - item.fileId
+                            },
+                            onPause = {
+                                scope.launch { repository.pauseThumbnailJobs(listOf(item.fileId)) }
+                            },
+                            onResume = {
+                                scope.launch { repository.resumeThumbnailJobs(listOf(item.fileId)) }
+                            },
+                            onCancel = {
+                                scope.launch {
+                                    repository.cancelThumbnailJobs(listOf(item.fileId))
+                                    selectedIds = selectedIds - item.fileId
+                                }
+                            },
+                            onRetry = {
+                                scope.launch { repository.retryThumbnailJobs(listOf(item.fileId)) }
+                            }
+                        )
                     }
-                }) { Text("Cancel selected") }
-                if (failedSelected.isNotEmpty()) {
-                    OutlinedButton(onClick = {
-                        val ids = failedSelected
-                        scope.launch {
-                            repository.retryThumbnailJobs(ids)
-                            selectedIds = emptySet()
-                        }
-                    }) { Text("Retry failed") }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Showing " + (if (items.isEmpty()) 0 else offset + 1) +
+                            "–" + (offset + items.size)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            enabled = offset > 0,
+                            onClick = { offset = (offset - THUMBNAIL_QUEUE_PAGE_SIZE).coerceAtLeast(0) }
+                        ) { Text("Previous") }
+                        OutlinedButton(
+                            enabled = items.size == THUMBNAIL_QUEUE_PAGE_SIZE,
+                            onClick = { offset += THUMBNAIL_QUEUE_PAGE_SIZE }
+                        ) { Text("Next") }
+                    }
                 }
             }
         }
-
-        if (pendingCount > 0) {
-            OutlinedButton(
-                onClick = { confirmCancelAll = true },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Cancel all jobs") }
-        }
-
-        if (items.isEmpty()) {
-            Text(
-                if (refreshing) "Loading queue…" else "The thumbnail queue is empty.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            items.forEach { item ->
-                ThumbnailQueueRow(
-                    item = item,
-                    selected = item.fileId in selectedIds,
-                    active = item.fileId in activeJobs,
-                    onSelect = { checked ->
-                        selectedIds = if (checked) selectedIds + item.fileId
-                        else selectedIds - item.fileId
-                    },
-                    onCancel = {
-                        scope.launch { repository.cancelThumbnailJobs(listOf(item.fileId)) }
-                    },
-                    onRetry = {
-                        scope.launch { repository.retryThumbnailJobs(listOf(item.fileId)) }
-                    }
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Showing " + (if (items.isEmpty()) 0 else offset + 1) + "–" + (offset + items.size))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    enabled = offset > 0,
-                    onClick = { offset = (offset - THUMBNAIL_QUEUE_PAGE_SIZE).coerceAtLeast(0) }
-                ) { Text("Previous") }
-                OutlinedButton(
-                    enabled = items.size == THUMBNAIL_QUEUE_PAGE_SIZE,
-                    onClick = { offset += THUMBNAIL_QUEUE_PAGE_SIZE }
-                ) { Text("Next") }
-            }
-        }
+        DesktopVerticalScrollbar(
+            state = scrollState,
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 2.dp)
+        )
     }
 }
 
@@ -251,7 +331,10 @@ private fun ThumbnailQueueRow(
     item: ThumbnailQueueItem,
     selected: Boolean,
     active: Boolean,
+    globallyPaused: Boolean,
     onSelect: (Boolean) -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
     onCancel: () -> Unit,
     onRetry: () -> Unit
 ) {
@@ -269,7 +352,8 @@ private fun ThumbnailQueueRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                 Text(
-                    Formatters.bytes(item.fileSizeBytes) + " · " + item.mimeType.ifBlank { "Unknown type" },
+                    Formatters.bytes(item.fileSizeBytes) + " · " +
+                        item.mimeType.ifBlank { "Unknown type" },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -281,8 +365,11 @@ private fun ThumbnailQueueRow(
                 )
                 Text(
                     when {
+                        globallyPaused -> "Paused · queue paused"
+                        item.isPaused -> "Paused"
                         active -> "Generating now"
-                        item.attempts >= MAX_THUMBNAIL_ATTEMPTS -> "Failed after " + item.attempts + " attempts"
+                        item.attempts >= MAX_THUMBNAIL_ATTEMPTS ->
+                            "Failed after " + item.attempts + " attempts"
                         item.attempts > 0 -> "Waiting to retry · attempt " + item.attempts
                         else -> "Waiting"
                     },
@@ -299,6 +386,12 @@ private fun ThumbnailQueueRow(
             if (item.attempts >= MAX_THUMBNAIL_ATTEMPTS) {
                 TextButton(onClick = onRetry) { Text("Retry") }
                 TextButton(onClick = onCancel) { Text("Remove") }
+            } else if (item.isPaused && !globallyPaused) {
+                TextButton(onClick = onResume) { Text("Resume") }
+                TextButton(onClick = onCancel) { Text("Cancel") }
+            } else if (!globallyPaused) {
+                TextButton(onClick = onPause) { Text("Pause") }
+                TextButton(onClick = onCancel) { Text("Cancel") }
             } else {
                 TextButton(onClick = onCancel) { Text("Cancel") }
             }
