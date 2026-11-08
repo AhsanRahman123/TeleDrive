@@ -31,6 +31,7 @@ interface CacheRepository {
         limit: Int,
         cacheFilter: String = "ALL",
         policyFilter: String = "ALL",
+        effectivePolicyFilter: String = "ALL",
         searchQuery: String = "",
         sortOrder: String = "THUMBNAIL_LARGEST"
     ): List<ThumbnailFileUsage> = emptyList()
@@ -40,6 +41,7 @@ interface CacheRepository {
         folderId: String?,
         cacheFilter: String,
         policyFilter: String,
+        effectivePolicyFilter: String,
         searchQuery: String
     ): List<String> = emptyList()
 
