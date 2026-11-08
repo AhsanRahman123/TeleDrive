@@ -202,8 +202,8 @@ class TransferExecutor(
         fileDao.setBackupState(entity.id, BackupState.UPLOADING)
 
         if (splitsIntoParts(entity, sourceFile, encrypt)) {
-            val result = try {
-                uploadInParts(
+            try {
+                val result = uploadInParts(
                     transfer = transfer,
                     entity = entity,
                     sourceFile = sourceFile,
@@ -215,13 +215,13 @@ class TransferExecutor(
                     supersededMessageId = supersededMessageId,
                     previewPath = previewPath
                 )
+                if (result == TransferOutcome.Completed) {
+                    cacheOrQueueUploadedThumbnail(entity, rawIconPath)
+                }
+                return result
             } finally {
                 rawIconPath?.let { File(it).delete() }
             }
-            if (result == TransferOutcome.Completed) {
-                cacheOrQueueUploadedThumbnail(entity, rawIconPath)
-            }
-            return result
         }
 
         var stagingFile: File? = null
