@@ -58,6 +58,7 @@ fun ThumbnailQueueScreen(
     val activeJobs by repository.observeThumbnailActiveJobs().collectAsState(initial = emptySet())
     var items by remember { mutableStateOf(emptyList<ThumbnailQueueItem>()) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var failedQueueIds by remember { mutableStateOf(emptySet<String>()) }
     var offset by remember { mutableStateOf(0) }
     var pendingCount by remember { mutableStateOf(0) }
     var queuePaused by remember { mutableStateOf(false) }
@@ -70,15 +71,14 @@ fun ThumbnailQueueScreen(
             refreshing = true
             items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
             pendingCount = repository.thumbnailManagerSummary().pendingJobs
+            failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
             refreshing = false
             delay(1_000L)
         }
     }
 
-    val failedSelected = items.filter {
-        it.fileId in selectedIds && it.attempts >= MAX_THUMBNAIL_ATTEMPTS
-    }.map { it.fileId }
+    val failedSelected = selectedIds.intersect(failedQueueIds)
 
     if (confirmCancelAll) {
         AlertDialog(
@@ -252,12 +252,12 @@ fun ThumbnailQueueScreen(
                         }) { Text("Cancel selected") }
                         if (failedSelected.isNotEmpty()) {
                             OutlinedButton(onClick = {
-                                val ids = failedSelected
+                                val ids = failedSelected.toList()
                                 scope.launch {
                                     repository.retryThumbnailJobs(ids)
                                     selectedIds = selectedIds - ids.toSet()
                                 }
-                            }) { Text("Retry failed on page") }
+                            }) { Text("Retry failed") }
                         }
                     }
                 }
