@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.home
 
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -279,8 +280,9 @@ fun HomeScreen(
             LoadingState(modifier = Modifier.padding(padding))
             return@Scaffold
         }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(end = 10.dp),
             contentPadding = padding.add(
                 horizontal = 16.dp,
                 top = 8.dp,
@@ -434,6 +436,11 @@ fun HomeScreen(
                     )
                 }
             }
+        }
+            DesktopVerticalScrollbar(
+                state = homeListState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
         }
     }
 }
