@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -349,6 +351,16 @@ fun ThumbnailManagerScreen(
                     )
                 }
                 OutlinedButton(onClick = { showQueue = true }) { Text("View queue") }
+                IconButton(onClick = {
+                    scope.launch { scrollState.animateScrollTo(0) }
+                }) {
+                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Scroll to top")
+                }
+                IconButton(onClick = {
+                    scope.launch { scrollState.animateScrollTo(scrollState.maxValue) }
+                }) {
+                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to bottom")
+                }
                 IconButton(onClick = { refreshKey++ }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
@@ -634,47 +646,54 @@ fun ThumbnailManagerScreen(
                     modifier = Modifier.padding(vertical = 16.dp)
                 )
             } else {
-                LazyColumn(
-                    state = fileListState,
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(440.dp)
-                        .then(fileDragSelect),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    itemsIndexed(files, key = { _, file -> file.fileId }) { _, file ->
-                        ThumbnailFileRow(
-                            file = file,
-                            selected = file.fileId in selectedIds,
-                            onSelectionChange = { checked ->
-                                selectedIds = if (checked) selectedIds + file.fileId
-                                else selectedIds - file.fileId
-                            },
-                            onPolicy = { policy ->
-                                scope.launch {
-                                    cacheRepository.setThumbnailPolicy(
-                                        ThumbnailTargetType.FILE,
-                                        file.fileId,
-                                        policy
-                                    )
-                                    refreshKey++
+                    LazyColumn(
+                        state = fileListState,
+                        modifier = Modifier.fillMaxSize().then(fileDragSelect),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        itemsIndexed(files, key = { _, file -> file.fileId }) { _, file ->
+                            ThumbnailFileRow(
+                                file = file,
+                                selected = file.fileId in selectedIds,
+                                onSelectionChange = { checked ->
+                                    selectedIds = if (checked) selectedIds + file.fileId
+                                    else selectedIds - file.fileId
+                                },
+                                onPolicy = { policy ->
+                                    scope.launch {
+                                        cacheRepository.setThumbnailPolicy(
+                                            ThumbnailTargetType.FILE,
+                                            file.fileId,
+                                            policy
+                                        )
+                                        refreshKey++
+                                    }
+                                },
+                                onGenerate = {
+                                    scope.launch {
+                                        cacheRepository.generateThumbnail(file.fileId)
+                                        summary = cacheRepository.thumbnailManagerSummary()
+                                    }
+                                },
+                                onRemove = {
+                                    scope.launch {
+                                        cacheRepository.removeThumbnail(file.fileId)
+                                        selectedIds = selectedIds - file.fileId
+                                        refreshKey++
+                                    }
                                 }
-                            },
-                            onGenerate = {
-                                scope.launch {
-                                    cacheRepository.generateThumbnail(file.fileId)
-                                    summary = cacheRepository.thumbnailManagerSummary()
-                                }
-                            },
-                            onRemove = {
-                                scope.launch {
-                                    cacheRepository.removeThumbnail(file.fileId)
-                                    selectedIds = selectedIds - file.fileId
-                                    refreshKey++
-                                }
-                            }
-                        )
+                            )
+                        }
                     }
+                    DesktopVerticalScrollbar(
+                        state = fileListState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                    )
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
