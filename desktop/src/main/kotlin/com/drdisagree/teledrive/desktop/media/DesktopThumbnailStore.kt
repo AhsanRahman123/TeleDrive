@@ -141,6 +141,34 @@ class DesktopThumbnailStore(
         }
     }
 
+    override suspend fun enqueueAutomatic(fileId: String) {
+        thumbnailJobDao.enqueue(
+            ThumbnailJobEntity(
+                fileId = fileId,
+                queuedAt = System.currentTimeMillis(),
+                force = false
+            )
+        )
+        jobWakeups.trySend(Unit)
+    }
+
+    override suspend fun enqueueAutomatic(fileIds: List<String>) {
+        if (fileIds.isEmpty()) return
+        val timestamp = System.currentTimeMillis()
+        fileIds.distinct().chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+            thumbnailJobDao.enqueue(
+                batch.map { id ->
+                    ThumbnailJobEntity(
+                        fileId = id,
+                        queuedAt = timestamp,
+                        force = false
+                    )
+                }
+            )
+            jobWakeups.trySend(Unit)
+        }
+    }
+
     private suspend fun readCachedThumbnail(fileId: String): ByteArray? {
         val cached = thumbnailDao.byFileId(fileId) ?: return null
         val file = File(cached.path)
