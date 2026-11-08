@@ -255,8 +255,8 @@ fun ThumbnailManagerScreen(
             title = { Text("Clear this folder's thumbnails?") },
             text = {
                 Text(
-                    "Cached previews in this folder and its subfolders will be deleted. " +
-                        "Original files will not be touched, and the folder will switch to Manual only."
+                    "Cached previews in this folder and its subfolders, plus matching queued jobs, will be removed. " +
+                        "Original files and Automatic/Manual thumbnail policies will remain unchanged."
                 )
             },
             confirmButton = {
