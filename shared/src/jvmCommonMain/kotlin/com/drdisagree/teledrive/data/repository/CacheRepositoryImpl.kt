@@ -672,8 +672,8 @@ class CacheRepositoryImpl(
                 )
             )
         }
-        thumbnailStore.pauseAllJobs()
         return try {
+            thumbnailStore.pauseAllJobs()
             action()
         } finally {
             if (!wasQueuePaused) {
