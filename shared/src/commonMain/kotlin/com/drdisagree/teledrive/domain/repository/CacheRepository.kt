@@ -36,6 +36,11 @@ interface CacheRepository {
         policy: ThumbnailPolicy
     ) = Unit
 
+    suspend fun thumbnailPolicy(
+        targetType: ThumbnailTargetType,
+        targetId: String
+    ): ThumbnailPolicy = ThumbnailPolicy.INHERIT
+
     suspend fun generateThumbnail(fileId: String) = Unit
 
     suspend fun generateThumbnails(fileIds: List<String>) = Unit
