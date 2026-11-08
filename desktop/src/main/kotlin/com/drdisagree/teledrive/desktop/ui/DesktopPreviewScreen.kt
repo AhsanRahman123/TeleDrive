@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.desktop.ui
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -725,12 +728,16 @@ private fun PreviewPane(
                 )
             }
 
-            is PreviewContent.PlainText -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp)
-            ) {
+            is PreviewContent.PlainText -> {
+                val previewTextScrollState = rememberScrollState()
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(previewTextScrollState)
+                            .padding(end = 10.dp)
+                            .padding(24.dp)
+                    ) {
                 if (MimeTypes.isMarkdown(file.mimeType)) {
                     MarkdownText(
                         text = current.text,
@@ -752,13 +759,22 @@ private fun PreviewPane(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    }
+                    DesktopVerticalScrollbar(
+                        state = previewTextScrollState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                    )
                 }
             }
 
-            is PreviewContent.Archive -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
-            ) {
+            is PreviewContent.Archive -> {
+                val archiveScrollState = rememberLazyListState()
+                Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = archiveScrollState,
+                    modifier = Modifier.fillMaxSize().padding(end = 10.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
+                ) {
                 items(current.entries) { entry ->
                     Row(
                         modifier = Modifier
@@ -791,6 +807,11 @@ private fun PreviewPane(
                             )
                         }
                     }
+                }
+                DesktopVerticalScrollbar(
+                    state = archiveScrollState,
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                )
                 }
             }
 
