@@ -31,6 +31,9 @@ interface CacheRepository {
         limit: Int
     ): List<ThumbnailFileUsage> = emptyList()
 
+    /** Fetch IDs only when the user explicitly selects every file in a folder. */
+    suspend fun thumbnailFileIds(folderId: String?): List<String> = emptyList()
+
     suspend fun setThumbnailPolicy(
         targetType: ThumbnailTargetType,
         targetId: String,
