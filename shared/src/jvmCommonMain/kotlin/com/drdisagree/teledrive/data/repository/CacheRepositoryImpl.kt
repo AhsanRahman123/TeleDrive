@@ -222,11 +222,22 @@ class CacheRepositoryImpl(
         searchQuery: String
     ): List<String> = thumbnailDao.fileIdsMatching(
         folderId = folderId,
+        folderEffectivePolicy = effectiveFolderPolicy(folderId).name,
         cacheFilter = cacheFilter,
         policyFilter = policyFilter,
         effectivePolicyFilter = effectivePolicyFilter,
         searchQuery = searchQuery.trim()
     )
+
+    private suspend fun effectiveFolderPolicy(folderId: String?): ThumbnailPolicy {
+        if (folderId == null) return ThumbnailPolicy.MANUAL_ONLY
+        val direct = thumbnailPolicyDao.policy(ThumbnailTargetType.FOLDER.name, folderId)
+            ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+        if (direct != null && direct != ThumbnailPolicy.INHERIT) return direct
+        return thumbnailPolicyDao.inheritedFolderPolicy(folderId)
+            ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+            ?: ThumbnailPolicy.MANUAL_ONLY
+    }
 
     override suspend fun thumbnailFiles(
         folderId: String?,
@@ -239,6 +250,7 @@ class CacheRepositoryImpl(
         sortOrder: String
     ): List<ThumbnailFileUsage> = thumbnailDao.filesInFolder(
         folderId = folderId,
+        folderEffectivePolicy = effectiveFolderPolicy(folderId).name,
         cacheFilter = cacheFilter,
         policyFilter = policyFilter,
         effectivePolicyFilter = effectivePolicyFilter,
