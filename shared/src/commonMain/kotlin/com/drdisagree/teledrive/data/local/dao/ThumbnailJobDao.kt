@@ -19,6 +19,10 @@ interface ThumbnailJobDao {
     @Query("SELECT * FROM thumbnail_jobs ORDER BY queuedAt ASC, fileId ASC LIMIT :limit")
     suspend fun next(limit: Int): List<ThumbnailJobEntity>
 
+    @Query("SELECT * FROM thumbnail_jobs WHERE fileId = :fileId LIMIT 1")
+    suspend fun byFileId(fileId: String): ThumbnailJobEntity?
+
+
     @Query(
         """SELECT * FROM thumbnail_jobs
             WHERE queuedAt <= :now AND attempts < :maxAttempts
