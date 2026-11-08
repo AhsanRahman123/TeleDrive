@@ -8,6 +8,9 @@ interface ThumbnailStore {
 
     suspend fun uploadThumbnailFile(fileId: String): File?
 
+    /** Promote the temporary preview created for Telegram into the persistent local cache. */
+    suspend fun cacheUploadedThumbnail(fileId: String, temporaryPath: String): Boolean = false
+
     /** Explicit user request; bypasses the manual-only viewing policy. */
     suspend fun generateNow(fileId: String): ByteArray? = thumbnailBytes(fileId)
 
