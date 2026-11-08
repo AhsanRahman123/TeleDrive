@@ -23,7 +23,10 @@ interface CacheRepository {
     suspend fun thumbnailManagerSummary(): ThumbnailManagerSummary =
         ThumbnailManagerSummary()
 
-    suspend fun thumbnailFolders(parentId: String?): List<ThumbnailFolderUsage> = emptyList()
+    suspend fun thumbnailFolders(
+        parentId: String?,
+        sortOrder: String = "MOST_MISSING"
+    ): List<ThumbnailFolderUsage> = emptyList()
 
     suspend fun thumbnailFiles(
         folderId: String?,
