@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.presentation.note
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollbar
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -185,12 +188,15 @@ fun NoteEditorScreen(
 
 @Composable
 private fun MarkdownToolbar(enabled: Boolean, onAction: (MarkdownAction) -> Unit) {
-    Row(
+    val toolbarScrollState = rememberScrollState()
+    Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .horizontalScroll(toolbarScrollState)
+            .padding(bottom = 8.dp)
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         ToolbarButton(Icons.Filled.FormatBold, Res.string.note_bold, enabled) {
@@ -221,6 +227,11 @@ private fun MarkdownToolbar(enabled: Boolean, onAction: (MarkdownAction) -> Unit
         ToolbarButton(Icons.Filled.FormatQuote, Res.string.note_quote, enabled) {
             onAction(MarkdownAction.LinePrefix("> "))
         }
+    }
+        DesktopHorizontalScrollbar(
+            state = toolbarScrollState,
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(8.dp)
+        )
     }
 }
 
