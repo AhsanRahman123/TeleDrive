@@ -205,13 +205,11 @@ fun DesktopPreviewScreen(
                     return@onPreviewKeyEvent false
                 }
                 when {
-                    event.key == Key.W &&
-                        (file?.category == FileCategory.IMAGE || file?.category == FileCategory.VIDEO) -> {
+                    event.key == Key.W -> {
                         if (index > 0) index--
                         true
                     }
-                    event.key == Key.E &&
-                        (file?.category == FileCategory.IMAGE || file?.category == FileCategory.VIDEO) -> {
+                    event.key == Key.E -> {
                         if (index < state.files.lastIndex) index++
                         true
                     }
