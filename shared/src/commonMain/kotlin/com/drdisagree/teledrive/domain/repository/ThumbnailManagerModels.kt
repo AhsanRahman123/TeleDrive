@@ -45,3 +45,15 @@ data class ThumbnailFileUsage(
     val isCached: Boolean
         get() = thumbnailSizeBytes != null
 }
+
+
+data class ThumbnailQueueItem(
+    val fileId: String,
+    val name: String,
+    val mimeType: String,
+    val fileSizeBytes: Long,
+    val queuedAt: Long,
+    val attempts: Int,
+    val isForced: Boolean,
+    val isProcessing: Boolean = false
+)
