@@ -263,6 +263,11 @@ private fun ThumbnailQueueRow(
                     color = if (active) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(
+                    "Queued " + Formatters.dateTime(item.queuedAt),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             if (item.attempts >= MAX_THUMBNAIL_ATTEMPTS) {
                 TextButton(onClick = onRetry) { Text("Retry") }
