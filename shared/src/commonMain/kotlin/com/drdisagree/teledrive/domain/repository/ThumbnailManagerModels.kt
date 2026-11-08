@@ -7,6 +7,32 @@ enum class ThumbnailTargetType {
     FOLDER
 }
 
+/** Inventory filters are applied by Room before paging, not in the UI. */
+enum class ThumbnailCacheFilter {
+    ALL,
+    GENERATED,
+    MISSING
+}
+
+/** INHERITED means there is no explicit file-level override; effective behavior is shown separately. */
+enum class ThumbnailPolicyFilter {
+    ALL,
+    INHERITED,
+    EXPLICIT_AUTOMATIC,
+    EXPLICIT_MANUAL_ONLY
+}
+
+enum class ThumbnailFileSort {
+    THUMBNAIL_LARGEST,
+    THUMBNAIL_SMALLEST,
+    SOURCE_LARGEST,
+    SOURCE_SMALLEST,
+    GENERATED_NEWEST,
+    LAST_VIEWED_OLDEST,
+    NAME_ASC,
+    NAME_DESC
+}
+
 data class ThumbnailManagerSummary(
     val totalBytes: Long = 0L,
     val cachedFiles: Int = 0,
@@ -39,7 +65,10 @@ data class ThumbnailFileUsage(
     val generatedAt: Long?,
     val lastAccessAt: Long?,
     val encrypted: Boolean?,
+    /** Explicit file rule. INHERIT means use the nearest folder rule or the default. */
     val policy: ThumbnailPolicy,
+    /** Actual behavior after resolving the file and all ancestor folder rules. */
+    val effectivePolicy: ThumbnailPolicy = policy,
     val isTrashed: Boolean = false
 ) {
     val isCached: Boolean
@@ -56,7 +85,8 @@ data class ThumbnailQueueItem(
     val queuedAt: Long,
     val attempts: Int,
     val isForced: Boolean,
-    val isProcessing: Boolean = false
+    val isProcessing: Boolean = false,
+    val isPaused: Boolean = false
 ) {
     val isFailed: Boolean get() = attempts >= 3
 }
