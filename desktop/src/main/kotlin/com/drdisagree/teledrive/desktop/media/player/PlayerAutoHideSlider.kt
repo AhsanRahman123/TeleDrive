@@ -76,10 +76,14 @@ internal fun PlayerAutoHideSlider(
         onDraggingChange(isDragging)
     }
 
-    LaunchedEffect(isHovered, isDragging, hasFocus, manuallyExpanded) {
-        // Only active pointer/focus interaction pins the player controls.
-        // The level slider's own hide delay runs independently.
-        onActiveChange(isHovered || isDragging || hasFocus || manuallyExpanded)
+    LaunchedEffect(isHovered, isDragging, hasFocus, manuallyExpanded, sliderVisible, autoHide) {
+        // Keep the player chrome visible until an auto-hiding slider has
+        // completed its own delay. A permanently expanded slider must not
+        // disable the player's separate control-bar auto-hide.
+        onActiveChange(
+            isHovered || isDragging || hasFocus || manuallyExpanded ||
+                (autoHide && sliderVisible)
+        )
     }
 
     DisposableEffect(Unit) {
