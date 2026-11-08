@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.settings
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -67,9 +69,10 @@ fun SettingsScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxSize().padding(end = 10.dp)
                 .padding(top = padding.calculateTopPadding())
                 .verticalScroll(scrollState)
         ) {
@@ -88,6 +91,11 @@ fun SettingsScreen(
                 Modifier.height(
                     24.dp + padding.calculateBottomPadding() + LocalBottomBarInset.current
                 )
+            )
+        }
+            DesktopVerticalScrollbar(
+                state = scrollState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
             )
         }
     }
