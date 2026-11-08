@@ -11,7 +11,12 @@ data class GalleryFilters(
     val favoritesOnly: Boolean = false,
     val availableOfflineOnly: Boolean = false,
     val backedUpOnly: Boolean = false,
-    val notBackedUpOnly: Boolean = false
+    val notBackedUpOnly: Boolean = false,
+    val extensionQuery: String = "",
+    val minSizeMb: String = "",
+    val maxSizeMb: String = "",
+    val modifiedAfterDate: String = "",
+    val modifiedBeforeDate: String = ""
 )
 
 data class GalleryUiState(
@@ -37,5 +42,10 @@ data class GalleryUiState(
                 filters.favoritesOnly ||
                 filters.availableOfflineOnly ||
                 filters.backedUpOnly ||
-                filters.notBackedUpOnly
+                filters.notBackedUpOnly ||
+                filters.extensionQuery.isNotBlank() ||
+                filters.minSizeMb.isNotBlank() ||
+                filters.maxSizeMb.isNotBlank() ||
+                filters.modifiedAfterDate.isNotBlank() ||
+                filters.modifiedBeforeDate.isNotBlank()
 }
