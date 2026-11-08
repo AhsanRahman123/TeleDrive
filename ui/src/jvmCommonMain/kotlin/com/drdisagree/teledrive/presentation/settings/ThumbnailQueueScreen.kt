@@ -56,6 +56,7 @@ fun ThumbnailQueueScreen(
     var offset by remember { mutableStateOf(0) }
     var pendingCount by remember { mutableStateOf(0) }
     var confirmCancelAll by remember { mutableStateOf(false) }
+    var selectingAll by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(offset) {
@@ -144,12 +145,32 @@ fun ThumbnailQueueScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(selectedIds.size.toString() + " selected", modifier = Modifier.weight(1f))
+            TextButton(
+                enabled = !selectingAll && pendingCount > 0,
+                onClick = {
+                    scope.launch {
+                        selectingAll = true
+                        try {
+                            val allIds = mutableSetOf<String>()
+                            var pageOffset = 0
+                            while (pageOffset < pendingCount) {
+                                val page = repository.thumbnailQueue(pageOffset, 200)
+                                if (page.isEmpty()) break
+                                allIds.addAll(page.map { it.fileId })
+                                pageOffset += page.size
+                            }
+                            selectedIds = allIds
+                        } finally {
+                            selectingAll = false
+                        }
+                    }
+                }
+            ) { Text(if (selectingAll) "Selecting…" else "Select all") }
             TextButton(onClick = {
-                selectedIds = if (selectedIds.size == items.size) emptySet()
-                else items.map { it.fileId }.toSet()
-            }) {
-                Text(if (items.isNotEmpty() && selectedIds.size == items.size) "Deselect page" else "Select page")
-            }
+                val pageIds = items.map { it.fileId }.toSet()
+                selectedIds = if (pageIds.all { it in selectedIds }) selectedIds - pageIds
+                else selectedIds + pageIds
+            }) { Text("Select page") }
         }
 
         if (selectedIds.isNotEmpty()) {
@@ -251,6 +272,12 @@ private fun ThumbnailQueueRow(
                     Formatters.bytes(item.fileSizeBytes) + " · " + item.mimeType.ifBlank { "Unknown type" },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    item.folderPath,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2
                 )
                 Text(
                     when {
