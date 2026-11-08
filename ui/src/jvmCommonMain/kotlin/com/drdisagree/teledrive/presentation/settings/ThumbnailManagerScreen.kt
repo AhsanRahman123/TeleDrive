@@ -67,6 +67,7 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailFolderUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailManagerSummary
 import com.drdisagree.teledrive.domain.repository.ThumbnailCacheFilter
 import com.drdisagree.teledrive.domain.repository.ThumbnailPolicyFilter
+import com.drdisagree.teledrive.domain.repository.ThumbnailEffectivePolicyFilter
 import com.drdisagree.teledrive.domain.repository.ThumbnailFileSort
 import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -105,6 +106,7 @@ fun ThumbnailManagerScreen(
     var selectingAll by remember { mutableStateOf(false) }
     var cacheFilter by remember { mutableStateOf(ThumbnailCacheFilter.ALL) }
     var policyFilter by remember { mutableStateOf(ThumbnailPolicyFilter.ALL) }
+    var effectivePolicyFilter by remember { mutableStateOf(ThumbnailEffectivePolicyFilter.ALL) }
     var sortOrder by remember { mutableStateOf(ThumbnailFileSort.THUMBNAIL_LARGEST) }
     var searchInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
@@ -131,13 +133,13 @@ fun ThumbnailManagerScreen(
         }
     }
 
-    LaunchedEffect(cacheFilter, policyFilter, sortOrder, searchQuery) {
+    LaunchedEffect(cacheFilter, policyFilter, effectivePolicyFilter, sortOrder, searchQuery) {
         pageOffset = 0
         selectedIds = emptySet()
     }
 
     LaunchedEffect(
-        folderId, refreshKey, pageOffset, cacheFilter, policyFilter, sortOrder, searchQuery
+        folderId, refreshKey, pageOffset, cacheFilter, policyFilter, effectivePolicyFilter, sortOrder, searchQuery
     ) {
         loading = true
         summary = cacheRepository.thumbnailManagerSummary()
@@ -148,6 +150,7 @@ fun ThumbnailManagerScreen(
             limit = THUMBNAIL_PAGE_SIZE + 1,
             cacheFilter = cacheFilter.name,
             policyFilter = policyFilter.name,
+            effectivePolicyFilter = effectivePolicyFilter.name,
             searchQuery = searchQuery,
             sortOrder = sortOrder.name
         )
@@ -553,6 +556,14 @@ fun ThumbnailManagerScreen(
                     onSelect = { policyFilter = ThumbnailPolicyFilter.valueOf(it) }
                 )
                 ThumbnailInventoryDropdown(
+                    title = "Behavior",
+                    value = effectivePolicyFilter.name,
+                    options = ThumbnailEffectivePolicyFilter.entries.map {
+                        it.name to effectivePolicyFilterLabel(it)
+                    },
+                    onSelect = { effectivePolicyFilter = ThumbnailEffectivePolicyFilter.valueOf(it) }
+                )
+                ThumbnailInventoryDropdown(
                     title = "Sort",
                     value = sortOrder.name,
                     options = ThumbnailFileSort.entries.map { it.name to fileSortLabel(it) },
@@ -587,6 +598,7 @@ fun ThumbnailManagerScreen(
                                         folderId = folderId,
                                         cacheFilter = cacheFilter.name,
                                         policyFilter = policyFilter.name,
+                                        effectivePolicyFilter = effectivePolicyFilter.name,
                                         searchQuery = searchQuery
                                     ).toSet()
                                 } finally {
@@ -944,6 +956,12 @@ private fun policyFilterLabel(filter: ThumbnailPolicyFilter): String = when (fil
     ThumbnailPolicyFilter.INHERITED -> "Inherited"
     ThumbnailPolicyFilter.EXPLICIT_AUTOMATIC -> "Explicit Automatic"
     ThumbnailPolicyFilter.EXPLICIT_MANUAL_ONLY -> "Explicit Manual only"
+}
+
+private fun effectivePolicyFilterLabel(filter: ThumbnailEffectivePolicyFilter): String = when (filter) {
+    ThumbnailEffectivePolicyFilter.ALL -> "All behaviors"
+    ThumbnailEffectivePolicyFilter.AUTOMATIC -> "Automatic"
+    ThumbnailEffectivePolicyFilter.MANUAL_ONLY -> "Manual only"
 }
 
 private fun fileSortLabel(sort: ThumbnailFileSort): String = when (sort) {
