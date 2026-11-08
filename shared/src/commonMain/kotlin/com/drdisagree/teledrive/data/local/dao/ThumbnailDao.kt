@@ -82,7 +82,7 @@ interface ThumbnailDao {
     @Query(
         """SELECT COALESCE(f.folderId, f.preTrashFolderId) AS folderId,
                   COUNT(*) AS eligibleFiles,
-                  SUM(CASE WHEN t.fileId IS NOT NULL THEN 1 ELSE 0 END) AS generatedFiles
+                  COUNT(t.fileId) AS generatedFiles
              FROM files f
              LEFT JOIN thumbnails t ON t.fileId = f.id
             WHERE f.trashedAt IS NULL
