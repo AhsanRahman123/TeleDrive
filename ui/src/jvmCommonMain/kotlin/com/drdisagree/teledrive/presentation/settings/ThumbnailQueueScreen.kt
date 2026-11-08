@@ -71,7 +71,7 @@ fun ThumbnailQueueScreen(
         while (true) {
             refreshing = true
             val page = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
-            pendingCount = repository.thumbnailManagerSummary().pendingJobs
+            pendingCount = repository.thumbnailQueueCount()
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
             if (page.isEmpty() && offset > 0) {
