@@ -113,11 +113,13 @@ class DesktopThumbnailStore(
     }
 
     override suspend fun cancelJobs(fileIds: List<String>) {
-        val jobs = fileIds.distinct().mapNotNull(runningJobs::get)
-        jobs.forEach {
-            it.cancel(CancellationException("Thumbnail job cancelled by user"))
+        schedulerMutex.withLock {
+            val jobs = fileIds.distinct().mapNotNull(runningJobs::get)
+            jobs.forEach {
+                it.cancel(CancellationException("Thumbnail job cancelled by user"))
+            }
+            jobs.joinAll()
         }
-        jobs.joinAll()
         jobWakeups.trySend(Unit)
     }
 
