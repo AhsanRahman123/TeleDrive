@@ -377,6 +377,7 @@ fun GalleryScreen(
     var showCreateAlbum by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var confirmDeleteLocal by remember { mutableStateOf(false) }
+    var advancedFiltersExpanded by remember { mutableStateOf(false) }
 
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
     val infoFolderPath by viewModel.infoFolderPath.collectAsStateWithLifecycle()
@@ -734,7 +735,64 @@ fun GalleryScreen(
                         }
                     },
                     actions = {
-                        if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                        if (advancedFiltersExpanded && state.tab != GalleryTab.ALBUMS) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = state.filters.extensionQuery,
+                            onValueChange = { viewModel.setAdvancedFilters(extension = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Extension") },
+                            placeholder = { Text("jpg, png, mp4") }
+                        )
+                        OutlinedTextField(
+                            value = state.filters.minSizeMb,
+                            onValueChange = { viewModel.setAdvancedFilters(minSizeMb = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Min size (MB)") }
+                        )
+                        OutlinedTextField(
+                            value = state.filters.maxSizeMb,
+                            onValueChange = { viewModel.setAdvancedFilters(maxSizeMb = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Max size (MB)") }
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = state.filters.modifiedAfterDate,
+                            onValueChange = { viewModel.setAdvancedFilters(modifiedAfterDate = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Modified from") },
+                            placeholder = { Text("YYYY-MM-DD") }
+                        )
+                        OutlinedTextField(
+                            value = state.filters.modifiedBeforeDate,
+                            onValueChange = { viewModel.setAdvancedFilters(modifiedBeforeDate = it) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Modified to") },
+                            placeholder = { Text("YYYY-MM-DD") }
+                        )
+                    }
+                    Text(
+                        "Use a file extension, size range in MB, and dates in YYYY-MM-DD format.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
                             IconButton(onClick = { showCreateAlbum = true }) {
                                 Icon(
                                     Icons.Filled.CreateNewFolder,
@@ -897,6 +955,11 @@ fun GalleryScreen(
                         selected = state.filters.notBackedUpOnly,
                         onClick = { viewModel.setNotBackedUpFilter(!state.filters.notBackedUpOnly) },
                         label = { Text(stringResource(Res.string.gallery_filter_not_backed_up)) }
+                    )
+                    FilterChip(
+                        selected = advancedFiltersExpanded,
+                        onClick = { advancedFiltersExpanded = !advancedFiltersExpanded },
+                        label = { Text("Advanced filters") }
                     )
                     if (state.hasActiveFilters) {
                         TextButton(onClick = viewModel::clearFilters) {
