@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.domain.repository
 
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 interface CacheRepository {
 
@@ -46,6 +47,17 @@ interface CacheRepository {
     suspend fun generateThumbnails(fileIds: List<String>) = Unit
 
     suspend fun generateFolderThumbnails(folderId: String?) = Unit
+
+    /** Queue every eligible uncached file in the drive, regardless of folder. */
+    suspend fun generateAllThumbnails() = Unit
+
+    suspend fun thumbnailQueue(offset: Int, limit: Int): List<ThumbnailQueueItem> = emptyList()
+
+    fun observeThumbnailActiveJobs(): Flow<Set<String>> = flowOf(emptySet())
+
+    suspend fun cancelThumbnailJobs(fileIds: List<String>) = Unit
+
+    suspend fun cancelAllThumbnailJobs() = Unit
 
     suspend fun removeThumbnail(fileId: String) = Unit
 
