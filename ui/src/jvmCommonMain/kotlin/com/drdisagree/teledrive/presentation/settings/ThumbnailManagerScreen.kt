@@ -721,6 +721,15 @@ private fun ThumbnailFileRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary
             )
+            file.generatedAt?.let { generated ->
+                Text(
+                    "Generated " + Formatters.dateTime(generated) +
+                        (file.lastAccessAt?.let { " · Last viewed " + Formatters.dateTime(it) } ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
         }
         ThumbnailPolicyMenu(file.policy, allowInherit = true, onSelect = onPolicy)
         if (file.isCached) {
