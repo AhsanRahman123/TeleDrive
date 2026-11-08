@@ -175,6 +175,7 @@ class DesktopThumbnailStore(
                 continue
             }
             delay(BACKGROUND_RETRY_DELAY_MS)
+            jobWakeups.trySend(Unit)
             return
         }
     }
