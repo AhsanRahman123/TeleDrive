@@ -46,8 +46,8 @@ import java.util.Locale
 @Composable
 fun FileInfoSheet(
     file: DriveFile,
-    folderPath: String? = null,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    folderPath: String? = null
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
