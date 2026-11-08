@@ -7,6 +7,11 @@ data class CacheStats(
     val tempBytes: Long,
     val tdlibBytes: Long
 ) {
+    /** Cache managed by Storage > Clear cache; thumbnail previews are independent. */
+    val nonThumbnailBytes: Long
+        get() = previewBytes + streamBytes + tempBytes + tdlibBytes
+
+    /** Combined footprint for diagnostics and overall storage accounting. */
     val totalBytes: Long
-        get() = thumbnailBytes + previewBytes + streamBytes + tempBytes + tdlibBytes
+        get() = thumbnailBytes + nonThumbnailBytes
 }
