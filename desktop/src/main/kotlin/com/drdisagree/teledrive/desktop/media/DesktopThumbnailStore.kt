@@ -80,6 +80,8 @@ class DesktopThumbnailStore(
 
     private val generationSemaphore = Semaphore(MAX_PARALLEL_GENERATIONS)
     private val videoThumbnailMutex = Mutex()
+    private val schedulerMutex = Mutex()
+    @Volatile private var schedulingPaused = false
     private val jobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobWakeups = Channel<Unit>(Channel.CONFLATED)
     private val runningJobs = ConcurrentHashMap<String, Job>()
@@ -102,10 +104,12 @@ class DesktopThumbnailStore(
                         error
                     )
                     delay(BACKGROUND_RETRY_DELAY_MS)
-                    jobWakeups.trySend(Unit)
+                    schedulingPaused = false
+        jobWakeups.trySend(Unit)
                 }
             }
         }
+        schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
 
@@ -115,22 +119,28 @@ class DesktopThumbnailStore(
             it.cancel(CancellationException("Thumbnail job cancelled by user"))
         }
         jobs.joinAll()
+        schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
 
     override suspend fun retryJobs(fileIds: List<String>) {
+        schedulingPaused = false
+        schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
 
     override suspend fun cancelAllJobs() {
-        val jobs = runningJobs.values.toList()
-        jobs.forEach {
-            it.cancel(CancellationException("All thumbnail jobs cancelled by user"))
+        schedulerMutex.withLock {
+            schedulingPaused = true
+            val jobs = runningJobs.values.toList()
+            jobs.forEach {
+                it.cancel(CancellationException("All thumbnail jobs cancelled by user"))
+            }
+            jobs.joinAll()
+            runningJobs.clear()
+            processingIds.clear()
+            _activeJobs.value = emptySet()
         }
-        jobs.joinAll()
-        runningJobs.clear()
-        processingIds.clear()
-        _activeJobs.value = emptySet()
     }
 
     override suspend fun thumbnailBytes(fileId: String): ByteArray? {
@@ -167,6 +177,7 @@ class DesktopThumbnailStore(
         thumbnailJobDao.enqueue(
             ThumbnailJobEntity(fileId = fileId, queuedAt = now, force = false)
         )
+        schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
 
@@ -178,6 +189,7 @@ class DesktopThumbnailStore(
                 force = true
             )
         )
+        schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
 
@@ -194,7 +206,8 @@ class DesktopThumbnailStore(
                     )
                 }
             )
-            jobWakeups.trySend(Unit)
+            schedulingPaused = false
+        jobWakeups.trySend(Unit)
         }
     }
 
@@ -206,6 +219,7 @@ class DesktopThumbnailStore(
                 force = false
             )
         )
+        schedulingPaused = false
         jobWakeups.trySend(Unit)
     }
 
@@ -222,7 +236,8 @@ class DesktopThumbnailStore(
                     )
                 }
             )
-            jobWakeups.trySend(Unit)
+            schedulingPaused = false
+        jobWakeups.trySend(Unit)
         }
     }
 
@@ -251,9 +266,10 @@ class DesktopThumbnailStore(
      * Schedule up to MAX_PARALLEL_GENERATIONS independent jobs. The database remains the
      * durable source of truth; in-memory jobs are only the currently executing subset.
      */
-    private suspend fun processPendingJobs() {
+    private suspend fun processPendingJobs() = schedulerMutex.withLock {
+        if (schedulingPaused) return@withLock
         val available = (MAX_PARALLEL_GENERATIONS - runningJobs.size).coerceAtLeast(0)
-        if (available == 0) return
+        if (available == 0) return@withLock
         val ready = thumbnailJobDao.nextReady(
             limit = available,
             now = System.currentTimeMillis(),
@@ -278,7 +294,8 @@ class DesktopThumbnailStore(
                     runningJobs.remove(job.fileId)
                     processingIds.remove(job.fileId)
                     _activeJobs.update { it - job.fileId }
-                    jobWakeups.trySend(Unit)
+                    schedulingPaused = false
+        jobWakeups.trySend(Unit)
                 }
             }
             runningJobs[job.fileId] = worker
@@ -317,7 +334,8 @@ class DesktopThumbnailStore(
         if (retryAt != Long.MAX_VALUE) {
             jobScope.launch {
                 delay(BACKGROUND_RETRY_DELAY_MS)
-                jobWakeups.trySend(Unit)
+                schedulingPaused = false
+        jobWakeups.trySend(Unit)
             }
         }
     }
