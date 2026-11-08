@@ -182,7 +182,7 @@ fun ThumbnailManagerScreen(
     }
 
     // Update totals and folder aggregates without resetting the current file page or selection.
-    LaunchedEffect(folderId) {
+    LaunchedEffect(folderId, folderSortOrder) {
         while (true) {
             val latest = cacheRepository.thumbnailManagerSummary()
             val cacheChanged = latest.totalBytes != summary.totalBytes ||
