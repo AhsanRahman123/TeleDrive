@@ -20,11 +20,21 @@ import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.data.local.dao.FileDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
+import com.drdisagree.teledrive.data.local.dao.ThumbnailJobDao
 import com.drdisagree.teledrive.data.local.entity.FileEntity
 import com.drdisagree.teledrive.data.local.entity.ThumbnailEntity
+import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
+import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.io.ByteArrayOutputStream
@@ -42,10 +52,20 @@ class AndroidThumbnailStore(
     private val streamCrypto: StreamCrypto,
     private val wrappedKeyRepository: WrappedKeyRepository,
     private val settingsRepository: SettingsRepository,
-    private val thumbnailPolicyDao: ThumbnailPolicyDao
+    private val thumbnailPolicyDao: ThumbnailPolicyDao,
+    private val thumbnailJobDao: ThumbnailJobDao
 ) : ThumbnailStore {
 
     private val generationSemaphore = Semaphore(3)
+    private val jobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val jobWakeups = Channel<Unit>(Channel.CONFLATED)
+
+    init {
+        jobScope.launch {
+            for (ignored in jobWakeups) processPendingJobs()
+        }
+        jobWakeups.trySend(Unit)
+    }
 
     override suspend fun thumbnailBytes(fileId: String): ByteArray? {
         if (!settingsRepository.preferences.first().linkPreviews && isNote(fileId)) {
@@ -63,6 +83,85 @@ class AndroidThumbnailStore(
         }
         readCachedThumbnail(fileId)?.let { return it }
         return generationSemaphore.withPermit { generate(fileId) }
+    }
+
+    override suspend fun enqueueAfterUpload(fileId: String) {
+        val now = System.currentTimeMillis()
+        thumbnailPolicyDao.upsert(
+            ThumbnailPolicyEntity(
+                targetType = TARGET_FILE,
+                targetId = fileId,
+                policy = ThumbnailPolicy.AUTOMATIC.name,
+                changedAt = now
+            )
+        )
+        thumbnailJobDao.enqueue(
+            ThumbnailJobEntity(fileId = fileId, queuedAt = now, force = false)
+        )
+        jobWakeups.trySend(Unit)
+    }
+
+    override suspend fun enqueueManual(fileId: String) {
+        thumbnailJobDao.enqueue(
+            ThumbnailJobEntity(
+                fileId = fileId,
+                queuedAt = System.currentTimeMillis(),
+                force = true
+            )
+        )
+        jobWakeups.trySend(Unit)
+    }
+
+    override suspend fun enqueueManual(fileIds: List<String>) {
+        if (fileIds.isEmpty()) return
+        val timestamp = System.currentTimeMillis()
+        fileIds.distinct().chunked(JOB_INSERT_BATCH_SIZE).forEach { batch ->
+            thumbnailJobDao.enqueue(
+                batch.map { id ->
+                    ThumbnailJobEntity(
+                        fileId = id,
+                        queuedAt = timestamp,
+                        force = true
+                    )
+                }
+            )
+            jobWakeups.trySend(Unit)
+        }
+    }
+
+    private suspend fun processPendingJobs() {
+        while (true) {
+            val job = thumbnailJobDao.next(1).firstOrNull() ?: return
+            val entity = fileDao.byId(job.fileId)
+            if (entity == null || entity.trashedAt != null) {
+                thumbnailJobDao.delete(job.fileId)
+                continue
+            }
+            val cached = thumbnailDao.byFileId(job.fileId)?.let { File(it.path).exists() } == true
+            if (cached || (!job.force && effectivePolicy(job.fileId) != ThumbnailPolicy.AUTOMATIC)) {
+                thumbnailJobDao.delete(job.fileId)
+                continue
+            }
+            val bytes = try {
+                generationSemaphore.withPermit { generate(job.fileId) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (bytes != null) {
+                thumbnailJobDao.delete(job.fileId)
+                continue
+            }
+            thumbnailJobDao.recordAttempt(job.fileId)
+            if (job.attempts + 1 >= MAX_BACKGROUND_ATTEMPTS) {
+                thumbnailJobDao.delete(job.fileId)
+                continue
+            }
+            delay(BACKGROUND_RETRY_DELAY_MS)
+            jobWakeups.trySend(Unit)
+            return
+        }
     }
 
     private suspend fun readCachedThumbnail(fileId: String): ByteArray? {
@@ -268,5 +367,10 @@ class AndroidThumbnailStore(
         private const val LINK_NOTE_LIMIT = 8L * 1024
         private const val MAX_DIMENSION = 512
         private const val JPEG_QUALITY = 82
+        private const val MAX_BACKGROUND_ATTEMPTS = 3
+        private const val BACKGROUND_RETRY_DELAY_MS = 5_000L
+        private const val JOB_INSERT_BATCH_SIZE = 250
+        private const val TARGET_FILE = "FILE"
+
     }
 }
