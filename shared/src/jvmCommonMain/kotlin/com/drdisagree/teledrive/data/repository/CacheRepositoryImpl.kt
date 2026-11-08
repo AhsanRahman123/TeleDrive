@@ -54,6 +54,10 @@ class CacheRepositoryImpl(
         )
     }
 
+    private suspend fun refreshThumbnailStats() {
+        stats.value = stats.value.copy(thumbnailBytes = thumbnailDao.totalSizeBytes())
+    }
+
     override suspend fun clearThumbnails() {
         thumbnailDir().deleteRecursively()
         thumbnailDao.deleteAll()
@@ -127,15 +131,14 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun thumbnailManagerSummary(): ThumbnailManagerSummary {
-        refreshStats()
-        val aggregates = thumbnailDao.folderAggregates()
-        val unfiled = aggregates.firstOrNull { it.folderId == null }
+        refreshThumbnailStats()
+        val unfiled = thumbnailDao.unfiledAggregate()
         return ThumbnailManagerSummary(
             totalBytes = thumbnailDao.totalSizeBytes(),
-            cachedFiles = aggregates.sumOf { it.cachedFiles },
+            cachedFiles = thumbnailDao.count(),
             pendingJobs = thumbnailJobDao.count(),
-            unfiledBytes = unfiled?.totalBytes ?: 0L,
-            unfiledCachedFiles = unfiled?.cachedFiles ?: 0
+            unfiledBytes = unfiled.totalBytes,
+            unfiledCachedFiles = unfiled.cachedFiles
         )
     }
 
