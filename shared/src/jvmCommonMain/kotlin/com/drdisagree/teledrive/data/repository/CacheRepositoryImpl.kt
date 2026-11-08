@@ -16,6 +16,7 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailFileUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailFolderUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailManagerSummary
 import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
+import com.drdisagree.teledrive.domain.repository.ThumbnailQueueItem
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.data.local.dao.CacheDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailDao
@@ -25,6 +26,7 @@ import com.drdisagree.teledrive.domain.repository.CacheStats
 import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 
 class CacheRepositoryImpl(
     private val storagePaths: AppStoragePaths,
@@ -348,6 +350,51 @@ class CacheRepositoryImpl(
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
+    }
+
+    override suspend fun generateAllThumbnails() {
+        var afterAddedAt: Long? = null
+        var afterFileId: String? = null
+        while (true) {
+            val page = thumbnailDao.allEligibleFileIdsPage(
+                onlyMissing = true,
+                afterAddedAt = afterAddedAt,
+                afterFileId = afterFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (page.isEmpty()) break
+            thumbnailStore.enqueueManual(page.map { it.fileId })
+            val last = page.last()
+            afterAddedAt = last.addedAt
+            afterFileId = last.fileId
+            if (page.size < JOB_BATCH_SIZE) break
+        }
+    }
+
+    override suspend fun thumbnailQueue(
+        offset: Int,
+        limit: Int
+    ): List<ThumbnailQueueItem> {
+        val active = thumbnailStore.observeActiveJobs().first()
+        return thumbnailJobDao.page(
+            offset = offset.coerceAtLeast(0),
+            limit = limit.coerceIn(1, 200)
+        ).map { it.copy(isProcessing = it.fileId in active) }
+    }
+
+    override fun observeThumbnailActiveJobs(): Flow<Set<String>> =
+        thumbnailStore.observeActiveJobs()
+
+    override suspend fun cancelThumbnailJobs(fileIds: List<String>) {
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return
+        thumbnailStore.cancelJobs(ids)
+        thumbnailJobDao.delete(ids)
+    }
+
+    override suspend fun cancelAllThumbnailJobs() {
+        thumbnailStore.cancelAllJobs()
+        thumbnailJobDao.deleteAll()
     }
 
     override suspend fun removeThumbnail(fileId: String) {
