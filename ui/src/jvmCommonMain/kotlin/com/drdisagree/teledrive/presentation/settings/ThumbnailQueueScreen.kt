@@ -70,10 +70,17 @@ fun ThumbnailQueueScreen(
     LaunchedEffect(offset) {
         while (true) {
             refreshing = true
-            items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
+            val page = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE)
             pendingCount = repository.thumbnailManagerSummary().pendingJobs
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
+            if (page.isEmpty() && offset > 0 && pendingCount > 0) {
+                // The live queue shrank while this page was open. Move to the last valid page.
+                offset = ((pendingCount - 1) / THUMBNAIL_QUEUE_PAGE_SIZE) *
+                    THUMBNAIL_QUEUE_PAGE_SIZE
+            } else {
+                items = page
+            }
             refreshing = false
             delay(1_000L)
         }
