@@ -17,7 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -65,7 +67,7 @@ fun FileDetailsItem(
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(horizontal = 10.dp, vertical = if (compact) 2.dp else 5.dp),
+            .padding(horizontal = 12.dp, vertical = if (compact) 2.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         SelectionCheckbox(
@@ -77,25 +79,31 @@ fun FileDetailsItem(
             file = file,
             contentDescription = null,
             modifier = Modifier
-                .size(if (compact) 34.dp else 40.dp)
+                .size(if (compact) 34.dp else 68.dp)
                 .clip(MaterialTheme.shapes.medium)
         )
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(if (compact) 10.dp else 16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = file.name,
-                style = MaterialTheme.typography.bodyMedium,
+                style = if (compact) MaterialTheme.typography.bodyMedium else {
+                    MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = details,
-                style = MaterialTheme.typography.bodySmall,
+                style = if (compact) MaterialTheme.typography.bodySmall
+                else MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
-        BackupStateBadge(file = file, modifier = Modifier.padding(start = 8.dp))
+        BackupStateBadge(file = file, modifier = Modifier.padding(start = 10.dp))
     }
 }
