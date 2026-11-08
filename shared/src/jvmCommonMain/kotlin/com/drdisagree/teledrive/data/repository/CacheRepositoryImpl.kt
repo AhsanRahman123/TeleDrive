@@ -224,19 +224,24 @@ class CacheRepositoryImpl(
                 )
             )
         }
+        if (targetType == ThumbnailTargetType.FILE &&
+            policy == ThumbnailPolicy.MANUAL_ONLY
+        ) {
+            thumbnailJobDao.delete(targetId)
+        }
         if (targetType == ThumbnailTargetType.FOLDER &&
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
-            val folderIds = folderDao.folderIdsInTree(targetId)
-            val nestedFolderIds = folderIds.filterNot { it == targetId }
-            if (nestedFolderIds.isNotEmpty()) {
-                thumbnailPolicyDao.deleteFolderOverrides(nestedFolderIds)
-            }
-            val fileIds = thumbnailDao.fileIdsInFolderTree(targetId, onlyMissing = false)
-            if (fileIds.isNotEmpty()) {
-                thumbnailPolicyDao.deleteFileOverrides(fileIds)
-                thumbnailJobDao.delete(fileIds)
-            }
+            thumbnailPolicyDao.deleteOverridesInFolderTree(targetId)
+            thumbnailJobDao.deleteInFolderTree(targetId)
+            thumbnailPolicyDao.upsert(
+                ThumbnailPolicyEntity(
+                    targetType = ThumbnailTargetType.FOLDER.name,
+                    targetId = targetId,
+                    policy = ThumbnailPolicy.MANUAL_ONLY.name,
+                    changedAt = System.currentTimeMillis()
+                )
+            )
         }
     }
 
@@ -256,12 +261,27 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun generateFolderThumbnails(folderId: String?) {
-        val fileIds = if (folderId == null) {
-            thumbnailDao.unfiledFileIds(onlyMissing = true)
-        } else {
-            thumbnailDao.fileIdsInFolderTree(folderId, onlyMissing = true)
+        var offset = 0
+        while (true) {
+            val fileIds = if (folderId == null) {
+                thumbnailDao.unfiledFileIdsPage(
+                    onlyMissing = true,
+                    limit = JOB_BATCH_SIZE,
+                    offset = offset
+                )
+            } else {
+                thumbnailDao.fileIdsInFolderTreePage(
+                    folderId = folderId,
+                    onlyMissing = true,
+                    limit = JOB_BATCH_SIZE,
+                    offset = offset
+                )
+            }
+            if (fileIds.isEmpty()) break
+            thumbnailStore.enqueueManual(fileIds)
+            offset += fileIds.size
+            if (fileIds.size < JOB_BATCH_SIZE) break
         }
-        if (fileIds.isNotEmpty()) thumbnailStore.enqueueManual(fileIds)
     }
 
     override suspend fun removeThumbnail(fileId: String) {
@@ -283,20 +303,10 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun removeFolderThumbnails(folderId: String) {
-        val cached = thumbnailDao.cachedFilesInFolderTree(folderId)
-        cached.forEach { File(it.path).delete() }
-        val allFileIds = thumbnailDao.fileIdsInFolderTree(folderId, onlyMissing = false)
-        val folderIds = folderDao.folderIdsInTree(folderId)
-        val nestedFolderIds = folderIds.filterNot { it == folderId }
-        if (cached.isNotEmpty()) thumbnailDao.deleteAll(cached.map { it.fileId })
-        if (allFileIds.isNotEmpty()) {
-            thumbnailPolicyDao.deleteFileOverrides(allFileIds)
-            thumbnailJobDao.delete(allFileIds)
-            allFileIds.forEach(thumbnailMemoryCache::remove)
-        }
-        if (nestedFolderIds.isNotEmpty()) {
-            thumbnailPolicyDao.deleteFolderOverrides(nestedFolderIds)
-        }
+        thumbnailDao.deleteFolderTree(folderId)
+        thumbnailPolicyDao.deleteOverridesInFolderTree(folderId)
+        thumbnailJobDao.deleteInFolderTree(folderId)
+        thumbnailMemoryCache.clear()
         thumbnailPolicyDao.upsert(
             ThumbnailPolicyEntity(
                 targetType = ThumbnailTargetType.FOLDER.name,
@@ -333,5 +343,6 @@ class CacheRepositoryImpl(
 
     private companion object {
         const val TAG = "CacheRepository"
+        const val JOB_BATCH_SIZE = 250
     }
 }
