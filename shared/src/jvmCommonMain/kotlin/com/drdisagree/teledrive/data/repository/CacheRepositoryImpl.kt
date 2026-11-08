@@ -434,22 +434,28 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun generateThumbnail(fileId: String) {
-        thumbnailPolicyDao.clearQueueItemPauses(listOf(fileId))
-        thumbnailStore.enqueueManual(fileId)
+        val missingIds = thumbnailDao.missingEligibleFileIds(listOf(fileId))
+        if (missingIds.isEmpty()) return
+        thumbnailPolicyDao.clearQueueItemPauses(missingIds)
+        thumbnailStore.enqueueManual(missingIds)
     }
 
     override suspend fun generateThumbnails(fileIds: List<String>): Int {
         val ids = fileIds.distinct()
-        var acceptedCount = 0
-        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
-            val missingIds = thumbnailDao.missingEligibleFileIds(batch)
-            if (missingIds.isNotEmpty()) {
-                thumbnailPolicyDao.clearQueueItemPauses(missingIds)
-                thumbnailStore.enqueueManual(missingIds)
-                acceptedCount += missingIds.size
-            }
+        if (ids.isEmpty()) return 0
+
+        // Filter in safe SQLite-sized batches, then submit the complete selection once.
+        // Cached files are excluded so the displayed queue count matches real work.
+        val missingIds = ids.chunked(JOB_BATCH_SIZE)
+            .flatMap { batch -> thumbnailDao.missingEligibleFileIds(batch) }
+            .distinct()
+        if (missingIds.isEmpty()) return 0
+
+        missingIds.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
         }
-        return acceptedCount
+        thumbnailStore.enqueueManual(missingIds)
+        return missingIds.size
     }
 
     override suspend fun generateFolderThumbnails(folderId: String?): Int {
