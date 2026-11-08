@@ -102,7 +102,8 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun clearAll() {
-        clearThumbnails()
+        // Storage > Clear cache must not remove Thumbnail Manager's independent cache.
+        // Thumbnails have their own explicit Clear thumbnails action and accounting.
         clearType(CacheEntryType.PREVIEW)
         clearType(CacheEntryType.STREAM)
         clearTemp()
