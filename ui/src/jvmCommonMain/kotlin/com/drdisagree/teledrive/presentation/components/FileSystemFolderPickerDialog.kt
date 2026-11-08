@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -122,6 +123,8 @@ fun FileSystemFolderPickerDialog(
         candidates.filter { it.isHome || File(it.path).exists() }
     }
 
+    val quickChipsScrollState = rememberScrollState()
+
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.backspaceUp(parentPath?.let { path -> { currentPath = path } }),
@@ -156,11 +159,15 @@ fun FileSystemFolderPickerDialog(
         text = {
             Column {
                 if (quickChips.isNotEmpty()) {
+                    DesktopHorizontalScrollContainer(
+                        state = quickChipsScrollState,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(bottom = 8.dp),
+                            .horizontalScroll(quickChipsScrollState)
+                            .padding(bottom = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         quickChips.forEach { chip ->
@@ -182,6 +189,7 @@ fun FileSystemFolderPickerDialog(
                                 }
                             )
                         }
+                    }
                     }
                 }
 
@@ -272,6 +280,10 @@ fun FileSystemFolderPickerDialog(
                                     visible = listState.canScrollForward,
                                     top = false,
                                     modifier = Modifier.align(Alignment.BottomCenter)
+                                )
+                                DesktopVerticalScrollbar(
+                                    state = listState,
+                                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                                 )
                             }
                         }
