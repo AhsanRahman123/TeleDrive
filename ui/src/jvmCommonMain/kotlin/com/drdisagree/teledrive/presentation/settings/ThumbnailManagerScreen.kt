@@ -255,8 +255,8 @@ fun ThumbnailManagerScreen(
             title = { Text("Clear this folder's thumbnails?") },
             text = {
                 Text(
-                    "Cached previews in this folder and its subfolders, plus matching queued jobs, will be removed. " +
-                        "Original files and Automatic/Manual thumbnail policies will remain unchanged."
+                    "Only cached previews in this folder and its subfolders will be removed. " +
+                        "Queued jobs and Automatic/Manual policies will remain unchanged, so pending work may create previews again."
                 )
             },
             confirmButton = {
@@ -283,8 +283,7 @@ fun ThumbnailManagerScreen(
             title = { Text("Delete all cached thumbnails?") },
             text = {
                 Text(
-                    "Every thumbnail preview and queued preparation will be removed from this device. " +
-                        "Your original files and Telegram backups will remain untouched."
+                    "Every cached thumbnail preview will be removed. Queue entries and Automatic/Manual policies will remain unchanged, so pending work may create previews again. Original files and Telegram backups will remain untouched."
                 )
             },
             confirmButton = {
@@ -307,7 +306,7 @@ fun ThumbnailManagerScreen(
         AlertDialog(
             onDismissRequest = { confirmRemoveSelected = false },
             title = { Text("Delete selected thumbnails?") },
-            text = { Text("The selected cached previews and any matching queued jobs will be removed. Original files will not be affected.") },
+            text = { Text("Only the selected cached previews will be removed. Queue entries, generation policies and original files will remain unchanged.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmRemoveSelected = false
