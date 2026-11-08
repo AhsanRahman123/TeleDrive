@@ -88,20 +88,9 @@ interface ThumbnailJobDao {
     )
     suspend fun fileIdsPage(offset: Int, limit: Int): List<String>
 
-    @Query("SELECT MAX(fileId) FROM thumbnail_jobs")
-    suspend fun maxFileId(): String?
-
-    @Query(
-        """SELECT fileId FROM thumbnail_jobs
-            WHERE fileId > :afterFileId AND fileId <= :throughFileId
-            ORDER BY fileId ASC
-            LIMIT :limit"""
-    )
-    suspend fun fileIdsAfter(
-        afterFileId: String,
-        throughFileId: String,
-        limit: Int
-    ): List<String>
+    /** A single read gives Select all one consistent queue snapshot. */
+    @Query("SELECT fileId FROM thumbnail_jobs ORDER BY fileId ASC")
+    suspend fun allFileIds(): List<String>
 
 
     @Query("UPDATE thumbnail_jobs SET attempts = 0, queuedAt = :now WHERE fileId IN (:fileIds)")
