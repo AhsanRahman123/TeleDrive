@@ -168,18 +168,26 @@ class TransferExecutor(
         fileDao.setBackupState(entity.id, BackupState.UPLOADING)
 
         if (splitsIntoParts(entity, sourceFile, encrypt)) {
-            return uploadInParts(
-                transfer = transfer,
-                entity = entity,
-                sourceFile = sourceFile,
-                localPath = localPath,
-                chatId = chatId,
-                manifest = manifest,
-                encrypt = encrypt,
-                contentHash = contentHash,
-                supersededMessageId = supersededMessageId,
-                previewPath = previewPath
-            )
+            val result = try {
+                uploadInParts(
+                    transfer = transfer,
+                    entity = entity,
+                    sourceFile = sourceFile,
+                    localPath = localPath,
+                    chatId = chatId,
+                    manifest = manifest,
+                    encrypt = encrypt,
+                    contentHash = contentHash,
+                    supersededMessageId = supersededMessageId,
+                    previewPath = previewPath
+                )
+            } finally {
+                rawIconPath?.let { File(it).delete() }
+            }
+            if (result == TransferOutcome.Completed) {
+                thumbnailStore.enqueueAfterUpload(entity.id)
+            }
+            return result
         }
 
         var stagingFile: File? = null
@@ -263,6 +271,9 @@ class TransferExecutor(
                     }
                 }
             }
+            if (outcome == TransferOutcome.Completed) {
+                thumbnailStore.enqueueAfterUpload(entity.id)
+            }
             outcome
         } catch (e: TransferControlException) {
             fileDao.setBackupStateIfLocalOnly(
@@ -275,6 +286,7 @@ class TransferExecutor(
             TransferOutcome.Failed(e.message, e.retryAfterSeconds)
         } finally {
             stagingFile?.delete()
+            rawIconPath?.let { File(it).delete() }
         }
     }
 
