@@ -78,9 +78,6 @@ fun ThumbnailQueueScreen(
             pendingCount = repository.thumbnailQueueCount()
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
-            if (selectedIds.isNotEmpty()) {
-                selectedIds = selectedIds.intersect(repository.thumbnailQueueAllFileIds().toSet())
-            }
             if (page.isEmpty() && offset > 0) {
                 // The live queue shrank while this page was open. Move to the last valid page,
                 // including page zero when the queue has become empty.
