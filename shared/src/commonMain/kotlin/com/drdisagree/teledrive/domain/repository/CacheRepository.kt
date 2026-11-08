@@ -85,6 +85,8 @@ interface CacheRepository {
     /** Stable snapshot of all queued IDs, suitable for selecting across changing queue pages. */
     suspend fun thumbnailQueueAllFileIds(): List<String> = emptyList()
 
+    suspend fun thumbnailQueueFailedFileIds(): List<String> = emptyList()
+
     suspend fun thumbnailQueuePaused(): Boolean = false
 
     fun observeThumbnailActiveJobs(): Flow<Set<String>> = flowOf(emptySet())
