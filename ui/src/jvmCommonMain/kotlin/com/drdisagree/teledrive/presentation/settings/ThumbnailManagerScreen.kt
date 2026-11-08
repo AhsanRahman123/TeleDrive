@@ -499,8 +499,11 @@ fun ThumbnailManagerScreen(
                         onClick = {
                             scope.launch {
                                 selectingAll = true
-                                selectedIds = cacheRepository.thumbnailFileIds(folderId).toSet()
-                                selectingAll = false
+                                try {
+                                    selectedIds = cacheRepository.thumbnailFileIds(folderId).toSet()
+                                } finally {
+                                    selectingAll = false
+                                }
                             }
                         }
                     ) {
