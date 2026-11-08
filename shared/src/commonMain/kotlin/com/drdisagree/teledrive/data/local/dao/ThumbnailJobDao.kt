@@ -54,10 +54,24 @@ interface ThumbnailJobDao {
     suspend fun recordAttempt(fileId: String, retryAt: Long)
 
     @Query(
-        """WITH RECURSIVE queued_page(fileId, queuedAt) AS (
-               SELECT fileId, queuedAt
-                 FROM thumbnail_jobs
-                ORDER BY queuedAt ASC, fileId ASC
+        """WITH RECURSIVE queued_page(fileId, queuedAt, sortName, fileSize, attempts) AS (
+               SELECT j.fileId,
+                      j.queuedAt,
+                      COALESCE(f.name, j.fileId),
+                      COALESCE(f.sizeBytes, 0),
+                      j.attempts
+                 FROM thumbnail_jobs j
+                 LEFT JOIN files f ON f.id = j.fileId
+                ORDER BY
+                    CASE WHEN :sortOrder = 'NEWEST_FIRST' THEN j.queuedAt END DESC,
+                    CASE WHEN :sortOrder = 'NAME_ASC' THEN COALESCE(f.name, j.fileId) END COLLATE NOCASE ASC,
+                    CASE WHEN :sortOrder = 'NAME_DESC' THEN COALESCE(f.name, j.fileId) END COLLATE NOCASE DESC,
+                    CASE WHEN :sortOrder = 'SOURCE_LARGEST' THEN COALESCE(f.sizeBytes, 0) END DESC,
+                    CASE WHEN :sortOrder = 'SOURCE_SMALLEST' THEN COALESCE(f.sizeBytes, 0) END ASC,
+                    CASE WHEN :sortOrder = 'FAILED_FIRST'
+                         THEN CASE WHEN j.attempts >= 3 THEN 0 ELSE 1 END END ASC,
+                    j.queuedAt ASC,
+                    j.fileId ASC
                 LIMIT :limit OFFSET :offset
            ),
            folder_paths(fileId, parentId, path, depth) AS (
@@ -93,9 +107,22 @@ interface ThumbnailJobDao {
              FROM queued_page q
              JOIN thumbnail_jobs j ON j.fileId = q.fileId
              LEFT JOIN files f ON f.id = j.fileId
-            ORDER BY q.queuedAt ASC, q.fileId ASC"""
+            ORDER BY
+                CASE WHEN :sortOrder = 'NEWEST_FIRST' THEN q.queuedAt END DESC,
+                CASE WHEN :sortOrder = 'NAME_ASC' THEN q.sortName END COLLATE NOCASE ASC,
+                CASE WHEN :sortOrder = 'NAME_DESC' THEN q.sortName END COLLATE NOCASE DESC,
+                CASE WHEN :sortOrder = 'SOURCE_LARGEST' THEN q.fileSize END DESC,
+                CASE WHEN :sortOrder = 'SOURCE_SMALLEST' THEN q.fileSize END ASC,
+                CASE WHEN :sortOrder = 'FAILED_FIRST'
+                     THEN CASE WHEN q.attempts >= 3 THEN 0 ELSE 1 END END ASC,
+                q.queuedAt ASC,
+                q.fileId ASC"""
     )
-    suspend fun page(offset: Int, limit: Int): List<ThumbnailQueueItem>
+    suspend fun page(
+        offset: Int,
+        limit: Int,
+        sortOrder: String
+    ): List<ThumbnailQueueItem>
 
     @Query(
         """SELECT fileId FROM thumbnail_jobs
