@@ -498,23 +498,8 @@ class CacheRepositoryImpl(
         limit = limit.coerceIn(1, 500)
     )
 
-    override suspend fun thumbnailQueueAllFileIds(): List<String> {
-        val throughFileId = thumbnailJobDao.maxFileId() ?: return emptyList()
-        val result = mutableListOf<String>()
-        var afterFileId = ""
-        while (true) {
-            val page = thumbnailJobDao.fileIdsAfter(
-                afterFileId = afterFileId,
-                throughFileId = throughFileId,
-                limit = JOB_BATCH_SIZE
-            )
-            if (page.isEmpty()) break
-            result.addAll(page)
-            afterFileId = page.last()
-            if (page.size < JOB_BATCH_SIZE) break
-        }
-        return result
-    }
+    override suspend fun thumbnailQueueAllFileIds(): List<String> =
+        thumbnailJobDao.allFileIds()
 
     override suspend fun thumbnailQueuePaused(): Boolean =
         thumbnailPolicyDao.isQueuePaused()
