@@ -448,6 +448,37 @@ class CacheRepositoryImpl(
         refreshThumbnailStats()
     }
 
+    override suspend fun removeThumbnails(fileIds: List<String>) {
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return
+        val changedAt = System.currentTimeMillis()
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            // Remove durable rows before stopping workers so cancellation cannot requeue an item.
+            thumbnailJobDao.delete(batch)
+            thumbnailStore.cancelJobs(batch)
+            val cached = thumbnailDao.cachedPathsByFileIds(batch)
+            val removedIds = cached.filter { ref ->
+                val file = File(ref.path)
+                !file.exists() || file.delete()
+            }.map { it.fileId }
+            if (removedIds.isNotEmpty()) {
+                thumbnailDao.deleteAll(removedIds)
+                removedIds.forEach(thumbnailMemoryCache::remove)
+            }
+            thumbnailPolicyDao.upsert(
+                batch.map { id ->
+                    ThumbnailPolicyEntity(
+                        targetType = ThumbnailTargetType.FILE.name,
+                        targetId = id,
+                        policy = ThumbnailPolicy.MANUAL_ONLY.name,
+                        changedAt = changedAt
+                    )
+                }
+            )
+        }
+        refreshThumbnailStats()
+    }
+
     override suspend fun removeFolderThumbnails(folderId: String) {
         cancelFolderThumbnailJobs(folderId)
         var afterFileId: String? = null
