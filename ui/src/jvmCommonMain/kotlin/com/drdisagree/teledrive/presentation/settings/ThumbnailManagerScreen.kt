@@ -521,18 +521,19 @@ fun ThumbnailManagerScreen(
                                 scope.launch {
                                     selectionBusy = true
                                     try {
-                                        var count = 0
+                                        var newlyQueued = 0
+                                        var alreadyQueued = 0
                                         if (selectedIds.isNotEmpty()) {
-                                            count += cacheRepository.generateThumbnails(selectedIds.toList())
+                                            val result = cacheRepository.generateThumbnails(selectedIds.toList())
+                                            newlyQueued += result.newlyQueued
+                                            alreadyQueued += result.alreadyQueued
                                         }
                                         selectedFolderIds.forEach { id ->
-                                            count += cacheRepository.generateFolderThumbnails(id)
+                                            val result = cacheRepository.generateFolderThumbnails(id)
+                                            newlyQueued += result.newlyQueued
+                                            alreadyQueued += result.alreadyQueued
                                         }
-                                        generationMessage = if (count > 0) {
-                                            "${count} missing thumbnail(s) added to the queue."
-                                        } else {
-                                            "Nothing new to queue: the selected items already have thumbnails or are not eligible."
-                                        }
+                                        generationMessage = enqueueResultMessage(newlyQueued, alreadyQueued)
                                         selectedIds = emptySet()
                                         selectedFolderIds = emptySet()
                                         summary = cacheRepository.thumbnailManagerSummary()
@@ -675,12 +676,11 @@ fun ThumbnailManagerScreen(
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                val count = cacheRepository.generateFolderThumbnails(folderId)
-                                generationMessage = if (count > 0) {
-                                    "$count missing previews added to the queue."
-                                } else {
-                                    "This folder has no eligible missing previews."
-                                }
+                                val result = cacheRepository.generateFolderThumbnails(folderId)
+                                generationMessage = enqueueResultMessage(
+                                    result.newlyQueued,
+                                    result.alreadyQueued
+                                )
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         }
@@ -706,12 +706,11 @@ fun ThumbnailManagerScreen(
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                val count = cacheRepository.generateFolderThumbnails(null)
-                                generationMessage = if (count > 0) {
-                                    "$count unfiled missing previews added to the queue."
-                                } else {
-                                    "There are no eligible unfiled previews to generate."
-                                }
+                                val result = cacheRepository.generateFolderThumbnails(null)
+                                generationMessage = enqueueResultMessage(
+                                    result.newlyQueued,
+                                    result.alreadyQueued
+                                )
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         }
@@ -719,12 +718,11 @@ fun ThumbnailManagerScreen(
                     OutlinedButton(
                         onClick = {
                             scope.launch {
-                                val count = cacheRepository.generateAllThumbnails()
-                                generationMessage = if (count > 0) {
-                                    "$count missing previews added to the queue."
-                                } else {
-                                    "All eligible files already have previews, or none are eligible."
-                                }
+                                val result = cacheRepository.generateAllThumbnails()
+                                generationMessage = enqueueResultMessage(
+                                    result.newlyQueued,
+                                    result.alreadyQueued
+                                )
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         }
@@ -765,12 +763,11 @@ fun ThumbnailManagerScreen(
                         currentPolicy = folder.policy,
                         onGenerate = {
                             scope.launch {
-                                val count = cacheRepository.generateFolderThumbnails(folder.id)
-                                generationMessage = if (count > 0) {
-                                    "$count missing previews added to the queue."
-                                } else {
-                                    "This folder already has previews for all eligible files."
-                                }
+                                val result = cacheRepository.generateFolderThumbnails(folder.id)
+                                generationMessage = enqueueResultMessage(
+                                    result.newlyQueued,
+                                    result.alreadyQueued
+                                )
                                 summary = cacheRepository.thumbnailManagerSummary()
                             }
                         },
@@ -840,12 +837,11 @@ fun ThumbnailManagerScreen(
                                 },
                                 onGenerate = {
                                     scope.launch {
-                                        val count = cacheRepository.generateThumbnails(listOf(file.fileId))
-                                        generationMessage = if (count > 0) {
-                                            "The missing preview was added to the queue."
-                                        } else {
-                                            "This file already has a preview or cannot have one generated."
-                                        }
+                                        val result = cacheRepository.generateThumbnails(listOf(file.fileId))
+                                        generationMessage = enqueueResultMessage(
+                                            result.newlyQueued,
+                                            result.alreadyQueued
+                                        )
                                         summary = cacheRepository.thumbnailManagerSummary()
                                     }
                                 },
@@ -1131,6 +1127,17 @@ private fun ThumbnailBulkPolicyMenu(onSelect: (ThumbnailPolicy) -> Unit) {
             }
         }
     }
+}
+
+private fun enqueueResultMessage(newlyQueued: Int, alreadyQueued: Int): String = when {
+    newlyQueued == 0 && alreadyQueued == 0 ->
+        "No missing eligible thumbnails were found in this selection."
+    newlyQueued > 0 && alreadyQueued > 0 ->
+        "Added $newlyQueued new jobs and refreshed $alreadyQueued jobs already in the queue."
+    newlyQueued > 0 ->
+        "Added $newlyQueued missing thumbnail jobs to the queue."
+    else ->
+        "Refreshed $alreadyQueued jobs already in the queue for manual generation."
 }
 
 private fun cacheFilterLabel(filter: ThumbnailCacheFilter): String = when (filter) {
