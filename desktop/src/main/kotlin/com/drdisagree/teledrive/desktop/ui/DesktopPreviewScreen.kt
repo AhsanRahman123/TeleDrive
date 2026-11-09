@@ -67,10 +67,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -179,15 +179,17 @@ fun DesktopPreviewScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val fullscreenController = LocalFullscreenController.current
-    // Keep fullscreen across media changes; restore the window only when leaving the viewer.
-    DisposableEffect(fullscreenController) {
-        onDispose {
-            fullscreenController?.let { controller ->
-                if (controller.isFullscreen()) controller.toggle()
-            }
+
+    fun leavePreview() {
+        if (fullscreenController?.isFullscreen() == true) {
+            fullscreenController.toggle()
         }
+        onBack()
     }
-    LaunchedEffect(state.closed) { if (state.closed) onBack() }
+
+    LaunchedEffect(state.closed) {
+        if (state.closed) leavePreview()
+    }
 
     var index by remember(state.files, state.initialIndex) {
         mutableStateOf(state.initialIndex.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
@@ -220,9 +222,26 @@ fun DesktopPreviewScreen(
         }
     }
 
+    var restoreFullscreenAfterNavigation by remember { mutableStateOf(false) }
+
     fun selectQueueFile(fileId: String) {
         val target = state.files.indexOfFirst { it.id == fileId }
-        if (target >= 0) index = target
+        if (target >= 0 && target != index) {
+            restoreFullscreenAfterNavigation =
+                fullscreenController?.isFullscreen() == true
+            index = target
+        }
+    }
+
+    LaunchedEffect(file?.id) {
+        if (restoreFullscreenAfterNavigation) {
+            // Wait until the replacement VLC surface has attached before restoring the window.
+            delay(50L)
+            if (fullscreenController?.isFullscreen() != true) {
+                fullscreenController?.toggle()
+            }
+            restoreFullscreenAfterNavigation = false
+        }
     }
 
     fun previousMedia() {
@@ -377,7 +396,7 @@ fun DesktopPreviewScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = ::leavePreview) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -417,6 +436,53 @@ fun DesktopPreviewScreen(
                 )
             )
         }
+        @Composable
+        fun RenderPreviewPane(pageFile: DriveFile) {
+            PreviewPane(
+                viewModel = viewModel,
+                file = pageFile,
+                snackbarHostState = snackbarHostState,
+                hasPrevious = if (mediaCategory != null) {
+                    queueIndex > 0 || (repeatAll && queueFiles.size > 1) ||
+                        (shuffle && shuffleCursor > 0)
+                } else index > 0,
+                hasNext = if (mediaCategory != null) {
+                    (shuffle && shuffleHistory.size < queueFiles.size) ||
+                        (shuffle && shuffleCursor < shuffleHistory.lastIndex) ||
+                        (repeatAll && queueFiles.size > 1) ||
+                        queueIndex in 0 until queueFiles.lastIndex
+                } else index < state.files.lastIndex,
+                onPrevious = if (mediaCategory != null) ::previousMedia
+                else { { if (index > 0) index-- } },
+                onNext = if (mediaCategory != null) ::nextMedia
+                else { { if (index < state.files.lastIndex) index++ } },
+                queueItems = queueItems,
+                currentQueueItemId = pageFile.id,
+                repeatAll = repeatAll,
+                shuffle = shuffle,
+                sleepTimerLabel = sleepTimerLabel,
+                sleepStopRequest = sleepStopRequest,
+                sleepAtTrackEnd = sleepAtTrackEnd,
+                onToggleRepeatAll = { repeatAll = !repeatAll },
+                onToggleShuffle = ::toggleShuffle,
+                onSelectQueueItem = ::selectQueueFile,
+                onSetSleepTimer = { duration ->
+                    sleepAtTrackEnd = false
+                    sleepDeadline = System.currentTimeMillis() + duration.coerceAtLeast(1L)
+                },
+                onSleepAtTrackEnd = {
+                    sleepDeadline = null
+                    sleepAtTrackEnd = true
+                },
+                onClearSleepTimer = {
+                    sleepDeadline = null
+                    sleepAtTrackEnd = false
+                },
+                onPlaybackFinished = ::handlePlaybackFinished,
+                onPlayerControlsVisibilityChange = { playerChromeVisible = it }
+            )
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -424,64 +490,32 @@ fun DesktopPreviewScreen(
         ) {
             when {
                 !state.ready || file == null -> LoadingState()
-                else -> AnimatedContent(
-                    targetState = index to file,
-                    modifier = Modifier.fillMaxSize(),
-                    transitionSpec = {
-                        val forward = targetState.first >= initialState.first
-                        val enter = slideInHorizontally { width ->
-                            if (forward) width else -width
-                        } + fadeIn()
-                        val exit = slideOutHorizontally { width ->
-                            if (forward) -width else width
-                        } + fadeOut()
-                        enter togetherWith exit
-                    },
-                    contentKey = { it.second.id }
-                ) { (_, pageFile) ->
-                    PreviewPane(
-                        viewModel = viewModel,
-                        file = pageFile,
-                        snackbarHostState = snackbarHostState,
-                        hasPrevious = if (mediaCategory != null) {
-                            queueIndex > 0 || (repeatAll && queueFiles.size > 1) ||
-                                (shuffle && shuffleCursor > 0)
-                        } else index > 0,
-                        hasNext = if (mediaCategory != null) {
-                            (shuffle && shuffleHistory.size < queueFiles.size) ||
-                                (shuffle && shuffleCursor < shuffleHistory.lastIndex) ||
-                                (repeatAll && queueFiles.size > 1) ||
-                                queueIndex in 0 until queueFiles.lastIndex
-                        } else index < state.files.lastIndex,
-                        onPrevious = if (mediaCategory != null) ::previousMedia
-                        else { { if (index > 0) index-- } },
-                        onNext = if (mediaCategory != null) ::nextMedia
-                        else { { if (index < state.files.lastIndex) index++ } },
-                        queueItems = queueItems,
-                        currentQueueItemId = file?.id,
-                        repeatAll = repeatAll,
-                        shuffle = shuffle,
-                        sleepTimerLabel = sleepTimerLabel,
-                        sleepStopRequest = sleepStopRequest,
-                        sleepAtTrackEnd = sleepAtTrackEnd,
-                        onToggleRepeatAll = { repeatAll = !repeatAll },
-                        onToggleShuffle = ::toggleShuffle,
-                        onSelectQueueItem = ::selectQueueFile,
-                        onSetSleepTimer = { duration ->
-                            sleepAtTrackEnd = false
-                            sleepDeadline = System.currentTimeMillis() + duration.coerceAtLeast(1L)
-                        },
-                        onSleepAtTrackEnd = {
-                            sleepDeadline = null
-                            sleepAtTrackEnd = true
-                        },
-                        onClearSleepTimer = {
-                            sleepDeadline = null
-                            sleepAtTrackEnd = false
-                        },
-                        onPlaybackFinished = ::handlePlaybackFinished,
-                        onPlayerControlsVisibilityChange = { playerChromeVisible = it }
-                    )
+                else -> {
+                    // VLC players own native resources. Do not keep outgoing and incoming
+                    // video players alive together during AnimatedContent transitions.
+                    if (mediaCategory != null) {
+                        key(file.id) {
+                            RenderPreviewPane(file)
+                        }
+                    } else {
+                        AnimatedContent(
+                            targetState = index to file,
+                            modifier = Modifier.fillMaxSize(),
+                            transitionSpec = {
+                                val forward = targetState.first >= initialState.first
+                                val enter = slideInHorizontally { width ->
+                                    if (forward) width else -width
+                                } + fadeIn()
+                                val exit = slideOutHorizontally { width ->
+                                    if (forward) -width else width
+                                } + fadeOut()
+                                enter togetherWith exit
+                            },
+                            contentKey = { it.second.id }
+                        ) { (_, pageFile) ->
+                            RenderPreviewPane(pageFile)
+                        }
+                    }
                 }
             }
             AnimatedVisibility(
