@@ -382,6 +382,10 @@ class TransferRepositoryImpl(
 
     override suspend fun pauseAll() {
         transferDao.pauseAll(System.currentTimeMillis())
+        // Cancel and join the old drain only after the rows are PAUSED. Otherwise an
+        // immediate Resume All can turn them QUEUED while their previous workers still
+        // occupy the slots, leaving the queue visually stuck with no fresh workers.
+        transferScheduler.pause()
         backupSessionTracker.refreshActive()
     }
 
