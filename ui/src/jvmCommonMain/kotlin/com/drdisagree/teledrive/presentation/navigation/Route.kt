@@ -82,6 +82,9 @@ sealed interface Route {
     data class CacheManager(val initialFilter: String = "ALL") : Route
 
     @Serializable
+    data object ThumbnailQueue : Route
+
+    @Serializable
     data object Exclusions : Route
 
     @Serializable
