@@ -829,7 +829,9 @@ private fun TransferRow(
                                 when {
                                     transfer.state == TransferState.QUEUED -> "Queued"
                                     transfer.state == TransferState.RUNNING &&
-                                        System.currentTimeMillis() - transfer.updatedAt > SPEED_STALE_AFTER_MS ->
+                                        transfer.stage == null &&
+                                        (transfer.speedBytesPerSecond <= 0L ||
+                                            System.currentTimeMillis() - transfer.updatedAt > SPEED_STALE_AFTER_MS) ->
                                         "Waiting for Telegram"
                                     transfer.state == TransferState.RUNNING -> "Running"
                                     transfer.state == TransferState.PAUSED -> "Paused"
