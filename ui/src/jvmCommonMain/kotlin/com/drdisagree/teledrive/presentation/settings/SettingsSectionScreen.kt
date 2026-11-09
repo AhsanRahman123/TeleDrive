@@ -596,24 +596,6 @@ private fun StorageSection(
     val prefs = state.preferences
     val reclaimable by viewModel.reclaimableBytes.collectAsStateWithLifecycle()
     var showTrashDialog by remember { mutableStateOf(false) }
-    var confirmFreeUpSpace by remember { mutableStateOf(false) }
-
-    if (confirmFreeUpSpace) {
-        ConfirmDialog(
-            title = stringResource(
-                Res.string.settings_free_up_space_title,
-                Formatters.bytes(reclaimable)
-            ),
-            message = stringResource(Res.string.settings_local_copies_files_already),
-            confirmLabel = stringResource(Res.string.common_free_space),
-            destructive = true,
-            onConfirm = {
-                confirmFreeUpSpace = false
-                viewModel.freeUpSpace()
-            },
-            onDismiss = { confirmFreeUpSpace = false }
-        )
-    }
 
     if (showTrashDialog) {
         ChoiceDialog(
@@ -673,13 +655,7 @@ private fun StorageSection(
                 } else {
                     stringResource(Res.string.settings_free_up_none)
                 },
-                onClick = {
-                    if (reclaimable > 0) {
-                        confirmFreeUpSpace = true
-                    } else {
-                        viewModel.reportNothingToFree()
-                    }
-                }
+                onClick = { onOpenCacheManager("ALL") }
             )
         }
         add {
