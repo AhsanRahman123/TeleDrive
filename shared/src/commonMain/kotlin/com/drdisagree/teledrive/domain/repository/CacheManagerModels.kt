@@ -30,7 +30,8 @@ data class CacheManagerSummary(
     val entryCount: Int = 0,
     val previewBytes: Long = 0L,
     val streamBytes: Long = 0L,
-    val tempBytes: Long = 0L
+    val tempBytes: Long = 0L,
+    val untrackedBytes: Long = 0L
 )
 
 data class CacheRemovalResult(
