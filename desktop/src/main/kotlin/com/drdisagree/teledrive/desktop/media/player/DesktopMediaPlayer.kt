@@ -109,6 +109,7 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -319,10 +320,15 @@ fun DesktopMediaPlayer(
             // call already in progress. Releasing VLC on the UI thread caused later
             // playback opens to become progressively less responsive.
             audioStateUpdates.cancel()
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                audioMutex.withLock {
-                    runCatching { player.controls().stop() }
-                    runCatching { player.release() }
+            val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            teardownScope.launch {
+                try {
+                    audioMutex.withLock {
+                        runCatching { player.controls().stop() }
+                        runCatching { player.release() }
+                    }
+                } finally {
+                    teardownScope.cancel()
                 }
             }
             fullscreenController?.let { controller ->
