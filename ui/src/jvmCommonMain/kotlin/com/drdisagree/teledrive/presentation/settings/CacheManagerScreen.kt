@@ -86,6 +86,11 @@ fun CacheManagerScreen(
 
     val folderId = folderPath.lastOrNull()?.id
 
+    LaunchedEffect(folderId) {
+        selectedPaths = emptySet()
+        selectedFolderIds = emptySet()
+    }
+
     LaunchedEffect(searchInput) {
         delay(300L)
         val normalized = searchInput.trim()
@@ -282,7 +287,7 @@ fun CacheManagerScreen(
                     style = MaterialTheme.typography.labelLarge
                 )
                 TextButton(
-                    enabled = !loading && entries.isNotEmpty(),
+                    enabled = !loading && (entries.isNotEmpty() || folders.isNotEmpty()),
                     onClick = {
                         scope.launch {
                             busy = true
