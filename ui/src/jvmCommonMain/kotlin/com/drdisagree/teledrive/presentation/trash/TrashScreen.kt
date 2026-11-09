@@ -137,11 +137,16 @@ fun TrashScreen(
     val dragSelect = rememberDragSelect(
         listState = listState,
         onStart = viewModel::startRangeSelection,
-        onRange = { range ->
+        isSelected = { index ->
+            state.rows.getOrNull(index)?.takeIf { it.selectable }?.item?.id
+                ?.let(state.selection::contains) == true
+        },
+        onRange = { range, shouldSelect ->
             viewModel.extendRangeSelection(
                 range.mapNotNull { index ->
                     state.rows.getOrNull(index)?.takeIf { it.selectable }?.item?.id
-                }
+                },
+                shouldSelect
             )
         },
         onEnd = viewModel::endRangeSelection
