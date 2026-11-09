@@ -543,6 +543,7 @@ class TransferExecutor(
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.downloadEnded)
             var lastObservedBytes: Long? = null
+            var lastObservedSpeedBytes: Long? = null
             var wasDownloadingActive = false
             telegramClient.downloadDocument(remoteFileId)
                 .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
@@ -550,8 +551,10 @@ class TransferExecutor(
                         is TelegramDownloadEvent.Progress -> {
                             val active = event.isDownloadingActive
                             val becameActive = active && !wasDownloadingActive
-                            val bytesChanged = lastObservedBytes != event.transferredBytes
+                            val bytesChanged = lastObservedBytes != event.transferredBytes ||
+                                lastObservedSpeedBytes != event.speedSampleBytes
                             lastObservedBytes = event.transferredBytes
+                            lastObservedSpeedBytes = event.speedSampleBytes
                             wasDownloadingActive = active
                             active to (active && (becameActive || bytesChanged))
                         }
@@ -567,13 +570,13 @@ class TransferExecutor(
                                 // TDLib can resume a partially downloaded local file. Seed the
                                 // meter from its existing byte count instead of counting those
                                 // old bytes as fresh network traffic.
-                                ticker.start(event.transferredBytes, now)
+                                ticker.start(event.speedSampleBytes, now)
                                 tickerStarted = true
                                 transferDao.updateProgress(
                                     transfer.id, event.transferredBytes, 0L, now
                                 )
                             } else {
-                                ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                ticker.tick(event.speedSampleBytes, now)?.let { speed ->
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
                                     )
