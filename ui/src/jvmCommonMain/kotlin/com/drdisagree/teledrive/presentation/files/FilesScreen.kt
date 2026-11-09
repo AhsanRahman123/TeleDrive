@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.DriveFolderUpload
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -133,6 +134,7 @@ import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.FileDetailsItem
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.FolderGridItem
 import com.drdisagree.teledrive.presentation.components.FolderInfoSheet
 import com.drdisagree.teledrive.presentation.components.FolderPickerDialog
@@ -240,6 +242,7 @@ fun FilesScreen(
     onOpenFile: (String, PreviewSequence) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenTransfers: () -> Unit,
+    onViewThumbnailQueue: () -> Unit,
     onNewNote: (String?) -> Unit,
     onEditNote: (String, String) -> Unit,
     onBack: (() -> Unit)?,
@@ -468,6 +471,12 @@ fun FilesScreen(
                                                 label = "Generate thumbnails",
                                                 icon = Icons.Filled.Image
                                             ) { viewModel.generateThumbnailsSelected() }
+                                        )
+                                        add(
+                                            MenuAction(
+                                                label = "View thumbnail queue",
+                                                icon = Icons.Filled.Refresh
+                                            ) { onViewThumbnailQueue() }
                                         )
                                         add(
                                             MenuAction(
@@ -1276,6 +1285,10 @@ private fun FilesContent(
             }
         }
         }
+        DesktopScrollEdgeControls(
+            state = gridState,
+            modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+        )
         DesktopVerticalScrollbar(
             state = gridState,
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
