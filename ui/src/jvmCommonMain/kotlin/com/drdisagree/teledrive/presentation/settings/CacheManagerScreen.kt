@@ -145,7 +145,11 @@ fun CacheManagerScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { refreshKey++ }) {
+                    IconButton(onClick = {
+                        pageOffset = 0
+                        entries = emptyList()
+                        refreshKey++
+                    }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Refresh cache inventory")
                     }
                 }
