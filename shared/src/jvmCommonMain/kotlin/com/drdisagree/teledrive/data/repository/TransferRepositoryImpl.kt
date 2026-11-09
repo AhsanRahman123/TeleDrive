@@ -402,6 +402,13 @@ class TransferRepositoryImpl(
         backupSessionTracker.refreshActive()
     }
 
+    override suspend fun setPriority(id: String, priority: Int) {
+        val transfer = transferDao.byId(id) ?: return
+        if (transfer.state.isTerminal) return
+        transferDao.setPriority(id, priority.coerceIn(-10, 10), System.currentTimeMillis())
+        if (transfer.state == TransferState.QUEUED) kickWorker()
+    }
+
     override suspend fun retry(id: String) {
         val transfer = transferDao.byId(id) ?: return
         if (transfer.state == TransferState.FAILED || transfer.state == TransferState.CANCELLED) {
