@@ -32,9 +32,11 @@ data class GalleryUiState(
     val sortField: FileSortField = FileSortField.DATE_MODIFIED,
     val sortDirection: SortDirection = SortDirection.DESCENDING,
     val filters: GalleryFilters = GalleryFilters(),
-    val selection: Set<String> = emptySet()
+    val selection: Set<String> = emptySet(),
+    val albumSelection: Set<String> = emptySet()
 ) {
-    val selectionMode: Boolean get() = selection.isNotEmpty()
+    val selectionCount: Int get() = selection.size + albumSelection.size
+    val selectionMode: Boolean get() = selectionCount > 0
     val allSelectedFavorite: Boolean get() = selectionMode && !capabilities.anyUnfavorited
     val allSelectedAvailableOffline: Boolean get() = selectionMode && !capabilities.anyNotAvailableOffline
     val hasActiveFilters: Boolean get() =
