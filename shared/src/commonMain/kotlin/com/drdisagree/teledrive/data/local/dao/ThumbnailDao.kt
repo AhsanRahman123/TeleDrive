@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.drdisagree.teledrive.data.local.entity.ThumbnailEntity
+import com.drdisagree.teledrive.domain.repository.CacheEntryUsage
 
 @Dao
 interface ThumbnailDao {
@@ -389,6 +390,104 @@ interface ThumbnailDao {
 
     @Query("DELETE FROM thumbnails WHERE fileId IN (:fileIds)")
     suspend fun deleteAll(fileIds: List<String>)
+
+    @Query(
+        """WITH RECURSIVE folder_paths(fileId, parentId, path, depth) AS (
+               SELECT f.id, d.parentId, d.name, 0
+                 FROM thumbnails t
+                 JOIN files f ON f.id = t.fileId
+                 JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
+               UNION ALL
+               SELECT fp.fileId, d.parentId, d.name || ' / ' || fp.path, fp.depth + 1
+                 FROM folder_paths fp
+                 JOIN folders d ON d.id = fp.parentId
+           )
+           SELECT t.path AS path,
+                  t.fileId AS fileId,
+                  'THUMBNAIL' AS type,
+                  t.sizeBytes AS sizeBytes,
+                  t.encrypted AS encrypted,
+                  t.generatedAt AS createdAt,
+                  t.lastAccessAt AS lastAccessAt,
+                  COALESCE(f.name, t.fileId) AS name,
+                  COALESCE(f.mimeType, '') AS mimeType,
+                  COALESCE(f.category, 'OTHER') AS category,
+                  COALESCE(f.folderId, f.preTrashFolderId) AS folderId,
+                  COALESCE(
+                    (SELECT fp.path FROM folder_paths fp
+                      WHERE fp.fileId = t.fileId
+                      ORDER BY fp.depth DESC LIMIT 1),
+                    'App cache'
+                  ) AS folderPath
+             FROM thumbnails t
+             LEFT JOIN files f ON f.id = t.fileId
+            WHERE (
+                    (:folderId IS NULL AND
+                        (f.id IS NULL OR COALESCE(f.folderId, f.preTrashFolderId) IS NULL))
+                    OR
+                    (:folderId IS NOT NULL AND
+                        COALESCE(f.folderId, f.preTrashFolderId) = :folderId)
+                  )
+              AND (:searchQuery = '' OR
+                   COALESCE(f.name, t.fileId) LIKE '%' || :searchQuery || '%')
+            ORDER BY
+                CASE WHEN :sortOrder = 'LARGEST' THEN t.sizeBytes END DESC,
+                CASE WHEN :sortOrder = 'SMALLEST' THEN t.sizeBytes END ASC,
+                CASE WHEN :sortOrder = 'NEWEST' THEN t.lastAccessAt END DESC,
+                CASE WHEN :sortOrder = 'OLDEST' THEN t.lastAccessAt END ASC,
+                CASE WHEN :sortOrder = 'NAME_ASC' THEN COALESCE(f.name, t.fileId) END COLLATE NOCASE ASC,
+                t.fileId ASC
+            LIMIT :limit OFFSET :offset"""
+    )
+    suspend fun managerThumbnails(
+        folderId: String?,
+        searchQuery: String,
+        sortOrder: String,
+        limit: Int,
+        offset: Int
+    ): List<CacheEntryUsage>
+
+    @Query(
+        """SELECT t.path
+             FROM thumbnails t
+             LEFT JOIN files f ON f.id = t.fileId
+            WHERE (
+                    (:folderId IS NULL AND
+                        (f.id IS NULL OR COALESCE(f.folderId, f.preTrashFolderId) IS NULL))
+                    OR
+                    (:folderId IS NOT NULL AND
+                        COALESCE(f.folderId, f.preTrashFolderId) = :folderId)
+                  )
+              AND (:searchQuery = '' OR
+                   COALESCE(f.name, t.fileId) LIKE '%' || :searchQuery || '%')
+            ORDER BY t.path ASC"""
+    )
+    suspend fun managerThumbnailPathsMatching(
+        folderId: String?,
+        searchQuery: String
+    ): List<String>
+
+    @Query(
+        """WITH RECURSIVE child_folders(id) AS (
+               SELECT id FROM folders WHERE id = :folderId
+               UNION ALL
+               SELECT folders.id FROM folders
+                JOIN child_folders ON folders.parentId = child_folders.id
+           )
+           SELECT t.path
+             FROM thumbnails t
+             JOIN files f ON f.id = t.fileId
+            WHERE COALESCE(f.folderId, f.preTrashFolderId) IN (SELECT id FROM child_folders)
+              AND (:searchQuery = '' OR f.name LIKE '%' || :searchQuery || '%')
+            ORDER BY t.path ASC"""
+    )
+    suspend fun managerThumbnailPathsInFolderTree(
+        folderId: String,
+        searchQuery: String = ""
+    ): List<String>
+
+    @Query("SELECT * FROM thumbnails WHERE path IN (:paths)")
+    suspend fun entriesByPaths(paths: List<String>): List<ThumbnailEntity>
 
     @Query("DELETE FROM thumbnails")
     suspend fun deleteAll()
