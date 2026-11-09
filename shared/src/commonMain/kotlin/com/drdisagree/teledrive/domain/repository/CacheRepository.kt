@@ -42,7 +42,11 @@ interface CacheRepository {
         searchQuery: String
     ): List<String> = emptyList()
 
-    suspend fun cacheEntryPathsInFolderTree(folderId: String): List<String> = emptyList()
+    suspend fun cacheEntryPathsInFolderTree(
+        folderId: String,
+        typeFilter: String = "ALL",
+        searchQuery: String = ""
+    ): List<String> = emptyList()
 
     suspend fun removeCacheEntries(paths: List<String>): CacheRemovalResult = CacheRemovalResult()
 
