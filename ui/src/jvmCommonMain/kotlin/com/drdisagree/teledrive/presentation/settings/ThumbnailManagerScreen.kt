@@ -73,6 +73,7 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailFolderSort
 import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -871,6 +872,15 @@ fun ThumbnailManagerScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    DesktopScrollEdgeControls(
+                        state = folderListState,
+                        modifier = Modifier.height(36.dp)
+                    )
+                }
                 Box(
                     modifier = Modifier.fillMaxWidth().height(280.dp)
                 ) {
