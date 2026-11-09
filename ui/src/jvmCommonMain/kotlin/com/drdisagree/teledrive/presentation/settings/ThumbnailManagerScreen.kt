@@ -168,6 +168,8 @@ fun ThumbnailManagerScreen(
         onEnd = { rangeSelectionBase = emptySet() }
     )
     LaunchedEffect(folderId) {
+        folderListState.scrollToItem(0)
+        fileListState.scrollToItem(0)
         selectedIds = emptySet()
         selectedFolderIds = emptySet()
         generationMessage = ""
