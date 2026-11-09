@@ -26,6 +26,7 @@ class TransfersViewModel(
 
     fun setTransferConcurrency(value: Int) = launch {
         settingsRepository.update { it.copy(transferConcurrency = value.coerceIn(1, 6)) }
+        transferRepository.wakeWorker()
     }
 
     private val rows = combine(
