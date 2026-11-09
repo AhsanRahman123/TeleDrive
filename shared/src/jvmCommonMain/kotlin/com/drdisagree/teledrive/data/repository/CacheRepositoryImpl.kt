@@ -140,8 +140,9 @@ class CacheRepositoryImpl(
         val previewBytes = cacheDao.sizeByType(CacheEntryType.PREVIEW)
         val streamBytes = cacheDao.sizeByType(CacheEntryType.STREAM)
         val tempBytes = cacheDao.sizeByType(CacheEntryType.TEMP)
-        val untrackedBytes = stagingSize() + partSize() +
-            storageInspector.directorySize(tdlibFilesDir())
+        val untrackedBytes = withContext(Dispatchers.IO) {
+            stagingSize() + partSize() + storageInspector.directorySize(tdlibFilesDir())
+        }
         return CacheManagerSummary(
             totalBytes = previewBytes + streamBytes + tempBytes + untrackedBytes,
             entryCount = cacheDao.entryCount(),
