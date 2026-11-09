@@ -83,13 +83,8 @@ import com.drdisagree.teledrive.resources.settings_backup_results
 import com.drdisagree.teledrive.resources.settings_block_screenshots
 import com.drdisagree.teledrive.resources.settings_cache_current_size
 import com.drdisagree.teledrive.resources.settings_cache_limit
-import com.drdisagree.teledrive.resources.settings_cached_previews_thumbnails_temporary
 import com.drdisagree.teledrive.resources.settings_change_passphrase
 import com.drdisagree.teledrive.resources.settings_choose_folder_device
-import com.drdisagree.teledrive.resources.settings_clear_cache_action
-import com.drdisagree.teledrive.resources.settings_clear_cache_title
-import com.drdisagree.teledrive.resources.settings_clear_thumbnails_action
-import com.drdisagree.teledrive.resources.settings_clear_thumbnails_title
 import com.drdisagree.teledrive.resources.settings_compact_layout
 import com.drdisagree.teledrive.resources.settings_confirm_removing_lock
 import com.drdisagree.teledrive.resources.settings_debug_logging
@@ -104,7 +99,6 @@ import com.drdisagree.teledrive.resources.settings_files_sealed_leaving_device
 import com.drdisagree.teledrive.resources.settings_files_stay_telegram_channel
 import com.drdisagree.teledrive.resources.settings_folder_unreadable
 import com.drdisagree.teledrive.resources.settings_free_up_space_title
-import com.drdisagree.teledrive.resources.settings_gallery_previews_regenerated_browse
 import com.drdisagree.teledrive.resources.settings_gallery_grid_columns
 import com.drdisagree.teledrive.resources.settings_gallery_grid_view
 import com.drdisagree.teledrive.resources.settings_grid_columns
