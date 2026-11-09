@@ -863,6 +863,10 @@ fun ThumbnailManagerScreen(
                         value = folderSortOrder,
                         onSelect = { folderSortOrder = it }
                     )
+                    DesktopScrollEdgeControls(
+                        state = folderListState,
+                        modifier = Modifier.height(40.dp)
+                    )
                 }
                 Text(
                     "Folder sorting uses the generated/missing counts shown on each row.",
@@ -919,10 +923,6 @@ fun ThumbnailManagerScreen(
                             )
                         }
                     }
-                    DesktopScrollEdgeControls(
-                        state = folderListState,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
-                    )
                     DesktopVerticalScrollbar(
                         state = folderListState,
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
@@ -945,6 +945,10 @@ fun ThumbnailManagerScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                DesktopScrollEdgeControls(
+                    state = fileListState,
+                    modifier = Modifier.height(40.dp)
+                )
             }
             Text(
                 "Each file checkbox selects that item. The Generated / Not generated filter can be changed above without changing any files.",
@@ -1009,10 +1013,6 @@ fun ThumbnailManagerScreen(
                             )
                         }
                     }
-                    DesktopScrollEdgeControls(
-                        state = fileListState,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
-                    )
                     DesktopVerticalScrollbar(
                         state = fileListState,
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
