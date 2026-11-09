@@ -649,12 +649,20 @@ fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.G && !ctrl && !alt && !shift -> {
-                        player.subpictures().setDelay(player.subpictures().delay() - SYNC_STEP_US)
+                        player.submit {
+                            runCatching {
+                                player.subpictures().setDelay(player.subpictures().delay() - SYNC_STEP_US)
+                            }
+                        }
                         interactionTick++
                         true
                     }
                     key == Key.H && !ctrl && !alt && !shift -> {
-                        player.subpictures().setDelay(player.subpictures().delay() + SYNC_STEP_US)
+                        player.submit {
+                            runCatching {
+                                player.subpictures().setDelay(player.subpictures().delay() + SYNC_STEP_US)
+                            }
+                        }
                         interactionTick++
                         true
                     }
@@ -1365,7 +1373,7 @@ private const val MAX_BRIGHTNESS = 100
 private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_500L
 private const val BRIGHTNESS_READ_GUARD_MS = 1_800L
 private const val AUDIO_OUTPUT_REAPPLY_INTERVAL_MS = 250L
-private const val AUDIO_OUTPUT_REAPPLY_ATTEMPTS = 6
+private const val AUDIO_OUTPUT_REAPPLY_ATTEMPTS = 3
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 
