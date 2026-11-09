@@ -97,6 +97,7 @@ class CacheRepositoryImpl(
     override suspend fun clearTemp() {
         clearType(CacheEntryType.TEMP)
         stagingDir().deleteRecursively()
+        partsDir().deleteRecursively()
         assemblyDir().deleteRecursively()
         refreshStats()
     }
@@ -128,6 +129,89 @@ class CacheRepositoryImpl(
             }
         }
 
+        refreshStats()
+    }
+
+    override suspend fun cacheManagerSummary(): CacheManagerSummary {
+        val previewBytes = cacheDao.sizeByType(CacheEntryType.PREVIEW)
+        val streamBytes = cacheDao.sizeByType(CacheEntryType.STREAM)
+        val tempBytes = cacheDao.sizeByType(CacheEntryType.TEMP)
+        val untrackedBytes = stagingSize() + partSize() +
+            storageInspector.directorySize(tdlibFilesDir())
+        return CacheManagerSummary(
+            totalBytes = previewBytes + streamBytes + tempBytes + untrackedBytes,
+            entryCount = cacheDao.entryCount(),
+            previewBytes = previewBytes,
+            streamBytes = streamBytes,
+            tempBytes = tempBytes,
+            untrackedBytes = untrackedBytes
+        )
+    }
+
+    override suspend fun cacheFolders(
+        parentId: String?,
+        sortOrder: String
+    ): List<CacheFolderUsage> = cacheDao.managerFolders(parentId, sortOrder)
+
+    override suspend fun cacheEntries(
+        folderId: String?,
+        offset: Int,
+        limit: Int,
+        typeFilter: String,
+        searchQuery: String,
+        sortOrder: String
+    ): List<CacheEntryUsage> = cacheDao.managerEntries(
+        folderId = folderId,
+        typeFilter = typeFilter,
+        searchQuery = searchQuery.trim(),
+        sortOrder = sortOrder,
+        limit = limit.coerceIn(1, 500),
+        offset = offset.coerceAtLeast(0)
+    )
+
+    override suspend fun cacheEntryPathsMatching(
+        folderId: String?,
+        typeFilter: String,
+        searchQuery: String
+    ): List<String> = cacheDao.managerEntryPathsMatching(
+        folderId = folderId,
+        typeFilter = typeFilter,
+        searchQuery = searchQuery.trim()
+    )
+
+    override suspend fun cacheEntryPathsInFolderTree(folderId: String): List<String> =
+        cacheDao.managerEntryPathsInFolderTree(folderId)
+
+    override suspend fun removeCacheEntries(paths: List<String>): CacheRemovalResult {
+        var removedEntries = 0
+        var removedBytes = 0L
+        paths.distinct().chunked(JOB_BATCH_SIZE).forEach { batch ->
+            val entries = cacheDao.entriesByPaths(batch)
+            val removedPaths = withContext(Dispatchers.IO) {
+                entries.filter { entry ->
+                    val file = File(entry.path)
+                    !file.exists() || file.delete()
+                }.map { it.path }
+            }
+            if (removedPaths.isNotEmpty()) {
+                val removedSet = removedPaths.toSet()
+                removedBytes += entries.filter { it.path in removedSet }.sumOf { it.sizeBytes }
+                removedEntries += removedPaths.size
+                cacheDao.deletePaths(removedPaths)
+            }
+        }
+        refreshStats()
+        return CacheRemovalResult(removedEntries, removedBytes)
+    }
+
+    override suspend fun clearUntrackedCache() {
+        withContext(Dispatchers.IO) {
+            stagingDir().deleteRecursively()
+            partsDir().deleteRecursively()
+            assemblyDir().deleteRecursively()
+        }
+        runCatching { telegramClient.clearDownloadedFiles() }
+            .onFailure { SafeLog.w(TAG, "Clearing Telegram's untracked downloads failed", it) }
         refreshStats()
     }
 
