@@ -200,6 +200,7 @@ class GalleryViewModel(
     private val _selectionModeEnabled = MutableStateFlow(false)
     val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
     private var rangeBase: Set<String>? = null
+    private var albumRangeBase: Set<String>? = null
     private val _allSelected = MutableStateFlow(false)
     val allSelected: StateFlow<Boolean> = _allSelected.asStateFlow()
 
@@ -497,6 +498,25 @@ class GalleryViewModel(
             if (folderId in current) current - folderId else current + folderId
         }
         _selectionModeEnabled.update { albumSelection.value.isNotEmpty() }
+    }
+
+    fun startAlbumRangeSelection() {
+        albumRangeBase = albumSelection.value
+        selection.update { emptySet() }
+        _selectionModeEnabled.update { true }
+        _allSelected.update { false }
+    }
+
+    fun extendAlbumRangeSelection(folderIds: List<String>, shouldSelect: Boolean) {
+        val base = albumRangeBase ?: return
+        albumSelection.update {
+            if (shouldSelect) base + folderIds else base - folderIds.toSet()
+        }
+        _selectionModeEnabled.update { albumSelection.value.isNotEmpty() }
+    }
+
+    fun endAlbumRangeSelection() {
+        albumRangeBase = null
     }
 
     fun clearSelection() {
