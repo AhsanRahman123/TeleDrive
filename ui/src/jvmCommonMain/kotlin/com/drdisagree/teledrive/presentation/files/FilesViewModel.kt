@@ -20,6 +20,7 @@ import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.UserPreferences
 import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.domain.repository.FileRepository
+import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.SyncRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
@@ -93,6 +94,7 @@ import kotlin.time.Duration.Companion.milliseconds
 class FilesViewModel(
     savedStateHandle: SavedStateHandle,
     private val fileRepository: FileRepository,
+    private val cacheRepository: CacheRepository,
     private val trashRepository: TrashRepository,
     private val transferRepository: TransferRepository,
     private val settingsRepository: SettingsRepository,
@@ -420,6 +422,37 @@ class FilesViewModel(
             }
             _working.value = null
             _messages.tryEmit(UiText.Resource(Res.string.message_moved_to_trash_count, total))
+        }
+    }
+
+    fun generateThumbnailsSelected() {
+        val fileIds = selection.value.toList()
+        val folderIds = folderSelection.value.toList()
+        if (fileIds.isEmpty() && folderIds.isEmpty()) return
+        clearSelection()
+        viewModelScope.launch {
+            var newlyQueued = 0
+            var alreadyQueued = 0
+            if (fileIds.isNotEmpty()) {
+                val result = cacheRepository.generateThumbnails(fileIds)
+                newlyQueued += result.newlyQueued
+                alreadyQueued += result.alreadyQueued
+            }
+            folderIds.forEach { id ->
+                val result = cacheRepository.generateFolderThumbnails(id)
+                newlyQueued += result.newlyQueued
+                alreadyQueued += result.alreadyQueued
+            }
+            val submitted = newlyQueued + alreadyQueued
+            _messages.tryEmit(
+                UiText.Plain(
+                    if (submitted > 0) {
+                        "Added $submitted missing thumbnails to the priority queue."
+                    } else {
+                        "No eligible missing thumbnails were found in the selection."
+                    }
+                )
+            )
         }
     }
 
