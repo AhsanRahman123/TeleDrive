@@ -40,7 +40,13 @@ class PartDownloader(
 
         val resumeFrom = withContext(dispatchers.io) { resumePoint(target, parts) }
         var written = resumeFrom.second
-        emit(PartDownloadEvent.Progress(written, isDownloadingActive = false))
+        emit(
+            PartDownloadEvent.Progress(
+                transferredBytes = written,
+                isDownloadingActive = false,
+                speedSampleBytes = written
+            )
+        )
 
         for (part in parts.drop(resumeFrom.first)) {
             val remoteFileId = part.remoteFileId ?: error("Part ${part.partIndex + 1} is missing")
@@ -80,7 +86,13 @@ class PartDownloader(
             }
 
             written += part.plainSize
-            emit(PartDownloadEvent.Progress(written, isDownloadingActive = false))
+            emit(
+            PartDownloadEvent.Progress(
+                transferredBytes = written,
+                isDownloadingActive = false,
+                speedSampleBytes = written
+            )
+        )
         }
 
         emit(PartDownloadEvent.Completed(target.token))
