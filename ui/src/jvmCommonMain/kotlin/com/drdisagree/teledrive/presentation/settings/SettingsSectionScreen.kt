@@ -699,7 +699,7 @@ private fun StorageSection(
         }
         add {
             SettingsClickRow(
-                title = stringResource(Res.string.settings_clear_cache_action),
+                title = "Manage cache",
                 subtitle = stringResource(
                     Res.string.settings_cache_current_size,
                     Formatters.bytes(state.cacheStats.nonThumbnailBytes)
