@@ -75,6 +75,7 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailFolderSort
 import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -131,9 +132,27 @@ fun ThumbnailManagerScreen(
     var searchInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
+    var folderRangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
     val fileListState = rememberLazyListState()
+    val folderListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
+    val folderDragSelect = rememberDragSelect(
+        listState = folderListState,
+        onStart = { folderRangeSelectionBase = selectedFolderIds },
+        isSelected = { index ->
+            folders.getOrNull(index)?.id?.let(selectedFolderIds::contains) == true
+        },
+        onRange = { range, shouldSelect ->
+            val rangeIds = range.mapNotNull { folders.getOrNull(it)?.id }.toSet()
+            selectedFolderIds = if (shouldSelect) {
+                folderRangeSelectionBase + rangeIds
+            } else {
+                folderRangeSelectionBase - rangeIds
+            }
+        },
+        onEnd = { folderRangeSelectionBase = emptySet() }
+    )
     val fileDragSelect = rememberDragSelect(
         listState = fileListState,
         onStart = { rangeSelectionBase = selectedIds },
@@ -853,40 +872,58 @@ fun ThumbnailManagerScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
-                folders.forEach { folder ->
-                    ThumbnailFolderRow(
-                        folder = folder,
-                        selected = folder.id in selectedFolderIds,
-                        onSelectionChange = { checked ->
-                            selectedFolderIds = if (checked) selectedFolderIds + folder.id
-                            else selectedFolderIds - folder.id
-                        },
-                        onOpen = {
-                            folderPath = folderPath + folder
-                            pageOffset = 0
-                        },
-                        onPolicy = { policy ->
-                            scope.launch {
-                                cacheRepository.setThumbnailPolicy(
-                                    ThumbnailTargetType.FOLDER,
-                                    folder.id,
-                                    policy
-                                )
-                                refreshKey++
-                            }
-                        },
-                        currentPolicy = folder.policy,
-                        onGenerate = {
-                            scope.launch {
-                                val result = cacheRepository.generateFolderThumbnails(folder.id)
-                                generationMessage = enqueueResultMessage(
-                                    result.newlyQueued,
-                                    result.alreadyQueued
-                                )
-                                summary = cacheRepository.thumbnailManagerSummary()
-                            }
-                        },
-                        onRemove = { confirmClearFolderId = folder.id }
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(280.dp)
+                ) {
+                    LazyColumn(
+                        state = folderListState,
+                        modifier = Modifier.fillMaxSize().then(folderDragSelect),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        itemsIndexed(folders, key = { _, folder -> folder.id }) { _, folder ->
+                            ThumbnailFolderRow(
+                                folder = folder,
+                                selected = folder.id in selectedFolderIds,
+                                onSelectionChange = { checked ->
+                                    selectedFolderIds = if (checked) selectedFolderIds + folder.id
+                                    else selectedFolderIds - folder.id
+                                },
+                                onOpen = {
+                                    folderPath = folderPath + folder
+                                    pageOffset = 0
+                                },
+                                onPolicy = { policy ->
+                                    scope.launch {
+                                        cacheRepository.setThumbnailPolicy(
+                                            ThumbnailTargetType.FOLDER,
+                                            folder.id,
+                                            policy
+                                        )
+                                        refreshKey++
+                                    }
+                                },
+                                currentPolicy = folder.policy,
+                                onGenerate = {
+                                    scope.launch {
+                                        val result = cacheRepository.generateFolderThumbnails(folder.id)
+                                        generationMessage = enqueueResultMessage(
+                                            result.newlyQueued,
+                                            result.alreadyQueued
+                                        )
+                                        summary = cacheRepository.thumbnailManagerSummary()
+                                    }
+                                },
+                                onRemove = { confirmClearFolderId = folder.id }
+                            )
+                        }
+                    }
+                    DesktopScrollEdgeControls(
+                        state = folderListState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
+                    )
+                    DesktopVerticalScrollbar(
+                        state = folderListState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                     )
                 }
             }
@@ -970,6 +1007,10 @@ fun ThumbnailManagerScreen(
                             )
                         }
                     }
+                    DesktopScrollEdgeControls(
+                        state = fileListState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
+                    )
                     DesktopVerticalScrollbar(
                         state = fileListState,
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
