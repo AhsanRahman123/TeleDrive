@@ -7,7 +7,7 @@ sealed interface TelegramDownloadEvent {
         val totalBytes: Long,
         /** False while TDLib has accepted the request but has not started downloading it. */
         val isDownloadingActive: Boolean = true,
-        /** Readable contiguous prefix used for speed only; total progress uses downloadedSize. */
+        /** TDLib's cumulative downloadedSize, used to measure actual received-byte throughput. */
         val speedSampleBytes: Long = transferredBytes
     ) : TelegramDownloadEvent
 
