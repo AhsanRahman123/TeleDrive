@@ -357,7 +357,12 @@ fun TransfersScreen(
                 transfer
             }
         }
-        val runningCount = visibleActive.count { it.state == TransferState.RUNNING }
+        val runningCount = visibleActive.count {
+            it.state == TransferState.RUNNING && it.speedBytesPerSecond > 0L
+        }
+        val waitingCount = visibleActive.count {
+            it.state == TransferState.RUNNING && it.speedBytesPerSecond <= 0L
+        }
         val queuedCount = visibleActive.count { it.state == TransferState.QUEUED }
         val visiblePaused = filterAndSort(state.paused)
         val visibleFailed = filterAndSort(state.failed)
@@ -507,7 +512,7 @@ fun TransfersScreen(
                             )
                             if (visibleActive.isNotEmpty()) {
                                 Text(
-                                    "${runningCount} running · ${queuedCount} queued · max ${transferConcurrency}",
+                                    "${runningCount} downloading · ${waitingCount} waiting · ${queuedCount} queued · max ${transferConcurrency}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
