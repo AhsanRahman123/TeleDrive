@@ -353,12 +353,13 @@ class TransferRepositoryImpl(
         }
     }
 
-    override suspend fun resume(id: String) {
-        val transfer = transferDao.byId(id) ?: return
+    override suspend fun resume(id: String) = workerControlLock.withLock {
+        val transfer = transferDao.byId(id) ?: return@withLock
         if (transfer.state == TransferState.PAUSED || transfer.state == TransferState.FAILED) {
             transferDao.setState(id, TransferState.QUEUED, System.currentTimeMillis())
             backupSessionTracker.refresh(transfer.backupSessionId)
-            kickWorker()
+            val prefs = settingsRepository.preferences.first()
+            transferScheduler.resume(prefs.allowMeteredTransfers)
         }
     }
 
@@ -414,18 +415,20 @@ class TransferRepositoryImpl(
         if (transfer.state == TransferState.QUEUED) kickWorker()
     }
 
-    override suspend fun retry(id: String) {
-        val transfer = transferDao.byId(id) ?: return
+    override suspend fun retry(id: String) = workerControlLock.withLock {
+        val transfer = transferDao.byId(id) ?: return@withLock
         if (transfer.state == TransferState.FAILED || transfer.state == TransferState.CANCELLED) {
             transferDao.upsert(
                 transfer.copy(
                     state = TransferState.QUEUED,
                     transferredBytes = 0,
+                    speedBytesPerSecond = 0,
                     errorMessage = null,
                     updatedAt = System.currentTimeMillis()
                 )
             )
-            kickWorker()
+            val prefs = settingsRepository.preferences.first()
+            transferScheduler.resume(prefs.allowMeteredTransfers)
         }
     }
 
