@@ -948,6 +948,10 @@ fun ThumbnailManagerScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                DesktopScrollEdgeControls(
+                    state = fileListState,
+                    modifier = Modifier.height(40.dp)
+                )
             }
             Text(
                 "Each file checkbox selects that item. The Generated / Not generated filter can be changed above without changing any files.",
