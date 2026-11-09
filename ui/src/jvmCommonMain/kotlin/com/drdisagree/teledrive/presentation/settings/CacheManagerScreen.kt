@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -47,6 +50,7 @@ import com.drdisagree.teledrive.domain.repository.CacheEntryUsage
 import com.drdisagree.teledrive.domain.repository.CacheFolderUsage
 import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRepository
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.common.Formatters
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -97,8 +101,21 @@ fun CacheManagerScreen(
     var confirmRemove by remember { mutableStateOf(false) }
     var confirmUntracked by remember { mutableStateOf(false) }
     var refreshKey by remember { mutableStateOf(0) }
+    var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
+    val cacheEntryListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
+    val cacheEntryDragSelect = rememberDragSelect(
+        listState = cacheEntryListState,
+        onStart = { rangeSelectionBase = selectedPaths },
+        isSelected = { index -> entries.getOrNull(index)?.path?.let(selectedPaths::contains) == true },
+        onRange = { range, shouldSelect ->
+            val paths = range.mapNotNull { entries.getOrNull(it)?.path }.toSet()
+            selectedPaths = if (shouldSelect) rangeSelectionBase + paths
+                else rangeSelectionBase - paths
+        },
+        onEnd = { rangeSelectionBase = emptySet() }
+    )
 
     LaunchedEffect(folderId) {
         selectedPaths = emptySet()
@@ -423,21 +440,30 @@ fun CacheManagerScreen(
             } else if (entries.isEmpty()) {
                 Text("No indexed cache entries in this folder match the current filters.")
             } else {
-                entries.forEach { entry ->
-                    CacheEntryRow(
-                        entry = entry,
-                        selected = entry.path in selectedPaths,
-                        onSelected = { checked ->
-                            selectedPaths = if (checked) selectedPaths + entry.path
-                                else selectedPaths - entry.path
+                LazyColumn(
+                    state = cacheEntryListState,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                        .then(cacheEntryDragSelect),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(entries, key = { _, entry -> entry.path }) { _, entry ->
+                        CacheEntryRow(
+                            entry = entry,
+                            selected = entry.path in selectedPaths,
+                            onSelected = { checked ->
+                                selectedPaths = if (checked) selectedPaths + entry.path
+                                    else selectedPaths - entry.path
+                            }
+                        )
+                    }
+                    if (hasMore) {
+                        item {
+                            OutlinedButton(
+                                enabled = !loading,
+                                onClick = { pageOffset += CACHE_MANAGER_PAGE_SIZE }
+                            ) { Text("Load more") }
                         }
-                    )
-                }
-                if (hasMore) {
-                    OutlinedButton(
-                        enabled = !loading,
-                        onClick = { pageOffset += CACHE_MANAGER_PAGE_SIZE }
-                    ) { Text("Load more") }
+                    }
                 }
             }
 
