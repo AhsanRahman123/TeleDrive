@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -30,6 +33,9 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Replay
@@ -38,6 +44,8 @@ import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ZoomOutMap
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -47,6 +55,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -140,6 +149,19 @@ fun DesktopMediaPlayer(
     onNext: () -> Unit = {},
     hasPrevious: Boolean = false,
     hasNext: Boolean = false,
+    repeatAll: Boolean = false,
+    shuffle: Boolean = false,
+    queueItems: List<PlayerQueueItem> = emptyList(),
+    currentQueueItemId: String? = null,
+    sleepTimerLabel: String = "Sleep timer",
+    sleepStopRequest: Int = 0,
+    onToggleRepeatAll: () -> Unit = {},
+    onToggleShuffle: () -> Unit = {},
+    onSelectQueueItem: (String) -> Unit = {},
+    onSetSleepTimer: (Long) -> Unit = {},
+    onSleepAtTrackEnd: () -> Unit = {},
+    onClearSleepTimer: () -> Unit = {},
+    onPlaybackFinished: () -> Unit = {},
     onControlsVisibilityChange: (Boolean) -> Unit = {}
 ) {
     val factory = VlcPlayback.factory ?: return
@@ -164,6 +186,7 @@ fun DesktopMediaPlayer(
     // a play/resume event cannot reapply the initial 100% / unmuted values.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
+    val latestRepeatOne = rememberUpdatedState(repeatOne)
     val playerScope = rememberCoroutineScope()
 
     val player = remember(mrl, isAudio) {
@@ -201,6 +224,9 @@ fun DesktopMediaPlayer(
                 override fun finished(mediaPlayer: MediaPlayer) {
                     playing = false
                     finished = true
+                    playerScope.launch {
+                        if (!latestRepeatOne.value) onPlaybackFinished()
+                    }
                 }
 
                 override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
@@ -291,9 +317,13 @@ fun DesktopMediaPlayer(
                     teardownScope.cancel()
                 }
             }
-            fullscreenController?.let { controller ->
-                if (controller.isFullscreen()) controller.toggle()
-            }
+        }
+    }
+
+    LaunchedEffect(player, sleepStopRequest) {
+        if (sleepStopRequest > 0) {
+            player.submit { runCatching { controls().pause() } }
+            playing = false
         }
     }
 
@@ -446,8 +476,14 @@ fun DesktopMediaPlayer(
         interactionTick,
         controlsPinned,
         controlPreferences.autoHidePlayerControls,
+        controlPreferences.showPlayerControls,
         controlPreferences.hideDelayMillis
     ) {
+        if (!controlPreferences.showPlayerControls) {
+            controlsVisible = false
+            onControlsVisibilityChange(false)
+            return@LaunchedEffect
+        }
         controlsVisible = true
         onControlsVisibilityChange(true)
         if (!controlPreferences.autoHidePlayerControls || controlsPinned) {
@@ -514,6 +550,25 @@ fun DesktopMediaPlayer(
                         playing = false
                         finished = true
                         timeMs = 0L
+                        interactionTick++
+                        true
+                    }
+                    key == Key.C && !ctrl && !alt && !shift -> {
+                        val updated = controlPreferences.copy(
+                            showPlayerControls = !controlPreferences.showPlayerControls
+                        )
+                        controlPreferences = updated
+                        PlayerControlPreferencesStore.save(updated)
+                        interactionTick++
+                        true
+                    }
+                    key == Key.R && !ctrl && !alt && !shift -> {
+                        onToggleRepeatAll()
+                        interactionTick++
+                        true
+                    }
+                    key == Key.U && !ctrl && !alt && !shift -> {
+                        onToggleShuffle()
                         interactionTick++
                         true
                     }
@@ -778,6 +833,11 @@ fun DesktopMediaPlayer(
                 brightnessMonitor = brightnessMonitor,
                 rate = rate,
                 repeatOne = repeatOne,
+                repeatAll = repeatAll,
+                shuffle = shuffle,
+                queueItems = queueItems,
+                currentQueueItemId = currentQueueItemId,
+                sleepTimerLabel = sleepTimerLabel,
                 trackTick = trackTick,
                 scaling = scaling,
                 onPrevious = onPrevious,
@@ -817,6 +877,12 @@ fun DesktopMediaPlayer(
                     repeatOne = !repeatOne
                     player.controls().repeat = repeatOne
                 },
+                onToggleRepeatAll = onToggleRepeatAll,
+                onToggleShuffle = onToggleShuffle,
+                onSelectQueueItem = onSelectQueueItem,
+                onSetSleepTimer = onSetSleepTimer,
+                onSleepAtTrackEnd = onSleepAtTrackEnd,
+                onClearSleepTimer = onClearSleepTimer,
                 onScaling = { scaling = it },
                 controlPreferences = controlPreferences,
                 onControlPreferencesChange = { updated ->
@@ -844,6 +910,11 @@ private fun PlayerControlsBar(
     brightnessMonitor: String,
     rate: Float,
     repeatOne: Boolean,
+    repeatAll: Boolean,
+    shuffle: Boolean,
+    queueItems: List<PlayerQueueItem>,
+    currentQueueItemId: String?,
+    sleepTimerLabel: String,
     trackTick: Int,
     scaling: VideoScaling,
     onPrevious: () -> Unit,
@@ -860,6 +931,12 @@ private fun PlayerControlsBar(
     onControlsKeepVisible: (Boolean) -> Unit,
     onRate: (Float) -> Unit,
     onToggleRepeat: () -> Unit,
+    onToggleRepeatAll: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onSelectQueueItem: (String) -> Unit,
+    onSetSleepTimer: (Long) -> Unit,
+    onSleepAtTrackEnd: () -> Unit,
+    onClearSleepTimer: () -> Unit,
     onSelectAudioTrack: (VlcTrack) -> Unit,
     onSelectTextTrack: (VlcTrack?) -> Unit,
     onScaling: (VideoScaling) -> Unit,
@@ -869,6 +946,11 @@ private fun PlayerControlsBar(
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
     var showSubtitleMenu by remember { mutableStateOf(false) }
+    var showQueueMenu by remember { mutableStateOf(false) }
+    var showSleepMenu by remember { mutableStateOf(false) }
+    var showCustomSleepDialog by remember { mutableStateOf(false) }
+    var customSleepHours by remember { mutableStateOf("0") }
+    var customSleepMinutes by remember { mutableStateOf("30") }
     var scrubTarget by remember { mutableStateOf<Float?>(null) }
     val fullscreen = LocalFullscreenController.current
     val trackWord = stringResource(Res.string.player_track)
@@ -894,6 +976,48 @@ private fun PlayerControlsBar(
         }
     }
     val subtitlesOn = textTracks.any { it.selected }
+
+    if (showCustomSleepDialog) {
+        AlertDialog(
+            onDismissRequest = { showCustomSleepDialog = false },
+            title = { Text("Custom sleep timer") },
+            text = {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = customSleepHours,
+                        onValueChange = { customSleepHours = it.filter(Char::isDigit).take(3) },
+                        label = { Text("Hours") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = customSleepMinutes,
+                        onValueChange = { customSleepMinutes = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Minutes") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val hours = customSleepHours.toLongOrNull() ?: 0L
+                        val minutes = customSleepMinutes.toLongOrNull() ?: 0L
+                        val durationMs = (hours * 60L + minutes) * 60_000L
+                        if (durationMs > 0L) {
+                            onSetSleepTimer(durationMs)
+                            showCustomSleepDialog = false
+                            onInteraction()
+                        }
+                    }
+                ) { Text("Start timer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomSleepDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -957,11 +1081,15 @@ private fun PlayerControlsBar(
             showRateMenu,
             showAudioMenu,
             showSubtitleMenu,
+            showQueueMenu,
+            showSleepMenu,
+            showCustomSleepDialog,
             volumeSliderActive,
             brightnessSliderActive
         ) {
             onControlsKeepVisible(
                 showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
+                    showQueueMenu || showSleepMenu || showCustomSleepDialog ||
                     volumeSliderActive || brightnessSliderActive
             )
         }
@@ -1080,6 +1208,22 @@ private fun PlayerControlsBar(
                             onControlPreferencesChange(
                                 controlPreferences.copy(
                                     autoHidePlayerControls = !controlPreferences.autoHidePlayerControls
+                                )
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Show player controls") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.showPlayerControls,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    showPlayerControls = !controlPreferences.showPlayerControls
                                 )
                             )
                         }
@@ -1227,6 +1371,115 @@ private fun PlayerControlsBar(
                         tint = if (repeatOne) MaterialTheme.colorScheme.primary else Color.White
                     )
                 }
+                IconButton(
+                    onClick = { onInteraction(); onToggleRepeatAll() },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Repeat,
+                        contentDescription = "Repeat all videos",
+                        tint = if (repeatAll) MaterialTheme.colorScheme.primary else Color.White
+                    )
+                }
+                IconButton(
+                    onClick = { onInteraction(); onToggleShuffle() },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Shuffle,
+                        contentDescription = "Shuffle queue",
+                        tint = if (shuffle) MaterialTheme.colorScheme.primary else Color.White
+                    )
+                }
+                Box {
+                    IconButton(
+                        onClick = { onInteraction(); showQueueMenu = true },
+                        enabled = queueItems.isNotEmpty(),
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.QueueMusic,
+                            contentDescription = "Open playback queue (${queueItems.size} items)",
+                            tint = if (queueItems.isEmpty()) Color.White.copy(alpha = 0.4f) else Color.White
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showQueueMenu,
+                        onDismissRequest = { showQueueMenu = false },
+                        modifier = Modifier.heightIn(max = 420.dp)
+                    ) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            queueItems.forEach { item ->
+                                DropdownMenuItem(
+                                    text = { Text(item.name, maxLines = 1) },
+                                    leadingIcon = {
+                                        RadioButton(
+                                            selected = item.id == currentQueueItemId,
+                                            onClick = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showQueueMenu = false
+                                        onSelectQueueItem(item.id)
+                                        onInteraction()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Box {
+                    TextButton(
+                        onClick = { onInteraction(); showSleepMenu = true }
+                    ) {
+                        Icon(Icons.Filled.Timer, contentDescription = null, tint = Color.White)
+                        Text(
+                            sleepTimerLabel,
+                            color = if (sleepTimerLabel == "Sleep timer") Color.White
+                            else MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showSleepMenu,
+                        onDismissRequest = { showSleepMenu = false }
+                    ) {
+                        listOf(15L, 30L, 45L, 60L).forEach { minutes ->
+                            DropdownMenuItem(
+                                text = { Text("$minutes minutes") },
+                                onClick = {
+                                    showSleepMenu = false
+                                    onSetSleepTimer(minutes * 60_000L)
+                                    onInteraction()
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Custom duration…") },
+                            onClick = {
+                                showSleepMenu = false
+                                showCustomSleepDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("End of current track") },
+                            onClick = {
+                                showSleepMenu = false
+                                onSleepAtTrackEnd()
+                                onInteraction()
+                            }
+                        )
+                        if (sleepTimerLabel != "Sleep timer") {
+                            DropdownMenuItem(
+                                text = { Text("Turn off sleep timer") },
+                                onClick = {
+                                    showSleepMenu = false
+                                    onClearSleepTimer()
+                                    onInteraction()
+                                }
+                            )
+                        }
+                    }
+                }
                 if (!isAudio) {
                     Box {
                         IconButton(
@@ -1335,6 +1588,11 @@ private fun PlayerControlsBar(
         }
     }
 }
+
+internal data class PlayerQueueItem(
+    val id: String,
+    val name: String
+)
 
 @Composable
 private fun TrackMenuItem(label: String, selected: Boolean, onClick: () -> Unit) {
