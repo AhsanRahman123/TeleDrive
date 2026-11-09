@@ -111,6 +111,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -270,18 +272,21 @@ fun DesktopMediaPlayer(
     val audioStateUpdates = remember(player) {
         Channel<Pair<Int, Boolean>>(Channel.CONFLATED)
     }
+    val audioMutex = remember(player) { Mutex() }
     LaunchedEffect(player) {
         var lastMuteState: Boolean? = null
         for ((level, shouldMute) in audioStateUpdates) {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    player.audio().setVolume(level.coerceIn(0, MAX_VOLUME))
-                    val nextMuteState = shouldMute || level <= 0
-                    // VLC mute is a separate native call. Avoid repeating it for every
-                    // slider tick; only change it when the mute state actually changes.
-                    if (lastMuteState != nextMuteState) {
-                        player.audio().isMute = nextMuteState
-                        lastMuteState = nextMuteState
+            audioMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        player.audio().setVolume(level.coerceIn(0, MAX_VOLUME))
+                        val nextMuteState = shouldMute || level <= 0
+                        // VLC mute is a separate native call. Avoid repeating it for every
+                        // slider tick; only change it when the mute state actually changes.
+                        if (lastMuteState != nextMuteState) {
+                            player.audio().isMute = nextMuteState
+                            lastMuteState = nextMuteState
+                        }
                     }
                 }
             }
@@ -298,17 +303,19 @@ fun DesktopMediaPlayer(
         // Media startup is native VLC work too; keep it off the Compose UI thread.
         // Check cancellation between native calls so an old player cannot start after
         // a rapid file change has already disposed it.
-        withContext(Dispatchers.IO) {
-            try {
-                currentCoroutineContext().ensureActive()
-                player.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
-                player.audio().isMute = muted || volume <= 0
-                currentCoroutineContext().ensureActive()
-                player.media().play(mrl)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // VLC reports startup failures through its own player events.
+        audioMutex.withLock {
+            withContext(Dispatchers.IO) {
+                try {
+                    currentCoroutineContext().ensureActive()
+                    player.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
+                    player.audio().isMute = muted || volume <= 0
+                    currentCoroutineContext().ensureActive()
+                    player.media().play(mrl)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // VLC reports startup failures through its own player events.
+                }
             }
         }
     }
