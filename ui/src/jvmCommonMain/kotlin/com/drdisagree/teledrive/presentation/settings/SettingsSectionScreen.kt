@@ -202,7 +202,7 @@ fun SettingsSectionScreen(
     onBack: () -> Unit,
     onOpenExclusions: () -> Unit,
     onOpenProxy: () -> Unit,
-    onOpenCacheManager: () -> Unit,
+    onOpenCacheManager: (String) -> Unit,
     onLoggedOut: () -> Unit,
     viewModel: SettingsViewModel = koinViewModel()
 ) {
@@ -286,7 +286,7 @@ fun SettingsSectionScreen(
                         SettingsSectionType.STORAGE -> StorageSection(
                             state = state,
                             viewModel = viewModel,
-                            onClearCache = onOpenCacheManager
+                            onOpenCacheManager = onOpenCacheManager
                         )
 
                         SettingsSectionType.THUMBNAILS -> Unit
@@ -592,26 +592,12 @@ private fun BackupSection(
 private fun StorageSection(
     state: SettingsUiState,
     viewModel: SettingsViewModel,
-    onClearCache: () -> Unit
+    onOpenCacheManager: (String) -> Unit
 ) {
     val prefs = state.preferences
     val reclaimable by viewModel.reclaimableBytes.collectAsStateWithLifecycle()
     var showTrashDialog by remember { mutableStateOf(false) }
     var confirmFreeUpSpace by remember { mutableStateOf(false) }
-    var confirmClearThumbnails by remember { mutableStateOf(false) }
-
-    if (confirmClearThumbnails) {
-        ConfirmDialog(
-            title = stringResource(Res.string.settings_clear_thumbnails_title),
-            message = stringResource(Res.string.settings_gallery_previews_regenerated_browse),
-            confirmLabel = stringResource(Res.string.common_clear),
-            onConfirm = {
-                confirmClearThumbnails = false
-                viewModel.clearThumbnails()
-            },
-            onDismiss = { confirmClearThumbnails = false }
-        )
-    }
 
     if (confirmFreeUpSpace) {
         ConfirmDialog(
@@ -702,16 +688,16 @@ private fun StorageSection(
                 title = "Manage cache",
                 subtitle = stringResource(
                     Res.string.settings_cache_current_size,
-                    Formatters.bytes(state.cacheStats.nonThumbnailBytes)
+                    Formatters.bytes(state.cacheStats.totalBytes)
                 ),
-                onClick = onClearCache
+                onClick = { onOpenCacheManager("ALL") }
             )
         }
         add {
             SettingsClickRow(
                 title = stringResource(Res.string.settings_clear_thumbnails_action),
                 subtitle = Formatters.bytes(state.cacheStats.thumbnailBytes),
-                onClick = { confirmClearThumbnails = true }
+                onClick = { onOpenCacheManager("THUMBNAIL") }
             )
         }
         add {
