@@ -435,6 +435,10 @@ class TransferRepositoryImpl(
         kickWorker()
     }
 
+    override suspend fun wakeWorker() {
+        kickWorker()
+    }
+
     /** A backup state only means something while a transfer backs the file up. */
     private suspend fun syncFileStates() {
         fileDao.repairBackedUpStates()
