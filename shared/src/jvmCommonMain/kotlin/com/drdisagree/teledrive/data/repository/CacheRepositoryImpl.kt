@@ -425,6 +425,27 @@ class CacheRepositoryImpl(
         searchQuery = searchQuery.trim()
     )
 
+    override suspend fun thumbnailAllMissingFileIds(): List<String> {
+        var afterAddedAt: Long? = null
+        var afterFileId: String? = null
+        val ids = mutableListOf<String>()
+        while (true) {
+            val page = thumbnailDao.allEligibleFileIdsPage(
+                onlyMissing = true,
+                afterAddedAt = afterAddedAt,
+                afterFileId = afterFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (page.isEmpty()) break
+            ids += page.map { it.fileId }
+            val last = page.last()
+            afterAddedAt = last.addedAt
+            afterFileId = last.fileId
+            if (page.size < JOB_BATCH_SIZE) break
+        }
+        return ids.distinct()
+    }
+
     private suspend fun effectiveFolderPolicy(folderId: String?): ThumbnailPolicy {
         if (folderId == null) return ThumbnailPolicy.MANUAL_ONLY
         val direct = thumbnailPolicyDao.policy(ThumbnailTargetType.FOLDER.name, folderId)
