@@ -123,7 +123,14 @@ interface TransferDao {
     )
     suspend fun updateProgress(id: String, transferred: Long, speed: Long, updatedAt: Long)
 
-    @Query("UPDATE transfers SET state = :state, updatedAt = :updatedAt WHERE id = :id")
+    @Query(
+        """UPDATE transfers SET state = :state,
+           speedBytesPerSecond = CASE
+               WHEN :state IN ('QUEUED', 'PAUSED', 'CANCELLED', 'FAILED') THEN 0
+               ELSE speedBytesPerSecond
+           END,
+           updatedAt = :updatedAt WHERE id = :id"""
+    )
     suspend fun setState(id: String, state: TransferState, updatedAt: Long)
 
     @Query(
@@ -142,7 +149,7 @@ interface TransferDao {
         completed: TransferState = TransferState.COMPLETED
     )
 
-    @Query("UPDATE transfers SET state = 'QUEUED', telegramFileId = NULL WHERE state = 'RUNNING'")
+    @Query("UPDATE transfers SET state = 'QUEUED', telegramFileId = NULL, speedBytesPerSecond = 0 WHERE state = 'RUNNING'")
     suspend fun requeueRunning()
 
     @Query("DELETE FROM transfers WHERE id IN (:ids)")
@@ -152,19 +159,19 @@ interface TransferDao {
     suspend fun clearFinished()
 
     @Query(
-        """UPDATE transfers SET state = 'PAUSED', updatedAt = :now
+        """UPDATE transfers SET state = 'PAUSED', speedBytesPerSecond = 0, updatedAt = :now
            WHERE state IN ('QUEUED', 'RUNNING')"""
     )
     suspend fun pauseAll(now: Long): Int
 
     @Query(
-        """UPDATE transfers SET state = 'QUEUED', updatedAt = :now
+        """UPDATE transfers SET state = 'QUEUED', speedBytesPerSecond = 0, updatedAt = :now
            WHERE state = 'PAUSED'"""
     )
     suspend fun resumeAll(now: Long): Int
 
     @Query(
-        """UPDATE transfers SET state = 'CANCELLED', updatedAt = :now
+        """UPDATE transfers SET state = 'CANCELLED', speedBytesPerSecond = 0, updatedAt = :now
            WHERE state IN ('QUEUED', 'RUNNING', 'PAUSED', 'FAILED')"""
     )
     suspend fun cancelAll(now: Long): Int
