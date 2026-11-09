@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
@@ -774,6 +775,12 @@ fun GalleryScreen(
                                     contentDescription = stringResource(Res.string.common_select)
                                 )
                             }
+                        }
+                        IconButton(onClick = onViewThumbnailQueue) {
+                            Icon(
+                                Icons.Filled.CloudQueue,
+                                contentDescription = "View thumbnail queue"
+                            )
                         }
                         IconButton(
                             onClick = {
