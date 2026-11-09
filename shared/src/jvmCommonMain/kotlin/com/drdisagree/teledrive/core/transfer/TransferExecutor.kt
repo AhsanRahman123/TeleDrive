@@ -593,7 +593,7 @@ class TransferExecutor(
 
         return try {
             partDownloader.download(entity.id, entity.isEncrypted, target)
-                .failWhenIdle(messages.downloadStalled)
+                .failWhenIdle(transfer.id, messages.downloadStalled)
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
