@@ -181,9 +181,7 @@ fun DesktopPreviewScreen(
     val fullscreenController = LocalFullscreenController.current
 
     fun leavePreview() {
-        if (fullscreenController?.isFullscreen() == true) {
-            fullscreenController.toggle()
-        }
+        fullscreenController?.setFullscreen(false)
         onBack()
     }
 
@@ -235,11 +233,10 @@ fun DesktopPreviewScreen(
 
     LaunchedEffect(file?.id) {
         if (restoreFullscreenAfterNavigation) {
-            // Wait until the replacement VLC surface has attached before restoring the window.
-            delay(50L)
-            if (fullscreenController?.isFullscreen() != true) {
-                fullscreenController?.toggle()
-            }
+            // Wait until the replacement VLC surface has attached, then reassert fullscreen
+            // directly. A toggle can accidentally leave the window floating after rapid W/E.
+            delay(100L)
+            fullscreenController?.setFullscreen(true)
             restoreFullscreenAfterNavigation = false
         }
     }
