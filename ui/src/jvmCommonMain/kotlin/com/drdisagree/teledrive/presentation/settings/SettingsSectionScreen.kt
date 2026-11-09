@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.presentation.settings
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -301,6 +302,10 @@ fun SettingsSectionScreen(
                     }
                     Spacer(Modifier.height(24.dp + padding.calculateBottomPadding()))
                 }
+                    DesktopScrollEdgeControls(
+                        state = scrollState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 14.dp)
+                    )
                 DesktopVerticalScrollbar(
                     state = scrollState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
