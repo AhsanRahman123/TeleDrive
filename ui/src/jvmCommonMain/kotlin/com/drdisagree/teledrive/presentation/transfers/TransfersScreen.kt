@@ -253,14 +253,17 @@ fun TransfersScreen(
                     }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Transfer settings")
                     }
-                    if (state.active.isNotEmpty()) {
+                    if (state.active.any { it.state == TransferState.RUNNING }) {
                         IconButton(onClick = viewModel::pauseAll) {
                             Icon(
                                 Icons.Filled.Pause,
                                 contentDescription = stringResource(Res.string.transfers_pause)
                             )
                         }
-                    } else if (state.paused.isNotEmpty()) {
+                    } else if (
+                        state.active.any { it.state == TransferState.QUEUED } ||
+                        state.paused.isNotEmpty()
+                    ) {
                         IconButton(onClick = viewModel::resumeAll) {
                             Icon(
                                 Icons.Filled.PlayArrow,
@@ -740,7 +743,7 @@ private fun failedSectionTitle(failed: List<TransferTask>): String {
     }
 }
 
-private const val SPEED_STALE_AFTER_MS = 4_000L
+private const val SPEED_STALE_AFTER_MS = 3_000L
 
 private fun transferRate(transfer: TransferTask): String {
     val stage = transfer.stage
