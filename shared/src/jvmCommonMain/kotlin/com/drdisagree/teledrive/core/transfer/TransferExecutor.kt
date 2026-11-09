@@ -239,8 +239,8 @@ class TransferExecutor(
             sourceFile.absolutePath to entity.name
         }
 
-        val startedAt = System.currentTimeMillis()
-        val ticker = ProgressTicker().apply { start(0, startedAt) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
 
         return try {
             var outcome: TransferOutcome =
@@ -258,10 +258,18 @@ class TransferExecutor(
                     is TelegramUploadEvent.Started -> Unit
                     is TelegramUploadEvent.Progress -> {
                         val now = System.currentTimeMillis()
-                        ticker.tick(event.transferredBytes, now)?.let { speed ->
+                        if (!tickerStarted) {
+                            ticker.start(event.transferredBytes, now)
+                            tickerStarted = true
                             transferDao.updateProgress(
-                                transfer.id, event.transferredBytes, speed, now
+                                transfer.id, event.transferredBytes, 0L, now
                             )
+                        } else {
+                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                transferDao.updateProgress(
+                                    transfer.id, event.transferredBytes, speed, now
+                                )
+                            }
                         }
                         checkControl(transfer.id)
                     }
@@ -354,7 +362,8 @@ class TransferExecutor(
         supersededMessageId: Long?,
         previewPath: String?
     ): TransferOutcome {
-        val ticker = ProgressTicker().apply { start(0, System.currentTimeMillis()) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
         var outcome: TransferOutcome =
             TransferOutcome.Failed(messages.uploadEnded)
 
@@ -365,10 +374,18 @@ class TransferExecutor(
                     when (event) {
                         is PartUploadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                            if (!tickerStarted) {
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
                                 transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                                    transfer.id, event.transferredBytes, 0L, now
                                 )
+                            } else {
+                                ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                }
                             }
                             checkControl(transfer.id)
                         }
