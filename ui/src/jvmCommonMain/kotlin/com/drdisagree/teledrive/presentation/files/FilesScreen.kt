@@ -47,7 +47,6 @@ import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.CloudQueue
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -292,20 +291,26 @@ fun FilesScreen(
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
 
     val viewTransfersLabel = stringResource(Res.string.snackbar_view_transfers)
+    val isThumbnailQueueMessage: (UiText) -> Boolean = { message ->
+        message is UiText.Plain &&
+            message.value.startsWith("Added ") &&
+            message.value.contains("missing thumbnails to the priority queue")
+    }
     CollectSnackbarMessages(
         messages = viewModel.messages,
         hostState = snackbarHostState,
         actionLabel = { message ->
-            if (
+            when {
+                isThumbnailQueueMessage(message) -> "View queue"
                 message is UiText.Resource &&
-                message.resource == Res.string.files_queued_for_download
-            ) {
-                viewTransfersLabel
-            } else {
-                null
+                    message.resource == Res.string.files_queued_for_download -> viewTransfersLabel
+                else -> null
             }
         },
-        onAction = { onOpenTransfers() }
+        onAction = { message ->
+            if (isThumbnailQueueMessage(message)) onViewThumbnailQueue()
+            else onOpenTransfers()
+        }
     )
     LaunchedEffect(Unit) {
         viewModel.deleteConsentRequests.collect { request ->
@@ -472,12 +477,6 @@ fun FilesScreen(
                                                 label = "Generate thumbnails",
                                                 icon = Icons.Filled.Image
                                             ) { viewModel.generateThumbnailsSelected() }
-                                        )
-                                        add(
-                                            MenuAction(
-                                                label = "View thumbnail queue",
-                                                icon = Icons.Filled.Refresh
-                                            ) { onViewThumbnailQueue() }
                                         )
                                         add(
                                             MenuAction(
