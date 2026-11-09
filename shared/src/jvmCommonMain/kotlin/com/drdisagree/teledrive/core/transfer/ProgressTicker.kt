@@ -37,6 +37,6 @@ class ProgressTicker(
     }
 
     private companion object {
-        const val INTERVAL_MS = 2_000L
+        const val INTERVAL_MS = 1_000L
     }
 }
