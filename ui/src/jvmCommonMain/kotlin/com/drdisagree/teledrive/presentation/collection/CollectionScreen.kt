@@ -296,7 +296,7 @@ fun CollectionScreen(
                 if (index < folders.size) {
                     folders[index].id in folderSelection
                 } else {
-                    files.peek(index - folders.size)?.id in selection
+                    files.peek(index - folders.size)?.id?.let(selection::contains) == true
                 }
             },
             onRange = { range, shouldSelect ->
