@@ -1061,16 +1061,18 @@ fun GalleryScreen(
             val listDragSelect = rememberDragSelect(
                 listState = mediaListState,
                 onStart = viewModel::startRangeSelection,
-                onRange = { range ->
-                    viewModel.extendRangeSelection(range.mapNotNull(mediaIdAt))
+                isSelected = { index -> mediaIdAt(index)?.let(state.selection::contains) == true },
+                onRange = { range, shouldSelect ->
+                    viewModel.extendRangeSelection(range.mapNotNull(mediaIdAt), shouldSelect)
                 },
                 onEnd = viewModel::endRangeSelection
             )
             val gridDragSelect = rememberDragSelect(
                 gridState = mediaGridState,
                 onStart = viewModel::startRangeSelection,
-                onRange = { range ->
-                    viewModel.extendRangeSelection(range.mapNotNull(mediaIdAt))
+                isSelected = { index -> mediaIdAt(index)?.let(state.selection::contains) == true },
+                onRange = { range, shouldSelect ->
+                    viewModel.extendRangeSelection(range.mapNotNull(mediaIdAt), shouldSelect)
                 },
                 onEnd = viewModel::endRangeSelection
             )
