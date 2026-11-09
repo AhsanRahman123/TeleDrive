@@ -81,7 +81,11 @@ class TransferExecutor(
     /**
      * A dead connection stops emitting without an error, which would leave the row RUNNING forever.
      */
-    private fun <T> Flow<T>.failWhenIdle(transferId: String, message: String): Flow<T> = channelFlow {
+    private fun <T> Flow<T>.failWhenIdle(
+        transferId: String,
+        message: String,
+        progressState: (T) -> Pair<Boolean, Boolean> = { true to true }
+    ): Flow<T> = channelFlow {
         val relay = Channel<T>(Channel.BUFFERED)
         val producer = launch {
             try {
@@ -91,7 +95,8 @@ class TransferExecutor(
                 relay.close(e)
             }
         }
-        var lastEventAt = System.currentTimeMillis()
+        var lastProgressAt = System.currentTimeMillis()
+        var monitorForStall = true
         try {
             while (true) {
                 // Pause/cancel/resume must release a worker even when TDLib has stopped
@@ -102,15 +107,22 @@ class TransferExecutor(
                     relay.receiveCatching()
                 }
                 if (received == null) {
-                    if (System.currentTimeMillis() - lastEventAt >= STALL_TIMEOUT_MS) {
+                    if (
+                        monitorForStall &&
+                        System.currentTimeMillis() - lastProgressAt >= STALL_TIMEOUT_MS
+                    ) {
                         throw TelegramException(STALL_CODE, message)
                     }
                     continue
                 }
                 received.exceptionOrNull()?.let { throw it }
                 if (received.isClosed) break
-                lastEventAt = System.currentTimeMillis()
-                send(received.getOrThrow())
+
+                val value = received.getOrThrow()
+                val (shouldMonitor, madeProgress) = progressState(value)
+                monitorForStall = shouldMonitor
+                if (madeProgress) lastProgressAt = System.currentTimeMillis()
+                send(value)
             }
         } finally {
             // The parent drain can itself be cancelled by Pause All. Keep cleanup non-cancellable
@@ -530,8 +542,22 @@ class TransferExecutor(
         return try {
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.downloadEnded)
+            var lastObservedBytes: Long? = null
+            var wasDownloadingActive = false
             telegramClient.downloadDocument(remoteFileId)
-                .failWhenIdle(transfer.id, messages.downloadStalled)
+                .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
+                    when (event) {
+                        is TelegramDownloadEvent.Progress -> {
+                            val active = event.isDownloadingActive
+                            val becameActive = active && !wasDownloadingActive
+                            val bytesChanged = lastObservedBytes != event.transferredBytes
+                            lastObservedBytes = event.transferredBytes
+                            wasDownloadingActive = active
+                            active to (active && (becameActive || bytesChanged))
+                        }
+                        is TelegramDownloadEvent.Completed -> true to true
+                    }
+                }
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
@@ -598,8 +624,23 @@ class TransferExecutor(
             TransferOutcome.Failed(messages.downloadEnded)
 
         return try {
+            var lastObservedBytes: Long? = null
+            var wasDownloadingActive = false
             partDownloader.download(entity.id, entity.isEncrypted, target)
-                .failWhenIdle(transfer.id, messages.downloadStalled)
+                .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
+                    when (event) {
+                        is PartDownloadEvent.Progress -> {
+                            val active = event.isDownloadingActive
+                            val becameActive = active && !wasDownloadingActive
+                            val bytesChanged = lastObservedBytes != event.transferredBytes
+                            lastObservedBytes = event.transferredBytes
+                            wasDownloadingActive = active
+                            active to (active && (becameActive || bytesChanged))
+                        }
+                        is PartDownloadEvent.Joining -> false to false
+                        is PartDownloadEvent.Completed -> true to true
+                    }
+                }
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
