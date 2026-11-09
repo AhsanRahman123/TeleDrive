@@ -863,8 +863,27 @@ private fun PlayerControlsBar(
     var scrubTarget by remember { mutableStateOf<Float?>(null) }
     val fullscreen = LocalFullscreenController.current
     val trackWord = stringResource(Res.string.player_track)
-    val audioTracks = remember(player, trackTick) { player.audioTracks(trackWord) }
-    val textTracks = remember(player, trackTick) { player.textTracks(trackWord) }
+    var audioTracks by remember(player) { mutableStateOf(emptyList<VlcTrack>()) }
+    var textTracks by remember(player) { mutableStateOf(emptyList<VlcTrack>()) }
+
+    // Track enumeration crosses the native LibVLC boundary. Keep it off the Compose
+    // thread and serialize it with the rest of this player's native operations.
+    LaunchedEffect(player, trackTick, trackWord) {
+        val result = CompletableDeferred<Pair<List<VlcTrack>, List<VlcTrack>>>()
+        runCatching {
+            player.submit {
+                val audio = runCatching { player.audioTracks(trackWord) }.getOrDefault(emptyList())
+                val text = runCatching { player.textTracks(trackWord) }.getOrDefault(emptyList())
+                result.complete(audio to text)
+            }
+        }.onFailure {
+            result.complete(emptyList<VlcTrack>() to emptyList())
+        }
+        withTimeoutOrNull(PLAYER_NATIVE_CALL_TIMEOUT_MS) { result.await() }?.let { tracks ->
+            audioTracks = tracks.first
+            textTracks = tracks.second
+        }
+    }
     val subtitlesOn = textTracks.any { it.selected }
 
     Column(
