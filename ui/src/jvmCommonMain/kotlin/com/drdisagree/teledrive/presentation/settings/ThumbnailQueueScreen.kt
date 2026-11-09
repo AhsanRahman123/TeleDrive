@@ -7,6 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,6 +48,8 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailQueueItem
 import com.drdisagree.teledrive.domain.repository.ThumbnailQueueSort
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -83,6 +89,19 @@ fun ThumbnailQueueScreen(
     var refreshing by remember { mutableStateOf(false) }
     var sortOrder by remember { mutableStateOf(ThumbnailQueueSort.OLDEST_FIRST) }
     var throughputFilesPerMinute by remember { mutableStateOf(0.0) }
+    var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
+    val queueListState = rememberLazyListState()
+    val queueDragSelect = rememberDragSelect(
+        listState = queueListState,
+        onStart = { rangeSelectionBase = selectedIds },
+        isSelected = { index -> items.getOrNull(index)?.fileId?.let(selectedIds::contains) == true },
+        onRange = { range, shouldSelect ->
+            val ids = range.mapNotNull { items.getOrNull(it)?.fileId }.toSet()
+            selectedIds = if (shouldSelect) rangeSelectionBase + ids
+                else rangeSelectionBase - ids
+        },
+        onEnd = { rangeSelectionBase = emptySet() }
+    )
 
     LaunchedEffect(offset, sortOrder) {
         var previousCount = -1
@@ -388,31 +407,48 @@ fun ThumbnailQueueScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    items.forEach { item ->
-                        ThumbnailQueueRow(
-                            item = item,
-                            selected = item.fileId in selectedIds,
-                            active = item.fileId in activeJobs,
-                            globallyPaused = queuePaused,
-                            onSelect = { checked ->
-                                selectedIds = if (checked) selectedIds + item.fileId
-                                else selectedIds - item.fileId
-                            },
-                            onPause = {
-                                scope.launch { repository.pauseThumbnailJobs(listOf(item.fileId)) }
-                            },
-                            onResume = {
-                                scope.launch { repository.resumeThumbnailJobs(listOf(item.fileId)) }
-                            },
-                            onCancel = {
-                                scope.launch {
-                                    repository.cancelThumbnailJobs(listOf(item.fileId))
-                                    selectedIds = selectedIds - item.fileId
-                                }
-                            },
-                            onRetry = {
-                                scope.launch { repository.retryThumbnailJobs(listOf(item.fileId)) }
+                    Box(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
+                        LazyColumn(
+                            state = queueListState,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                                .then(queueDragSelect),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            itemsIndexed(items, key = { _, item -> item.fileId }) { _, item ->
+                                ThumbnailQueueRow(
+                                    item = item,
+                                    selected = item.fileId in selectedIds,
+                                    active = item.fileId in activeJobs,
+                                    globallyPaused = queuePaused,
+                                    onSelect = { checked ->
+                                        selectedIds = if (checked) selectedIds + item.fileId
+                                        else selectedIds - item.fileId
+                                    },
+                                    onPause = {
+                                        scope.launch { repository.pauseThumbnailJobs(listOf(item.fileId)) }
+                                    },
+                                    onResume = {
+                                        scope.launch { repository.resumeThumbnailJobs(listOf(item.fileId)) }
+                                    },
+                                    onCancel = {
+                                        scope.launch {
+                                            repository.cancelThumbnailJobs(listOf(item.fileId))
+                                            selectedIds = selectedIds - item.fileId
+                                        }
+                                    },
+                                    onRetry = {
+                                        scope.launch { repository.retryThumbnailJobs(listOf(item.fileId)) }
+                                    }
+                                )
                             }
+                        }
+                        DesktopScrollEdgeControls(
+                            state = queueListState,
+                            modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
+                        )
+                        DesktopVerticalScrollbar(
+                            state = queueListState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                         )
                     }
                 }
