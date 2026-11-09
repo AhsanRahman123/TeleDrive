@@ -209,6 +209,7 @@ fun DesktopMediaPlayer(
     var brightnessMonitor by remember(mrl) { mutableStateOf("") }
     var brightnessDragging by remember(mrl) { mutableStateOf(false) }
     var pendingBrightness by remember(mrl) { mutableStateOf<Float?>(null) }
+    val brightnessUpdates = remember { Channel<Float>(Channel.CONFLATED) }
 
     // Poll the actual monitor brightness so changes made through Monitorian
     // or compatible Windhawk controls are reflected in TeleDrive.
@@ -233,19 +234,29 @@ fun DesktopMediaPlayer(
         }
     }
 
-    // Debounce slider movement so the monitor is not flooded with DDC/CI
-    // requests. The last value is sent after the user pauses briefly.
-    LaunchedEffect(mrl, pendingBrightness) {
-        val requested = pendingBrightness ?: return@LaunchedEffect
-        delay(BRIGHTNESS_WRITE_DEBOUNCE_MS)
-        val applied = withContext(Dispatchers.IO) {
-            WindowsMonitorBrightness.setPercent(requested)
+    // One conflated writer serializes DDC/CI requests across media changes.
+    // Rapid slider events replace stale values instead of stacking synchronized
+    // monitor API calls behind one another.
+    LaunchedEffect(brightnessUpdates) {
+        for (firstValue in brightnessUpdates) {
+            var requested = firstValue
+            delay(BRIGHTNESS_WRITE_DEBOUNCE_MS)
+            while (true) {
+                val latest = brightnessUpdates.tryReceive().getOrNull() ?: break
+                requested = latest
+            }
+            val applied = withContext(Dispatchers.IO) {
+                WindowsMonitorBrightness.setPercent(requested)
+            }
+            if (applied) {
+                brightnessAvailable = true
+                brightness = requested.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
+            }
+            if (pendingBrightness == requested) pendingBrightness = null
         }
-        if (applied) {
-            brightnessAvailable = true
-            brightness = requested.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
-        }
-        if (pendingBrightness == requested) pendingBrightness = null
+    }
+    DisposableEffect(brightnessUpdates) {
+        onDispose { brightnessUpdates.close() }
     }
 
     DisposableEffect(playing, isAudio) {
@@ -775,6 +786,7 @@ fun DesktopMediaPlayer(
                     val requested = it.coerceIn(0, MAX_BRIGHTNESS)
                     brightness = requested
                     pendingBrightness = requested.toFloat()
+                    brightnessUpdates.trySend(requested.toFloat())
                     interactionTick++
                 },
                 onBrightnessDragging = { brightnessDragging = it },
