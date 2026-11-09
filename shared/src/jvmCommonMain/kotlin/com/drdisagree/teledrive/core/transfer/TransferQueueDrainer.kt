@@ -166,7 +166,9 @@ class TransferQueueDrainer(
                 }
 
                 is TransferOutcome.Paused -> {
-                    markState(transferId, TransferState.PAUSED)
+                    // Pause already changed the row to PAUSED. Do not write PAUSED again:
+                    // Resume all may have changed it back to QUEUED while the old native
+                    // request was winding down. Leaving QUEUED lets this slot pick it up again.
                     return
                 }
 
