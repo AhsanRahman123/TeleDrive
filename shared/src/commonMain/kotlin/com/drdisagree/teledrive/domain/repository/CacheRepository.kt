@@ -20,6 +20,34 @@ interface CacheRepository {
 
     suspend fun enforceLimit(maxBytes: Long)
 
+    suspend fun cacheManagerSummary(): CacheManagerSummary = CacheManagerSummary()
+
+    suspend fun cacheFolders(
+        parentId: String?,
+        sortOrder: String = "LARGEST"
+    ): List<CacheFolderUsage> = emptyList()
+
+    suspend fun cacheEntries(
+        folderId: String?,
+        offset: Int,
+        limit: Int,
+        typeFilter: String = "ALL",
+        searchQuery: String = "",
+        sortOrder: String = "LARGEST"
+    ): List<CacheEntryUsage> = emptyList()
+
+    suspend fun cacheEntryPathsMatching(
+        folderId: String?,
+        typeFilter: String,
+        searchQuery: String
+    ): List<String> = emptyList()
+
+    suspend fun cacheEntryPathsInFolderTree(folderId: String): List<String> = emptyList()
+
+    suspend fun removeCacheEntries(paths: List<String>): CacheRemovalResult = CacheRemovalResult()
+
+    suspend fun clearUntrackedCache() = Unit
+
     suspend fun thumbnailManagerSummary(): ThumbnailManagerSummary =
         ThumbnailManagerSummary()
 
