@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.presentation.trash
 
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -435,6 +436,10 @@ fun TrashScreen(
                 }
             }
         }
+                DesktopScrollEdgeControls(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                )
                 DesktopVerticalScrollbar(
                     state = listState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
