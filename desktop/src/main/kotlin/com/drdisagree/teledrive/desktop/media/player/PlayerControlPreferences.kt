@@ -39,8 +39,8 @@ internal object PlayerControlPreferencesStore {
     }
 
     private const val KEY_AUTO_HIDE_VOLUME = "auto_hide_volume_slider"
-    private const val KEY_AUTO_HIDE_BRIGHTNESS = "auto_hide_brightness_slider"
-    private const val KEY_AUTO_HIDE_PLAYER_CONTROLS = "auto_hide_player_controls"
+    private const val KEY_AUTO_HIDE_BRIGHTNESS = "auto_hide_brightness_slider_v2"
+    private const val KEY_AUTO_HIDE_PLAYER_CONTROLS = "auto_hide_player_controls_v2"
     private const val KEY_SHOW_PLAYER_CONTROLS = "show_player_controls"
     private const val KEY_HIDE_DELAY = "slider_hide_delay_ms"
 }
