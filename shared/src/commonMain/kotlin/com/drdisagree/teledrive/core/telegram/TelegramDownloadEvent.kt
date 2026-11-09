@@ -5,7 +5,9 @@ sealed interface TelegramDownloadEvent {
     data class Progress(
         val transferredBytes: Long,
         val totalBytes: Long,
-        /** Bytes in the readable contiguous prefix; used only for throughput measurement. */
+        /** False while TDLib has accepted the request but has not started downloading it. */
+        val isDownloadingActive: Boolean = true,
+        /** Readable contiguous prefix used for speed only; total progress uses downloadedSize. */
         val speedSampleBytes: Long = transferredBytes
     ) : TelegramDownloadEvent
 
