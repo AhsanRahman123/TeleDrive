@@ -126,7 +126,7 @@ interface TransferDao {
     @Query(
         """UPDATE transfers SET state = :state,
            speedBytesPerSecond = CASE
-               WHEN :state IN ('QUEUED', 'PAUSED', 'CANCELLED', 'FAILED') THEN 0
+               WHEN :state IN ('QUEUED', 'RUNNING', 'PAUSED', 'CANCELLED', 'FAILED') THEN 0
                ELSE speedBytesPerSecond
            END,
            updatedAt = :updatedAt WHERE id = :id"""
