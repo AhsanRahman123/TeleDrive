@@ -25,6 +25,7 @@ import com.drdisagree.teledrive.presentation.search.SearchScreen
 import com.drdisagree.teledrive.presentation.proxy.ProxyScreen
 import com.drdisagree.teledrive.presentation.settings.ExclusionsScreen
 import com.drdisagree.teledrive.presentation.settings.CacheManagerScreen
+import com.drdisagree.teledrive.presentation.settings.ThumbnailQueueScreen
 import com.drdisagree.teledrive.presentation.settings.SettingsScreen
 import com.drdisagree.teledrive.presentation.settings.SettingsSectionScreen
 import com.drdisagree.teledrive.presentation.settings.SettingsSectionType
@@ -109,6 +110,7 @@ fun AppNavHost(
                     },
                     onOpenSearch = { navController.navigateOnce(Route.Search) },
                     onOpenTransfers = { navController.navigateOnce(Route.Transfers) },
+                    onViewThumbnailQueue = { navController.navigateOnce(Route.ThumbnailQueue) },
                     onNewNote = { folderId ->
                         navController.navigateOnce(Route.NoteEditor(folderId = folderId))
                     },
@@ -133,7 +135,8 @@ fun AppNavHost(
                             Route.GalleryAlbum(album.folderId, album.name ?: unfiledAlbumName)
                         )
                     },
-                    onOpenTransfers = { navController.navigateOnce(Route.Transfers) }
+                    onOpenTransfers = { navController.navigateOnce(Route.Transfers) },
+                    onViewThumbnailQueue = { navController.navigateOnce(Route.ThumbnailQueue) }
                 )
             }
         }
@@ -143,7 +146,8 @@ fun AppNavHost(
                     navController.navigateOnce(sequence.routeFor(id))
                 },
                 onBack = { navController.popBackStackOnce() },
-                onOpenTransfers = { navController.navigateOnce(Route.Transfers) }
+                onOpenTransfers = { navController.navigateOnce(Route.Transfers) },
+                onViewThumbnailQueue = { navController.navigateOnce(Route.ThumbnailQueue) }
             )
         }
         composable<Route.Preview>(
@@ -221,6 +225,9 @@ fun AppNavHost(
                     }
                 }
             )
+        }
+        composable<Route.ThumbnailQueue> {
+            ThumbnailQueueScreen(onBack = { navController.popBackStackOnce() })
         }
         composable<Route.CacheManager> { entry ->
             val route = entry.toRoute<Route.CacheManager>()
