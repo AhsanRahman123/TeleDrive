@@ -292,7 +292,14 @@ fun CollectionScreen(
         val dragSelect = rememberDragSelect(
             listState = listState,
             onStart = viewModel::startRangeSelection,
-            onRange = { range ->
+            isSelected = { index ->
+                if (index < folders.size) {
+                    folders[index].id in folderSelection
+                } else {
+                    files.peek(index - folders.size)?.id in selection
+                }
+            },
+            onRange = { range, shouldSelect ->
                 val folderIds = mutableListOf<String>()
                 val fileIds = mutableListOf<String>()
                 for (index in range) {
@@ -305,7 +312,7 @@ fun CollectionScreen(
                         }
                     }
                 }
-                viewModel.extendRangeSelection(fileIds, folderIds)
+                viewModel.extendRangeSelection(fileIds, folderIds, shouldSelect)
             },
             onEnd = viewModel::endRangeSelection
         )
