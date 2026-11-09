@@ -134,14 +134,15 @@ interface TransferDao {
     suspend fun setState(id: String, state: TransferState, updatedAt: Long)
 
     @Query(
-        """UPDATE transfers SET state = :state, errorMessage = :error, updatedAt = :updatedAt
-           WHERE id = :id"""
+        """UPDATE transfers SET state = :state, errorMessage = :error,
+           speedBytesPerSecond = 0, updatedAt = :updatedAt WHERE id = :id"""
     )
     suspend fun setFailed(id: String, state: TransferState, error: String?, updatedAt: Long)
 
     @Query(
         """UPDATE transfers SET state = :completed, transferredBytes = sizeBytes,
-           completedAt = :completedAt, updatedAt = :completedAt WHERE id = :id"""
+           speedBytesPerSecond = 0, completedAt = :completedAt, updatedAt = :completedAt
+           WHERE id = :id"""
     )
     suspend fun setCompleted(
         id: String,
