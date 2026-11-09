@@ -79,9 +79,9 @@ class TransferExecutor(
     /**
      * A dead connection stops emitting without an error, which would leave the row RUNNING forever.
      */
-    private fun <T> Flow<T>.failWhenIdle(message: String): Flow<T> = channelFlow {
+    private fun <T> Flow<T>.failWhenIdle(transferId: String, message: String): Flow<T> = channelFlow {
         val relay = Channel<T>(Channel.BUFFERED)
-        launch {
+        val producer = launch {
             try {
                 collect { relay.send(it) }
                 relay.close()
@@ -89,13 +89,29 @@ class TransferExecutor(
                 relay.close(e)
             }
         }
-        while (true) {
-            val received =
-                withTimeoutOrNull(STALL_TIMEOUT_MS.milliseconds) { relay.receiveCatching() }
-                    ?: throw TelegramException(STALL_CODE, message)
-            received.exceptionOrNull()?.let { throw it }
-            if (received.isClosed) break
-            send(received.getOrThrow())
+        var lastEventAt = System.currentTimeMillis()
+        try {
+            while (true) {
+                // Pause/cancel/resume must release a worker even when TDLib has stopped
+                // emitting progress. Poll independently of network progress instead of
+                // waiting for the long network-idle timeout.
+                checkControl(transferId)
+                val received = withTimeoutOrNull(CONTROL_POLL_MS.milliseconds) {
+                    relay.receiveCatching()
+                }
+                if (received == null) {
+                    if (System.currentTimeMillis() - lastEventAt >= STALL_TIMEOUT_MS) {
+                        throw TelegramException(STALL_CODE, message)
+                    }
+                    continue
+                }
+                received.exceptionOrNull()?.let { throw it }
+                if (received.isClosed) break
+                lastEventAt = System.currentTimeMillis()
+                send(received.getOrThrow())
+            }
+        } finally {
+            producer.cancel()
         }
     }
 
@@ -252,7 +268,7 @@ class TransferExecutor(
                 mimeType = if (encrypt) "application/octet-stream" else entity.mimeType,
                 caption = caption,
                 thumbnailPath = previewPath
-            ).failWhenIdle(messages.uploadStalled).collect { event ->
+            ).failWhenIdle(transfer.id, messages.uploadStalled).collect { event ->
                 currentCoroutineContext().ensureActive()
                 when (event) {
                     is TelegramUploadEvent.Started -> Unit
@@ -509,7 +525,7 @@ class TransferExecutor(
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.downloadEnded)
             telegramClient.downloadDocument(remoteFileId)
-                .failWhenIdle(messages.downloadStalled)
+                .failWhenIdle(transfer.id, messages.downloadStalled)
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
@@ -759,9 +775,13 @@ class TransferExecutor(
 
     private suspend fun checkControl(transferId: String) {
         when (transferDao.byId(transferId)?.state) {
-            TransferState.PAUSED -> throw TransferControlException(paused = true)
-            TransferState.CANCELLED -> throw TransferControlException(paused = false)
-            else -> Unit
+            TransferState.RUNNING -> Unit
+            TransferState.PAUSED,
+            TransferState.QUEUED -> throw TransferControlException(paused = true)
+            TransferState.CANCELLED,
+            TransferState.COMPLETED,
+            TransferState.FAILED,
+            null -> throw TransferControlException(paused = false)
         }
     }
 
@@ -771,6 +791,7 @@ class TransferExecutor(
     companion object {
         private const val EAGER_HASH_LIMIT = 512L * 1024 * 1024
         private const val SPACE_MARGIN_BYTES = 256L * 1024 * 1024
+        private const val CONTROL_POLL_MS = 250L
         private const val STALL_TIMEOUT_MS = 180_000L
         private const val STALL_CODE = 408
     }
