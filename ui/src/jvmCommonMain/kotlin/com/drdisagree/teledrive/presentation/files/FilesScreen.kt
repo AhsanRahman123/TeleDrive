@@ -1090,7 +1090,14 @@ private fun FilesContent(
     val dragSelect = rememberDragSelect(
         gridState = gridState,
         onStart = viewModel::startRangeSelection,
-        onRange = { range ->
+        isSelected = { index ->
+            if (index < state.folders.size) {
+                state.folderSelection.contains(state.folders[index].id)
+            } else {
+                files.peek(index - state.folders.size)?.id in state.selection
+            }
+        },
+        onRange = { range, shouldSelect ->
             val folderIds = mutableListOf<String>()
             val fileIds = mutableListOf<String>()
             for (index in range) {
@@ -1103,7 +1110,7 @@ private fun FilesContent(
                     }
                 }
             }
-            viewModel.extendRangeSelection(fileIds, folderIds)
+            viewModel.extendRangeSelection(fileIds, folderIds, shouldSelect)
         },
         onEnd = viewModel::endRangeSelection
     )
