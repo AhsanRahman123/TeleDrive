@@ -131,38 +131,22 @@ fun ThumbnailManagerScreen(
     var searchInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
-    var rangeSelectionModeKnown by remember { mutableStateOf(false) }
-    var rangeSelectionDeselect by remember { mutableStateOf(false) }
     val fileListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
     val fileDragSelect = rememberDragSelect(
         listState = fileListState,
-        onStart = {
-            rangeSelectionBase = selectedIds
-            rangeSelectionModeKnown = false
-            rangeSelectionDeselect = false
-        },
-        onRange = { range ->
-            // Match desktop file managers: the anchor's original state decides whether
-            // this drag adds the range or removes it. The mode stays fixed for the gesture.
-            if (!rangeSelectionModeKnown) {
-                val anchorId = files.getOrNull(range.first)?.fileId
-                rangeSelectionDeselect = anchorId != null && anchorId in rangeSelectionBase
-                rangeSelectionModeKnown = true
-            }
+        onStart = { rangeSelectionBase = selectedIds },
+        isSelected = { index -> files.getOrNull(index)?.fileId in selectedIds },
+        onRange = { range, shouldSelect ->
             val rangeIds = range.mapNotNull { files.getOrNull(it)?.fileId }.toSet()
-            selectedIds = if (rangeSelectionDeselect) {
-                rangeSelectionBase - rangeIds
-            } else {
+            selectedIds = if (shouldSelect) {
                 rangeSelectionBase + rangeIds
+            } else {
+                rangeSelectionBase - rangeIds
             }
         },
-        onEnd = {
-            rangeSelectionBase = emptySet()
-            rangeSelectionModeKnown = false
-            rangeSelectionDeselect = false
-        }
+        onEnd = { rangeSelectionBase = emptySet() }
     )
     LaunchedEffect(folderId) {
         selectedIds = emptySet()
