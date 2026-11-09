@@ -485,8 +485,8 @@ class TransferExecutor(
         val remoteFileId = entity.remoteFileId
             ?: return TransferOutcome.Failed(messages.noRemoteCopy)
 
-        val startedAt = System.currentTimeMillis()
-        val ticker = ProgressTicker().apply { start(0, startedAt) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
 
         return try {
             var outcome: TransferOutcome =
@@ -498,10 +498,21 @@ class TransferExecutor(
                     when (event) {
                         is TelegramDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                            if (!tickerStarted) {
+                                // TDLib can resume a partially downloaded local file. Seed the
+                                // meter from its existing byte count instead of counting those
+                                // old bytes as fresh network traffic.
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
                                 transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                                    transfer.id, event.transferredBytes, 0L, now
                                 )
+                            } else {
+                                ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                }
                             }
                             checkControl(transfer.id)
                         }
@@ -542,7 +553,8 @@ class TransferExecutor(
             return TransferOutcome.Failed(messages.cacheFull(cacheNeeded))
         }
 
-        val ticker = ProgressTicker().apply { start(0, System.currentTimeMillis()) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
         var outcome: TransferOutcome =
             TransferOutcome.Failed(messages.downloadEnded)
 
@@ -555,10 +567,20 @@ class TransferExecutor(
                         is PartDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
                             transferDao.setStage(transfer.id, null, now)
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                            if (!tickerStarted) {
+                                // The destination may contain a retained partial file; begin
+                                // measuring only bytes received after this transfer resumes.
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
                                 transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                                    transfer.id, event.transferredBytes, 0L, now
                                 )
+                            } else {
+                                ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                }
                             }
                             checkControl(transfer.id)
                         }
