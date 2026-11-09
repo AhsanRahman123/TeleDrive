@@ -24,6 +24,10 @@ import com.drdisagree.teledrive.data.local.dao.ThumbnailDao
 import com.drdisagree.teledrive.data.local.entity.CacheEntryType
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.CacheStats
+import com.drdisagree.teledrive.domain.repository.CacheEntryUsage
+import com.drdisagree.teledrive.domain.repository.CacheFolderUsage
+import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
+import com.drdisagree.teledrive.domain.repository.CacheRemovalResult
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -179,8 +183,15 @@ class CacheRepositoryImpl(
         searchQuery = searchQuery.trim()
     )
 
-    override suspend fun cacheEntryPathsInFolderTree(folderId: String): List<String> =
-        cacheDao.managerEntryPathsInFolderTree(folderId)
+    override suspend fun cacheEntryPathsInFolderTree(
+        folderId: String,
+        typeFilter: String,
+        searchQuery: String
+    ): List<String> = cacheDao.managerEntryPathsInFolderTree(
+        folderId,
+        typeFilter,
+        searchQuery.trim()
+    )
 
     override suspend fun removeCacheEntries(paths: List<String>): CacheRemovalResult {
         var removedEntries = 0
