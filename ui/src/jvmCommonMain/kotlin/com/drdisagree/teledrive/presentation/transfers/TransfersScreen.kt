@@ -175,7 +175,7 @@ fun TransfersScreen(
                         steps = 1
                     )
                     Text(
-                        "This controls TeleDrive's worker pool. Telegram may temporarily queue large files by data centre, so fewer than this number may be receiving bytes at the same time.",
+                        "This sets TeleDrive's worker pool. Telegram's per-data-centre guidance allows up to 2 large files (over 20 MB) or 5 small files to download at once, so a third large file may wait for another to finish.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
