@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.DriveFolderUpload
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -462,6 +463,12 @@ fun FilesScreen(
                                                 ) { viewModel.requestRenameSelected() }
                                             )
                                         }
+                                        add(
+                                            MenuAction(
+                                                label = "Generate thumbnails",
+                                                icon = Icons.Filled.Image
+                                            ) { viewModel.generateThumbnailsSelected() }
+                                        )
                                         add(
                                             MenuAction(
                                                 label = stringResource(Res.string.files_copy),
