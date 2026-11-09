@@ -545,6 +545,7 @@ class TransferExecutor(
             var lastObservedBytes: Long? = null
             var lastObservedSpeedBytes: Long? = null
             var lastPersistedBytes: Long? = null
+            var wasPersistedActive = false
             var wasDownloadingActive = false
             telegramClient.downloadDocument(remoteFileId)
                 .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
@@ -571,12 +572,13 @@ class TransferExecutor(
                                 // TDLib has the request queued but is not receiving network bytes.
                                 ticker.start(event.speedSampleBytes, now)
                                 tickerStarted = true
-                                if (lastPersistedBytes != event.transferredBytes) {
+                                if (lastPersistedBytes != event.transferredBytes || wasPersistedActive) {
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, 0L, now
                                     )
                                     lastPersistedBytes = event.transferredBytes
                                 }
+                                wasPersistedActive = false
                             } else if (!tickerStarted) {
                                 ticker.start(event.speedSampleBytes, now)
                                 tickerStarted = true
@@ -584,6 +586,7 @@ class TransferExecutor(
                                     transfer.id, event.transferredBytes, 0L, now
                                 )
                                 lastPersistedBytes = event.transferredBytes
+                                wasPersistedActive = true
                             } else {
                                 ticker.tick(event.speedSampleBytes, now)?.let { speed ->
                                     transferDao.updateProgress(
@@ -591,6 +594,7 @@ class TransferExecutor(
                                     )
                                     lastPersistedBytes = event.transferredBytes
                                 }
+                                wasPersistedActive = true
                             }
                             checkControl(transfer.id)
                         }
@@ -640,6 +644,7 @@ class TransferExecutor(
             var lastObservedBytes: Long? = null
             var lastObservedSpeedBytes: Long? = null
             var lastPersistedBytes: Long? = null
+            var wasPersistedActive = false
             var wasDownloadingActive = false
             partDownloader.download(entity.id, entity.isEncrypted, target)
                 .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
@@ -669,12 +674,13 @@ class TransferExecutor(
                                 // a baseline, not newly received data.
                                 ticker.start(event.speedSampleBytes, now)
                                 tickerStarted = true
-                                if (lastPersistedBytes != event.transferredBytes) {
+                                if (lastPersistedBytes != event.transferredBytes || wasPersistedActive) {
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, 0L, now
                                     )
                                     lastPersistedBytes = event.transferredBytes
                                 }
+                                wasPersistedActive = false
                             } else if (!tickerStarted) {
                                 ticker.start(event.speedSampleBytes, now)
                                 tickerStarted = true
@@ -682,6 +688,7 @@ class TransferExecutor(
                                     transfer.id, event.transferredBytes, 0L, now
                                 )
                                 lastPersistedBytes = event.transferredBytes
+                                wasPersistedActive = true
                             } else {
                                 ticker.tick(event.speedSampleBytes, now)?.let { speed ->
                                     transferDao.updateProgress(
@@ -689,6 +696,7 @@ class TransferExecutor(
                                     )
                                     lastPersistedBytes = event.transferredBytes
                                 }
+                                wasPersistedActive = true
                             }
                             checkControl(transfer.id)
                         }
