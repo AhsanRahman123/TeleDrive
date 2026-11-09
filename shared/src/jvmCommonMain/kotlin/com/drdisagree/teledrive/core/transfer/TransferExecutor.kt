@@ -653,13 +653,13 @@ class TransferExecutor(
                             if (!tickerStarted) {
                                 // The destination may contain a retained partial file; begin
                                 // measuring only bytes received after this transfer resumes.
-                                ticker.start(event.transferredBytes, now)
+                                ticker.start(event.speedSampleBytes, now)
                                 tickerStarted = true
                                 transferDao.updateProgress(
                                     transfer.id, event.transferredBytes, 0L, now
                                 )
                             } else {
-                                ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                ticker.tick(event.speedSampleBytes, now)?.let { speed ->
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
                                     )
