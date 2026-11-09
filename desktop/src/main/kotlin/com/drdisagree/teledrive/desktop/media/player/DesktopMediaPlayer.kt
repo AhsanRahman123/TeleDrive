@@ -66,8 +66,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -711,15 +709,7 @@ fun DesktopMediaPlayer(
                     bitmap = current,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = scaling.contentScale,
-                    colorFilter = remember(brightness) {
-                        val factor = (brightness / 100f).coerceIn(0f, 2f)
-                        ColorFilter.colorMatrix(
-                            ColorMatrix().apply {
-                                setToScale(factor, factor, factor, 1f)
-                            }
-                        )
-                    }
+                    contentScale = scaling.contentScale
                 )
             }
         }
