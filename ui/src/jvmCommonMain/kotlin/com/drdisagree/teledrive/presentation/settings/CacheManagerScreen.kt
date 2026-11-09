@@ -436,7 +436,7 @@ fun CacheManagerScreen(
             onDismissRequest = { confirmUntracked = false },
             title = { Text("Clear other app-managed cache?") },
             text = {
-                Text("This removes temporary working files and Telegram-managed downloaded cache. It does not delete your original files or the separately managed thumbnail previews.")
+                Text("This removes temporary working files and Telegram-managed downloaded cache. Wait until active downloads and transfers finish first. Original files and thumbnail previews are not deleted.")
             },
             confirmButton = {
                 Button(onClick = {
