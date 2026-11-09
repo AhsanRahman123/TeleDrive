@@ -40,7 +40,7 @@ class PartDownloader(
 
         val resumeFrom = withContext(dispatchers.io) { resumePoint(target, parts) }
         var written = resumeFrom.second
-        emit(PartDownloadEvent.Progress(written))
+        emit(PartDownloadEvent.Progress(written, isDownloadingActive = false))
 
         for (part in parts.drop(resumeFrom.first)) {
             val remoteFileId = part.remoteFileId ?: error("Part ${part.partIndex + 1} is missing")
@@ -48,7 +48,12 @@ class PartDownloader(
             telegramClient.downloadDocument(remoteFileId).collect { event ->
                 when (event) {
                     is TelegramDownloadEvent.Progress ->
-                        emit(PartDownloadEvent.Progress(written + event.transferredBytes.coerceAtMost(part.plainSize)))
+                        emit(
+                            PartDownloadEvent.Progress(
+                                written + event.transferredBytes.coerceAtMost(part.plainSize),
+                                event.isDownloadingActive
+                            )
+                        )
 
                     is TelegramDownloadEvent.Completed -> downloaded = event.localPath
                 }
@@ -74,7 +79,7 @@ class PartDownloader(
             }
 
             written += part.plainSize
-            emit(PartDownloadEvent.Progress(written))
+            emit(PartDownloadEvent.Progress(written, isDownloadingActive = false))
         }
 
         emit(PartDownloadEvent.Completed(target.token))
