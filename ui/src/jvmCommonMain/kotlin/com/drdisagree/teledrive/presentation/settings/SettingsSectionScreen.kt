@@ -695,7 +695,7 @@ private fun StorageSection(
         }
         add {
             SettingsClickRow(
-                title = stringResource(Res.string.settings_clear_thumbnails_action),
+                title = "Manage thumbnail cache",
                 subtitle = Formatters.bytes(state.cacheStats.thumbnailBytes),
                 onClick = { onOpenCacheManager("THUMBNAIL") }
             )
