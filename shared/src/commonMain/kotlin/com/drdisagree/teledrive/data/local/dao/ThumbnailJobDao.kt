@@ -73,7 +73,7 @@ interface ThumbnailJobDao {
                     CASE WHEN :sortOrder = 'SOURCE_LARGEST' THEN COALESCE(f.sizeBytes, 0) END DESC,
                     CASE WHEN :sortOrder = 'SOURCE_SMALLEST' THEN COALESCE(f.sizeBytes, 0) END ASC,
                     CASE WHEN :sortOrder = 'FAILED_FIRST'
-                         THEN CASE WHEN j.attempts >= 3 THEN 0 ELSE 1 END END ASC,
+                         THEN CASE WHEN j.attempts >= 5 THEN 0 ELSE 1 END END ASC,
                     j.queuedAt ASC,
                     j.fileId ASC
                 LIMIT :limit OFFSET :offset
@@ -118,7 +118,7 @@ interface ThumbnailJobDao {
                 CASE WHEN :sortOrder = 'SOURCE_LARGEST' THEN q.fileSize END DESC,
                 CASE WHEN :sortOrder = 'SOURCE_SMALLEST' THEN q.fileSize END ASC,
                 CASE WHEN :sortOrder = 'FAILED_FIRST'
-                     THEN CASE WHEN q.attempts >= 3 THEN 0 ELSE 1 END END ASC,
+                     THEN CASE WHEN q.attempts >= 5 THEN 0 ELSE 1 END END ASC,
                 q.queuedAt ASC,
                 q.fileId ASC"""
     )
@@ -143,7 +143,7 @@ interface ThumbnailJobDao {
     @Query("SELECT fileId FROM thumbnail_jobs ORDER BY fileId ASC")
     suspend fun allFileIds(): List<String>
 
-    @Query("SELECT fileId FROM thumbnail_jobs WHERE attempts >= 3")
+    @Query("SELECT fileId FROM thumbnail_jobs WHERE attempts >= 5")
     suspend fun failedFileIds(): List<String>
 
     /**
@@ -154,7 +154,7 @@ interface ThumbnailJobDao {
         """SELECT j.fileId
              FROM thumbnail_jobs j
              LEFT JOIN files f ON f.id = j.fileId
-            WHERE j.attempts >= 3
+            WHERE j.attempts >= 5
               AND (
                     f.id IS NULL
                     OR NOT (
