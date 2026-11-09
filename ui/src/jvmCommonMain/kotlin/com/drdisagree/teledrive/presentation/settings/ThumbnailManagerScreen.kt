@@ -218,18 +218,20 @@ fun ThumbnailManagerScreen(
     // Keep the manager and queue page independently live, using the same
     // one-second queue-reduction estimate on both screens.
     LaunchedEffect(folderId) {
-        var previousCount = -1
+        var previousRemaining = -1
         var previousSampleAt = 0L
         var throughputFilesPerMinute = 0.0
         while (true) {
             val liveQueueCount = cacheRepository.thumbnailQueueCount()
+            val failedCount = cacheRepository.thumbnailQueueFailedFileIds().size
+            val remainingWork = (liveQueueCount - failedCount).coerceAtLeast(0)
             val paused = cacheRepository.thumbnailQueuePaused()
             val sampleAt = System.currentTimeMillis()
             if (paused) {
                 throughputFilesPerMinute = 0.0
-            } else if (previousCount >= 0 && previousSampleAt > 0L) {
+            } else if (previousRemaining >= 0 && previousSampleAt > 0L) {
                 val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
-                val removed = previousCount - liveQueueCount
+                val removed = previousRemaining - remainingWork
                 if (removed > 0) {
                     val sampleRate = removed * 60_000.0 / elapsed
                     throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
@@ -237,20 +239,22 @@ fun ThumbnailManagerScreen(
                     } else {
                         throughputFilesPerMinute * 0.65 + sampleRate * 0.35
                     }
-                } else if (liveQueueCount > previousCount) {
+                } else if (remainingWork > previousRemaining) {
                     throughputFilesPerMinute = 0.0
                 }
             }
-            previousCount = liveQueueCount
+            previousRemaining = remainingWork
             previousSampleAt = sampleAt
             if (summary.pendingJobs != liveQueueCount) {
                 summary = summary.copy(pendingJobs = liveQueueCount)
             }
             queueEstimate = when {
                 paused -> "ETA unavailable while paused"
-                liveQueueCount == 0 -> "All queued jobs completed"
+                remainingWork == 0 && failedCount > 0 ->
+                    "$failedCount failed jobs need retry · ETA unavailable"
+                remainingWork == 0 -> "All queued jobs completed"
                 throughputFilesPerMinute > 0.0 -> {
-                    val etaSeconds = (liveQueueCount * 60.0 / throughputFilesPerMinute)
+                    val etaSeconds = (remainingWork * 60.0 / throughputFilesPerMinute)
                         .toLong().coerceAtLeast(1L)
                     "Recent queue reduction: ${throughputFilesPerMinute.toInt()} files/min · " +
                         "Estimated remaining: ${formatThumbnailQueueEta(etaSeconds)}"
