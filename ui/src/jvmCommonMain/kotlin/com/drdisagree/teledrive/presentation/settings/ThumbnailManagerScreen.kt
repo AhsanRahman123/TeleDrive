@@ -612,7 +612,30 @@ fun ThumbnailManagerScreen(
                                 }
                             }
                         }
-                    ) { Text(if (selectingAll) "Selecting…" else "Select matching files") }
+                    ) {
+                        Text(
+                            if (selectingAll) "Selecting…"
+                            else if (folderId == null) "Select matching unfiled files"
+                            else "Select matching files"
+                        )
+                    }
+                    if (folderId == null) {
+                        TextButton(
+                            enabled = !selectingAll,
+                            onClick = {
+                                scope.launch {
+                                    selectingAll = true
+                                    try {
+                                        selectedIds = cacheRepository.thumbnailAllMissingFileIds().toSet()
+                                        selectedFolderIds = emptySet()
+                                        generationMessage = "Selected ${selectedIds.size} missing files across the drive."
+                                    } finally {
+                                        selectingAll = false
+                                    }
+                                }
+                            }
+                        ) { Text(if (selectingAll) "Selecting…" else "Select all missing (drive)") }
+                    }
                     TextButton(
                         enabled = !selectingAll && files.isNotEmpty(),
                         onClick = { selectedIds = selectedIds + files.map { it.fileId } }
