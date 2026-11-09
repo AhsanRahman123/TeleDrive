@@ -22,6 +22,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -967,82 +968,68 @@ class TdLibTelegramClient(
         }
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
-    override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> =
-        callbackFlow<TelegramDownloadEvent> {
-            val subscribed = CompletableDeferred<Unit>()
-            val downloadedFileId = CompletableDeferred<Int>()
+    override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> = flow {
+        var activeFileId: Int? = null
+        var completed = false
 
-            val job = launch {
-                updates.onSubscription { subscribed.complete(Unit) }
-                    .filterIsInstance<TdApi.UpdateFile>()
-                    .filter { it.file.id == downloadedFileId.await() }
-                    .collect { update ->
-                        val local = update.file.local
-                        val readyPath = update.file.readyPath()
-                        if (readyPath != null) {
-                            trySend(
-                                TelegramDownloadEvent.Completed(readyPath, update.file.size)
-                            )
-                            close()
-                        } else {
-                            trySend(
-                                TelegramDownloadEvent.Progress(
-                                    local?.downloadedSize ?: 0,
-                                    update.file.size.takeIf { it > 0 }
-                                        ?: update.file.expectedSize
-                                )
-                            )
-                        }
-                    }
-            }
-
-            subscribed.await()
+        try {
             val file: TdApi.File = remoteFile(remoteFileId)
             val fileId = file.id
-            downloadedFileId.complete(fileId)
+            activeFileId = fileId
 
             file.readyPath()?.let { path ->
-                trySend(TelegramDownloadEvent.Completed(path, file.size))
-                close()
+                emit(TelegramDownloadEvent.Completed(path, file.size))
+                completed = true
+                return@flow
             }
 
-            if (!isClosedForSend) {
-                if (file.local?.isDownloadingCompleted == true) {
-                    send<TdApi.Ok>(TdApi.DeleteFile(fileId))
-                }
-                val started: TdApi.File =
-                    send(TdApi.DownloadFile(fileId, DOWNLOAD_PRIORITY, 0, 0, false))
-                started.readyPath()?.let { path ->
-                    trySend(TelegramDownloadEvent.Completed(path, started.size))
-                    close()
-                }
+            if (file.local?.isDownloadingCompleted == true) {
+                send<TdApi.Ok>(TdApi.DeleteFile(fileId))
             }
 
-            val resumer = launch {
-                while (true) {
-                    delay(DOWNLOAD_RESUME_INTERVAL_MS)
-                    val current = runCatching { send<TdApi.File>(TdApi.GetFile(fileId)) }.getOrNull()
-                        ?: continue
-                    if (current.local?.isDownloadingCompleted == true) break
-                    if (current.local?.isDownloadingActive != true) {
-                        runCatching {
-                            send<TdApi.File>(
-                                TdApi.DownloadFile(fileId, DOWNLOAD_PRIORITY, 0, 0, false)
-                            )
-                        }
-                    }
-                }
+            // DownloadFile returns immediately after the request is scheduled. GetFile then
+            // gives us TDLib's authoritative LocalFile.downloadedSize without relying on a
+            // potentially delayed/dropped UpdateFile notification.
+            val started: TdApi.File = send(
+                TdApi.DownloadFile(fileId, DOWNLOAD_PRIORITY, 0, 0, false)
+            )
+            started.readyPath()?.let { path ->
+                emit(TelegramDownloadEvent.Completed(path, started.size))
+                completed = true
+                return@flow
             }
 
-            try {
-                awaitClose { }
-            } finally {
-                // Stop and join both update/resume helpers before sending the native cancel.
-                // Then wait for TDLib's acknowledgement before releasing this worker slot.
+            var lastDownloaded = started.local?.downloadedSize ?: 0L
+            var lastTotal = started.size.takeIf { it > 0 }
+                ?: started.expectedSize
+            emit(TelegramDownloadEvent.Progress(lastDownloaded, lastTotal))
+
+            while (true) {
+                delay(DOWNLOAD_PROGRESS_POLL_MS)
+                val current: TdApi.File = send(TdApi.GetFile(fileId))
+                current.readyPath()?.let { path ->
+                    emit(TelegramDownloadEvent.Completed(path, current.size))
+                    completed = true
+                    return@flow
+                }
+
+                val local = current.local
+                val downloaded = local?.downloadedSize ?: 0L
+                val total = current.size.takeIf { it > 0 }
+                    ?: current.expectedSize.takeIf { it > 0 }
+                    ?: lastTotal
+                if (downloaded != lastDownloaded || total != lastTotal) {
+                    emit(TelegramDownloadEvent.Progress(downloaded, total))
+                    lastDownloaded = downloaded
+                    lastTotal = total
+                }
+            }
+        } finally {
+            val fileId = activeFileId
+            if (fileId != null && !completed) {
+                // Await cancellation acknowledgement before the worker slot is released.
+                // Resume All must never start a second native request while this one is active.
                 withContext(NonCancellable) {
-                    resumer.cancelAndJoin()
-                    job.cancelAndJoin()
                     val activeClient = client
                     if (activeClient != null) {
                         val acknowledged = CompletableDeferred<Unit>()
@@ -1057,7 +1044,8 @@ class TdLibTelegramClient(
                     }
                 }
             }
-        }.buffer(capacity = 64)
+        }
+    }.buffer(capacity = 64)
 
     override suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray? {
         val message = runCatching { send(TdApi.GetMessage(chatId, messageId)) }.getOrNull()
@@ -1371,8 +1359,8 @@ class TdLibTelegramClient(
         private const val REQUEST_TIMEOUT_CODE = 408
         private const val COPY_TIMEOUT_MS = 30_000L
         private const val CLIENT_WAIT_STEP_MS = 10L
-        private const val DOWNLOAD_PRIORITY = 16
-        const val DOWNLOAD_RESUME_INTERVAL_MS = 15_000L
+        private const val DOWNLOAD_PRIORITY = 32
+        private const val DOWNLOAD_PROGRESS_POLL_MS = 500L
         private const val THUMBNAIL_PRIORITY = 24
         private const val THUMBNAIL_EDGE = 320
         private const val DELETE_BATCH = 100
