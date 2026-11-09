@@ -32,7 +32,7 @@ interface ThumbnailJobDao {
                      AND p.targetId = thumbnail_jobs.fileId
                      AND p.policy = 'PAUSED'
               )
-            ORDER BY queuedAt ASC, fileId ASC LIMIT :limit"""
+            ORDER BY force DESC, queuedAt ASC, fileId ASC LIMIT :limit"""
     )
     suspend fun nextReady(
         limit: Int,
