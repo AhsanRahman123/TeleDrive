@@ -175,7 +175,7 @@ fun DesktopMediaPlayer(
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
     var volume by remember(mrl) { mutableIntStateOf(100) }
-    var brightness by remember(mrl) { mutableIntStateOf(100) }
+    var brightness by remember { mutableIntStateOf(100) }
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
     var trackTick by remember { mutableIntStateOf(0) }
@@ -255,8 +255,8 @@ fun DesktopMediaPlayer(
         }
     }
 
-    var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(false) }
-    var brightnessMonitor by remember(mrl) { mutableStateOf("") }
+    var brightnessAvailable by remember { mutableStateOf(false) }
+    var brightnessMonitor by remember { mutableStateOf("") }
     var brightnessDragging by remember(mrl) { mutableStateOf(false) }
     var brightnessLastInputAt by remember(mrl) { mutableLongStateOf(0L) }
     val brightnessUpdates = remember(mrl) { Channel<Float>(Channel.CONFLATED) }
@@ -264,10 +264,7 @@ fun DesktopMediaPlayer(
     // Mirror Monitorian: read physical monitor brightness, but never let a polling
     // result overwrite an in-progress drag or a value just sent to the monitor.
     LaunchedEffect(mrl, isAudio) {
-        if (isAudio) {
-            brightnessAvailable = false
-            return@LaunchedEffect
-        }
+        if (isAudio) return@LaunchedEffect
         while (isActive) {
             val shouldRead = !brightnessDragging &&
                 System.currentTimeMillis() - brightnessLastInputAt >= BRIGHTNESS_READ_GUARD_MS
