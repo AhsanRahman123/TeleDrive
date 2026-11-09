@@ -5,6 +5,7 @@ import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollb
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.Alignment
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -344,6 +345,10 @@ fun SearchScreen(
                         )
                     }
                 }
+                DesktopScrollEdgeControls(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                )
                 DesktopVerticalScrollbar(
                     state = listState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
