@@ -181,11 +181,14 @@ fun ThumbnailQueueScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    val remainingWork = (pendingCount - failedQueueIds.size).coerceAtLeast(0)
                     val queueEstimate = when {
                         queuePaused -> "ETA unavailable while paused"
-                        pendingCount == 0 -> "All queued jobs completed"
+                        remainingWork == 0 && failedQueueIds.isNotEmpty() ->
+                            "${failedQueueIds.size} failed jobs need retry · ETA unavailable"
+                        remainingWork == 0 -> "All queued jobs completed"
                         throughputFilesPerMinute > 0.0 -> {
-                            val etaSeconds = (pendingCount * 60.0 / throughputFilesPerMinute).toLong()
+                            val etaSeconds = (remainingWork * 60.0 / throughputFilesPerMinute).toLong()
                                 .coerceAtLeast(1L)
                             "Recent queue reduction: ${throughputFilesPerMinute.toInt()} files/min · " +
                                 "Estimated remaining: ${formatThumbnailQueueEta(etaSeconds)}"
