@@ -85,7 +85,8 @@ fun ThumbnailQueueScreen(
     var throughputFilesPerMinute by remember { mutableStateOf(0.0) }
 
     LaunchedEffect(offset, sortOrder) {
-        var previousRemaining = -1
+        var previousCount = -1
+        var previousFailedCount = 0
         var previousSampleAt = 0L
         throughputFilesPerMinute = 0.0
         while (true) {
@@ -99,9 +100,9 @@ fun ThumbnailQueueScreen(
             val sampleAt = System.currentTimeMillis()
             if (queuePaused) {
                 throughputFilesPerMinute = 0.0
-            } else if (previousRemaining >= 0 && previousSampleAt > 0L) {
+            } else if (previousCount >= 0 && previousSampleAt > 0L) {
                 val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
-                val removed = previousRemaining - remainingWork
+                val removed = previousCount - liveQueueCount
                 if (removed > 0) {
                     val sampleRate = removed * 60_000.0 / elapsed
                     throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
@@ -109,11 +110,12 @@ fun ThumbnailQueueScreen(
                     } else {
                         throughputFilesPerMinute * 0.65 + sampleRate * 0.35
                     }
-                } else if (remainingWork > previousRemaining) {
+                } else if (liveQueueCount > previousCount || failedCount != previousFailedCount) {
                     throughputFilesPerMinute = 0.0
                 }
             }
-            previousRemaining = remainingWork
+            previousCount = liveQueueCount
+            previousFailedCount = failedCount
             previousSampleAt = sampleAt
 
             if (page.isEmpty() && offset > 0) {
