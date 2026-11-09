@@ -9,6 +9,8 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 
 class DesktopTransferScheduler(
@@ -19,11 +21,13 @@ class DesktopTransferScheduler(
     private val scope = CoroutineScope(SupervisorJob() + dispatchers.io)
     private val draining = AtomicBoolean(false)
     private val requested = AtomicBoolean(false)
+    @Volatile
+    private var drainJob: Job? = null
 
     override fun kick(allowMetered: Boolean) {
         requested.set(true)
         if (!draining.compareAndSet(false, true)) return
-        scope.launch {
+        val job = scope.launch {
             try {
                 while (requested.getAndSet(false)) {
                     while (drainer.drain(
@@ -39,10 +43,18 @@ class DesktopTransferScheduler(
             }
             if (requested.get()) kick(allowMetered)
         }
+        drainJob = job
     }
 
     override fun rekick(allowMetered: Boolean) {
         kick(allowMetered)
+    }
+
+    override suspend fun pause() {
+        requested.set(false)
+        val active = drainJob
+        active?.cancelAndJoin()
+        if (drainJob === active) drainJob = null
     }
 
     private companion object {
