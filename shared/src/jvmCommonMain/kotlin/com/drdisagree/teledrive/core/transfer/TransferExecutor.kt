@@ -544,6 +544,7 @@ class TransferExecutor(
                 TransferOutcome.Failed(messages.downloadEnded)
             var lastObservedBytes: Long? = null
             var lastObservedSpeedBytes: Long? = null
+            var lastPersistedBytes: Long? = null
             var wasDownloadingActive = false
             telegramClient.downloadDocument(remoteFileId)
                 .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
@@ -566,20 +567,29 @@ class TransferExecutor(
                     when (event) {
                         is TelegramDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            if (!tickerStarted) {
-                                // TDLib can resume a partially downloaded local file. Seed the
-                                // meter from its existing byte count instead of counting those
-                                // old bytes as fresh network traffic.
+                            if (!event.isDownloadingActive) {
+                                // TDLib has the request queued but is not receiving network bytes.
+                                ticker.start(event.speedSampleBytes, now)
+                                tickerStarted = true
+                                if (lastPersistedBytes != event.transferredBytes) {
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, 0L, now
+                                    )
+                                    lastPersistedBytes = event.transferredBytes
+                                }
+                            } else if (!tickerStarted) {
                                 ticker.start(event.speedSampleBytes, now)
                                 tickerStarted = true
                                 transferDao.updateProgress(
                                     transfer.id, event.transferredBytes, 0L, now
                                 )
+                                lastPersistedBytes = event.transferredBytes
                             } else {
                                 ticker.tick(event.speedSampleBytes, now)?.let { speed ->
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
                                     )
+                                    lastPersistedBytes = event.transferredBytes
                                 }
                             }
                             checkControl(transfer.id)
@@ -629,6 +639,7 @@ class TransferExecutor(
         return try {
             var lastObservedBytes: Long? = null
             var lastObservedSpeedBytes: Long? = null
+            var lastPersistedBytes: Long? = null
             var wasDownloadingActive = false
             partDownloader.download(entity.id, entity.isEncrypted, target)
                 .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
@@ -653,19 +664,30 @@ class TransferExecutor(
                         is PartDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
                             transferDao.setStage(transfer.id, null, now)
-                            if (!tickerStarted) {
-                                // The destination may contain a retained partial file; begin
-                                // measuring only bytes received after this transfer resumes.
+                            if (!event.isDownloadingActive) {
+                                // Between Telegram parts and while queued, the current prefix is
+                                // a baseline, not newly received data.
+                                ticker.start(event.speedSampleBytes, now)
+                                tickerStarted = true
+                                if (lastPersistedBytes != event.transferredBytes) {
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, 0L, now
+                                    )
+                                    lastPersistedBytes = event.transferredBytes
+                                }
+                            } else if (!tickerStarted) {
                                 ticker.start(event.speedSampleBytes, now)
                                 tickerStarted = true
                                 transferDao.updateProgress(
                                     transfer.id, event.transferredBytes, 0L, now
                                 )
+                                lastPersistedBytes = event.transferredBytes
                             } else {
                                 ticker.tick(event.speedSampleBytes, now)?.let { speed ->
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
                                     )
+                                    lastPersistedBytes = event.transferredBytes
                                 }
                             }
                             checkControl(transfer.id)
