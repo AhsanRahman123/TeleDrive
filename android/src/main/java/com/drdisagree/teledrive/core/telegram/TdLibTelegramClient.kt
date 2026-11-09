@@ -1001,7 +1001,13 @@ class TdLibTelegramClient(
             var lastDownloaded = started.local?.downloadedSize ?: 0L
             var lastTotal = started.size.takeIf { it > 0 }
                 ?: started.expectedSize
-            emit(TelegramDownloadEvent.Progress(lastDownloaded, lastTotal))
+            emit(
+                TelegramDownloadEvent.Progress(
+                    lastDownloaded,
+                    lastTotal,
+                    started.local?.isDownloadingActive ?: true
+                )
+            )
 
             while (true) {
                 delay(DOWNLOAD_PROGRESS_POLL_MS)
@@ -1017,11 +1023,18 @@ class TdLibTelegramClient(
                 val total = current.size.takeIf { it > 0 }
                     ?: current.expectedSize.takeIf { it > 0 }
                     ?: lastTotal
-                if (downloaded != lastDownloaded || total != lastTotal) {
-                    emit(TelegramDownloadEvent.Progress(downloaded, total))
-                    lastDownloaded = downloaded
-                    lastTotal = total
-                }
+
+                // Emit a heartbeat even when the byte count is unchanged. TDLib can keep
+                // a request pending behind its per-data-centre large-file queue.
+                emit(
+                    TelegramDownloadEvent.Progress(
+                        downloaded,
+                        total,
+                        local?.isDownloadingActive ?: true
+                    )
+                )
+                lastDownloaded = downloaded
+                lastTotal = total
             }
         } finally {
             val fileId = activeFileId
