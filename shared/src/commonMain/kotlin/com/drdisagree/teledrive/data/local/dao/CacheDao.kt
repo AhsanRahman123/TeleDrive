@@ -114,7 +114,7 @@ interface CacheDao {
                  JOIN folder_tree ON child.parentId = folder_tree.id
                 WHERE child.trashedAt IS NULL
            ),
-           usage AS (
+           cache_usage AS (
                SELECT folder_tree.rootId AS id,
                       COALESCE(SUM(ce.sizeBytes), 0) AS totalBytes,
                       COUNT(ce.path) AS entryCount
@@ -122,6 +122,25 @@ interface CacheDao {
                  JOIN files f ON COALESCE(f.folderId, f.preTrashFolderId) = folder_tree.id
                  JOIN cache_entries ce ON ce.fileId = f.id
                 GROUP BY folder_tree.rootId
+           ),
+           thumbnail_usage AS (
+               SELECT folder_tree.rootId AS id,
+                      COALESCE(SUM(t.sizeBytes), 0) AS totalBytes,
+                      COUNT(t.fileId) AS entryCount
+                 FROM folder_tree
+                 JOIN files f ON COALESCE(f.folderId, f.preTrashFolderId) = folder_tree.id
+                 JOIN thumbnails t ON t.fileId = f.id
+                GROUP BY folder_tree.rootId
+           ),
+           usage AS (
+               SELECT roots.id AS id,
+                      COALESCE(cache_usage.totalBytes, 0) +
+                          COALESCE(thumbnail_usage.totalBytes, 0) AS totalBytes,
+                      COALESCE(cache_usage.entryCount, 0) +
+                          COALESCE(thumbnail_usage.entryCount, 0) AS entryCount
+                 FROM (SELECT DISTINCT rootId AS id FROM folder_tree) roots
+                 LEFT JOIN cache_usage ON cache_usage.id = roots.id
+                 LEFT JOIN thumbnail_usage ON thumbnail_usage.id = roots.id
            )
            SELECT folder.id AS id,
                   folder.name AS name,
