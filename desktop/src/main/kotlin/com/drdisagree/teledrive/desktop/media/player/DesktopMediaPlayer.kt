@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -332,6 +333,15 @@ fun DesktopMediaPlayer(
             lastSleepStopRequest = sleepStopRequest
             player.submit { runCatching { controls().pause() } }
             playing = false
+        }
+    }
+
+    LaunchedEffect(player, repeatAll, sleepAtTrackEnd) {
+        // Repeat-current and repeat-all are mutually exclusive. End-of-track sleep
+        // must override VLC's native repeat flag so the timer can stop playback.
+        if (repeatAll || sleepAtTrackEnd) {
+            repeatOne = false
+            player.submit { runCatching { controls().repeat = false } }
         }
     }
 
@@ -675,7 +685,8 @@ fun DesktopMediaPlayer(
                     }
                     key == Key.L && !ctrl && !alt && !shift -> {
                         repeatOne = !repeatOne
-                        player.controls().repeat = repeatOne
+                        if (repeatOne && repeatAll) onToggleRepeatAll()
+                        player.submit { runCatching { controls().repeat = repeatOne } }
                         interactionTick++
                         true
                     }
@@ -762,7 +773,13 @@ fun DesktopMediaPlayer(
                 }
             }
             .focusable()
-            .pointerHoverIcon(if (controlsVisible) PointerIcon.Default else blankCursor)
+            .pointerHoverIcon(
+                if (controlsVisible || !controlPreferences.showPlayerControls) {
+                    PointerIcon.Default
+                } else {
+                    blankCursor
+                }
+            )
             .pointerInput(player, playing, finished, isAudio) {
                 if (!isAudio) {
                     detectTapGestures(
@@ -820,6 +837,27 @@ fun DesktopMediaPlayer(
 
         if (buffering && !finished) {
             CircularWavyProgressIndicator(modifier = Modifier.size(56.dp))
+        }
+
+        // Leave one small reveal affordance when the user permanently hides player chrome.
+        // Keyboard shortcut C remains available as well.
+        if (!controlPreferences.showPlayerControls) {
+            IconButton(
+                onClick = {
+                    val updated = controlPreferences.copy(showPlayerControls = true)
+                    controlPreferences = updated
+                    controlsPinned = true
+                    PlayerControlPreferencesStore.save(updated)
+                    interactionTick++
+                },
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Visibility,
+                    contentDescription = "Show player controls",
+                    tint = Color.White
+                )
+            }
         }
 
         AnimatedVisibility(
@@ -884,7 +922,8 @@ fun DesktopMediaPlayer(
                 onRate = ::setPlaybackRate,
                 onToggleRepeat = {
                     repeatOne = !repeatOne
-                    player.controls().repeat = repeatOne
+                    if (repeatOne && repeatAll) onToggleRepeatAll()
+                    player.submit { runCatching { controls().repeat = repeatOne } }
                 },
                 onToggleRepeatAll = onToggleRepeatAll,
                 onToggleShuffle = onToggleShuffle,
