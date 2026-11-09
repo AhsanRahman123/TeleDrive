@@ -218,7 +218,8 @@ fun ThumbnailManagerScreen(
     // Keep the manager and queue page independently live, using the same
     // one-second queue-reduction estimate on both screens.
     LaunchedEffect(folderId) {
-        var previousRemaining = -1
+        var previousCount = -1
+        var previousFailedCount = 0
         var previousSampleAt = 0L
         var throughputFilesPerMinute = 0.0
         while (true) {
@@ -229,9 +230,9 @@ fun ThumbnailManagerScreen(
             val sampleAt = System.currentTimeMillis()
             if (paused) {
                 throughputFilesPerMinute = 0.0
-            } else if (previousRemaining >= 0 && previousSampleAt > 0L) {
+            } else if (previousCount >= 0 && previousSampleAt > 0L) {
                 val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
-                val removed = previousRemaining - remainingWork
+                val removed = previousCount - liveQueueCount
                 if (removed > 0) {
                     val sampleRate = removed * 60_000.0 / elapsed
                     throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
@@ -239,11 +240,12 @@ fun ThumbnailManagerScreen(
                     } else {
                         throughputFilesPerMinute * 0.65 + sampleRate * 0.35
                     }
-                } else if (remainingWork > previousRemaining) {
+                } else if (liveQueueCount > previousCount || failedCount != previousFailedCount) {
                     throughputFilesPerMinute = 0.0
                 }
             }
-            previousRemaining = remainingWork
+            previousCount = liveQueueCount
+            previousFailedCount = failedCount
             previousSampleAt = sampleAt
             if (summary.pendingJobs != liveQueueCount) {
                 summary = summary.copy(pendingJobs = liveQueueCount)
