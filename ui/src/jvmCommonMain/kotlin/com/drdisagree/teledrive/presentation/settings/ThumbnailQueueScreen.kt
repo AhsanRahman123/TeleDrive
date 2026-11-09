@@ -102,7 +102,7 @@ fun ThumbnailQueueScreen(
                 throughputFilesPerMinute = 0.0
             } else if (previousCount >= 0 && previousSampleAt > 0L) {
                 val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
-                val removed = previousCount - liveQueueCount
+                val removed = previousCount - pendingCount
                 if (removed > 0) {
                     val sampleRate = removed * 60_000.0 / elapsed
                     throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
@@ -110,12 +110,12 @@ fun ThumbnailQueueScreen(
                     } else {
                         throughputFilesPerMinute * 0.65 + sampleRate * 0.35
                     }
-                } else if (liveQueueCount > previousCount || failedCount != previousFailedCount) {
+                } else if (pendingCount > previousCount || failedQueueIds.size != previousFailedCount) {
                     throughputFilesPerMinute = 0.0
                 }
             }
-            previousCount = liveQueueCount
-            previousFailedCount = failedCount
+            previousCount = pendingCount
+            previousFailedCount = failedQueueIds.size
             previousSampleAt = sampleAt
 
             if (page.isEmpty() && offset > 0) {
