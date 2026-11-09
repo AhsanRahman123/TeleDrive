@@ -743,7 +743,7 @@ private fun failedSectionTitle(failed: List<TransferTask>): String {
     }
 }
 
-private const val SPEED_STALE_AFTER_MS = 3_000L
+private const val SPEED_STALE_AFTER_MS = 1_500L
 
 private fun transferRate(transfer: TransferTask): String {
     val stage = transfer.stage
