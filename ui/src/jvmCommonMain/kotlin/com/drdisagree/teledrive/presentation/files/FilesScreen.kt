@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.DriveFolderUpload
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Search
@@ -582,6 +583,12 @@ fun FilesScreen(
                                     Icon(
                                         Icons.Filled.CheckBoxOutlineBlank,
                                         contentDescription = stringResource(Res.string.common_select)
+                                    )
+                                }
+                                IconButton(onClick = onViewThumbnailQueue) {
+                                    Icon(
+                                        Icons.Filled.CloudQueue,
+                                        contentDescription = "View thumbnail queue"
                                     )
                                 }
                                 RefreshAction(
