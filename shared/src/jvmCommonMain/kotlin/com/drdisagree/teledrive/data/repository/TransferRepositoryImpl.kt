@@ -436,7 +436,8 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun wakeWorker() {
-        kickWorker()
+        val prefs = settingsRepository.preferences.first()
+        transferScheduler.rekick(prefs.allowMeteredTransfers)
     }
 
     /** A backup state only means something while a transfer backs the file up. */
