@@ -32,6 +32,7 @@ import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.MediaAlbum
 import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.repository.FileRepository
+import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.SyncRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
@@ -126,6 +127,7 @@ private fun albumComparator(
 class GalleryViewModel(
     savedStateHandle: SavedStateHandle,
     private val fileRepository: FileRepository,
+    private val cacheRepository: CacheRepository,
     private val trashRepository: TrashRepository,
     private val transferRepository: TransferRepository,
     private val settingsRepository: SettingsRepository,
@@ -489,6 +491,25 @@ class GalleryViewModel(
     }
 
     fun hasSelection(): Boolean = selection.value.isNotEmpty()
+
+    fun generateThumbnailsSelected() {
+        val ids = selection.value.toList()
+        if (ids.isEmpty()) return
+        clearSelection()
+        viewModelScope.launch {
+            val result = cacheRepository.generateThumbnails(ids)
+            val submitted = result.newlyQueued + result.alreadyQueued
+            _messages.tryEmit(
+                UiText.Plain(
+                    if (submitted > 0) {
+                        "Added $submitted missing thumbnails to the priority queue."
+                    } else {
+                        "No eligible missing thumbnails were found in the selection."
+                    }
+                )
+            )
+        }
+    }
 
     fun selectAll() {
         viewModelScope.launch {
