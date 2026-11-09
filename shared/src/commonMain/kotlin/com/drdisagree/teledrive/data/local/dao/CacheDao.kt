@@ -132,7 +132,7 @@ interface CacheDao {
                  JOIN thumbnails t ON t.fileId = f.id
                 GROUP BY folder_tree.rootId
            ),
-           usage AS (
+           folder_usage AS (
                SELECT roots.id AS id,
                       COALESCE(cache_usage.totalBytes, 0) +
                           COALESCE(thumbnail_usage.totalBytes, 0) AS totalBytes,
@@ -145,15 +145,15 @@ interface CacheDao {
            SELECT folder.id AS id,
                   folder.name AS name,
                   folder.parentId AS parentId,
-                  COALESCE(usage.totalBytes, 0) AS totalBytes,
-                  COALESCE(usage.entryCount, 0) AS entryCount
+                  COALESCE(folder_usage.totalBytes, 0) AS totalBytes,
+                  COALESCE(folder_usage.entryCount, 0) AS entryCount
              FROM folders folder
-             LEFT JOIN usage ON usage.id = folder.id
+             LEFT JOIN folder_usage ON folder_usage.id = folder.id
             WHERE folder.parentId IS :parentId
               AND folder.trashedAt IS NULL
               AND COALESCE(usage.totalBytes, 0) > 0
             ORDER BY
-                CASE WHEN :sortOrder = 'LARGEST' THEN usage.totalBytes END DESC,
+                CASE WHEN :sortOrder = 'LARGEST' THEN folder_usage.totalBytes END DESC,
                 CASE WHEN :sortOrder = 'SMALLEST' THEN usage.totalBytes END ASC,
                 folder.name COLLATE NOCASE ASC"""
     )
