@@ -54,8 +54,11 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import java.util.Date
@@ -146,6 +149,14 @@ fun TransfersScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
     var detailsTransfer by remember { mutableStateOf<TransferTask?>(null) }
+    var speedClock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            speedClock = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(transferConcurrency) {
         concurrencyDraft = transferConcurrency
@@ -331,7 +342,19 @@ fun TransfersScreen(
                     }
                 }.toList()
 
-        val visibleActive = filterAndSort(state.active)
+        val visibleActive = filterAndSort(state.active).map { transfer ->
+            // TDLib may leave a job in RUNNING while it is waiting for a native download
+            // resource. Never keep displaying the last non-zero rate once progress stops.
+            if (
+                transfer.state == TransferState.RUNNING &&
+                transfer.speedBytesPerSecond > 0L &&
+                speedClock - transfer.updatedAt > SPEED_STALE_AFTER_MS
+            ) {
+                transfer.copy(speedBytesPerSecond = 0L)
+            } else {
+                transfer
+            }
+        }
         val runningCount = visibleActive.count { it.state == TransferState.RUNNING }
         val queuedCount = visibleActive.count { it.state == TransferState.QUEUED }
         val visiblePaused = filterAndSort(state.paused)
@@ -719,6 +742,8 @@ private fun failedSectionTitle(failed: List<TransferTask>): String {
 }
 
 @Composable
+private const val SPEED_STALE_AFTER_MS = 4_000L
+
 private fun transferRate(transfer: TransferTask): String {
     val stage = transfer.stage
     if (stage != null) {
