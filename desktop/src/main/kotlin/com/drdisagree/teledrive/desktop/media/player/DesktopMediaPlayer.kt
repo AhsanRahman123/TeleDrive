@@ -1288,7 +1288,6 @@ private val PLAYBACK_RATE_PRESETS = listOf(
     2.0f, 2.5f, 3.0f, 4.0f
 )
 
-private const val CONTROLS_HIDE_DELAY_MS = 3_000L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
