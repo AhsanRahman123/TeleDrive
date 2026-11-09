@@ -209,7 +209,7 @@ fun SearchScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = padding.calculateTopPadding())
+                .padding(padding)
         ) {
             Box(modifier = Modifier.fillMaxWidth()) {
                     Row(
@@ -279,7 +279,7 @@ fun SearchScreen(
                         start = 12.dp,
                         end = 12.dp,
                         top = 12.dp,
-                        bottom = 12.dp + padding.calculateBottomPadding()
+                        bottom = 12.dp
                     )
                 ) {
                     if (state.folders.isNotEmpty()) {
