@@ -1094,7 +1094,7 @@ private fun FilesContent(
             if (index < state.folders.size) {
                 state.folderSelection.contains(state.folders[index].id)
             } else {
-                files.peek(index - state.folders.size)?.id in state.selection
+                files.peek(index - state.folders.size)?.id?.let(state.selection::contains) == true
             }
         },
         onRange = { range, shouldSelect ->
