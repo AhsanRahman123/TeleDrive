@@ -202,13 +202,13 @@ fun SettingsSectionScreen(
     onBack: () -> Unit,
     onOpenExclusions: () -> Unit,
     onOpenProxy: () -> Unit,
+    onOpenCacheManager: () -> Unit,
     onLoggedOut: () -> Unit,
     viewModel: SettingsViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var confirmLogout by remember { mutableStateOf(false) }
-    var confirmClearCache by remember { mutableStateOf(false) }
 
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
 
@@ -286,7 +286,7 @@ fun SettingsSectionScreen(
                         SettingsSectionType.STORAGE -> StorageSection(
                             state = state,
                             viewModel = viewModel,
-                            onClearCache = { confirmClearCache = true }
+                            onClearCache = onOpenCacheManager
                         )
 
                         SettingsSectionType.THUMBNAILS -> Unit
@@ -326,18 +326,6 @@ fun SettingsSectionScreen(
                 viewModel.logout(onLoggedOut)
             },
             onDismiss = { confirmLogout = false }
-        )
-    }
-    if (confirmClearCache) {
-        ConfirmDialog(
-            title = stringResource(Res.string.settings_clear_cache_title),
-            message = stringResource(Res.string.settings_cached_previews_thumbnails_temporary),
-            confirmLabel = stringResource(Res.string.settings_clear_cache_action),
-            onConfirm = {
-                confirmClearCache = false
-                viewModel.clearCache()
-            },
-            onDismiss = { confirmClearCache = false }
         )
     }
 }
