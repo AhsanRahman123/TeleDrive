@@ -293,7 +293,7 @@ fun CacheManagerScreen(
                                 ).toMutableSet()
                                 if (folderId == null) {
                                     folders.forEach { folder ->
-                                        paths += repository.cacheEntryPathsInFolderTree(folder.id)
+                                        paths += repository.cacheEntryPathsInFolderTree(folder.id, typeFilter, searchQuery)
                                     }
                                 }
                                 selectedPaths = paths
