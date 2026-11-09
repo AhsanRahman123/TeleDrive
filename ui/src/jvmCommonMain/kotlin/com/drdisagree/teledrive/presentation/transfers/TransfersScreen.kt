@@ -54,8 +54,10 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import java.util.Date
@@ -146,6 +148,14 @@ fun TransfersScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
     var detailsTransfer by remember { mutableStateOf<TransferTask?>(null) }
+    var speedClock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            speedClock = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
 
     androidx.compose.runtime.LaunchedEffect(transferConcurrency) {
         concurrencyDraft = transferConcurrency
@@ -157,15 +167,15 @@ fun TransfersScreen(
             title = { Text("Transfer concurrency") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Maximum simultaneous Telegram transfer jobs: $concurrencyDraft of 6")
+                    Text("Maximum transfer workers: $concurrencyDraft of 3")
                     Slider(
                         value = concurrencyDraft.toFloat(),
-                        onValueChange = { concurrencyDraft = it.toInt().coerceIn(1, 6) },
-                        valueRange = 1f..6f,
-                        steps = 4
+                        onValueChange = { concurrencyDraft = it.toInt().coerceIn(1, 3) },
+                        valueRange = 1f..3f,
+                        steps = 1
                     )
                     Text(
-                        "This controls how many queued transfers may run at once. Raising it can use more bandwidth and disk activity.",
+                        "This sets TeleDrive's worker pool. Telegram's per-data-centre guidance allows up to 2 large files (over 20 MB) or 5 small files to download at once, so a third large file may wait for another to finish.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -243,14 +253,17 @@ fun TransfersScreen(
                     }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Transfer settings")
                     }
-                    if (state.active.isNotEmpty()) {
+                    if (state.active.any { it.state == TransferState.RUNNING }) {
                         IconButton(onClick = viewModel::pauseAll) {
                             Icon(
                                 Icons.Filled.Pause,
                                 contentDescription = stringResource(Res.string.transfers_pause)
                             )
                         }
-                    } else if (state.paused.isNotEmpty()) {
+                    } else if (
+                        state.active.any { it.state == TransferState.QUEUED } ||
+                        state.paused.isNotEmpty()
+                    ) {
                         IconButton(onClick = viewModel::resumeAll) {
                             Icon(
                                 Icons.Filled.PlayArrow,
@@ -331,7 +344,26 @@ fun TransfersScreen(
                     }
                 }.toList()
 
-        val visibleActive = filterAndSort(state.active)
+        val visibleActive = filterAndSort(state.active).map { transfer ->
+            // TDLib may leave a job in RUNNING while it is waiting for a native download
+            // resource. Never keep displaying the last non-zero rate once progress stops.
+            if (
+                transfer.state == TransferState.RUNNING &&
+                transfer.speedBytesPerSecond > 0L &&
+                speedClock - transfer.updatedAt > SPEED_STALE_AFTER_MS
+            ) {
+                transfer.copy(speedBytesPerSecond = 0L)
+            } else {
+                transfer
+            }
+        }
+        val runningCount = visibleActive.count {
+            it.state == TransferState.RUNNING && it.speedBytesPerSecond > 0L
+        }
+        val waitingCount = visibleActive.count {
+            it.state == TransferState.RUNNING && it.speedBytesPerSecond <= 0L
+        }
+        val queuedCount = visibleActive.count { it.state == TransferState.QUEUED }
         val visiblePaused = filterAndSort(state.paused)
         val visibleFailed = filterAndSort(state.failed)
         val visibleCompleted = filterAndSort(state.completed)
@@ -474,8 +506,18 @@ fun TransfersScreen(
                             },
                             enabled = visibleIds.isNotEmpty()
                         )
-                        Text("${visibleIds.size} shown · ${selectedTransferIds.intersect(visibleIds).size} selected",
-                            modifier = Modifier.weight(1f))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "${visibleIds.size} shown · ${selectedTransferIds.intersect(visibleIds).size} selected"
+                            )
+                            if (visibleActive.isNotEmpty()) {
+                                Text(
+                                    "${runningCount} downloading · ${waitingCount} waiting · ${queuedCount} queued · max ${transferConcurrency}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         TextButton(onClick = {
                             selectedTransferIds = if (allVisibleSelected) {
                                 selectedTransferIds - visibleIds
@@ -706,7 +748,8 @@ private fun failedSectionTitle(failed: List<TransferTask>): String {
     }
 }
 
-@Composable
+private const val SPEED_STALE_AFTER_MS = 1_500L
+
 private fun transferRate(transfer: TransferTask): String {
     val stage = transfer.stage
     if (stage != null) {
@@ -781,6 +824,22 @@ private fun TransferRow(
                             )
                             append(" · ")
                             append(Formatters.bytes(transfer.sizeBytes))
+                            append(" · ")
+                            append(
+                                when {
+                                    transfer.state == TransferState.QUEUED -> "Queued"
+                                    transfer.state == TransferState.RUNNING &&
+                                        transfer.stage == null &&
+                                        (transfer.speedBytesPerSecond <= 0L ||
+                                            System.currentTimeMillis() - transfer.updatedAt > SPEED_STALE_AFTER_MS) ->
+                                        "Waiting for Telegram"
+                                    transfer.state == TransferState.RUNNING -> "Running"
+                                    transfer.state == TransferState.PAUSED -> "Paused"
+                                    transfer.state == TransferState.FAILED -> "Failed"
+                                    transfer.state == TransferState.COMPLETED -> "Completed"
+                                    else -> "Canceled"
+                                }
+                            )
                             transfer.errorMessage?.let {
                                 append(" · ")
                                 append(it)

@@ -36,6 +36,8 @@ import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -79,9 +81,13 @@ class TransferExecutor(
     /**
      * A dead connection stops emitting without an error, which would leave the row RUNNING forever.
      */
-    private fun <T> Flow<T>.failWhenIdle(message: String): Flow<T> = channelFlow {
+    private fun <T> Flow<T>.failWhenIdle(
+        transferId: String,
+        message: String,
+        progressState: (T) -> Pair<Boolean, Boolean> = { true to true }
+    ): Flow<T> = channelFlow {
         val relay = Channel<T>(Channel.BUFFERED)
-        launch {
+        val producer = launch {
             try {
                 collect { relay.send(it) }
                 relay.close()
@@ -89,13 +95,41 @@ class TransferExecutor(
                 relay.close(e)
             }
         }
-        while (true) {
-            val received =
-                withTimeoutOrNull(STALL_TIMEOUT_MS.milliseconds) { relay.receiveCatching() }
-                    ?: throw TelegramException(STALL_CODE, message)
-            received.exceptionOrNull()?.let { throw it }
-            if (received.isClosed) break
-            send(received.getOrThrow())
+        var lastProgressAt = System.currentTimeMillis()
+        var monitorForStall = true
+        try {
+            while (true) {
+                // Pause/cancel/resume must release a worker even when TDLib has stopped
+                // emitting progress. Poll independently of network progress instead of
+                // waiting for the long network-idle timeout.
+                checkControl(transferId)
+                val received = withTimeoutOrNull(CONTROL_POLL_MS.milliseconds) {
+                    relay.receiveCatching()
+                }
+                if (received == null) {
+                    if (
+                        monitorForStall &&
+                        System.currentTimeMillis() - lastProgressAt >= STALL_TIMEOUT_MS
+                    ) {
+                        throw TelegramException(STALL_CODE, message)
+                    }
+                    continue
+                }
+                received.exceptionOrNull()?.let { throw it }
+                if (received.isClosed) break
+
+                val value = received.getOrThrow()
+                val (shouldMonitor, madeProgress) = progressState(value)
+                monitorForStall = shouldMonitor
+                if (madeProgress) lastProgressAt = System.currentTimeMillis()
+                send(value)
+            }
+        } finally {
+            // The parent drain can itself be cancelled by Pause All. Keep cleanup non-cancellable
+            // so the TDLib flow's awaitClose handler finishes before this worker slot is released.
+            withContext(NonCancellable) {
+                producer.cancelAndJoin()
+            }
         }
     }
 
@@ -239,8 +273,8 @@ class TransferExecutor(
             sourceFile.absolutePath to entity.name
         }
 
-        val startedAt = System.currentTimeMillis()
-        val ticker = ProgressTicker().apply { start(0, startedAt) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
 
         return try {
             var outcome: TransferOutcome =
@@ -252,16 +286,24 @@ class TransferExecutor(
                 mimeType = if (encrypt) "application/octet-stream" else entity.mimeType,
                 caption = caption,
                 thumbnailPath = previewPath
-            ).failWhenIdle(messages.uploadStalled).collect { event ->
+            ).failWhenIdle(transfer.id, messages.uploadStalled).collect { event ->
                 currentCoroutineContext().ensureActive()
                 when (event) {
                     is TelegramUploadEvent.Started -> Unit
                     is TelegramUploadEvent.Progress -> {
                         val now = System.currentTimeMillis()
-                        ticker.tick(event.transferredBytes, now)?.let { speed ->
+                        if (!tickerStarted) {
+                            ticker.start(event.transferredBytes, now)
+                            tickerStarted = true
                             transferDao.updateProgress(
-                                transfer.id, event.transferredBytes, speed, now
+                                transfer.id, event.transferredBytes, 0L, now
                             )
+                        } else {
+                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                transferDao.updateProgress(
+                                    transfer.id, event.transferredBytes, speed, now
+                                )
+                            }
                         }
                         checkControl(transfer.id)
                     }
@@ -354,7 +396,8 @@ class TransferExecutor(
         supersededMessageId: Long?,
         previewPath: String?
     ): TransferOutcome {
-        val ticker = ProgressTicker().apply { start(0, System.currentTimeMillis()) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
         var outcome: TransferOutcome =
             TransferOutcome.Failed(messages.uploadEnded)
 
@@ -365,10 +408,18 @@ class TransferExecutor(
                     when (event) {
                         is PartUploadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                            if (!tickerStarted) {
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
                                 transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                                    transfer.id, event.transferredBytes, 0L, now
                                 )
+                            } else {
+                                ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                }
                             }
                             checkControl(transfer.id)
                         }
@@ -485,23 +536,65 @@ class TransferExecutor(
         val remoteFileId = entity.remoteFileId
             ?: return TransferOutcome.Failed(messages.noRemoteCopy)
 
-        val startedAt = System.currentTimeMillis()
-        val ticker = ProgressTicker().apply { start(0, startedAt) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
 
         return try {
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.downloadEnded)
+            var lastObservedBytes: Long? = null
+            var lastObservedSpeedBytes: Long? = null
+            var lastPersistedBytes: Long? = null
+            var wasPersistedActive = false
+            var wasDownloadingActive = false
             telegramClient.downloadDocument(remoteFileId)
-                .failWhenIdle(messages.downloadStalled)
+                .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
+                    when (event) {
+                        is TelegramDownloadEvent.Progress -> {
+                            val active = event.isDownloadingActive
+                            val becameActive = active && !wasDownloadingActive
+                            val bytesChanged = lastObservedBytes != event.transferredBytes ||
+                                lastObservedSpeedBytes != event.speedSampleBytes
+                            lastObservedBytes = event.transferredBytes
+                            lastObservedSpeedBytes = event.speedSampleBytes
+                            wasDownloadingActive = active
+                            active to (active && (becameActive || bytesChanged))
+                        }
+                        is TelegramDownloadEvent.Completed -> true to true
+                    }
+                }
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
                         is TelegramDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                            if (!event.isDownloadingActive) {
+                                // TDLib has the request queued but is not receiving network bytes.
+                                ticker.start(event.speedSampleBytes, now)
+                                tickerStarted = true
+                                if (lastPersistedBytes != event.transferredBytes || wasPersistedActive) {
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, 0L, now
+                                    )
+                                    lastPersistedBytes = event.transferredBytes
+                                }
+                                wasPersistedActive = false
+                            } else if (!tickerStarted) {
+                                ticker.start(event.speedSampleBytes, now)
+                                tickerStarted = true
                                 transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                                    transfer.id, event.transferredBytes, 0L, now
                                 )
+                                lastPersistedBytes = event.transferredBytes
+                                wasPersistedActive = true
+                            } else {
+                                ticker.tick(event.speedSampleBytes, now)?.let { speed ->
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                    lastPersistedBytes = event.transferredBytes
+                                }
+                                wasPersistedActive = true
                             }
                             checkControl(transfer.id)
                         }
@@ -542,23 +635,68 @@ class TransferExecutor(
             return TransferOutcome.Failed(messages.cacheFull(cacheNeeded))
         }
 
-        val ticker = ProgressTicker().apply { start(0, System.currentTimeMillis()) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
         var outcome: TransferOutcome =
             TransferOutcome.Failed(messages.downloadEnded)
 
         return try {
+            var lastObservedBytes: Long? = null
+            var lastObservedSpeedBytes: Long? = null
+            var lastPersistedBytes: Long? = null
+            var wasPersistedActive = false
+            var wasDownloadingActive = false
             partDownloader.download(entity.id, entity.isEncrypted, target)
-                .failWhenIdle(messages.downloadStalled)
+                .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
+                    when (event) {
+                        is PartDownloadEvent.Progress -> {
+                            val active = event.isDownloadingActive
+                            val becameActive = active && !wasDownloadingActive
+                            val bytesChanged = lastObservedBytes != event.transferredBytes ||
+                                lastObservedSpeedBytes != event.speedSampleBytes
+                            lastObservedBytes = event.transferredBytes
+                            lastObservedSpeedBytes = event.speedSampleBytes
+                            wasDownloadingActive = active
+                            active to (active && (becameActive || bytesChanged))
+                        }
+                        is PartDownloadEvent.Joining -> false to false
+                        is PartDownloadEvent.Completed -> true to true
+                    }
+                }
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
                         is PartDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
                             transferDao.setStage(transfer.id, null, now)
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                            if (!event.isDownloadingActive) {
+                                // Between Telegram parts and while queued, the current prefix is
+                                // a baseline, not newly received data.
+                                ticker.start(event.speedSampleBytes, now)
+                                tickerStarted = true
+                                if (lastPersistedBytes != event.transferredBytes || wasPersistedActive) {
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, 0L, now
+                                    )
+                                    lastPersistedBytes = event.transferredBytes
+                                }
+                                wasPersistedActive = false
+                            } else if (!tickerStarted) {
+                                ticker.start(event.speedSampleBytes, now)
+                                tickerStarted = true
                                 transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                                    transfer.id, event.transferredBytes, 0L, now
                                 )
+                                lastPersistedBytes = event.transferredBytes
+                                wasPersistedActive = true
+                            } else {
+                                ticker.tick(event.speedSampleBytes, now)?.let { speed ->
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                    lastPersistedBytes = event.transferredBytes
+                                }
+                                wasPersistedActive = true
                             }
                             checkControl(transfer.id)
                         }
@@ -720,9 +858,13 @@ class TransferExecutor(
 
     private suspend fun checkControl(transferId: String) {
         when (transferDao.byId(transferId)?.state) {
-            TransferState.PAUSED -> throw TransferControlException(paused = true)
-            TransferState.CANCELLED -> throw TransferControlException(paused = false)
-            else -> Unit
+            TransferState.RUNNING -> Unit
+            TransferState.PAUSED,
+            TransferState.QUEUED -> throw TransferControlException(paused = true)
+            TransferState.CANCELLED,
+            TransferState.COMPLETED,
+            TransferState.FAILED,
+            null -> throw TransferControlException(paused = false)
         }
     }
 
@@ -732,6 +874,7 @@ class TransferExecutor(
     companion object {
         private const val EAGER_HASH_LIMIT = 512L * 1024 * 1024
         private const val SPACE_MARGIN_BYTES = 256L * 1024 * 1024
+        private const val CONTROL_POLL_MS = 250L
         private const val STALL_TIMEOUT_MS = 180_000L
         private const val STALL_CODE = 408
     }

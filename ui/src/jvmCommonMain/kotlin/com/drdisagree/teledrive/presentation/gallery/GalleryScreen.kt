@@ -12,7 +12,6 @@ import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.CloudQueue
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Storage
@@ -289,7 +288,7 @@ private fun AlbumGrid(
                 albums.getOrNull(index)?.folderId?.let(selectedAlbumIds::contains) == true
             },
             onRange = onRange,
-            onEnd = onEnd
+            onEnd = onEndRange
         )
         val keyboard = rememberKeyboardCollection(listState)
         Box(modifier = Modifier.fillMaxSize()) {
@@ -348,7 +347,7 @@ private fun AlbumGrid(
                 albums.getOrNull(index)?.folderId?.let(selectedAlbumIds::contains) == true
             },
             onRange = onRange,
-            onEnd = onEnd
+            onEnd = onEndRange
         )
         val keyboard = rememberKeyboardCollection(gridState, columns)
         Box(modifier = Modifier.fillMaxSize()) {
@@ -464,20 +463,26 @@ fun GalleryScreen(
 
 
     val viewTransfersLabel = stringResource(Res.string.snackbar_view_transfers)
+    val isThumbnailQueueMessage: (UiText) -> Boolean = { message ->
+        message is UiText.Plain &&
+            message.value.startsWith("Added ") &&
+            message.value.contains("missing thumbnails to the priority queue")
+    }
     CollectSnackbarMessages(
         messages = viewModel.messages,
         hostState = snackbarHostState,
         actionLabel = { message ->
-            if (
+            when {
+                isThumbnailQueueMessage(message) -> "View queue"
                 message is UiText.Resource &&
-                message.resource == Res.string.files_queued_for_download
-            ) {
-                viewTransfersLabel
-            } else {
-                null
+                    message.resource == Res.string.files_queued_for_download -> viewTransfersLabel
+                else -> null
             }
         },
-        onAction = { onOpenTransfers() }
+        onAction = { message ->
+            if (isThumbnailQueueMessage(message)) onViewThumbnailQueue()
+            else onOpenTransfers()
+        }
     )
 
     if (showMovePicker) {
@@ -721,12 +726,6 @@ fun GalleryScreen(
                                 )
                                 add(
                                     MenuAction(
-                                        label = "View thumbnail queue",
-                                        icon = Icons.Filled.Refresh
-                                    ) { onViewThumbnailQueue() }
-                                )
-                                add(
-                                    MenuAction(
                                         label = stringResource(Res.string.common_share),
                                         icon = Icons.Filled.Share
                                     ) { viewModel.shareSelected() }
@@ -813,11 +812,10 @@ fun GalleryScreen(
                             }
                         }
                         IconButton(onClick = viewModel::startSelectionMode) {
-                                Icon(
-                                    Icons.Filled.CheckBoxOutlineBlank,
-                                    contentDescription = stringResource(Res.string.common_select)
-                                )
-                            }
+                            Icon(
+                                Icons.Filled.CheckBoxOutlineBlank,
+                                contentDescription = stringResource(Res.string.common_select)
+                            )
                         }
                         IconButton(onClick = onViewThumbnailQueue) {
                             Icon(
@@ -847,69 +845,6 @@ fun GalleryScreen(
                                 )
                             )
                         }
-                        IconButton(onClick = { showSortMenu = true }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Sort,
-                                contentDescription = stringResource(Res.string.files_sort)
-                            )
-                        }
-                        SortMenu(
-                            expanded = showSortMenu,
-                            current = state.sortField,
-                            direction = state.sortDirection,
-                            onDismiss = { showSortMenu = false },
-                            onSelect = { field, direction ->
-                                showSortMenu = false
-                                viewModel.setSort(field, direction)
-                            },
-                            fields = if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
-                                listOf(
-                                    FileSortField.NAME,
-                                    FileSortField.SIZE,
-                                    FileSortField.DATE_MODIFIED
-                                )
-                            } else {
-                                FileSortField.entries
-                            }
-                        )
-                        RefreshAction(refreshing = refreshing, onRefresh = viewModel::refresh)
-            if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
-                            IconButton(onClick = { showCreateAlbum = true }) {
-                                Icon(
-                                    Icons.Filled.CreateNewFolder,
-                                    contentDescription = stringResource(Res.string.gallery_new_album)
-                                )
-                            }
-                        }
-                        IconButton(onClick = viewModel::startSelectionMode) {
-                                Icon(
-                                    Icons.Filled.CheckBoxOutlineBlank,
-                                    contentDescription = stringResource(Res.string.common_select)
-                                )
-                            }
-                        }
-                            IconButton(
-                                onClick = {
-                                    viewModel.setViewMode(
-                                        if (state.viewMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
-                                    )
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = if (state.viewMode == ViewMode.GRID) {
-                                        Icons.Filled.ViewList
-                                    } else {
-                                        Icons.Filled.GridView
-                                    },
-                                    contentDescription = stringResource(
-                                        if (state.viewMode == ViewMode.GRID) {
-                                            Res.string.gallery_view_list
-                                        } else {
-                                            Res.string.gallery_view_grid
-                                        }
-                                    )
-                                )
-                            }
                         IconButton(onClick = { showSortMenu = true }) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Sort,
@@ -970,18 +905,18 @@ fun GalleryScreen(
                 .padding(top = padding.calculateTopPadding())
                 .nestedScroll(tabScrollConnection)
         ) {
-            if (!state.isAlbumView) {
-                AnimatedVisibility(
-                    visible = tabsVisible,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    GalleryTabSelector(
-                        selected = state.tab,
-                        onSelect = viewModel::setTab
-                    )
-                }
-            }
+            AnimatedVisibility(
+                visible = tabsVisible,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (!state.isAlbumView) {
+                        GalleryTabSelector(
+                            selected = state.tab,
+                            onSelect = viewModel::setTab
+                        )
+                    }
 
             OutlinedTextField(
                 value = state.filters.searchQuery,
@@ -1108,6 +1043,9 @@ fun GalleryScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
                 }
             }
 

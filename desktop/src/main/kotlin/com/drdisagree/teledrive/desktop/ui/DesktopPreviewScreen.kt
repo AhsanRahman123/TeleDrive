@@ -70,7 +70,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -94,6 +97,7 @@ import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.desktop.media.ExternalMediaPlayer
 import com.drdisagree.teledrive.desktop.media.MediaStreamServer
 import com.drdisagree.teledrive.desktop.media.player.DesktopMediaPlayer
+import com.drdisagree.teledrive.desktop.media.player.PlayerQueueItem
 import com.drdisagree.teledrive.desktop.media.player.VlcPlayback
 import com.drdisagree.teledrive.desktop.resources.preview_open_externally
 import com.drdisagree.teledrive.desktop.resources.preview_open_failed
@@ -151,6 +155,7 @@ import com.drdisagree.teledrive.resources.preview_requires_download
 import com.drdisagree.teledrive.resources.preview_truncated_download_view
 import com.drdisagree.teledrive.resources.preview_unarchive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -173,12 +178,169 @@ fun DesktopPreviewScreen(
     viewModel: PreviewViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    LaunchedEffect(state.closed) { if (state.closed) onBack() }
+    val fullscreenController = LocalFullscreenController.current
+
+    fun leavePreview() {
+        fullscreenController?.setFullscreen(false)
+        onBack()
+    }
+
+    LaunchedEffect(state.closed) {
+        if (state.closed) leavePreview()
+    }
 
     var index by remember(state.files, state.initialIndex) {
         mutableStateOf(state.initialIndex.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
+    val mediaCategory = file?.category?.takeIf {
+        it == FileCategory.AUDIO || it == FileCategory.VIDEO
+    }
+    val queueFiles = remember(state.files, mediaCategory) {
+        if (mediaCategory == null) emptyList()
+        else state.files.filter { it.category == mediaCategory }
+    }
+    val queueItems = remember(queueFiles) { queueFiles.map { PlayerQueueItem(it.id, it.name) } }
+    val queueIndex = queueFiles.indexOfFirst { it.id == file?.id }
+
+    var repeatAll by remember(state.files, mediaCategory) { mutableStateOf(false) }
+    var shuffle by remember(state.files, mediaCategory) { mutableStateOf(false) }
+    var shuffleHistory by remember(state.files, mediaCategory) { mutableStateOf(emptyList<String>()) }
+    var shuffleCursor by remember(state.files, mediaCategory) { mutableIntStateOf(-1) }
+
+    LaunchedEffect(shuffle, file?.id, queueFiles) {
+        if (!shuffle || file == null || queueFiles.isEmpty()) return@LaunchedEffect
+        val existing = shuffleHistory.indexOf(file.id)
+        if (existing >= 0) {
+            shuffleCursor = existing
+        } else {
+            val retained = shuffleHistory.take(shuffleCursor + 1)
+            shuffleHistory = retained + file.id
+            shuffleCursor = shuffleHistory.lastIndex
+        }
+    }
+
+    var restoreFullscreenAfterNavigation by remember { mutableStateOf(false) }
+
+    fun selectQueueFile(fileId: String) {
+        val target = state.files.indexOfFirst { it.id == fileId }
+        if (target >= 0 && target != index) {
+            restoreFullscreenAfterNavigation =
+                fullscreenController?.isFullscreen() == true
+            index = target
+        }
+    }
+
+    LaunchedEffect(file?.id) {
+        if (restoreFullscreenAfterNavigation) {
+            // Wait until the replacement VLC surface has attached, then reassert fullscreen
+            // directly. A toggle can accidentally leave the window floating after rapid W/E.
+            delay(100L)
+            fullscreenController?.setFullscreen(true)
+            restoreFullscreenAfterNavigation = false
+        }
+    }
+
+    fun previousMedia() {
+        if (queueFiles.size <= 1 || queueIndex < 0) return
+        if (shuffle) {
+            if (shuffleCursor > 0) {
+                val previousId = shuffleHistory[shuffleCursor - 1]
+                shuffleCursor--
+                selectQueueFile(previousId)
+            } else if (repeatAll) {
+                val currentId = file?.id ?: return
+                val candidates = queueFiles.filter { it.id != currentId }
+                val next = candidates.randomOrNull() ?: return
+                shuffleHistory = listOf(next.id, currentId)
+                shuffleCursor = 0
+                selectQueueFile(next.id)
+            }
+        } else if (queueIndex > 0) {
+            selectQueueFile(queueFiles[queueIndex - 1].id)
+        } else if (repeatAll) {
+            selectQueueFile(queueFiles.last().id)
+        }
+    }
+
+    fun nextMedia() {
+        if (queueFiles.size <= 1 || queueIndex < 0) return
+        if (shuffle) {
+            if (shuffleCursor < shuffleHistory.lastIndex) {
+                shuffleCursor++
+                selectQueueFile(shuffleHistory[shuffleCursor])
+                return
+            }
+            val played = shuffleHistory.toSet()
+            val candidates = queueFiles.filter { it.id !in played }
+                .ifEmpty {
+                    if (repeatAll) queueFiles.filter { it.id != file?.id } else emptyList()
+                }
+            val next = candidates.randomOrNull() ?: return
+            if (next.id in played) {
+                shuffleHistory = listOf(file!!.id, next.id)
+                shuffleCursor = 1
+            } else {
+                shuffleHistory = shuffleHistory.take(shuffleCursor + 1) + next.id
+                shuffleCursor = shuffleHistory.lastIndex
+            }
+            selectQueueFile(next.id)
+        } else if (queueIndex < queueFiles.lastIndex) {
+            selectQueueFile(queueFiles[queueIndex + 1].id)
+        } else if (repeatAll) {
+            selectQueueFile(queueFiles.first().id)
+        }
+    }
+
+    fun toggleShuffle() {
+        shuffle = !shuffle
+        shuffleHistory = listOfNotNull(file?.id)
+        shuffleCursor = shuffleHistory.lastIndex
+    }
+
+    var sleepDeadline by remember(state.files) { mutableStateOf<Long?>(null) }
+    var sleepAtTrackEnd by remember(state.files) { mutableStateOf(false) }
+    var sleepClock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var sleepStopRequest by remember(state.files) { mutableIntStateOf(0) }
+
+    LaunchedEffect(sleepDeadline) {
+        val deadline = sleepDeadline ?: return@LaunchedEffect
+        while (true) {
+            val now = System.currentTimeMillis()
+            sleepClock = now
+            val remaining = deadline - now
+            if (remaining <= 0L) {
+                sleepDeadline = null
+                sleepAtTrackEnd = false
+                sleepStopRequest++
+                break
+            }
+            delay(remaining.coerceAtMost(1_000L))
+        }
+    }
+
+    fun handlePlaybackFinished() {
+        if (sleepAtTrackEnd) {
+            sleepAtTrackEnd = false
+            sleepDeadline = null
+            return
+        }
+        if (repeatAll || shuffle) nextMedia()
+    }
+
+    val sleepTimerLabel = when {
+        sleepAtTrackEnd -> "End of current track"
+        sleepDeadline != null -> {
+            val remaining = (sleepDeadline!! - sleepClock).coerceAtLeast(0L) / 1_000L
+            val hours = remaining / 3_600L
+            val minutes = (remaining % 3_600L) / 60L
+            val seconds = remaining % 60L
+            if (hours > 0L) "Sleep · ${hours}h ${minutes}m"
+            else "Sleep · ${minutes}m ${seconds}s"
+        }
+        else -> "Sleep timer"
+    }
+
     val infoTarget by viewModel.infoTarget.collectAsState()
     var showOverflow by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<DriveFile?>(null) }
@@ -200,7 +362,8 @@ fun DesktopPreviewScreen(
             .focusRequester(viewerFocusRequester)
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown ||
-                    event.isCtrlPressed || event.isAltPressed || event.isShiftPressed
+                    event.isCtrlPressed || event.isAltPressed || event.isShiftPressed ||
+                    mediaCategory != null
                 ) {
                     return@onPreviewKeyEvent false
                 }
@@ -230,7 +393,7 @@ fun DesktopPreviewScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = ::leavePreview) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -270,6 +433,53 @@ fun DesktopPreviewScreen(
                 )
             )
         }
+        @Composable
+        fun RenderPreviewPane(pageFile: DriveFile) {
+            PreviewPane(
+                viewModel = viewModel,
+                file = pageFile,
+                snackbarHostState = snackbarHostState,
+                hasPrevious = if (mediaCategory != null) {
+                    queueIndex > 0 || (repeatAll && queueFiles.size > 1) ||
+                        (shuffle && shuffleCursor > 0)
+                } else index > 0,
+                hasNext = if (mediaCategory != null) {
+                    (shuffle && shuffleHistory.size < queueFiles.size) ||
+                        (shuffle && shuffleCursor < shuffleHistory.lastIndex) ||
+                        (repeatAll && queueFiles.size > 1) ||
+                        queueIndex in 0 until queueFiles.lastIndex
+                } else index < state.files.lastIndex,
+                onPrevious = if (mediaCategory != null) ::previousMedia
+                else { { if (index > 0) index-- } },
+                onNext = if (mediaCategory != null) ::nextMedia
+                else { { if (index < state.files.lastIndex) index++ } },
+                queueItems = queueItems,
+                currentQueueItemId = pageFile.id,
+                repeatAll = repeatAll,
+                shuffle = shuffle,
+                sleepTimerLabel = sleepTimerLabel,
+                sleepStopRequest = sleepStopRequest,
+                sleepAtTrackEnd = sleepAtTrackEnd,
+                onToggleRepeatAll = { repeatAll = !repeatAll },
+                onToggleShuffle = ::toggleShuffle,
+                onSelectQueueItem = ::selectQueueFile,
+                onSetSleepTimer = { duration ->
+                    sleepAtTrackEnd = false
+                    sleepDeadline = System.currentTimeMillis() + duration.coerceAtLeast(1L)
+                },
+                onSleepAtTrackEnd = {
+                    sleepDeadline = null
+                    sleepAtTrackEnd = true
+                },
+                onClearSleepTimer = {
+                    sleepDeadline = null
+                    sleepAtTrackEnd = false
+                },
+                onPlaybackFinished = ::handlePlaybackFinished,
+                onPlayerControlsVisibilityChange = { playerChromeVisible = it }
+            )
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -277,31 +487,32 @@ fun DesktopPreviewScreen(
         ) {
             when {
                 !state.ready || file == null -> LoadingState()
-                else -> AnimatedContent(
-                    targetState = index to file,
-                    modifier = Modifier.fillMaxSize(),
-                    transitionSpec = {
-                        val forward = targetState.first >= initialState.first
-                        val enter = slideInHorizontally { width ->
-                            if (forward) width else -width
-                        } + fadeIn()
-                        val exit = slideOutHorizontally { width ->
-                            if (forward) -width else width
-                        } + fadeOut()
-                        enter togetherWith exit
-                    },
-                    contentKey = { it.second.id }
-                ) { (_, pageFile) ->
-                    PreviewPane(
-                        viewModel = viewModel,
-                        file = pageFile,
-                        snackbarHostState = snackbarHostState,
-                        hasPrevious = index > 0,
-                        hasNext = index < state.files.lastIndex,
-                        onPrevious = { if (index > 0) index-- },
-                        onNext = { if (index < state.files.lastIndex) index++ },
-                        onPlayerControlsVisibilityChange = { playerChromeVisible = it }
-                    )
+                else -> {
+                    // VLC players own native resources. Do not keep outgoing and incoming
+                    // video players alive together during AnimatedContent transitions.
+                    if (mediaCategory != null) {
+                        key(file.id) {
+                            RenderPreviewPane(file)
+                        }
+                    } else {
+                        AnimatedContent(
+                            targetState = index to file,
+                            modifier = Modifier.fillMaxSize(),
+                            transitionSpec = {
+                                val forward = targetState.first >= initialState.first
+                                val enter = slideInHorizontally { width ->
+                                    if (forward) width else -width
+                                } + fadeIn()
+                                val exit = slideOutHorizontally { width ->
+                                    if (forward) -width else width
+                                } + fadeOut()
+                                enter togetherWith exit
+                            },
+                            contentKey = { it.second.id }
+                        ) { (_, pageFile) ->
+                            RenderPreviewPane(pageFile)
+                        }
+                    }
                 }
             }
             AnimatedVisibility(
@@ -542,6 +753,20 @@ private fun PreviewPane(
     hasNext: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    queueItems: List<PlayerQueueItem>,
+    currentQueueItemId: String?,
+    repeatAll: Boolean,
+    shuffle: Boolean,
+    sleepTimerLabel: String,
+    sleepStopRequest: Int,
+    sleepAtTrackEnd: Boolean,
+    onToggleRepeatAll: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onSelectQueueItem: (String) -> Unit,
+    onSetSleepTimer: (Long) -> Unit,
+    onSleepAtTrackEnd: () -> Unit,
+    onClearSleepTimer: () -> Unit,
+    onPlaybackFinished: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val content by viewModel.contentFor(file).collectAsState()
@@ -685,6 +910,20 @@ private fun PreviewPane(
                     onNext = onNext,
                     hasPrevious = hasPrevious,
                     hasNext = hasNext,
+                    queueItems = queueItems,
+                    currentQueueItemId = currentQueueItemId,
+                    repeatAll = repeatAll,
+                    shuffle = shuffle,
+                    sleepTimerLabel = sleepTimerLabel,
+                    sleepStopRequest = sleepStopRequest,
+                    sleepAtTrackEnd = sleepAtTrackEnd,
+                    onToggleRepeatAll = onToggleRepeatAll,
+                    onToggleShuffle = onToggleShuffle,
+                    onSelectQueueItem = onSelectQueueItem,
+                    onSetSleepTimer = onSetSleepTimer,
+                    onSleepAtTrackEnd = onSleepAtTrackEnd,
+                    onClearSleepTimer = onClearSleepTimer,
+                    onPlaybackFinished = onPlaybackFinished,
                     onControlsVisibilityChange = onPlayerControlsVisibilityChange
                 )
             } else {
@@ -715,6 +954,20 @@ private fun PreviewPane(
                     onNext = onNext,
                     hasPrevious = hasPrevious,
                     hasNext = hasNext,
+                    queueItems = queueItems,
+                    currentQueueItemId = currentQueueItemId,
+                    repeatAll = repeatAll,
+                    shuffle = shuffle,
+                    sleepTimerLabel = sleepTimerLabel,
+                    sleepStopRequest = sleepStopRequest,
+                    sleepAtTrackEnd = sleepAtTrackEnd,
+                    onToggleRepeatAll = onToggleRepeatAll,
+                    onToggleShuffle = onToggleShuffle,
+                    onSelectQueueItem = onSelectQueueItem,
+                    onSetSleepTimer = onSetSleepTimer,
+                    onSleepAtTrackEnd = onSleepAtTrackEnd,
+                    onClearSleepTimer = onClearSleepTimer,
+                    onPlaybackFinished = onPlaybackFinished,
                     onControlsVisibilityChange = onPlayerControlsVisibilityChange
                 )
             } else {
@@ -883,6 +1136,20 @@ private fun InlineStreamPlayer(
     onNext: () -> Unit,
     hasPrevious: Boolean,
     hasNext: Boolean,
+    queueItems: List<PlayerQueueItem>,
+    currentQueueItemId: String?,
+    repeatAll: Boolean,
+    shuffle: Boolean,
+    sleepTimerLabel: String,
+    sleepStopRequest: Int,
+    sleepAtTrackEnd: Boolean,
+    onToggleRepeatAll: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onSelectQueueItem: (String) -> Unit,
+    onSetSleepTimer: (Long) -> Unit,
+    onSleepAtTrackEnd: () -> Unit,
+    onClearSleepTimer: () -> Unit,
+    onPlaybackFinished: () -> Unit,
     onControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val streamServer = koinInject<MediaStreamServer>()
@@ -919,6 +1186,20 @@ private fun InlineStreamPlayer(
         onNext = onNext,
         hasPrevious = hasPrevious,
         hasNext = hasNext,
+        queueItems = queueItems,
+        currentQueueItemId = currentQueueItemId,
+        repeatAll = repeatAll,
+        shuffle = shuffle,
+        sleepTimerLabel = sleepTimerLabel,
+        sleepStopRequest = sleepStopRequest,
+        sleepAtTrackEnd = sleepAtTrackEnd,
+        onToggleRepeatAll = onToggleRepeatAll,
+        onToggleShuffle = onToggleShuffle,
+        onSelectQueueItem = onSelectQueueItem,
+        onSetSleepTimer = onSetSleepTimer,
+        onSleepAtTrackEnd = onSleepAtTrackEnd,
+        onClearSleepTimer = onClearSleepTimer,
+        onPlaybackFinished = onPlaybackFinished,
         onControlsVisibilityChange = onControlsVisibilityChange
     )
 }

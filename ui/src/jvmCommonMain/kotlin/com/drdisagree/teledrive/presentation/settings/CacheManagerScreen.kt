@@ -671,8 +671,7 @@ fun CacheManagerScreen(
             confirmButton = {
                 Button(onClick = {
                     confirmClearAllCache = false
-                    settingsViewModel.clearCache()
-                    refreshKey++
+                    settingsViewModel.clearCache { refreshKey++ }
                 }) { Text("Clear all cache") }
             },
             dismissButton = {
@@ -691,8 +690,7 @@ fun CacheManagerScreen(
             confirmButton = {
                 Button(onClick = {
                     confirmClearThumbnailCache = false
-                    settingsViewModel.clearThumbnails()
-                    refreshKey++
+                    settingsViewModel.clearThumbnails { refreshKey++ }
                 }) { Text("Clear thumbnails") }
             },
             dismissButton = {

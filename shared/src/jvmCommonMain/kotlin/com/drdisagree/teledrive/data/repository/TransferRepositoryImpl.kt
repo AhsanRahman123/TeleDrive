@@ -43,6 +43,7 @@ class TransferRepositoryImpl(
 ) : TransferRepository {
 
     private val enqueueLock = Mutex()
+    private val workerControlLock = Mutex()
     private val uploadBatchGeneration = UploadBatchGeneration()
 
     private sealed interface EnqueueOutcome {
@@ -352,12 +353,13 @@ class TransferRepositoryImpl(
         }
     }
 
-    override suspend fun resume(id: String) {
-        val transfer = transferDao.byId(id) ?: return
+    override suspend fun resume(id: String) = workerControlLock.withLock {
+        val transfer = transferDao.byId(id) ?: return@withLock
         if (transfer.state == TransferState.PAUSED || transfer.state == TransferState.FAILED) {
             transferDao.setState(id, TransferState.QUEUED, System.currentTimeMillis())
+            val prefs = settingsRepository.preferences.first()
+            transferScheduler.resume(prefs.allowMeteredTransfers)
             backupSessionTracker.refresh(transfer.backupSessionId)
-            kickWorker()
         }
     }
 
@@ -380,15 +382,20 @@ class TransferRepositoryImpl(
             .forEach { cancel(it) }
     }
 
-    override suspend fun pauseAll() {
+    override suspend fun pauseAll() = workerControlLock.withLock {
         transferDao.pauseAll(System.currentTimeMillis())
+        // Mark rows first so each worker's control poll exits cooperatively, then join
+        // the drain before allowing Resume All to enqueue another generation of workers.
+        transferScheduler.pause()
         backupSessionTracker.refreshActive()
     }
 
-    override suspend fun resumeAll() {
+    override suspend fun resumeAll() = workerControlLock.withLock {
         transferDao.resumeAll(System.currentTimeMillis())
+        val prefs = settingsRepository.preferences.first()
+        // Wake the worker pool immediately after the rows become QUEUED.
+        transferScheduler.resume(prefs.allowMeteredTransfers)
         backupSessionTracker.refreshActive()
-        kickWorker()
     }
 
     override suspend fun cancelAll() {
@@ -409,18 +416,20 @@ class TransferRepositoryImpl(
         if (transfer.state == TransferState.QUEUED) kickWorker()
     }
 
-    override suspend fun retry(id: String) {
-        val transfer = transferDao.byId(id) ?: return
+    override suspend fun retry(id: String) = workerControlLock.withLock {
+        val transfer = transferDao.byId(id) ?: return@withLock
         if (transfer.state == TransferState.FAILED || transfer.state == TransferState.CANCELLED) {
             transferDao.upsert(
                 transfer.copy(
                     state = TransferState.QUEUED,
                     transferredBytes = 0,
+                    speedBytesPerSecond = 0,
                     errorMessage = null,
                     updatedAt = System.currentTimeMillis()
                 )
             )
-            kickWorker()
+            val prefs = settingsRepository.preferences.first()
+            transferScheduler.resume(prefs.allowMeteredTransfers)
         }
     }
 
@@ -433,6 +442,11 @@ class TransferRepositoryImpl(
         transferDao.requeueRunning()
         syncFileStates()
         kickWorker()
+    }
+
+    override suspend fun wakeWorker() {
+        val prefs = settingsRepository.preferences.first()
+        transferScheduler.rekick(prefs.allowMeteredTransfers)
     }
 
     /** A backup state only means something while a transfer backs the file up. */

@@ -95,6 +95,13 @@ fun main() {
                         } else {
                             WindowPlacement.Fullscreen
                         }
+                },
+                setFullscreen = { fullscreen ->
+                    windowState.placement = if (fullscreen) {
+                        WindowPlacement.Fullscreen
+                    } else {
+                        WindowPlacement.Floating
+                    }
                 }
             )
         }

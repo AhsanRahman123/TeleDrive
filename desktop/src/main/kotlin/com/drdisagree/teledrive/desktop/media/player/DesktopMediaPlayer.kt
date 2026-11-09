@@ -14,8 +14,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -30,6 +33,9 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Replay
@@ -37,7 +43,10 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.ZoomOutMap
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -47,6 +56,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,6 +69,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
@@ -66,8 +77,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -110,6 +119,7 @@ import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -118,6 +128,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
@@ -139,6 +150,20 @@ fun DesktopMediaPlayer(
     onNext: () -> Unit = {},
     hasPrevious: Boolean = false,
     hasNext: Boolean = false,
+    repeatAll: Boolean = false,
+    shuffle: Boolean = false,
+    queueItems: List<PlayerQueueItem> = emptyList(),
+    currentQueueItemId: String? = null,
+    sleepTimerLabel: String = "Sleep timer",
+    sleepStopRequest: Int = 0,
+    sleepAtTrackEnd: Boolean = false,
+    onToggleRepeatAll: () -> Unit = {},
+    onToggleShuffle: () -> Unit = {},
+    onSelectQueueItem: (String) -> Unit = {},
+    onSetSleepTimer: (Long) -> Unit = {},
+    onSleepAtTrackEnd: () -> Unit = {},
+    onClearSleepTimer: () -> Unit = {},
+    onPlaybackFinished: () -> Unit = {},
     onControlsVisibilityChange: (Boolean) -> Unit = {}
 ) {
     val factory = VlcPlayback.factory ?: return
@@ -150,7 +175,7 @@ fun DesktopMediaPlayer(
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
     var volume by remember(mrl) { mutableIntStateOf(100) }
-    var brightness by remember(mrl) { mutableIntStateOf(100) }
+    var brightness by remember { mutableIntStateOf(100) }
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
     var trackTick by remember { mutableIntStateOf(0) }
@@ -163,6 +188,9 @@ fun DesktopMediaPlayer(
     // a play/resume event cannot reapply the initial 100% / unmuted values.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
+    val latestRepeatOne = rememberUpdatedState(repeatOne)
+    val latestSleepAtTrackEnd = rememberUpdatedState(sleepAtTrackEnd)
+    val playerScope = rememberCoroutineScope()
 
     val player = remember(mrl, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
@@ -172,14 +200,16 @@ fun DesktopMediaPlayer(
                     playing = true
                     finished = false
                     buffering = false
-                    // VLC may create its audio output after the initial media.play() call.
-                    // Reapply the current output state at the actual playing event as well.
-                    runCatching {
-                        val currentVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
-                        mediaPlayer.audio().setVolume(currentVolume)
-                        mediaPlayer.audio().isMute = latestMuted.value || currentVolume <= 0
-                    }
+                    // Do not call LibVLC from this native callback thread. The event thread
+                    // must return immediately; volume restoration is queued below via submit().
                     trackTick++
+                }
+
+                override fun audioDeviceChanged(mediaPlayer: MediaPlayer, audioDevice: String) {
+                    // Windows can replace the default output when USB/Bluetooth earphones are
+                    // attached. Publish the state change on Compose's dispatcher, and never
+                    // call LibVLC from this native callback.
+                    playerScope.launch { trackTick++ }
                 }
 
                 override fun elementaryStreamAdded(
@@ -197,6 +227,11 @@ fun DesktopMediaPlayer(
                 override fun finished(mediaPlayer: MediaPlayer) {
                     playing = false
                     finished = true
+                    playerScope.launch {
+                        if (!latestRepeatOne.value || latestSleepAtTrackEnd.value) {
+                            onPlaybackFinished()
+                        }
+                    }
                 }
 
                 override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
@@ -220,8 +255,10 @@ fun DesktopMediaPlayer(
         }
     }
 
-    var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(false) }
-    var brightnessMonitor by remember(mrl) { mutableStateOf("") }
+    // Render the physical brightness control immediately for video. A successful DDC/CI
+    // read will synchronize its value, but an initial transient read failure must not hide it.
+    var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(!isAudio) }
+    var brightnessMonitor by remember { mutableStateOf("") }
     var brightnessDragging by remember(mrl) { mutableStateOf(false) }
     var brightnessLastInputAt by remember(mrl) { mutableLongStateOf(0L) }
     val brightnessUpdates = remember(mrl) { Channel<Float>(Channel.CONFLATED) }
@@ -229,10 +266,7 @@ fun DesktopMediaPlayer(
     // Mirror Monitorian: read physical monitor brightness, but never let a polling
     // result overwrite an in-progress drag or a value just sent to the monitor.
     LaunchedEffect(mrl, isAudio) {
-        if (isAudio) {
-            brightnessAvailable = false
-            return@LaunchedEffect
-        }
+        if (isAudio) return@LaunchedEffect
         while (isActive) {
             val shouldRead = !brightnessDragging &&
                 System.currentTimeMillis() - brightnessLastInputAt >= BRIGHTNESS_READ_GUARD_MS
@@ -242,12 +276,12 @@ fun DesktopMediaPlayer(
                 }
                 val stillIdle = !brightnessDragging &&
                     System.currentTimeMillis() - brightnessLastInputAt >= BRIGHTNESS_READ_GUARD_MS
-                if (stillIdle) {
-                    brightnessAvailable = reading != null
-                    if (reading != null) {
-                        brightness = reading.percent.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
-                        brightnessMonitor = reading.monitorDescription
-                    }
+                if (stillIdle && reading != null) {
+                    // Once DDC/CI has been detected for this video, keep the slider visible
+                    // through temporary monitor-read failures (sleep/wake, focus, hot-plug).
+                    brightnessAvailable = true
+                    brightness = reading.percent.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
+                    brightnessMonitor = reading.monitorDescription
                 }
             }
             delay(BRIGHTNESS_POLL_INTERVAL_MS)
@@ -287,25 +321,41 @@ fun DesktopMediaPlayer(
                     teardownScope.cancel()
                 }
             }
-            fullscreenController?.let { controller ->
-                if (controller.isFullscreen()) controller.toggle()
-            }
         }
     }
 
-    // VLC can report playback before its audio output has fully attached. Reapply the
-    // saved level after the playing/track events so Gallery launches never need a manual
-    // slider nudge to become audible.
+    var lastSleepStopRequest by remember(mrl) {
+        mutableIntStateOf(sleepStopRequest)
+    }
+    LaunchedEffect(player, sleepStopRequest) {
+        if (sleepStopRequest > lastSleepStopRequest) {
+            lastSleepStopRequest = sleepStopRequest
+            player.submit { runCatching { controls().pause() } }
+            playing = false
+        }
+    }
+
+    LaunchedEffect(player, repeatAll, sleepAtTrackEnd) {
+        // Repeat-current and repeat-all are mutually exclusive. End-of-track sleep
+        // must override VLC's native repeat flag so the timer can stop playback.
+        if (repeatAll || sleepAtTrackEnd) {
+            repeatOne = false
+            player.submit { runCatching { controls().repeat = false } }
+        }
+    }
+
+    // Volume/mute restoration is submitted to vlcj's serialized player executor.
+    // Never call AudioApi directly from an event callback or the Compose UI thread: audio
+    // device hot-plug on Windows can temporarily hold native LibVLC audio locks.
     LaunchedEffect(player, mrl, playing, trackTick) {
         if (playing) {
-            delay(AUDIO_OUTPUT_SETTLE_MS)
-            val requestedVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
-            val shouldMute = latestMuted.value || requestedVolume <= 0
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    player.audio().setVolume(requestedVolume)
-                    player.audio().isMute = shouldMute
-                }
+            repeat(AUDIO_OUTPUT_REAPPLY_ATTEMPTS) {
+                delay(AUDIO_OUTPUT_REAPPLY_INTERVAL_MS)
+                if (!playing) return@LaunchedEffect
+                player.submitAudioState(
+                    latestVolume.value.coerceIn(0, MAX_VOLUME),
+                    latestMuted.value
+                )
             }
         }
     }
@@ -326,19 +376,17 @@ fun DesktopMediaPlayer(
     }
     val toggleMute: () -> Unit = {
         muted = !muted
-        player.audio().isMute = muted
+        player.submitAudioState(volume, muted)
     }
     fun setPlayerVolume(value: Int, unmute: Boolean = true) {
         val nextVolume = value.coerceIn(0, MAX_VOLUME)
         volume = nextVolume
-        player.audio().setVolume(nextVolume)
         if (nextVolume == 0) {
             muted = true
-            player.audio().isMute = true
         } else if (unmute) {
             muted = false
-            player.audio().isMute = false
         }
+        player.submitAudioState(nextVolume, muted)
     }
     fun adjustPlayerVolume(delta: Int) {
         setPlayerVolume(volume + delta, unmute = delta > 0)
@@ -359,58 +407,83 @@ fun DesktopMediaPlayer(
         interactionTick++
     }
     fun cycleAudioTrack() {
-        val tracks = player.audioTracks(trackWord)
-        if (tracks.isEmpty()) return
-        val selected = tracks.indexOfFirst { it.selected }
-        val next = tracks[(selected + 1).coerceAtLeast(0) % tracks.size]
-        player.audio().setTrack(next.id)
-        onPreferredAudioLanguage(next.language)
-        trackTick++
+        player.submit {
+            val tracks = runCatching { player.audioTracks(trackWord) }.getOrDefault(emptyList())
+            if (tracks.isNotEmpty()) {
+                val selected = tracks.indexOfFirst { it.selected }
+                val next = tracks[(selected + 1).coerceAtLeast(0) % tracks.size]
+                runCatching { player.audio().setTrack(next.id) }
+                playerScope.launch {
+                    onPreferredAudioLanguage(next.language)
+                    trackTick++
+                }
+            }
+        }
     }
     fun cycleSubtitleTrack(reverse: Boolean = false) {
-        val tracks = player.textTracks(trackWord)
-        if (tracks.isEmpty()) return
-        val selected = tracks.indexOfFirst { it.selected }
-        val nextIndex = if (reverse) {
-            if (selected <= 0) tracks.lastIndex else selected - 1
-        } else {
-            (selected + 1) % tracks.size
+        player.submit {
+            val tracks = runCatching { player.textTracks(trackWord) }.getOrDefault(emptyList())
+            if (tracks.isNotEmpty()) {
+                val selected = tracks.indexOfFirst { it.selected }
+                val nextIndex = if (reverse) {
+                    if (selected <= 0) tracks.lastIndex else selected - 1
+                } else {
+                    (selected + 1) % tracks.size
+                }
+                val next = tracks[nextIndex]
+                runCatching { player.subpictures().setTrack(next.id) }
+                playerScope.launch {
+                    onPreferredSubtitleLanguage(next.language)
+                    trackTick++
+                }
+            }
         }
-        val next = tracks[nextIndex]
-        player.subpictures().setTrack(next.id)
-        onPreferredSubtitleLanguage(next.language)
-        trackTick++
     }
     fun toggleSubtitles() {
-        val tracks = player.textTracks(trackWord)
-        if (tracks.isEmpty()) return
-        val selected = tracks.firstOrNull { it.selected }
-        if (selected != null) {
-            player.subpictures().setTrack(VLC_TRACK_DISABLED)
-        } else {
-            val next = tracks.firstOrNull { it.language == preferredSubtitleLanguage }
-                ?: tracks.first()
-            player.subpictures().setTrack(next.id)
-            onPreferredSubtitleLanguage(next.language)
+        player.submit {
+            val tracks = runCatching { player.textTracks(trackWord) }.getOrDefault(emptyList())
+            if (tracks.isNotEmpty()) {
+                val selected = tracks.firstOrNull { it.selected }
+                if (selected != null) {
+                    runCatching { player.subpictures().setTrack(VLC_TRACK_DISABLED) }
+                } else {
+                    val next = tracks.firstOrNull { it.language == preferredSubtitleLanguage }
+                        ?: tracks.first()
+                    runCatching { player.subpictures().setTrack(next.id) }
+                    playerScope.launch { onPreferredSubtitleLanguage(next.language) }
+                }
+                playerScope.launch { trackTick++ }
+            }
         }
-        trackTick++
     }
 
     var languagesApplied by remember(mrl) { mutableStateOf(false) }
     LaunchedEffect(mrl, trackTick, preferredAudioLanguage, preferredSubtitleLanguage) {
         if (languagesApplied || trackTick == 0) return@LaunchedEffect
-        val audio = player.audioTracks(trackWord)
-        val text = player.textTracks(trackWord)
-        if (audio.isEmpty() && text.isEmpty()) return@LaunchedEffect
+        val applied = CompletableDeferred<Boolean>()
+        runCatching {
+            player.submit {
+                val audio = runCatching { player.audioTracks(trackWord) }.getOrDefault(emptyList())
+                val text = runCatching { player.textTracks(trackWord) }.getOrDefault(emptyList())
+                if (audio.isEmpty() && text.isEmpty()) {
+                    applied.complete(false)
+                } else {
+                    if (preferredAudioLanguage.isNotEmpty()) {
+                        audio.firstOrNull { it.language == preferredAudioLanguage }
+                            ?.let { runCatching { player.audio().setTrack(it.id) } }
+                    }
+                    if (preferredSubtitleLanguage.isNotEmpty()) {
+                        text.firstOrNull { it.language == preferredSubtitleLanguage }
+                            ?.let { runCatching { player.subpictures().setTrack(it.id) } }
+                    }
+                    applied.complete(true)
+                }
+            }
+        }.onFailure { applied.complete(false) }
+        if (withTimeoutOrNull(PLAYER_NATIVE_CALL_TIMEOUT_MS) { applied.await() } != true) {
+            return@LaunchedEffect
+        }
         languagesApplied = true
-        if (preferredAudioLanguage.isNotEmpty()) {
-            audio.firstOrNull { it.language == preferredAudioLanguage }
-                ?.let { player.audio().setTrack(it.id) }
-        }
-        if (preferredSubtitleLanguage.isNotEmpty()) {
-            text.firstOrNull { it.language == preferredSubtitleLanguage }
-                ?.let { player.subpictures().setTrack(it.id) }
-        }
         trackTick++
     }
 
@@ -420,8 +493,14 @@ fun DesktopMediaPlayer(
         interactionTick,
         controlsPinned,
         controlPreferences.autoHidePlayerControls,
+        controlPreferences.showPlayerControls,
         controlPreferences.hideDelayMillis
     ) {
+        if (!controlPreferences.showPlayerControls) {
+            controlsVisible = false
+            onControlsVisibilityChange(false)
+            return@LaunchedEffect
+        }
         controlsVisible = true
         onControlsVisibilityChange(true)
         if (!controlPreferences.autoHidePlayerControls || controlsPinned) {
@@ -488,6 +567,26 @@ fun DesktopMediaPlayer(
                         playing = false
                         finished = true
                         timeMs = 0L
+                        interactionTick++
+                        true
+                    }
+                    key == Key.C && !ctrl && !alt && !shift -> {
+                        val updated = controlPreferences.copy(
+                            showPlayerControls = !controlPreferences.showPlayerControls
+                        )
+                        controlPreferences = updated
+                        controlsPinned = updated.showPlayerControls
+                        PlayerControlPreferencesStore.save(updated)
+                        interactionTick++
+                        true
+                    }
+                    key == Key.R && !ctrl && !alt && !shift -> {
+                        onToggleRepeatAll()
+                        interactionTick++
+                        true
+                    }
+                    key == Key.U && !ctrl && !alt && !shift -> {
+                        onToggleShuffle()
                         interactionTick++
                         true
                     }
@@ -585,7 +684,8 @@ fun DesktopMediaPlayer(
                     }
                     key == Key.L && !ctrl && !alt && !shift -> {
                         repeatOne = !repeatOne
-                        player.controls().repeat = repeatOne
+                        if (repeatOne && repeatAll) onToggleRepeatAll()
+                        player.submit { runCatching { controls().repeat = repeatOne } }
                         interactionTick++
                         true
                     }
@@ -610,22 +710,34 @@ fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.J && !ctrl && !alt && !shift -> {
-                        player.audio().setDelay(player.audio().delay() - SYNC_STEP_US)
+                        player.submit {
+                            runCatching { player.audio().setDelay(player.audio().delay() - SYNC_STEP_US) }
+                        }
                         interactionTick++
                         true
                     }
                     key == Key.K && !ctrl && !alt && !shift -> {
-                        player.audio().setDelay(player.audio().delay() + SYNC_STEP_US)
+                        player.submit {
+                            runCatching { player.audio().setDelay(player.audio().delay() + SYNC_STEP_US) }
+                        }
                         interactionTick++
                         true
                     }
                     key == Key.G && !ctrl && !alt && !shift -> {
-                        player.subpictures().setDelay(player.subpictures().delay() - SYNC_STEP_US)
+                        player.submit {
+                            runCatching {
+                                player.subpictures().setDelay(player.subpictures().delay() - SYNC_STEP_US)
+                            }
+                        }
                         interactionTick++
                         true
                     }
                     key == Key.H && !ctrl && !alt && !shift -> {
-                        player.subpictures().setDelay(player.subpictures().delay() + SYNC_STEP_US)
+                        player.submit {
+                            runCatching {
+                                player.subpictures().setDelay(player.subpictures().delay() + SYNC_STEP_US)
+                            }
+                        }
                         interactionTick++
                         true
                     }
@@ -660,7 +772,13 @@ fun DesktopMediaPlayer(
                 }
             }
             .focusable()
-            .pointerHoverIcon(if (controlsVisible) PointerIcon.Default else blankCursor)
+            .pointerHoverIcon(
+                if (controlsVisible || !controlPreferences.showPlayerControls) {
+                    PointerIcon.Default
+                } else {
+                    blankCursor
+                }
+            )
             .pointerInput(player, playing, finished, isAudio) {
                 if (!isAudio) {
                     detectTapGestures(
@@ -711,21 +829,34 @@ fun DesktopMediaPlayer(
                     bitmap = current,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = scaling.contentScale,
-                    colorFilter = remember(brightness) {
-                        val factor = (brightness / 100f).coerceIn(0f, 2f)
-                        ColorFilter.colorMatrix(
-                            ColorMatrix().apply {
-                                setToScale(factor, factor, factor, 1f)
-                            }
-                        )
-                    }
+                    contentScale = scaling.contentScale
                 )
             }
         }
 
         if (buffering && !finished) {
             CircularWavyProgressIndicator(modifier = Modifier.size(56.dp))
+        }
+
+        // Leave one small reveal affordance when the user permanently hides player chrome.
+        // Keyboard shortcut C remains available as well.
+        if (!controlPreferences.showPlayerControls) {
+            IconButton(
+                onClick = {
+                    val updated = controlPreferences.copy(showPlayerControls = true)
+                    controlPreferences = updated
+                    controlsPinned = true
+                    PlayerControlPreferencesStore.save(updated)
+                    interactionTick++
+                },
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Visibility,
+                    contentDescription = "Show player controls",
+                    tint = Color.White
+                )
+            }
         }
 
         AnimatedVisibility(
@@ -748,6 +879,11 @@ fun DesktopMediaPlayer(
                 brightnessMonitor = brightnessMonitor,
                 rate = rate,
                 repeatOne = repeatOne,
+                repeatAll = repeatAll,
+                shuffle = shuffle,
+                queueItems = queueItems,
+                currentQueueItemId = currentQueueItemId,
+                sleepTimerLabel = sleepTimerLabel,
                 trackTick = trackTick,
                 scaling = scaling,
                 onPrevious = onPrevious,
@@ -755,12 +891,13 @@ fun DesktopMediaPlayer(
                 hasPrevious = hasPrevious,
                 hasNext = hasNext,
                 onSelectAudioTrack = { track ->
-                    player.audio().setTrack(track.id)
+                    player.submit { runCatching { player.audio().setTrack(track.id) } }
                     onPreferredAudioLanguage(track.language)
                     trackTick++
                 },
                 onSelectTextTrack = { track ->
-                    player.subpictures().setTrack(track?.id ?: VLC_TRACK_DISABLED)
+                    val trackId = track?.id ?: VLC_TRACK_DISABLED
+                    player.submit { runCatching { player.subpictures().setTrack(trackId) } }
                     onPreferredSubtitleLanguage(track?.language.orEmpty())
                     trackTick++
                 },
@@ -784,8 +921,15 @@ fun DesktopMediaPlayer(
                 onRate = ::setPlaybackRate,
                 onToggleRepeat = {
                     repeatOne = !repeatOne
-                    player.controls().repeat = repeatOne
+                    if (repeatOne && repeatAll) onToggleRepeatAll()
+                    player.submit { runCatching { controls().repeat = repeatOne } }
                 },
+                onToggleRepeatAll = onToggleRepeatAll,
+                onToggleShuffle = onToggleShuffle,
+                onSelectQueueItem = onSelectQueueItem,
+                onSetSleepTimer = onSetSleepTimer,
+                onSleepAtTrackEnd = onSleepAtTrackEnd,
+                onClearSleepTimer = onClearSleepTimer,
                 onScaling = { scaling = it },
                 controlPreferences = controlPreferences,
                 onControlPreferencesChange = { updated ->
@@ -813,6 +957,11 @@ private fun PlayerControlsBar(
     brightnessMonitor: String,
     rate: Float,
     repeatOne: Boolean,
+    repeatAll: Boolean,
+    shuffle: Boolean,
+    queueItems: List<PlayerQueueItem>,
+    currentQueueItemId: String?,
+    sleepTimerLabel: String,
     trackTick: Int,
     scaling: VideoScaling,
     onPrevious: () -> Unit,
@@ -829,6 +978,12 @@ private fun PlayerControlsBar(
     onControlsKeepVisible: (Boolean) -> Unit,
     onRate: (Float) -> Unit,
     onToggleRepeat: () -> Unit,
+    onToggleRepeatAll: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onSelectQueueItem: (String) -> Unit,
+    onSetSleepTimer: (Long) -> Unit,
+    onSleepAtTrackEnd: () -> Unit,
+    onClearSleepTimer: () -> Unit,
     onSelectAudioTrack: (VlcTrack) -> Unit,
     onSelectTextTrack: (VlcTrack?) -> Unit,
     onScaling: (VideoScaling) -> Unit,
@@ -838,12 +993,78 @@ private fun PlayerControlsBar(
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
     var showSubtitleMenu by remember { mutableStateOf(false) }
+    var showQueueMenu by remember { mutableStateOf(false) }
+    var showSleepMenu by remember { mutableStateOf(false) }
+    var showCustomSleepDialog by remember { mutableStateOf(false) }
+    var customSleepHours by remember { mutableStateOf("0") }
+    var customSleepMinutes by remember { mutableStateOf("30") }
     var scrubTarget by remember { mutableStateOf<Float?>(null) }
     val fullscreen = LocalFullscreenController.current
     val trackWord = stringResource(Res.string.player_track)
-    val audioTracks = remember(player, trackTick) { player.audioTracks(trackWord) }
-    val textTracks = remember(player, trackTick) { player.textTracks(trackWord) }
+    var audioTracks by remember(player) { mutableStateOf(emptyList<VlcTrack>()) }
+    var textTracks by remember(player) { mutableStateOf(emptyList<VlcTrack>()) }
+
+    // Track enumeration crosses the native LibVLC boundary. Keep it off the Compose
+    // thread and serialize it with the rest of this player's native operations.
+    LaunchedEffect(player, trackTick, trackWord) {
+        val result = CompletableDeferred<Pair<List<VlcTrack>, List<VlcTrack>>>()
+        runCatching {
+            player.submit {
+                val audio = runCatching { player.audioTracks(trackWord) }.getOrDefault(emptyList())
+                val text = runCatching { player.textTracks(trackWord) }.getOrDefault(emptyList())
+                result.complete(audio to text)
+            }
+        }.onFailure {
+            result.complete(emptyList<VlcTrack>() to emptyList())
+        }
+        withTimeoutOrNull(PLAYER_NATIVE_CALL_TIMEOUT_MS) { result.await() }?.let { tracks ->
+            audioTracks = tracks.first
+            textTracks = tracks.second
+        }
+    }
     val subtitlesOn = textTracks.any { it.selected }
+
+    if (showCustomSleepDialog) {
+        AlertDialog(
+            onDismissRequest = { showCustomSleepDialog = false },
+            title = { Text("Custom sleep timer") },
+            text = {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = customSleepHours,
+                        onValueChange = { customSleepHours = it.filter(Char::isDigit).take(3) },
+                        label = { Text("Hours") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = customSleepMinutes,
+                        onValueChange = { customSleepMinutes = it.filter(Char::isDigit).take(2) },
+                        label = { Text("Minutes") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val hours = customSleepHours.toLongOrNull() ?: 0L
+                        val minutes = customSleepMinutes.toLongOrNull() ?: 0L
+                        val durationMs = (hours * 60L + minutes) * 60_000L
+                        if (durationMs > 0L) {
+                            onSetSleepTimer(durationMs)
+                            showCustomSleepDialog = false
+                            onInteraction()
+                        }
+                    }
+                ) { Text("Start timer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomSleepDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -907,11 +1128,15 @@ private fun PlayerControlsBar(
             showRateMenu,
             showAudioMenu,
             showSubtitleMenu,
+            showQueueMenu,
+            showSleepMenu,
+            showCustomSleepDialog,
             volumeSliderActive,
             brightnessSliderActive
         ) {
             onControlsKeepVisible(
                 showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
+                    showQueueMenu || showSleepMenu || showCustomSleepDialog ||
                     volumeSliderActive || brightnessSliderActive
             )
         }
@@ -1032,6 +1257,23 @@ private fun PlayerControlsBar(
                                     autoHidePlayerControls = !controlPreferences.autoHidePlayerControls
                                 )
                             )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Show player controls") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.showPlayerControls,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    showPlayerControls = !controlPreferences.showPlayerControls
+                                )
+                            )
+                            onControlsKeepVisible(!controlPreferences.showPlayerControls)
                         }
                     )
                     DropdownMenuItem(
@@ -1177,6 +1419,115 @@ private fun PlayerControlsBar(
                         tint = if (repeatOne) MaterialTheme.colorScheme.primary else Color.White
                     )
                 }
+                IconButton(
+                    onClick = { onInteraction(); onToggleRepeatAll() },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Repeat,
+                        contentDescription = "Repeat all videos",
+                        tint = if (repeatAll) MaterialTheme.colorScheme.primary else Color.White
+                    )
+                }
+                IconButton(
+                    onClick = { onInteraction(); onToggleShuffle() },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Shuffle,
+                        contentDescription = "Shuffle queue",
+                        tint = if (shuffle) MaterialTheme.colorScheme.primary else Color.White
+                    )
+                }
+                Box {
+                    IconButton(
+                        onClick = { onInteraction(); showQueueMenu = true },
+                        enabled = queueItems.isNotEmpty(),
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.QueueMusic,
+                            contentDescription = "Open playback queue (${queueItems.size} items)",
+                            tint = if (queueItems.isEmpty()) Color.White.copy(alpha = 0.4f) else Color.White
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showQueueMenu,
+                        onDismissRequest = { showQueueMenu = false },
+                        modifier = Modifier.heightIn(max = 420.dp)
+                    ) {
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            queueItems.forEach { item ->
+                                DropdownMenuItem(
+                                    text = { Text(item.name, maxLines = 1) },
+                                    leadingIcon = {
+                                        RadioButton(
+                                            selected = item.id == currentQueueItemId,
+                                            onClick = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showQueueMenu = false
+                                        onSelectQueueItem(item.id)
+                                        onInteraction()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                Box {
+                    TextButton(
+                        onClick = { onInteraction(); showSleepMenu = true }
+                    ) {
+                        Icon(Icons.Filled.Timer, contentDescription = null, tint = Color.White)
+                        Text(
+                            sleepTimerLabel,
+                            color = if (sleepTimerLabel == "Sleep timer") Color.White
+                            else MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showSleepMenu,
+                        onDismissRequest = { showSleepMenu = false }
+                    ) {
+                        listOf(15L, 30L, 45L, 60L).forEach { minutes ->
+                            DropdownMenuItem(
+                                text = { Text("$minutes minutes") },
+                                onClick = {
+                                    showSleepMenu = false
+                                    onSetSleepTimer(minutes * 60_000L)
+                                    onInteraction()
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Custom duration…") },
+                            onClick = {
+                                showSleepMenu = false
+                                showCustomSleepDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("End of current track") },
+                            onClick = {
+                                showSleepMenu = false
+                                onSleepAtTrackEnd()
+                                onInteraction()
+                            }
+                        )
+                        if (sleepTimerLabel != "Sleep timer") {
+                            DropdownMenuItem(
+                                text = { Text("Turn off sleep timer") },
+                                onClick = {
+                                    showSleepMenu = false
+                                    onClearSleepTimer()
+                                    onInteraction()
+                                }
+                            )
+                        }
+                    }
+                }
                 if (!isAudio) {
                     Box {
                         IconButton(
@@ -1286,6 +1637,11 @@ private fun PlayerControlsBar(
     }
 }
 
+internal data class PlayerQueueItem(
+    val id: String,
+    val name: String
+)
+
 @Composable
 private fun TrackMenuItem(label: String, selected: Boolean, onClick: () -> Unit) {
     DropdownMenuItem(
@@ -1301,6 +1657,20 @@ private val PLAYBACK_RATE_PRESETS = listOf(
     2.0f, 2.5f, 3.0f, 4.0f
 )
 
+private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
+    val requestedVolume = volume.coerceIn(0, MAX_VOLUME)
+    val requestedMute = muted || requestedVolume <= 0
+    runCatching {
+        submit {
+            runCatching {
+                audio().setVolume(requestedVolume)
+                audio().isMute = requestedMute
+            }
+        }
+    }
+}
+
+private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
@@ -1309,7 +1679,8 @@ private const val MAX_VOLUME = 200
 private const val MAX_BRIGHTNESS = 100
 private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_500L
 private const val BRIGHTNESS_READ_GUARD_MS = 1_800L
-private const val AUDIO_OUTPUT_SETTLE_MS = 150L
+private const val AUDIO_OUTPUT_REAPPLY_INTERVAL_MS = 250L
+private const val AUDIO_OUTPUT_REAPPLY_ATTEMPTS = 3
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 

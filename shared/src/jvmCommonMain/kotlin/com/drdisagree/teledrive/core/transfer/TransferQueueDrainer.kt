@@ -135,16 +135,21 @@ class TransferQueueDrainer(
     ): TransferEntity? {
         val types = TransferType.entries.filter { type ->
             (includeBackups || type != TransferType.BACKUP) &&
-                    (includeUploads || type.isIncoming)
+                (includeUploads || type.isIncoming)
         }
         if (types.isEmpty()) return null
         return transferDao.nextQueuedOf(types, skip.size + 1).firstOrNull { it.id !in skip }
     }
 
     private suspend fun claimNextQueued(includeBackups: Boolean): String? = claimLock.withLock {
+        // Keep uploads serialized as before; the three worker slots are available for
+        // incoming downloads/restores and do not silently increase upload concurrency.
         val uploading = executing.values.any { !it.isIncoming }
-        val next = nextClaimable(includeBackups, executing.keys, includeUploads = !uploading)
-            ?: return@withLock null
+        val next = nextClaimable(
+            includeBackups = includeBackups,
+            skip = executing.keys,
+            includeUploads = !uploading
+        ) ?: return@withLock null
         transferDao.setState(next.id, TransferState.RUNNING, System.currentTimeMillis())
         executing[next.id] = next.type
         next.id
@@ -169,7 +174,9 @@ class TransferQueueDrainer(
                 }
 
                 is TransferOutcome.Paused -> {
-                    markState(transferId, TransferState.PAUSED)
+                    // Pause already changed the row to PAUSED. Do not write PAUSED again:
+                    // Resume all may have changed it back to QUEUED while the old native
+                    // request was winding down. Leaving QUEUED lets this slot pick it up again.
                     return
                 }
 
@@ -216,7 +223,7 @@ class TransferQueueDrainer(
     }
 
     private companion object {
-        const val MAX_CONCURRENCY = 6
+        const val MAX_CONCURRENCY = 3
         const val SLOT_WAIT_MS = 5_000L
         const val IDLE_POLL_MS = 1_000L
         const val BASE_BACKOFF_SECONDS = 2

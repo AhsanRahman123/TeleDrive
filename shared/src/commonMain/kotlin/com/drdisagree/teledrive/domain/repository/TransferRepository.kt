@@ -60,4 +60,7 @@ interface TransferRepository {
     suspend fun clearFinished()
 
     suspend fun recoverOrphanedTransfers()
+
+    /** Re-wakes the worker after runtime transfer settings change. */
+    suspend fun wakeWorker() = Unit
 }

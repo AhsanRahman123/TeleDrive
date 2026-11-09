@@ -28,8 +28,6 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -874,6 +872,15 @@ fun ThumbnailManagerScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    DesktopScrollEdgeControls(
+                        state = folderListState,
+                        modifier = Modifier.height(36.dp)
+                    )
+                }
                 Box(
                     modifier = Modifier.fillMaxWidth().height(280.dp)
                 ) {
@@ -919,10 +926,6 @@ fun ThumbnailManagerScreen(
                             )
                         }
                     }
-                    DesktopScrollEdgeControls(
-                        state = folderListState,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
-                    )
                     DesktopVerticalScrollbar(
                         state = folderListState,
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
@@ -945,6 +948,10 @@ fun ThumbnailManagerScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                DesktopScrollEdgeControls(
+                    state = fileListState,
+                    modifier = Modifier.height(40.dp)
+                )
             }
             Text(
                 "Each file checkbox selects that item. The Generated / Not generated filter can be changed above without changing any files.",
@@ -1009,10 +1016,6 @@ fun ThumbnailManagerScreen(
                             )
                         }
                     }
-                    DesktopScrollEdgeControls(
-                        state = fileListState,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
-                    )
                     DesktopVerticalScrollbar(
                         state = fileListState,
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
