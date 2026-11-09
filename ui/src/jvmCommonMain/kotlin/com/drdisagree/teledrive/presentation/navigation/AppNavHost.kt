@@ -222,8 +222,12 @@ fun AppNavHost(
                 }
             )
         }
-        composable<Route.CacheManager> {
-            CacheManagerScreen(onBack = { navController.popBackStackOnce() })
+        composable<Route.CacheManager> { entry ->
+            val route = entry.toRoute<Route.CacheManager>()
+            CacheManagerScreen(
+                onBack = { navController.popBackStackOnce() },
+                initialFilter = route.initialFilter
+            )
         }
         composable<Route.Exclusions> {
             ExclusionsScreen(onBack = { navController.popBackStackOnce() })
