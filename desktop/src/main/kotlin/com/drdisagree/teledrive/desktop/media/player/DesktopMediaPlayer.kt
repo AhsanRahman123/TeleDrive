@@ -296,13 +296,20 @@ fun DesktopMediaPlayer(
     // slider nudge to become audible.
     LaunchedEffect(player, mrl, playing, trackTick) {
         if (playing) {
-            delay(AUDIO_OUTPUT_SETTLE_MS)
-            val requestedVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
-            val shouldMute = latestMuted.value || requestedVolume <= 0
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    player.audio().setVolume(requestedVolume)
-                    player.audio().isMute = shouldMute
+            // VLC can announce playback before its audio output is fully attached. A
+            // single early volume call can be lost, especially when Gallery rapidly
+            // switches media. Retry briefly after the stream/playing events settle.
+            repeat(AUDIO_OUTPUT_REAPPLY_ATTEMPTS) {
+                delay(AUDIO_OUTPUT_REAPPLY_INTERVAL_MS)
+                if (!playing) return@LaunchedEffect
+
+                val requestedVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
+                val shouldMute = latestMuted.value || requestedVolume <= 0
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        player.audio().setVolume(requestedVolume)
+                        player.audio().isMute = shouldMute
+                    }
                 }
             }
         }
@@ -1299,7 +1306,8 @@ private const val MAX_VOLUME = 200
 private const val MAX_BRIGHTNESS = 100
 private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_500L
 private const val BRIGHTNESS_READ_GUARD_MS = 1_800L
-private const val AUDIO_OUTPUT_SETTLE_MS = 150L
+private const val AUDIO_OUTPUT_REAPPLY_INTERVAL_MS = 250L
+private const val AUDIO_OUTPUT_REAPPLY_ATTEMPTS = 6
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 
