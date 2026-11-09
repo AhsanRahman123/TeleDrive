@@ -51,7 +51,8 @@ class PartDownloader(
                         emit(
                             PartDownloadEvent.Progress(
                                 written + event.transferredBytes.coerceAtMost(part.plainSize),
-                                event.isDownloadingActive
+                                event.isDownloadingActive,
+                                written + event.speedSampleBytes.coerceAtMost(part.plainSize)
                             )
                         )
 
