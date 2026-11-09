@@ -12,6 +12,7 @@ import it.tdlight.jni.TdApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -37,6 +38,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -1028,12 +1030,28 @@ class DesktopTelegramClient(
                 }
             }
 
-            awaitClose {
-                resumer.cancel()
-                job.cancel()
-                // Closing this flow means this transfer no longer owns the download.
-                // onlyIfPending=true leaves an already-active TDLib request running in the background.
-                client?.send(TdApi.CancelDownloadFile(fileId, false)) { }
+            try {
+                awaitClose {
+                    resumer.cancel()
+                    job.cancel()
+                }
+            } finally {
+                // Wait for TDLib to acknowledge cancellation before the transfer worker is
+                // released, so Resume All cannot race a still-active native download.
+                withContext(NonCancellable) {
+                    val activeClient = client
+                    if (activeClient != null) {
+                        val acknowledged = CompletableDeferred<Unit>()
+                        val sent = runCatching {
+                            activeClient.send(TdApi.CancelDownloadFile(fileId, false)) {
+                                acknowledged.complete(Unit)
+                            }
+                        }.isSuccess
+                        if (sent) {
+                            withTimeoutOrNull(3_000L) { acknowledged.await() }
+                        }
+                    }
+                }
             }
         }.buffer(capacity = 64)
 
