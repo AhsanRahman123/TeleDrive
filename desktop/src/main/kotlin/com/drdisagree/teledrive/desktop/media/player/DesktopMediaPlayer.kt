@@ -65,6 +65,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -111,15 +113,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
@@ -152,7 +146,7 @@ fun DesktopMediaPlayer(
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
     var volume by remember(mrl) { mutableIntStateOf(100) }
-    var brightness by remember(mrl) { mutableIntStateOf(0) }
+    var brightness by remember(mrl) { mutableIntStateOf(100) }
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
     var trackTick by remember { mutableIntStateOf(0) }
@@ -211,122 +205,21 @@ fun DesktopMediaPlayer(
         }
     }
 
-    var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(false) }
-    var brightnessMonitor by remember(mrl) { mutableStateOf("") }
-    var brightnessDragging by remember(mrl) { mutableStateOf(false) }
-    val brightnessUpdates = remember(mrl) { Channel<Float>(Channel.CONFLATED) }
-
-    // Poll the actual monitor brightness so changes made through Monitorian
-    // or compatible Windhawk controls are reflected in TeleDrive.
-    // All DDC/CI calls run off the Compose UI thread.
-    LaunchedEffect(mrl, isAudio, brightnessDragging) {
-        if (isAudio) {
-            brightnessAvailable = false
-            return@LaunchedEffect
-        }
-        if (brightnessDragging) return@LaunchedEffect
-
-        while (isActive) {
-            val reading = withContext(Dispatchers.IO) {
-                WindowsMonitorBrightness.read()
-            }
-            brightnessAvailable = reading != null
-            if (reading != null) {
-                brightness = reading.percent.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
-                brightnessMonitor = reading.monitorDescription
-            }
-            delay(BRIGHTNESS_POLL_INTERVAL_MS)
-        }
-    }
-
-    // One conflated writer serializes DDC/CI requests. Each new slider value
-    // replaces a stale pending value and the latest value is sent immediately.
-    LaunchedEffect(brightnessUpdates) {
-        for (requested in brightnessUpdates) {
-            val applied = withContext(Dispatchers.IO) {
-                WindowsMonitorBrightness.setPercent(requested)
-            }
-            if (applied) {
-                brightnessAvailable = true
-                brightness = requested.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
-            }
-        }
-    }
-    DisposableEffect(brightnessUpdates) {
-        onDispose { brightnessUpdates.cancel() }
-    }
-
     DisposableEffect(playing, isAudio) {
         ScreenAwake.keepAwake(playing && !isAudio)
         onDispose { ScreenAwake.keepAwake(false) }
     }
 
-    // Keep native VLC audio calls off the Compose UI thread. A conflated channel
-    // drops stale intermediate slider positions so the latest drag value is applied
-    // immediately without building a backlog of JNI calls.
-    val audioStateUpdates = remember(player) {
-        Channel<Pair<Int, Boolean>>(Channel.CONFLATED)
-    }
-    val audioMutex = remember(player) { Mutex() }
-    LaunchedEffect(player) {
-        var lastMuteState: Boolean? = null
-        for ((level, shouldMute) in audioStateUpdates) {
-            audioMutex.withLock {
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        player.audio().setVolume(level.coerceIn(0, MAX_VOLUME))
-                        val nextMuteState = shouldMute || level <= 0
-                        // VLC mute is a separate native call. Avoid repeating it for every
-                        // slider tick; only change it when the mute state actually changes.
-                        if (lastMuteState != nextMuteState) {
-                            player.audio().isMute = nextMuteState
-                            lastMuteState = nextMuteState
-                        }
-                    }
-                }
-            }
-        }
-    }
-    DisposableEffect(audioStateUpdates) {
-        onDispose { audioStateUpdates.close() }
-    }
-
     val fullscreenController = LocalFullscreenController.current
-    // Initial native audio setup can block briefly on a newly-created VLC player.
-    // Do it on IO before starting playback, never on Compose's UI thread.
-    LaunchedEffect(player, mrl) {
-        // Media startup is native VLC work too; keep it off the Compose UI thread.
-        // Check cancellation between native calls so an old player cannot start after
-        // a rapid file change has already disposed it.
-        audioMutex.withLock {
-            withContext(Dispatchers.IO) {
-                try {
-                    currentCoroutineContext().ensureActive()
-                    player.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
-                    player.audio().isMute = muted || volume <= 0
-                    currentCoroutineContext().ensureActive()
-                    player.media().play(mrl)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    // VLC reports startup failures through its own player events.
-                }
-            }
-        }
-    }
     DisposableEffect(player, mrl) {
+        player.media().play(mrl)
         onDispose {
-            // Discard queued updates, then serialize teardown behind any native VLC
-            // call already in progress. Releasing VLC on the UI thread caused later
-            // playback opens to become progressively less responsive.
-            audioStateUpdates.cancel()
+            // Release VLC off the Compose UI thread so switching files stays responsive.
             val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             teardownScope.launch {
                 try {
-                    audioMutex.withLock {
-                        runCatching { player.controls().stop() }
-                        runCatching { player.release() }
-                    }
+                    runCatching { player.controls().stop() }
+                    runCatching { player.release() }
                 } finally {
                     teardownScope.cancel()
                 }
@@ -335,15 +228,6 @@ fun DesktopMediaPlayer(
                 if (controller.isFullscreen()) controller.toggle()
             }
         }
-    }
-
-    // VLC can create a fresh audio output in a muted/zero-volume state when
-    // a video is opened directly from Files, Home, or Gallery. Re-apply the
-    // current player state once playback actually starts, and whenever the
-    // user changes volume or mute state. This avoids requiring a slider drag
-    // to initialise the audio output.
-    LaunchedEffect(player, mrl, playing, volume, muted) {
-        if (playing) audioStateUpdates.trySend(volume to muted)
     }
 
     val trackWord = stringResource(Res.string.player_track)
@@ -362,17 +246,19 @@ fun DesktopMediaPlayer(
     }
     val toggleMute: () -> Unit = {
         muted = !muted
-        audioStateUpdates.trySend(volume to muted)
+        player.audio().isMute = muted
     }
     fun setPlayerVolume(value: Int, unmute: Boolean = true) {
         val nextVolume = value.coerceIn(0, MAX_VOLUME)
         volume = nextVolume
+        player.audio().setVolume(nextVolume)
         if (nextVolume == 0) {
             muted = true
+            player.audio().isMute = true
         } else if (unmute) {
             muted = false
+            player.audio().isMute = false
         }
-        audioStateUpdates.trySend(nextVolume to muted)
     }
     fun adjustPlayerVolume(delta: Int) {
         setPlayerVolume(volume + delta, unmute = delta > 0)
@@ -745,7 +631,15 @@ fun DesktopMediaPlayer(
                     bitmap = current,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = scaling.contentScale
+                    contentScale = scaling.contentScale,
+                    colorFilter = remember(brightness) {
+                        val factor = (brightness / 100f).coerceIn(0f, 2f)
+                        ColorFilter.colorMatrix(
+                            ColorMatrix().apply {
+                                setToScale(factor, factor, factor, 1f)
+                            }
+                        )
+                    }
                 )
             }
         }
@@ -770,8 +664,6 @@ fun DesktopMediaPlayer(
                 muted = muted,
                 volume = volume,
                 brightness = brightness,
-                brightnessAvailable = brightnessAvailable,
-                brightnessMonitor = brightnessMonitor,
                 rate = rate,
                 repeatOne = repeatOne,
                 trackTick = trackTick,
@@ -796,12 +688,9 @@ fun DesktopMediaPlayer(
                 onToggleMute = toggleMute,
                 onVolumeChange = { setPlayerVolume(it) },
                 onBrightnessChange = {
-                    val requested = it.coerceIn(0, MAX_BRIGHTNESS)
-                    brightness = requested
-                    brightnessUpdates.trySend(requested.toFloat())
+                    brightness = it.coerceIn(0, MAX_BRIGHTNESS)
                     interactionTick++
                 },
-                onBrightnessDragging = { brightnessDragging = it },
                 onControlsKeepVisible = { controlsPinned = it },
                 onRate = ::setPlaybackRate,
                 onToggleRepeat = {
@@ -831,8 +720,6 @@ private fun PlayerControlsBar(
     muted: Boolean,
     volume: Int,
     brightness: Int,
-    brightnessAvailable: Boolean,
-    brightnessMonitor: String,
     rate: Float,
     repeatOne: Boolean,
     trackTick: Int,
@@ -847,7 +734,6 @@ private fun PlayerControlsBar(
     onToggleMute: () -> Unit,
     onVolumeChange: (Int) -> Unit,
     onBrightnessChange: (Int) -> Unit,
-    onBrightnessDragging: (Boolean) -> Unit,
     onControlsKeepVisible: (Boolean) -> Unit,
     onRate: (Float) -> Unit,
     onToggleRepeat: () -> Unit,
@@ -965,14 +851,10 @@ private fun PlayerControlsBar(
                 onActiveChange = { volumeSliderActive = it }
             )
 
-            if (!isAudio && brightnessAvailable) {
+            if (!isAudio) {
                 PlayerAutoHideSlider(
                     icon = Icons.Filled.Brightness6,
-                    contentDescription = if (brightnessMonitor.isBlank()) {
-                        "Display brightness"
-                    } else {
-                        "Display brightness: $brightnessMonitor"
-                    },
+                    contentDescription = "Video brightness",
                     value = brightness.toFloat(),
                     valueRange = 0f..MAX_BRIGHTNESS.toFloat(),
                     autoHide = controlPreferences.autoHideBrightnessSlider,
@@ -982,7 +864,6 @@ private fun PlayerControlsBar(
                         onInteraction()
                         onBrightnessChange(value.roundToInt())
                     },
-                    onDraggingChange = onBrightnessDragging,
                     onActiveChange = { brightnessSliderActive = it },
                     expandOnClick = true
                 )
