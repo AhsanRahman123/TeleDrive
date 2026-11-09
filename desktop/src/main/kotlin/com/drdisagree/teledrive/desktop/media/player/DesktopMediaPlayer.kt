@@ -1295,7 +1295,7 @@ private const val VOLUME_STEP = 5
 private const val MAX_VOLUME = 200
 private const val MAX_BRIGHTNESS = 100
 private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_000L
-private const val BRIGHTNESS_WRITE_DEBOUNCE_MS = 90L
+private const val BRIGHTNESS_WRITE_DEBOUNCE_MS = 35L
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 
