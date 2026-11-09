@@ -58,6 +58,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
@@ -158,6 +159,10 @@ fun DesktopMediaPlayer(
     var interactionTick by remember { mutableIntStateOf(0) }
     var controlsPinned by remember { mutableStateOf(false) }
     var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
+    // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
+    // a play/resume event cannot reapply the initial 100% / unmuted values.
+    val latestVolume = rememberUpdatedState(volume)
+    val latestMuted = rememberUpdatedState(muted)
 
     val player = remember(mrl, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
@@ -170,8 +175,9 @@ fun DesktopMediaPlayer(
                     // VLC may create its audio output after the initial media.play() call.
                     // Reapply the current output state at the actual playing event as well.
                     runCatching {
-                        mediaPlayer.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
-                        mediaPlayer.audio().isMute = muted || volume <= 0
+                        val currentVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
+                        mediaPlayer.audio().setVolume(currentVolume)
+                        mediaPlayer.audio().isMute = latestMuted.value || currentVolume <= 0
                     }
                     trackTick++
                 }
@@ -293,8 +299,8 @@ fun DesktopMediaPlayer(
     LaunchedEffect(player, mrl, playing, trackTick) {
         if (playing) {
             delay(AUDIO_OUTPUT_SETTLE_MS)
-            val requestedVolume = volume.coerceIn(0, MAX_VOLUME)
-            val shouldMute = muted || requestedVolume <= 0
+            val requestedVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
+            val shouldMute = latestMuted.value || requestedVolume <= 0
             withContext(Dispatchers.IO) {
                 runCatching {
                     player.audio().setVolume(requestedVolume)
