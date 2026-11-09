@@ -130,7 +130,7 @@ fun CacheManagerScreen(
     LaunchedEffect(Unit) {
         settingsViewModel.deleteConsentRequests.collect { request ->
             deleteConsentLauncher.launch(request) { granted ->
-                if (granted) settingsViewModel.freeUpSpace()
+                if (granted) settingsViewModel.retryLocalCopyRemoval()
             }
         }
     }
