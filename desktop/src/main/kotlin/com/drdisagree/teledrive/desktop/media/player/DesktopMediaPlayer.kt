@@ -170,13 +170,14 @@ fun DesktopMediaPlayer(
                     playing = true
                     finished = false
                     buffering = false
-                    // VLC may create its audio output after the initial media.play() call.
-                    // Reapply the current output state at the actual playing event as well.
-                    runCatching {
-                        val currentVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
-                        mediaPlayer.audio().setVolume(currentVolume)
-                        mediaPlayer.audio().isMute = latestMuted.value || currentVolume <= 0
-                    }
+                    // Do not call LibVLC from this native callback thread. The event thread
+                    // must return immediately; volume restoration is queued below via submit().
+                    trackTick++
+                }
+
+                override fun audioDeviceChanged(mediaPlayer: MediaPlayer, audioDevice: String) {
+                    // Windows can replace the default output when USB/Bluetooth earphones are
+                    // attached. Only publish a state tick here; never call LibVLC in this callback.
                     trackTick++
                 }
 
@@ -291,26 +292,18 @@ fun DesktopMediaPlayer(
         }
     }
 
-    // VLC can report playback before its audio output has fully attached. Reapply the
-    // saved level after the playing/track events so Gallery launches never need a manual
-    // slider nudge to become audible.
+    // Volume/mute restoration is submitted to vlcj's serialized player executor.
+    // Never call AudioApi directly from an event callback or the Compose UI thread: audio
+    // device hot-plug on Windows can temporarily hold native LibVLC audio locks.
     LaunchedEffect(player, mrl, playing, trackTick) {
         if (playing) {
-            // VLC can announce playback before its audio output is fully attached. A
-            // single early volume call can be lost, especially when Gallery rapidly
-            // switches media. Retry briefly after the stream/playing events settle.
             repeat(AUDIO_OUTPUT_REAPPLY_ATTEMPTS) {
                 delay(AUDIO_OUTPUT_REAPPLY_INTERVAL_MS)
                 if (!playing) return@LaunchedEffect
-
-                val requestedVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
-                val shouldMute = latestMuted.value || requestedVolume <= 0
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        player.audio().setVolume(requestedVolume)
-                        player.audio().isMute = shouldMute
-                    }
-                }
+                player.submitAudioState(
+                    latestVolume.value.coerceIn(0, MAX_VOLUME),
+                    latestMuted.value
+                )
             }
         }
     }
