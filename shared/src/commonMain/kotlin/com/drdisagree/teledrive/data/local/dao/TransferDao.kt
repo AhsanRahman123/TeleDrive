@@ -119,7 +119,7 @@ interface TransferDao {
 
     @Query(
         """UPDATE transfers SET transferredBytes = :transferred, speedBytesPerSecond = :speed,
-           updatedAt = :updatedAt WHERE id = :id"""
+           updatedAt = :updatedAt WHERE id = :id AND state = 'RUNNING'"""
     )
     suspend fun updateProgress(id: String, transferred: Long, speed: Long, updatedAt: Long)
 
