@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.presentation.transfers
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -301,6 +302,10 @@ fun TransfersScreen(
                 TransferRow(transfer = transfer, modifier = itemModifier(transfer))
             }
         }
+DesktopScrollEdgeControls(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                    )
                 DesktopVerticalScrollbar(
                     state = listState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
