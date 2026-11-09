@@ -3,7 +3,7 @@ package com.drdisagree.teledrive.desktop.media.player
 import java.util.prefs.Preferences
 
 internal data class PlayerControlPreferences(
-    val autoHideVolumeSlider: Boolean = true,
+    val autoHideVolumeSlider: Boolean = false,
     val autoHideBrightnessSlider: Boolean = false,
     val autoHidePlayerControls: Boolean = false,
     val showPlayerControls: Boolean = true,
@@ -18,7 +18,7 @@ internal object PlayerControlPreferencesStore {
 
     fun load(): PlayerControlPreferences = runCatching {
         PlayerControlPreferences(
-            autoHideVolumeSlider = preferences.getBoolean(KEY_AUTO_HIDE_VOLUME, true),
+            autoHideVolumeSlider = preferences.getBoolean(KEY_AUTO_HIDE_VOLUME, false),
             autoHideBrightnessSlider = preferences.getBoolean(KEY_AUTO_HIDE_BRIGHTNESS, false),
             autoHidePlayerControls = preferences.getBoolean(KEY_AUTO_HIDE_PLAYER_CONTROLS, false),
             showPlayerControls = preferences.getBoolean(KEY_SHOW_PLAYER_CONTROLS, true),
