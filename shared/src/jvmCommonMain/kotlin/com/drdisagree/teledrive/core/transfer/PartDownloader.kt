@@ -87,12 +87,12 @@ class PartDownloader(
 
             written += part.plainSize
             emit(
-            PartDownloadEvent.Progress(
-                transferredBytes = written,
-                isDownloadingActive = false,
-                speedSampleBytes = written
+                PartDownloadEvent.Progress(
+                    transferredBytes = written,
+                    isDownloadingActive = false,
+                    speedSampleBytes = written
+                )
             )
-        )
         }
 
         emit(PartDownloadEvent.Completed(target.token))
