@@ -332,6 +332,8 @@ fun TransfersScreen(
                 }.toList()
 
         val visibleActive = filterAndSort(state.active)
+        val runningCount = visibleActive.count { it.state == TransferState.RUNNING }
+        val queuedCount = visibleActive.count { it.state == TransferState.QUEUED }
         val visiblePaused = filterAndSort(state.paused)
         val visibleFailed = filterAndSort(state.failed)
         val visibleCompleted = filterAndSort(state.completed)
@@ -474,8 +476,18 @@ fun TransfersScreen(
                             },
                             enabled = visibleIds.isNotEmpty()
                         )
-                        Text("${visibleIds.size} shown · ${selectedTransferIds.intersect(visibleIds).size} selected",
-                            modifier = Modifier.weight(1f))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "${visibleIds.size} shown · ${selectedTransferIds.intersect(visibleIds).size} selected"
+                            )
+                            if (visibleActive.isNotEmpty()) {
+                                Text(
+                                    "${runningCount} running · ${queuedCount} queued · max ${transferConcurrency}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         TextButton(onClick = {
                             selectedTransferIds = if (allVisibleSelected) {
                                 selectedTransferIds - visibleIds
@@ -781,6 +793,17 @@ private fun TransferRow(
                             )
                             append(" · ")
                             append(Formatters.bytes(transfer.sizeBytes))
+                            append(" · ")
+                            append(
+                                when (transfer.state) {
+                                    TransferState.QUEUED -> "Queued"
+                                    TransferState.RUNNING -> "Running"
+                                    TransferState.PAUSED -> "Paused"
+                                    TransferState.FAILED -> "Failed"
+                                    TransferState.COMPLETED -> "Completed"
+                                    TransferState.CANCELLED -> "Canceled"
+                                }
+                            )
                             transfer.errorMessage?.let {
                                 append(" · ")
                                 append(it)
