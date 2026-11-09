@@ -214,6 +214,7 @@ fun AppNavHost(
                 onBack = { navController.popBackStackOnce() },
                 onOpenExclusions = { navController.navigateOnce(Route.Exclusions) },
                 onOpenProxy = { navController.navigateOnce(Route.Proxy) },
+                onOpenCacheManager = { navController.navigateOnce(Route.CacheManager) },
                 onLoggedOut = {
                     navController.navigateOnce(Route.Onboarding) {
                         popUpTo(0) { inclusive = true }
