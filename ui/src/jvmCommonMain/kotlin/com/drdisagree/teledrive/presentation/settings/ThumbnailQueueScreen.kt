@@ -308,6 +308,22 @@ fun ThumbnailQueueScreen(
                     color = MaterialTheme.colorScheme.primary
                 )
 
+                if (failedQueueIds.isNotEmpty()) {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            val failedIds = failedQueueIds.toList()
+                            scope.launch {
+                                repository.retryThumbnailJobs(failedIds)
+                                selectedIds = selectedIds - failedIds.toSet()
+                                offset = 0
+                            }
+                        }
+                    ) {
+                        Text("Retry all failed (${failedQueueIds.size})")
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
