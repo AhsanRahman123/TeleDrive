@@ -166,10 +166,10 @@ fun CacheManagerScreen(
                 Card(modifier = Modifier.weight(1f)) {
                     Column(Modifier.padding(14.dp)) {
                         Text("Individually selectable", style = MaterialTheme.typography.labelMedium)
-                        Text(Formatters.bytes(summary.previewBytes + summary.streamBytes + summary.tempBytes),
+                        Text(Formatters.bytes(summary.previewBytes + summary.streamBytes + summary.tempBytes + summary.thumbnailBytes),
                             style = MaterialTheme.typography.headlineSmall)
                         Text(
-                            "${summary.entryCount} entries · previews, streams and temporary files",
+                            "${summary.entryCount} entries · thumbnails, previews, streams and temporary files",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -178,7 +178,7 @@ fun CacheManagerScreen(
             }
 
             Text(
-                "Thumbnail previews are managed separately in Thumbnail Manager. This page lets you inspect and remove other indexed cache entries without wiping everything.",
+                "Thumbnail previews are included here for selective cleanup. Use Thumbnail Manager for generation policies and queue controls.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -192,7 +192,7 @@ fun CacheManagerScreen(
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("ALL", "PREVIEW", "STREAM", "TEMP").forEach { filter ->
+                listOf("ALL", "THUMBNAIL", "PREVIEW", "STREAM", "TEMP").forEach { filter ->
                     FilterChip(
                         selected = typeFilter == filter,
                         onClick = {
