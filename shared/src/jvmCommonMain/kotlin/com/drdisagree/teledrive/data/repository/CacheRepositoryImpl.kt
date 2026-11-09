@@ -602,8 +602,12 @@ class CacheRepositoryImpl(
     override suspend fun generateFolderThumbnails(folderId: String?): ThumbnailEnqueueResult {
         var afterAddedAt: Long? = null
         var afterFileId: String? = null
-        var newlyQueued = 0
-        var alreadyQueued = 0
+        val missingIds = mutableListOf<String>()
+
+        // Take the complete missing-file snapshot before starting any workers.
+        // Previously each page was enqueued while the next page was still being queried.
+        // Workers could finish and mutate the thumbnails table during that scan, making
+        // a long folder operation depend on concurrent generation timing.
         while (true) {
             val page = if (folderId == null) {
                 thumbnailDao.unfiledFileIdsPage(
@@ -622,25 +626,33 @@ class CacheRepositoryImpl(
                 )
             }
             if (page.isEmpty()) break
-            val pageIds = page.map { it.fileId }
-            val existingIds = thumbnailJobDao.existingFileIds(pageIds).toSet()
-            newlyQueued += pageIds.count { it !in existingIds }
-            alreadyQueued += existingIds.size
-            thumbnailPolicyDao.clearQueueItemPauses(pageIds)
-            thumbnailStore.enqueueManual(pageIds)
+            missingIds += page.map { it.fileId }
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
-        return ThumbnailEnqueueResult(newlyQueued, alreadyQueued)
+
+        val ids = missingIds.distinct()
+        if (ids.isEmpty()) return ThumbnailEnqueueResult()
+        var alreadyQueued = 0
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            alreadyQueued += thumbnailJobDao.existingFileIds(batch).size
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
+        }
+        // One durable manual batch means the queue starts only after the full target set
+        // has been discovered; the store itself inserts safely in SQLite-sized chunks.
+        thumbnailStore.enqueueManual(ids)
+        return ThumbnailEnqueueResult(
+            newlyQueued = (ids.size - alreadyQueued).coerceAtLeast(0),
+            alreadyQueued = alreadyQueued
+        )
     }
 
     override suspend fun generateAllThumbnails(): ThumbnailEnqueueResult {
         var afterAddedAt: Long? = null
         var afterFileId: String? = null
-        var newlyQueued = 0
-        var alreadyQueued = 0
+        val missingIds = mutableListOf<String>()
         while (true) {
             val page = thumbnailDao.allEligibleFileIdsPage(
                 onlyMissing = true,
@@ -649,18 +661,25 @@ class CacheRepositoryImpl(
                 limit = JOB_BATCH_SIZE
             )
             if (page.isEmpty()) break
-            val pageIds = page.map { it.fileId }
-            val existingIds = thumbnailJobDao.existingFileIds(pageIds).toSet()
-            newlyQueued += pageIds.count { it !in existingIds }
-            alreadyQueued += existingIds.size
-            thumbnailPolicyDao.clearQueueItemPauses(pageIds)
-            thumbnailStore.enqueueManual(pageIds)
+            missingIds += page.map { it.fileId }
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
-        return ThumbnailEnqueueResult(newlyQueued, alreadyQueued)
+
+        val ids = missingIds.distinct()
+        if (ids.isEmpty()) return ThumbnailEnqueueResult()
+        var alreadyQueued = 0
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            alreadyQueued += thumbnailJobDao.existingFileIds(batch).size
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
+        }
+        thumbnailStore.enqueueManual(ids)
+        return ThumbnailEnqueueResult(
+            newlyQueued = (ids.size - alreadyQueued).coerceAtLeast(0),
+            alreadyQueued = alreadyQueued
+        )
     }
 
     override suspend fun thumbnailQueue(
