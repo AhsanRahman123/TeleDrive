@@ -79,6 +79,9 @@ sealed interface Route {
     data class SettingsSection(val section: String) : Route
 
     @Serializable
+    data object CacheManager : Route
+
+    @Serializable
     data object Exclusions : Route
 
     @Serializable
