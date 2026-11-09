@@ -142,9 +142,9 @@ class SearchViewModel(
         rangeBase = selection.value
     }
 
-    fun extendRangeSelection(ids: List<String>) {
+    fun extendRangeSelection(ids: List<String>, shouldSelect: Boolean) {
         val base = rangeBase ?: return
-        selection.update { base + ids }
+        selection.update { if (shouldSelect) base + ids else base - ids.toSet() }
     }
 
     fun endRangeSelection() {
