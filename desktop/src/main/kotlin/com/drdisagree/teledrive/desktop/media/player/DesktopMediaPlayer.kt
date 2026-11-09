@@ -255,7 +255,9 @@ fun DesktopMediaPlayer(
         }
     }
 
-    var brightnessAvailable by remember { mutableStateOf(false) }
+    // Render the physical brightness control immediately for video. A successful DDC/CI
+    // read will synchronize its value, but an initial transient read failure must not hide it.
+    var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(!isAudio) }
     var brightnessMonitor by remember { mutableStateOf("") }
     var brightnessDragging by remember(mrl) { mutableStateOf(false) }
     var brightnessLastInputAt by remember(mrl) { mutableLongStateOf(0L) }
