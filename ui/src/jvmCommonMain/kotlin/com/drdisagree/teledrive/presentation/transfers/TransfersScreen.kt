@@ -157,12 +157,12 @@ fun TransfersScreen(
             title = { Text("Transfer concurrency") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Maximum simultaneous Telegram transfer jobs: $concurrencyDraft of 6")
+                    Text("Maximum simultaneous Telegram transfer jobs: $concurrencyDraft of 3")
                     Slider(
                         value = concurrencyDraft.toFloat(),
-                        onValueChange = { concurrencyDraft = it.toInt().coerceIn(1, 6) },
-                        valueRange = 1f..6f,
-                        steps = 4
+                        onValueChange = { concurrencyDraft = it.toInt().coerceIn(1, 3) },
+                        valueRange = 1f..3f,
+                        steps = 1
                     )
                     Text(
                         "This controls how many queued transfers may run at once. Raising it can use more bandwidth and disk activity.",
