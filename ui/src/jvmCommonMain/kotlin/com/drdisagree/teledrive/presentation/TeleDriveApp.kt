@@ -81,7 +81,6 @@ import com.drdisagree.teledrive.core.files.PendingShare
 import com.drdisagree.teledrive.domain.model.AppLanguage
 import com.drdisagree.teledrive.domain.model.AppTheme
 import com.drdisagree.teledrive.presentation.applock.LockScreen
-import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.LocalCompactLayout
 import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.components.SessionBrokenDialog
@@ -177,7 +176,11 @@ fun TeleDriveApp(
             LocalCompactLayout provides state.compactLayout
         ) {
             when {
-                state.loading -> LoadingState()
+                state.loading -> Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                )
                 state.locked -> LockScreen(onUnlocked = viewModel::unlock)
                 else -> MainScaffold(
                     pendingShare = pendingShare,

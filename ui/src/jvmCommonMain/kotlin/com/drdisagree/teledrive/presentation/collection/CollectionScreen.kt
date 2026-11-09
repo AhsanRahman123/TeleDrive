@@ -60,13 +60,13 @@ import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FolderRow
-import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
 import com.drdisagree.teledrive.presentation.components.keyboardCollectionItem
 import com.drdisagree.teledrive.presentation.components.liftedTopAppBarColors
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollection
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
+import com.drdisagree.teledrive.presentation.components.skeleton.CollectionSkeleton
 import com.drdisagree.teledrive.presentation.preview.PreviewSequence
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.collection_empty_title
@@ -279,7 +279,15 @@ fun CollectionScreen(
         }
     ) { padding ->
         if (files.isInitialLoad) {
-            LoadingState()
+            CollectionSkeleton(
+                columns = 1,
+                contentPadding = PaddingValues(
+                    start = 8.dp,
+                    end = 8.dp,
+                    top = 8.dp + padding.calculateTopPadding(),
+                    bottom = 8.dp + padding.calculateBottomPadding()
+                )
+            )
             return@Scaffold
         }
         if (files.itemCount == 0 && folders.isEmpty()) {

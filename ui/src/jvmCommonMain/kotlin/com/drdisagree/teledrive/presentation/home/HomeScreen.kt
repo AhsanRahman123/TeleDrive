@@ -98,7 +98,6 @@ import com.drdisagree.teledrive.presentation.components.ConnectionIndicator
 import com.drdisagree.teledrive.presentation.components.DriveAvatarSwitcher
 import com.drdisagree.teledrive.presentation.components.FileThumbnail
 import com.drdisagree.teledrive.presentation.components.GroupedList
-import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.PermissionWarningCard
 import com.drdisagree.teledrive.presentation.components.chartColor
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
@@ -183,6 +182,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val sections by viewModel.sections.collectAsStateWithLifecycle()
     var lastConnectionStatus by remember { mutableStateOf<ConnectionStatus?>(null) }
     val scanning by viewModel.scanning.collectAsStateWithLifecycle()
     val pendingSync by viewModel.pendingSync.collectAsStateWithLifecycle()
@@ -294,7 +294,15 @@ fun HomeScreen(
         }
     ) { padding ->
         if (state.loading) {
-            LoadingState(modifier = Modifier.padding(padding))
+            HomeSkeleton(
+                sections = sections,
+                showBackupCard = capabilities.supportsAutoBackup,
+                contentPadding = padding.add(
+                    horizontal = 16.dp,
+                    top = 8.dp,
+                    bottom = 24.dp + LocalBottomBarInset.current
+                )
+            )
             return@Scaffold
         }
         Box(modifier = Modifier.fillMaxSize()) {

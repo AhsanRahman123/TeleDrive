@@ -66,13 +66,13 @@ import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FolderRow
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
 import com.drdisagree.teledrive.presentation.components.keyboardCollectionItem
-import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.MenuAction
 import com.drdisagree.teledrive.presentation.components.label
 import com.drdisagree.teledrive.presentation.components.liftedTopAppBarColors
 import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollection
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
+import com.drdisagree.teledrive.presentation.components.skeleton.CollectionSkeleton
 import com.drdisagree.teledrive.presentation.preview.PreviewSequence
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.app_backed_up
@@ -258,6 +258,7 @@ fun SearchScreen(
                     )
                 }
 
+<<<<<<< HEAD
             val commandFocusRequester = rememberCollectionCommandFocusRequester()
             Box(
                 modifier = Modifier
@@ -272,6 +273,18 @@ fun SearchScreen(
             ) {
                 when {
                 state.searching -> LoadingState()
+=======
+            when {
+                state.searching -> CollectionSkeleton(
+                    columns = 1,
+                    contentPadding = PaddingValues(
+                        start = 12.dp,
+                        end = 12.dp,
+                        top = 12.dp,
+                        bottom = 12.dp + padding.calculateBottomPadding()
+                    )
+                )
+>>>>>>> babce817 (Show shimmer skeletons that match each screen's layout while it loads)
                 !state.searched -> EmptyState(
                     icon = Icons.Outlined.Search,
                     title = stringResource(Res.string.app_search_drive),
