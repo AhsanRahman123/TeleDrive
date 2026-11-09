@@ -820,13 +820,16 @@ private fun TransferRow(
                             append(Formatters.bytes(transfer.sizeBytes))
                             append(" · ")
                             append(
-                                when (transfer.state) {
-                                    TransferState.QUEUED -> "Queued"
-                                    TransferState.RUNNING -> "Running"
-                                    TransferState.PAUSED -> "Paused"
-                                    TransferState.FAILED -> "Failed"
-                                    TransferState.COMPLETED -> "Completed"
-                                    TransferState.CANCELLED -> "Canceled"
+                                when {
+                                    transfer.state == TransferState.QUEUED -> "Queued"
+                                    transfer.state == TransferState.RUNNING &&
+                                        System.currentTimeMillis() - transfer.updatedAt > SPEED_STALE_AFTER_MS ->
+                                        "Waiting for Telegram"
+                                    transfer.state == TransferState.RUNNING -> "Running"
+                                    transfer.state == TransferState.PAUSED -> "Paused"
+                                    transfer.state == TransferState.FAILED -> "Failed"
+                                    transfer.state == TransferState.COMPLETED -> "Completed"
+                                    else -> "Canceled"
                                 }
                             )
                             transfer.errorMessage?.let {
