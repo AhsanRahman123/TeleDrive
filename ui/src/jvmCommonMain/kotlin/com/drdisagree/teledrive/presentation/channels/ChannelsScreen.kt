@@ -256,7 +256,7 @@ fun ChannelsScreen(
                 )
             }
         }
-DesktopScrollEdgeControls(
+                DesktopScrollEdgeControls(
                     state = listState,
                     modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
                     )
