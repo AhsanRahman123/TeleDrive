@@ -213,7 +213,7 @@ class TransferQueueDrainer(
     }
 
     private companion object {
-        const val MAX_CONCURRENCY = 6
+        const val MAX_CONCURRENCY = 3
         const val SLOT_WAIT_MS = 5_000L
         const val IDLE_POLL_MS = 1_000L
         const val BASE_BACKOFF_SECONDS = 2
