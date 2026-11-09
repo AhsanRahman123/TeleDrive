@@ -1001,7 +1001,8 @@ class DesktopTelegramClient(
                 TelegramDownloadEvent.Progress(
                     lastDownloaded,
                     lastTotal,
-                    started.local?.isDownloadingActive ?: true
+                    started.local?.isDownloadingActive ?: true,
+                    started.local?.downloadedPrefixSize ?: lastDownloaded
                 )
             )
 
@@ -1026,7 +1027,8 @@ class DesktopTelegramClient(
                     TelegramDownloadEvent.Progress(
                         downloaded,
                         total,
-                        local?.isDownloadingActive ?: true
+                        local?.isDownloadingActive ?: true,
+                        local?.downloadedPrefixSize ?: downloaded
                     )
                 )
                 lastDownloaded = downloaded
