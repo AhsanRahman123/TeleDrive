@@ -282,6 +282,14 @@ class SettingsViewModel(
         _messages.tryEmit(UiText.Resource(Res.string.settings_free_up_none))
     }
 
+    /**
+     * Retries local-copy cleanup after the platform has granted the requested delete permission.
+     * The first attempt returns before removing files when the OS requires user consent.
+     */
+    fun retryLocalCopyRemoval() {
+        freeUpSpace()
+    }
+
     fun freeUpSpace() {
         viewModelScope.launch {
             when (val result = fileRepository.freeUpSpace()) {
