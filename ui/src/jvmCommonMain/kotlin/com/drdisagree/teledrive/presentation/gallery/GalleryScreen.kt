@@ -289,7 +289,7 @@ private fun AlbumGrid(
                 albums.getOrNull(index)?.folderId?.let(selectedAlbumIds::contains) == true
             },
             onRange = onRange,
-            onEnd = onEnd
+            onEnd = onEndRange
         )
         val keyboard = rememberKeyboardCollection(listState)
         Box(modifier = Modifier.fillMaxSize()) {
@@ -348,7 +348,7 @@ private fun AlbumGrid(
                 albums.getOrNull(index)?.folderId?.let(selectedAlbumIds::contains) == true
             },
             onRange = onRange,
-            onEnd = onEnd
+            onEnd = onEndRange
         )
         val keyboard = rememberKeyboardCollection(gridState, columns)
         Box(modifier = Modifier.fillMaxSize()) {
@@ -813,11 +813,10 @@ fun GalleryScreen(
                             }
                         }
                         IconButton(onClick = viewModel::startSelectionMode) {
-                                Icon(
-                                    Icons.Filled.CheckBoxOutlineBlank,
-                                    contentDescription = stringResource(Res.string.common_select)
-                                )
-                            }
+                            Icon(
+                                Icons.Filled.CheckBoxOutlineBlank,
+                                contentDescription = stringResource(Res.string.common_select)
+                            )
                         }
                         IconButton(onClick = onViewThumbnailQueue) {
                             Icon(
@@ -847,69 +846,6 @@ fun GalleryScreen(
                                 )
                             )
                         }
-                        IconButton(onClick = { showSortMenu = true }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Sort,
-                                contentDescription = stringResource(Res.string.files_sort)
-                            )
-                        }
-                        SortMenu(
-                            expanded = showSortMenu,
-                            current = state.sortField,
-                            direction = state.sortDirection,
-                            onDismiss = { showSortMenu = false },
-                            onSelect = { field, direction ->
-                                showSortMenu = false
-                                viewModel.setSort(field, direction)
-                            },
-                            fields = if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
-                                listOf(
-                                    FileSortField.NAME,
-                                    FileSortField.SIZE,
-                                    FileSortField.DATE_MODIFIED
-                                )
-                            } else {
-                                FileSortField.entries
-                            }
-                        )
-                        RefreshAction(refreshing = refreshing, onRefresh = viewModel::refresh)
-            if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
-                            IconButton(onClick = { showCreateAlbum = true }) {
-                                Icon(
-                                    Icons.Filled.CreateNewFolder,
-                                    contentDescription = stringResource(Res.string.gallery_new_album)
-                                )
-                            }
-                        }
-                        IconButton(onClick = viewModel::startSelectionMode) {
-                                Icon(
-                                    Icons.Filled.CheckBoxOutlineBlank,
-                                    contentDescription = stringResource(Res.string.common_select)
-                                )
-                            }
-                        }
-                            IconButton(
-                                onClick = {
-                                    viewModel.setViewMode(
-                                        if (state.viewMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
-                                    )
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = if (state.viewMode == ViewMode.GRID) {
-                                        Icons.Filled.ViewList
-                                    } else {
-                                        Icons.Filled.GridView
-                                    },
-                                    contentDescription = stringResource(
-                                        if (state.viewMode == ViewMode.GRID) {
-                                            Res.string.gallery_view_list
-                                        } else {
-                                            Res.string.gallery_view_grid
-                                        }
-                                    )
-                                )
-                            }
                         IconButton(onClick = { showSortMenu = true }) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Sort,
