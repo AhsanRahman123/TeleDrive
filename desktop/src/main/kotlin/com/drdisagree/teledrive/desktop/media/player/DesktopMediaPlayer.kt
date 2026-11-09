@@ -181,8 +181,9 @@ fun DesktopMediaPlayer(
 
                 override fun audioDeviceChanged(mediaPlayer: MediaPlayer, audioDevice: String) {
                     // Windows can replace the default output when USB/Bluetooth earphones are
-                    // attached. Only publish a state tick here; never call LibVLC in this callback.
-                    trackTick++
+                    // attached. Publish the state change on Compose's dispatcher, and never
+                    // call LibVLC from this native callback.
+                    playerScope.launch { trackTick++ }
                 }
 
                 override fun elementaryStreamAdded(
