@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -48,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.repository.CacheEntryUsage
 import com.drdisagree.teledrive.domain.repository.CacheFolderUsage
@@ -625,10 +627,17 @@ private fun CacheEntryRow(
 ) {
     Card {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(
+                    value = selected,
+                    role = Role.Checkbox,
+                    onValueChange = onSelected
+                )
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Checkbox(checked = selected, onCheckedChange = onSelected)
+            Checkbox(checked = selected, onCheckedChange = null)
             Column(Modifier.weight(1f)) {
                 Text(entry.name, style = MaterialTheme.typography.bodyLarge)
                 Text(
