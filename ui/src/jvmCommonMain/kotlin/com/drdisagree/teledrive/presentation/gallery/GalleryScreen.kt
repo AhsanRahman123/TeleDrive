@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Storage
@@ -656,6 +657,12 @@ fun GalleryScreen(
                                 )
                             }
                             val actions = buildList {
+                                add(
+                                    MenuAction(
+                                        label = "Generate thumbnails",
+                                        icon = Icons.Filled.Image
+                                    ) { viewModel.generateThumbnailsSelected() }
+                                )
                                 add(
                                     MenuAction(
                                         label = stringResource(Res.string.common_share),
