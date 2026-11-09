@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Storage
@@ -183,6 +184,7 @@ import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileGridItem
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.LoadingState
@@ -302,6 +304,10 @@ private fun AlbumGrid(
                 )
             }
             }
+            DesktopScrollEdgeControls(
+                state = listState,
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+            )
             DesktopVerticalScrollbar(
                 state = listState,
                 modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
@@ -341,6 +347,10 @@ private fun AlbumGrid(
                 )
             }
             }
+            DesktopScrollEdgeControls(
+                state = gridState,
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+            )
             DesktopVerticalScrollbar(
                 state = gridState,
                 modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
@@ -358,6 +368,7 @@ fun GalleryScreen(
     onOpenAlbum: (MediaAlbum) -> Unit = {},
     onBack: (() -> Unit)? = null,
     onOpenTransfers: () -> Unit = {},
+    onViewThumbnailQueue: () -> Unit = {},
     viewModel: GalleryViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -662,6 +673,12 @@ fun GalleryScreen(
                                         label = "Generate thumbnails",
                                         icon = Icons.Filled.Image
                                     ) { viewModel.generateThumbnailsSelected() }
+                                )
+                                add(
+                                    MenuAction(
+                                        label = "View thumbnail queue",
+                                        icon = Icons.Filled.Refresh
+                                    ) { onViewThumbnailQueue() }
                                 )
                                 add(
                                     MenuAction(
@@ -1183,6 +1200,10 @@ fun GalleryScreen(
                             }
                         }
                     }
+                        DesktopScrollEdgeControls(
+                            state = mediaListState,
+                            modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                        )
                         DesktopVerticalScrollbar(
                             state = mediaListState,
                             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
@@ -1262,6 +1283,10 @@ fun GalleryScreen(
                             }
                         }
                     }
+                        DesktopScrollEdgeControls(
+                            state = mediaGridState,
+                            modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                        )
                         DesktopVerticalScrollbar(
                             state = mediaGridState,
                             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
