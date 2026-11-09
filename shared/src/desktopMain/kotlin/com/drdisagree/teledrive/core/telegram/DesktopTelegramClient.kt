@@ -1031,7 +1031,9 @@ class DesktopTelegramClient(
             awaitClose {
                 resumer.cancel()
                 job.cancel()
-                client?.send(TdApi.CancelDownloadFile(fileId, true)) { }
+                // Closing this flow means this transfer no longer owns the download.
+                // onlyIfPending=true leaves an already-active TDLib request running in the background.
+                client?.send(TdApi.CancelDownloadFile(fileId, false)) { }
             }
         }.buffer(capacity = 64)
 
