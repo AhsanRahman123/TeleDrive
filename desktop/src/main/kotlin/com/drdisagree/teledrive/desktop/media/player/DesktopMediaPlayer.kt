@@ -107,6 +107,9 @@ import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -282,11 +285,19 @@ fun DesktopMediaPlayer(
     // Do it on IO before starting playback, never on Compose's UI thread.
     LaunchedEffect(player, mrl) {
         // Media startup is native VLC work too; keep it off the Compose UI thread.
+        // Check cancellation between native calls so an old player cannot start after
+        // a rapid file change has already disposed it.
         withContext(Dispatchers.IO) {
-            runCatching {
+            try {
+                currentCoroutineContext().ensureActive()
                 player.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
                 player.audio().isMute = muted || volume <= 0
+                currentCoroutineContext().ensureActive()
                 player.media().play(mrl)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // VLC reports startup failures through its own player events.
             }
         }
     }
