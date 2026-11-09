@@ -36,6 +36,7 @@ import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -111,7 +112,9 @@ class TransferExecutor(
                 send(received.getOrThrow())
             }
         } finally {
-            producer.cancel()
+            // Wait for the underlying TDLib flow's awaitClose cleanup before releasing
+            // this worker slot. Otherwise Resume All can race a still-active native request.
+            producer.cancelAndJoin()
         }
     }
 
