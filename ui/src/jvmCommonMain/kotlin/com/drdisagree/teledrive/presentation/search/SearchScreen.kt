@@ -131,8 +131,9 @@ fun SearchScreen(
     val dragSelect = rememberDragSelect(
         listState = listState,
         onStart = viewModel::startRangeSelection,
-        onRange = { range ->
-            viewModel.extendRangeSelection(range.mapNotNull(fileIdAt))
+        isSelected = { index -> fileIdAt(index)?.let(state.selection::contains) == true },
+        onRange = { range, shouldSelect ->
+            viewModel.extendRangeSelection(range.mapNotNull(fileIdAt), shouldSelect)
         },
         onEnd = viewModel::endRangeSelection
     )
