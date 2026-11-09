@@ -429,10 +429,13 @@ fun CacheManagerScreen(
                     confirmUntracked = false
                     scope.launch {
                         busy = true
-                        repository.clearUntrackedCache()
-                        summary = repository.cacheManagerSummary()
-                        message = "Other app-managed cache cleared."
-                        busy = false
+                        try {
+                            repository.clearUntrackedCache()
+                            summary = repository.cacheManagerSummary()
+                            message = "Other app-managed cache cleared."
+                        } finally {
+                            busy = false
+                        }
                     }
                 }) { Text("Clear other cache") }
             },
