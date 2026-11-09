@@ -905,18 +905,18 @@ fun GalleryScreen(
                 .padding(top = padding.calculateTopPadding())
                 .nestedScroll(tabScrollConnection)
         ) {
-            if (!state.isAlbumView) {
-                AnimatedVisibility(
-                    visible = tabsVisible,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    GalleryTabSelector(
-                        selected = state.tab,
-                        onSelect = viewModel::setTab
-                    )
-                }
-            }
+            AnimatedVisibility(
+                visible = tabsVisible,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (!state.isAlbumView) {
+                        GalleryTabSelector(
+                            selected = state.tab,
+                            onSelect = viewModel::setTab
+                        )
+                    }
 
             OutlinedTextField(
                 value = state.filters.searchQuery,
@@ -1043,6 +1043,9 @@ fun GalleryScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+
                 }
             }
 
