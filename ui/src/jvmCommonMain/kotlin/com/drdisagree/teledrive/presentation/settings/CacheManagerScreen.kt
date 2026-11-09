@@ -49,7 +49,6 @@ import com.drdisagree.teledrive.domain.repository.CacheFolderUsage
 import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.presentation.common.Formatters
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -117,13 +116,6 @@ fun CacheManagerScreen(
             else entries + page.take(CACHE_MANAGER_PAGE_SIZE)
         hasMore = page.size > CACHE_MANAGER_PAGE_SIZE
         loading = false
-    }
-
-    LaunchedEffect(refreshKey) {
-        while (true) {
-            delay(5_000L)
-            summary = repository.cacheManagerSummary()
-        }
     }
 
     fun sortLabel(): String = when (sortOrder) {
