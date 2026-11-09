@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -43,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -52,9 +54,11 @@ import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import java.util.Date
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -135,6 +139,13 @@ fun TransfersScreen(
     var confirmCancelAll by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showTransferSettings by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var typeFilter by remember { mutableStateOf("ALL") }
+    var sortOrder by remember { mutableStateOf("STATUS") }
+    var showFilterMenu by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
+    var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
+    var detailsTransfer by remember { mutableStateOf<TransferTask?>(null) }
 
     androidx.compose.runtime.LaunchedEffect(transferConcurrency) {
         concurrencyDraft = transferConcurrency
@@ -185,6 +196,13 @@ fun TransfersScreen(
                 viewModel.clearFinished()
             },
             onDismiss = { confirmClearFinished = false }
+        )
+    }
+
+    if (detailsTransfer != null) {
+        TransferDetailsDialog(
+            transfer = detailsTransfer!!,
+            onDismiss = { detailsTransfer = null }
         )
     }
 
@@ -284,16 +302,57 @@ fun TransfersScreen(
             )
             return@Scaffold
         }
+        fun filterAndSort(items: List<TransferTask>): List<TransferTask> =
+            items.asSequence()
+                .filter { transfer ->
+                    val typeMatches = when (typeFilter) {
+                        "DOWNLOADS" -> transfer.type == TransferType.DOWNLOAD || transfer.type == TransferType.RESTORE
+                        "UPLOADS" -> transfer.type == TransferType.UPLOAD || transfer.type == TransferType.BACKUP
+                        "FAILED" -> transfer.state == TransferState.FAILED
+                        "COMPLETED" -> transfer.state == TransferState.COMPLETED
+                        else -> true
+                    }
+                    typeMatches && (searchQuery.isBlank() ||
+                        transfer.displayName.contains(searchQuery.trim(), ignoreCase = true))
+                }
+                .let { sequence ->
+                    when (sortOrder) {
+                        "PRIORITY" -> sequence.sortedWith(
+                            compareByDescending<TransferTask> { it.priority }.thenBy { it.createdAt }
+                        )
+                        "LARGEST" -> sequence.sortedByDescending { it.sizeBytes }
+                        "SMALLEST" -> sequence.sortedBy { it.sizeBytes }
+                        "NEWEST" -> sequence.sortedByDescending { it.createdAt }
+                        "OLDEST" -> sequence.sortedBy { it.createdAt }
+                        "NAME" -> sequence.sortedBy { it.displayName.lowercase() }
+                        else -> sequence.sortedWith(
+                            compareByDescending<TransferTask> { it.progress }.thenBy { it.createdAt }
+                        )
+                    }
+                }.toList()
+
+        val visibleActive = filterAndSort(state.active)
+        val visiblePaused = filterAndSort(state.paused)
+        val visibleFailed = filterAndSort(state.failed)
+        val visibleCompleted = filterAndSort(state.completed)
+        val visibleTransfers = visibleActive + visiblePaused + visibleFailed + visibleCompleted
+        val visibleIds = visibleTransfers.map { it.id }.toSet()
+        val selectedTransfers = visibleTransfers.filter { it.id in selectedTransferIds }
+        val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedTransferIds }
         val activeTitle = stringResource(Res.string.transfers_section_active)
         val pausedTitle = stringResource(Res.string.transfers_section_paused)
         val finishedTitle = stringResource(Res.string.transfers_section_finished)
-        val failedTitle = failedSectionTitle(state.failed)
+        val failedTitle = failedSectionTitle(visibleFailed)
+        val activeTotal = if (typeFilter == "ALL" && searchQuery.isBlank()) state.activeTotal else visibleActive.size
+        val pausedTotal = if (typeFilter == "ALL" && searchQuery.isBlank()) state.pausedTotal else visiblePaused.size
+        val failedTotal = if (typeFilter == "ALL" && searchQuery.isBlank()) state.failedTotal else visibleFailed.size
+        val completedTotal = if (typeFilter == "ALL" && searchQuery.isBlank()) state.completedTotal else visibleCompleted.size
         val rows = buildList {
             listOf(
-                state.active to state.activeTotal,
-                state.paused to state.pausedTotal,
-                state.failed to state.failedTotal,
-                state.completed to state.completedTotal
+                visibleActive to activeTotal,
+                visiblePaused to pausedTotal,
+                visibleFailed to failedTotal,
+                visibleCompleted to completedTotal
             ).forEach { (transfers, total) ->
                 if (transfers.isEmpty()) return@forEach
                 add(null)
@@ -325,8 +384,146 @@ fun TransfersScreen(
                 .keyboardCollection(keyboard, rows.count { it != null }, shortcuts),
             contentPadding = padding.add(horizontal = 16.dp, top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            section("active", activeTitle, state.active, state.activeTotal) { transfer ->
+) {
+            item(key = "transfer-toolbar") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            placeholder = { Text("Search downloads and transfers") }
+                        )
+                        Box {
+                            TextButton(onClick = { showFilterMenu = true }) {
+                                Text(
+                                    when (typeFilter) {
+                                        "DOWNLOADS" -> "Downloads"
+                                        "UPLOADS" -> "Uploads"
+                                        "FAILED" -> "Failed"
+                                        "COMPLETED" -> "Completed"
+                                        else -> "All files"
+                                    }
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showFilterMenu,
+                                onDismissRequest = { showFilterMenu = false }
+                            ) {
+                                listOf("ALL" to "All files", "DOWNLOADS" to "Downloads",
+                                    "UPLOADS" to "Uploads", "FAILED" to "Failed",
+                                    "COMPLETED" to "Completed").forEach { (value, label) ->
+                                    DropdownMenuItem(
+                                        text = { Text(label) },
+                                        onClick = {
+                                            typeFilter = value
+                                            showFilterMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        Box {
+                            TextButton(onClick = { showSortMenu = true }) {
+                                Text(
+                                    when (sortOrder) {
+                                        "PRIORITY" -> "Priority"
+                                        "LARGEST" -> "Largest"
+                                        "SMALLEST" -> "Smallest"
+                                        "NEWEST" -> "Newest"
+                                        "OLDEST" -> "Oldest"
+                                        "NAME" -> "Name A–Z"
+                                        else -> "By status"
+                                    }
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false }
+                            ) {
+                                listOf("STATUS" to "By status", "PRIORITY" to "By priority",
+                                    "LARGEST" to "Largest first", "SMALLEST" to "Smallest first",
+                                    "NEWEST" to "Newest first", "OLDEST" to "Oldest first",
+                                    "NAME" to "Name A–Z").forEach { (value, label) ->
+                                    DropdownMenuItem(
+                                        text = { Text(label) },
+                                        onClick = {
+                                            sortOrder = value
+                                            showSortMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = allVisibleSelected,
+                            onCheckedChange = { checked ->
+                                selectedTransferIds = if (checked) selectedTransferIds + visibleIds
+                                    else selectedTransferIds - visibleIds
+                            },
+                            enabled = visibleIds.isNotEmpty()
+                        )
+                        Text("${visibleIds.size} shown · ${selectedTransferIds.intersect(visibleIds).size} selected",
+                            modifier = Modifier.weight(1f))
+                        TextButton(onClick = {
+                            selectedTransferIds = if (allVisibleSelected) {
+                                selectedTransferIds - visibleIds
+                            } else {
+                                selectedTransferIds + visibleIds
+                            }
+                        }, enabled = visibleIds.isNotEmpty()) {
+                            Text(if (allVisibleSelected) "Deselect visible" else "Select visible")
+                        }
+                    }
+                    if (selectedTransfers.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (selectedTransfers.any { it.state == TransferState.QUEUED || it.state == TransferState.RUNNING }) {
+                                TextButton(onClick = { viewModel.pauseSelected(selectedTransfers.map { it.id }) }) {
+                                    Text("Pause")
+                                }
+                            }
+                            if (selectedTransfers.any { it.state == TransferState.PAUSED }) {
+                                TextButton(onClick = { viewModel.resumeSelected(selectedTransfers.map { it.id }) }) {
+                                    Text("Resume")
+                                }
+                            }
+                            if (selectedTransfers.any { it.state == TransferState.FAILED }) {
+                                TextButton(onClick = { viewModel.retrySelected(selectedTransfers.filter { it.state == TransferState.FAILED }.map { it.id }) }) {
+                                    Text("Retry failed")
+                                }
+                            }
+                            TextButton(onClick = {
+                                viewModel.cancelSelected(selectedTransfers.filter { !it.state.isTerminal }.map { it.id })
+                                selectedTransferIds = selectedTransferIds - visibleIds
+                            }, enabled = selectedTransfers.any { !it.state.isTerminal }) {
+                                Text("Cancel")
+                            }
+                            TextButton(onClick = { selectedTransferIds = emptySet() }) { Text("Clear") }
+                        }
+                    }
+                }
+            }
+            if (visibleTransfers.isEmpty()) {
+                item(key = "transfer-empty-filter") {
+                    Text(
+                        "No transfers match the current search or filter.",
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            section("active", activeTitle, visibleActive, activeTotal) { transfer ->
                 TransferRow(
                     transfer = transfer,
                     primaryIcon = Icons.Filled.Pause,
@@ -334,11 +531,17 @@ fun TransfersScreen(
                     onPrimary = { viewModel.pause(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
                     onPriorityChange = { viewModel.setPriority(transfer.id, it) },
+                    selected = transfer.id in selectedTransferIds,
+                    onSelect = { checked ->
+                        selectedTransferIds = if (checked) selectedTransferIds + transfer.id
+                            else selectedTransferIds - transfer.id
+                    },
+                    onDetails = { detailsTransfer = transfer },
                     actionsFocusable = actionsFocusable(transfer),
                     modifier = itemModifier(transfer)
                 )
             }
-            section("paused", pausedTitle, state.paused, state.pausedTotal) { transfer ->
+            section("paused", pausedTitle, visiblePaused, pausedTotal) { transfer ->
                 TransferRow(
                     transfer = transfer,
                     primaryIcon = Icons.Filled.PlayArrow,
@@ -346,11 +549,17 @@ fun TransfersScreen(
                     onPrimary = { viewModel.resume(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
                     onPriorityChange = { viewModel.setPriority(transfer.id, it) },
+                    selected = transfer.id in selectedTransferIds,
+                    onSelect = { checked ->
+                        selectedTransferIds = if (checked) selectedTransferIds + transfer.id
+                            else selectedTransferIds - transfer.id
+                    },
+                    onDetails = { detailsTransfer = transfer },
                     actionsFocusable = actionsFocusable(transfer),
                     modifier = itemModifier(transfer)
                 )
             }
-            section("failed", failedTitle, state.failed, state.failedTotal) { transfer ->
+            section("failed", failedTitle, visibleFailed, failedTotal) { transfer ->
                 TransferRow(
                     transfer = transfer,
                     primaryIcon = Icons.Filled.Refresh,
@@ -358,17 +567,29 @@ fun TransfersScreen(
                     onPrimary = { viewModel.retry(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
                     onPriorityChange = { viewModel.setPriority(transfer.id, it) },
+                    selected = transfer.id in selectedTransferIds,
+                    onSelect = { checked ->
+                        selectedTransferIds = if (checked) selectedTransferIds + transfer.id
+                            else selectedTransferIds - transfer.id
+                    },
+                    onDetails = { detailsTransfer = transfer },
                     actionsFocusable = actionsFocusable(transfer),
                     modifier = itemModifier(transfer)
                 )
             }
-            section("finished", finishedTitle, state.completed, state.completedTotal) { transfer ->
+            section("finished", finishedTitle, visibleCompleted, completedTotal) { transfer ->
                 TransferRow(
                     transfer = transfer,
                     onOpenInApp = transfer.fileId?.let { id -> { onOpenFile(id) } },
                     onShowInFolder = transfer.localPath?.takeIf { fileRevealer != null }?.let { path ->
                         { fileRevealer?.reveal(path) }
                     },
+                    selected = transfer.id in selectedTransferIds,
+                    onSelect = { checked ->
+                        selectedTransferIds = if (checked) selectedTransferIds + transfer.id
+                            else selectedTransferIds - transfer.id
+                    },
+                    onDetails = { detailsTransfer = transfer },
                     modifier = itemModifier(transfer)
                 )
             }
@@ -382,6 +603,57 @@ fun TransfersScreen(
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                 )
             }
+    }
+}
+
+@Composable
+private fun TransferDetailsDialog(
+    transfer: TransferTask,
+    onDismiss: () -> Unit
+) {
+    var tab by remember(transfer.id) { mutableStateOf("GENERAL") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(transfer.displayName, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { tab = "GENERAL" }) {
+                        Text(if (tab == "GENERAL") "● General" else "General")
+                    }
+                    TextButton(onClick = { tab = "PROGRESS" }) {
+                        Text(if (tab == "PROGRESS") "● Progress" else "Progress")
+                    }
+                }
+                if (tab == "GENERAL") {
+                    TransferDetailLine("Type", transfer.type.name.lowercase().replaceFirstChar { it.uppercase() })
+                    TransferDetailLine("Status", transfer.state.name.lowercase().replaceFirstChar { it.uppercase() })
+                    TransferDetailLine("Size", Formatters.bytes(transfer.sizeBytes))
+                    TransferDetailLine("Local path", transfer.localPath ?: "Not downloaded to this device")
+                    TransferDetailLine("Added", Date(transfer.createdAt).toString())
+                    TransferDetailLine("Priority", transfer.priority.toString())
+                } else {
+                    TransferDetailLine("Transferred", "${Formatters.bytes(transfer.transferredBytes)} / ${Formatters.bytes(transfer.sizeBytes)}")
+                    TransferDetailLine("Progress", Formatters.percent(transfer.progress))
+                    TransferDetailLine("Speed", if (transfer.speedBytesPerSecond > 0) Formatters.speed(transfer.speedBytesPerSecond) else "Not available")
+                    TransferDetailLine("Time remaining", transfer.etaSeconds?.let { Formatters.eta(it) } ?: "Not available")
+                    TransferDetailLine("Stage", transfer.stage?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "—")
+                    transfer.errorMessage?.let { TransferDetailLine("Last error", it) }
+                    transfer.completedAt?.let { TransferDetailLine("Completed", Date(it).toString()) }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+}
+
+@Composable
+private fun TransferDetailLine(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -462,6 +734,9 @@ private fun TransferRow(
     onPriorityChange: ((Int) -> Unit)? = null,
     onOpenInApp: (() -> Unit)? = null,
     onShowInFolder: (() -> Unit)? = null,
+    selected: Boolean = false,
+    onSelect: ((Boolean) -> Unit)? = null,
+    onDetails: (() -> Unit)? = null,
     actionsFocusable: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -478,6 +753,13 @@ private fun TransferRow(
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onSelect != null) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = onSelect,
+                        modifier = actions
+                    )
+                }
                 TransferThumbnail(transfer = transfer)
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -520,7 +802,7 @@ private fun TransferRow(
                     }
                 }
                 if (onCancel != null || onPriorityChange != null ||
-                    onOpenInApp != null || onShowInFolder != null
+                    onOpenInApp != null || onShowInFolder != null || onDetails != null
                 ) {
                     Box {
                         IconButton(onClick = { showRowMenu = true }, modifier = actions) {
@@ -547,6 +829,15 @@ private fun TransferRow(
                                     onClick = {
                                         showRowMenu = false
                                         reveal()
+                                    }
+                                )
+                            }
+                            onDetails?.let { details ->
+                                DropdownMenuItem(
+                                    text = { Text("Details") },
+                                    onClick = {
+                                        showRowMenu = false
+                                        details()
                                     }
                                 )
                             }
