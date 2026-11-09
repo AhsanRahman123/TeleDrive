@@ -357,9 +357,9 @@ class TransferRepositoryImpl(
         val transfer = transferDao.byId(id) ?: return@withLock
         if (transfer.state == TransferState.PAUSED || transfer.state == TransferState.FAILED) {
             transferDao.setState(id, TransferState.QUEUED, System.currentTimeMillis())
-            backupSessionTracker.refresh(transfer.backupSessionId)
             val prefs = settingsRepository.preferences.first()
             transferScheduler.resume(prefs.allowMeteredTransfers)
+            backupSessionTracker.refresh(transfer.backupSessionId)
         }
     }
 
@@ -392,9 +392,10 @@ class TransferRepositoryImpl(
 
     override suspend fun resumeAll() = workerControlLock.withLock {
         transferDao.resumeAll(System.currentTimeMillis())
-        backupSessionTracker.refreshActive()
         val prefs = settingsRepository.preferences.first()
+        // Wake the worker pool immediately after the rows become QUEUED.
         transferScheduler.resume(prefs.allowMeteredTransfers)
+        backupSessionTracker.refreshActive()
     }
 
     override suspend fun cancelAll() {
