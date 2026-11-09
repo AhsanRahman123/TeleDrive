@@ -18,7 +18,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -1361,7 +1360,7 @@ class TdLibTelegramClient(
         private const val CLIENT_WAIT_STEP_MS = 10L
         private const val DOWNLOAD_PRIORITY = 32
         private const val DOWNLOAD_PROGRESS_POLL_MS = 500L
-        private const val THUMBNAIL_PRIORITY = 24
+        private const val THUMBNAIL_PRIORITY = 8
         private const val THUMBNAIL_EDGE = 320
         private const val DELETE_BATCH = 100
         private const val RATE_LIMIT_RETRIES = 5
