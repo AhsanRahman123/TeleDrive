@@ -155,6 +155,7 @@ fun DesktopMediaPlayer(
     currentQueueItemId: String? = null,
     sleepTimerLabel: String = "Sleep timer",
     sleepStopRequest: Int = 0,
+    sleepAtTrackEnd: Boolean = false,
     onToggleRepeatAll: () -> Unit = {},
     onToggleShuffle: () -> Unit = {},
     onSelectQueueItem: (String) -> Unit = {},
@@ -187,6 +188,7 @@ fun DesktopMediaPlayer(
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
     val latestRepeatOne = rememberUpdatedState(repeatOne)
+    val latestSleepAtTrackEnd = rememberUpdatedState(sleepAtTrackEnd)
     val playerScope = rememberCoroutineScope()
 
     val player = remember(mrl, isAudio) {
@@ -225,7 +227,9 @@ fun DesktopMediaPlayer(
                     playing = false
                     finished = true
                     playerScope.launch {
-                        if (!latestRepeatOne.value) onPlaybackFinished()
+                        if (!latestRepeatOne.value || latestSleepAtTrackEnd.value) {
+                            onPlaybackFinished()
+                        }
                     }
                 }
 
@@ -320,8 +324,12 @@ fun DesktopMediaPlayer(
         }
     }
 
+    var lastSleepStopRequest by remember(mrl) {
+        mutableIntStateOf(sleepStopRequest)
+    }
     LaunchedEffect(player, sleepStopRequest) {
-        if (sleepStopRequest > 0) {
+        if (sleepStopRequest > lastSleepStopRequest) {
+            lastSleepStopRequest = sleepStopRequest
             player.submit { runCatching { controls().pause() } }
             playing = false
         }
@@ -558,6 +566,7 @@ fun DesktopMediaPlayer(
                             showPlayerControls = !controlPreferences.showPlayerControls
                         )
                         controlPreferences = updated
+                        controlsPinned = updated.showPlayerControls
                         PlayerControlPreferencesStore.save(updated)
                         interactionTick++
                         true
@@ -1226,6 +1235,7 @@ private fun PlayerControlsBar(
                                     showPlayerControls = !controlPreferences.showPlayerControls
                                 )
                             )
+                            onControlsKeepVisible(!controlPreferences.showPlayerControls)
                         }
                     )
                     DropdownMenuItem(
