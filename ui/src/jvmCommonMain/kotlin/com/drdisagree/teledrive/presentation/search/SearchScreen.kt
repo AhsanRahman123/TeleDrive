@@ -263,7 +263,7 @@ fun SearchScreen(
                     description = stringResource(Res.string.app_nothing_matches_search)
                 )
 
-                else -> Box(modifier = Modifier.fillMaxSize()) {
+                else -> Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
