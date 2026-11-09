@@ -243,6 +243,9 @@ class CacheRepositoryImpl(
     override suspend fun removeCacheEntries(paths: List<String>): CacheRemovalResult {
         var removedEntries = 0
         var removedBytes = 0L
+        val thumbnailFileIds = linkedSetOf<String>()
+        val thumbnailSizesByPath = mutableMapOf<String, Long>()
+
         paths.distinct().chunked(JOB_BATCH_SIZE).forEach { batch ->
             val entries = cacheDao.entriesByPaths(batch)
             val removedPaths = withContext(Dispatchers.IO) {
@@ -258,16 +261,25 @@ class CacheRepositoryImpl(
                 cacheDao.deletePaths(removedPaths)
             }
 
-            val thumbnailEntries = thumbnailDao.entriesByPaths(batch)
-            if (thumbnailEntries.isNotEmpty()) {
-                val thumbnailIds = thumbnailEntries.map { it.fileId }.distinct()
-                removeThumbnails(thumbnailIds)
-                val remainingPaths = thumbnailDao.entriesByPaths(batch).mapTo(mutableSetOf()) { it.path }
-                val removedThumbnails = thumbnailEntries.filter { it.path !in remainingPaths }
-                removedEntries += removedThumbnails.size
-                removedBytes += removedThumbnails.sumOf { it.sizeBytes }
+            thumbnailDao.entriesByPaths(batch).forEach { thumbnail ->
+                thumbnailFileIds += thumbnail.fileId
+                thumbnailSizesByPath[thumbnail.path] = thumbnail.sizeBytes
             }
         }
+
+        // Pause/resume the thumbnail worker once for the whole selected set, not once per
+        // SQLite batch. This keeps large folder selections from repeatedly interrupting it.
+        if (thumbnailFileIds.isNotEmpty()) {
+            removeThumbnails(thumbnailFileIds.toList())
+            val thumbnailPaths = thumbnailSizesByPath.keys.toList()
+            val remainingPaths = thumbnailPaths.chunked(JOB_BATCH_SIZE)
+                .flatMap { thumbnailDao.entriesByPaths(it) }
+                .mapTo(mutableSetOf()) { it.path }
+            val removedThumbnailPaths = thumbnailPaths.filterNot { it in remainingPaths }
+            removedEntries += removedThumbnailPaths.size
+            removedBytes += removedThumbnailPaths.sumOf { thumbnailSizesByPath[it] ?: 0L }
+        }
+
         refreshStats()
         return CacheRemovalResult(removedEntries, removedBytes)
     }
