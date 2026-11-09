@@ -659,8 +659,31 @@ class CacheRepositoryImpl(
         }
     }
 
+    /**
+     * A stale thumbnail row must not make a file look generated. Validate the
+     * physical preview before taking a bulk "missing" snapshot; the viewer used
+     * to discover these only when each file was opened individually.
+     */
+    private suspend fun missingThumbnailIds(fileIds: List<String>): List<String> {
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return emptyList()
+
+        val invalidIds = withContext(Dispatchers.IO) {
+            thumbnailDao.pathsForFiles(ids).filter { ref ->
+                val cachedFile = File(ref.path)
+                !cachedFile.isFile || cachedFile.length() <= 0L
+            }.map { it.fileId }.distinct()
+        }
+        if (invalidIds.isNotEmpty()) {
+            thumbnailDao.deleteAll(invalidIds)
+            invalidIds.forEach(thumbnailMemoryCache::remove)
+            refreshThumbnailStats()
+        }
+        return thumbnailDao.missingEligibleFileIds(ids)
+    }
+
     override suspend fun generateThumbnail(fileId: String) {
-        val missingIds = thumbnailDao.missingEligibleFileIds(listOf(fileId))
+        val missingIds = missingThumbnailIds(listOf(fileId))
         if (missingIds.isEmpty()) return
         thumbnailPolicyDao.clearQueueItemPauses(missingIds)
         thumbnailStore.enqueueManual(missingIds)
@@ -670,10 +693,10 @@ class CacheRepositoryImpl(
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return ThumbnailEnqueueResult()
 
-        // Filter in safe SQLite-sized batches. A selected item already in the queue is
-        // refreshed as a forced manual job, never inserted as a duplicate row.
+        // Filter in SQLite-sized batches and repair stale cache rows before treating
+        // a selected item as already generated.
         val missingIds = ids.chunked(JOB_BATCH_SIZE)
-            .flatMap { batch -> thumbnailDao.missingEligibleFileIds(batch) }
+            .flatMap { batch -> missingThumbnailIds(batch) }
             .distinct()
         if (missingIds.isEmpty()) return ThumbnailEnqueueResult()
 
@@ -699,9 +722,11 @@ class CacheRepositoryImpl(
         // Workers could finish and mutate the thumbnails table during that scan, making
         // a long folder operation depend on concurrent generation timing.
         while (true) {
+            // Scan all eligible files so stale thumbnail DB rows are included.
+            // missingThumbnailIds verifies each physical cache file before filtering.
             val page = if (folderId == null) {
                 thumbnailDao.unfiledFileIdsPage(
-                    onlyMissing = true,
+                    onlyMissing = false,
                     afterAddedAt = afterAddedAt,
                     afterFileId = afterFileId,
                     limit = JOB_BATCH_SIZE
@@ -709,14 +734,14 @@ class CacheRepositoryImpl(
             } else {
                 thumbnailDao.fileIdsInFolderTreePage(
                     folderId = folderId,
-                    onlyMissing = true,
+                    onlyMissing = false,
                     afterAddedAt = afterAddedAt,
                     afterFileId = afterFileId,
                     limit = JOB_BATCH_SIZE
                 )
             }
             if (page.isEmpty()) break
-            missingIds += page.map { it.fileId }
+            missingIds += missingThumbnailIds(page.map { it.fileId })
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
@@ -744,14 +769,16 @@ class CacheRepositoryImpl(
         var afterFileId: String? = null
         val missingIds = mutableListOf<String>()
         while (true) {
+            // Include cached-row candidates and validate their actual files, so
+            // missing/corrupt preview files are queued in this one bulk operation.
             val page = thumbnailDao.allEligibleFileIdsPage(
-                onlyMissing = true,
+                onlyMissing = false,
                 afterAddedAt = afterAddedAt,
                 afterFileId = afterFileId,
                 limit = JOB_BATCH_SIZE
             )
             if (page.isEmpty()) break
-            missingIds += page.map { it.fileId }
+            missingIds += missingThumbnailIds(page.map { it.fileId })
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
