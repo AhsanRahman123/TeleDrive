@@ -130,18 +130,26 @@ class TransferQueueDrainer(
 
     private suspend fun nextClaimable(
         includeBackups: Boolean,
-        skip: Set<String> = emptySet()
+        skip: Set<String> = emptySet(),
+        includeUploads: Boolean = true
     ): TransferEntity? {
         val types = TransferType.entries.filter { type ->
-            includeBackups || type != TransferType.BACKUP
+            (includeBackups || type != TransferType.BACKUP) &&
+                (includeUploads || type.isIncoming)
         }
         if (types.isEmpty()) return null
         return transferDao.nextQueuedOf(types, skip.size + 1).firstOrNull { it.id !in skip }
     }
 
     private suspend fun claimNextQueued(includeBackups: Boolean): String? = claimLock.withLock {
-        val next = nextClaimable(includeBackups, executing.keys)
-            ?: return@withLock null
+        // Keep uploads serialized as before; the three worker slots are available for
+        // incoming downloads/restores and do not silently increase upload concurrency.
+        val uploading = executing.values.any { !it.isIncoming }
+        val next = nextClaimable(
+            includeBackups = includeBackups,
+            skip = executing.keys,
+            includeUploads = !uploading
+        ) ?: return@withLock null
         transferDao.setState(next.id, TransferState.RUNNING, System.currentTimeMillis())
         executing[next.id] = next.type
         next.id
