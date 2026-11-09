@@ -628,6 +628,7 @@ class TransferExecutor(
 
         return try {
             var lastObservedBytes: Long? = null
+            var lastObservedSpeedBytes: Long? = null
             var wasDownloadingActive = false
             partDownloader.download(entity.id, entity.isEncrypted, target)
                 .failWhenIdle(transfer.id, messages.downloadStalled) { event ->
@@ -635,8 +636,10 @@ class TransferExecutor(
                         is PartDownloadEvent.Progress -> {
                             val active = event.isDownloadingActive
                             val becameActive = active && !wasDownloadingActive
-                            val bytesChanged = lastObservedBytes != event.transferredBytes
+                            val bytesChanged = lastObservedBytes != event.transferredBytes ||
+                                lastObservedSpeedBytes != event.speedSampleBytes
                             lastObservedBytes = event.transferredBytes
+                            lastObservedSpeedBytes = event.speedSampleBytes
                             wasDownloadingActive = active
                             active to (active && (becameActive || bytesChanged))
                         }
