@@ -20,12 +20,12 @@ class TransfersViewModel(
 ) : ViewModel() {
 
     val transferConcurrency: StateFlow<Int> = settingsRepository.preferences
-        .map { it.transferConcurrency.coerceIn(1, 6) }
+        .map { it.transferConcurrency.coerceIn(1, 3) }
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 2)
 
     fun setTransferConcurrency(value: Int) = launch {
-        settingsRepository.update { it.copy(transferConcurrency = value.coerceIn(1, 6)) }
+        settingsRepository.update { it.copy(transferConcurrency = value.coerceIn(1, 3)) }
         transferRepository.wakeWorker()
     }
 
