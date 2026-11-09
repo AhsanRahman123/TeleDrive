@@ -138,6 +138,8 @@ fun CacheManagerScreen(
     )
 
     LaunchedEffect(folderId) {
+        folderListState.scrollToItem(0)
+        cacheEntryListState.scrollToItem(0)
         selectedPaths = emptySet()
         selectedFolderIds = emptySet()
     }
