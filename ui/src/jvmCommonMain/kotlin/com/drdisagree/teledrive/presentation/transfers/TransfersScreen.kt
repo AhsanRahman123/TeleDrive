@@ -56,7 +56,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
@@ -741,7 +740,6 @@ private fun failedSectionTitle(failed: List<TransferTask>): String {
     }
 }
 
-@Composable
 private const val SPEED_STALE_AFTER_MS = 4_000L
 
 private fun transferRate(transfer: TransferTask): String {
