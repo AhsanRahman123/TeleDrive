@@ -282,15 +282,6 @@ fun DesktopPreviewScreen(
         shuffleCursor = shuffleHistory.lastIndex
     }
 
-    fun handlePlaybackFinished() {
-        if (sleepAtTrackEnd) {
-            sleepAtTrackEnd = false
-            sleepDeadline = null
-            return
-        }
-        if (repeatAll || shuffle) nextMedia()
-    }
-
     var sleepDeadline by remember(state.files) { mutableStateOf<Long?>(null) }
     var sleepAtTrackEnd by remember(state.files) { mutableStateOf(false) }
     var sleepClock by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -310,6 +301,15 @@ fun DesktopPreviewScreen(
             }
             delay(remaining.coerceAtMost(1_000L))
         }
+    }
+
+    fun handlePlaybackFinished() {
+        if (sleepAtTrackEnd) {
+            sleepAtTrackEnd = false
+            sleepDeadline = null
+            return
+        }
+        if (repeatAll || shuffle) nextMedia()
     }
 
     val sleepTimerLabel = when {
@@ -462,6 +462,7 @@ fun DesktopPreviewScreen(
                         shuffle = shuffle,
                         sleepTimerLabel = sleepTimerLabel,
                         sleepStopRequest = sleepStopRequest,
+                        sleepAtTrackEnd = sleepAtTrackEnd,
                         onToggleRepeatAll = { repeatAll = !repeatAll },
                         onToggleShuffle = ::toggleShuffle,
                         onSelectQueueItem = ::selectQueueFile,
@@ -720,6 +721,20 @@ private fun PreviewPane(
     hasNext: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    queueItems: List<PlayerQueueItem>,
+    currentQueueItemId: String?,
+    repeatAll: Boolean,
+    shuffle: Boolean,
+    sleepTimerLabel: String,
+    sleepStopRequest: Int,
+    sleepAtTrackEnd: Boolean,
+    onToggleRepeatAll: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onSelectQueueItem: (String) -> Unit,
+    onSetSleepTimer: (Long) -> Unit,
+    onSleepAtTrackEnd: () -> Unit,
+    onClearSleepTimer: () -> Unit,
+    onPlaybackFinished: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val content by viewModel.contentFor(file).collectAsState()
@@ -863,6 +878,20 @@ private fun PreviewPane(
                     onNext = onNext,
                     hasPrevious = hasPrevious,
                     hasNext = hasNext,
+                    queueItems = queueItems,
+                    currentQueueItemId = currentQueueItemId,
+                    repeatAll = repeatAll,
+                    shuffle = shuffle,
+                    sleepTimerLabel = sleepTimerLabel,
+                    sleepStopRequest = sleepStopRequest,
+                    sleepAtTrackEnd = sleepAtTrackEnd,
+                    onToggleRepeatAll = onToggleRepeatAll,
+                    onToggleShuffle = onToggleShuffle,
+                    onSelectQueueItem = onSelectQueueItem,
+                    onSetSleepTimer = onSetSleepTimer,
+                    onSleepAtTrackEnd = onSleepAtTrackEnd,
+                    onClearSleepTimer = onClearSleepTimer,
+                    onPlaybackFinished = onPlaybackFinished,
                     onControlsVisibilityChange = onPlayerControlsVisibilityChange
                 )
             } else {
@@ -893,6 +922,20 @@ private fun PreviewPane(
                     onNext = onNext,
                     hasPrevious = hasPrevious,
                     hasNext = hasNext,
+                    queueItems = queueItems,
+                    currentQueueItemId = currentQueueItemId,
+                    repeatAll = repeatAll,
+                    shuffle = shuffle,
+                    sleepTimerLabel = sleepTimerLabel,
+                    sleepStopRequest = sleepStopRequest,
+                    sleepAtTrackEnd = sleepAtTrackEnd,
+                    onToggleRepeatAll = onToggleRepeatAll,
+                    onToggleShuffle = onToggleShuffle,
+                    onSelectQueueItem = onSelectQueueItem,
+                    onSetSleepTimer = onSetSleepTimer,
+                    onSleepAtTrackEnd = onSleepAtTrackEnd,
+                    onClearSleepTimer = onClearSleepTimer,
+                    onPlaybackFinished = onPlaybackFinished,
                     onControlsVisibilityChange = onPlayerControlsVisibilityChange
                 )
             } else {
@@ -1061,6 +1104,20 @@ private fun InlineStreamPlayer(
     onNext: () -> Unit,
     hasPrevious: Boolean,
     hasNext: Boolean,
+    queueItems: List<PlayerQueueItem>,
+    currentQueueItemId: String?,
+    repeatAll: Boolean,
+    shuffle: Boolean,
+    sleepTimerLabel: String,
+    sleepStopRequest: Int,
+    sleepAtTrackEnd: Boolean,
+    onToggleRepeatAll: () -> Unit,
+    onToggleShuffle: () -> Unit,
+    onSelectQueueItem: (String) -> Unit,
+    onSetSleepTimer: (Long) -> Unit,
+    onSleepAtTrackEnd: () -> Unit,
+    onClearSleepTimer: () -> Unit,
+    onPlaybackFinished: () -> Unit,
     onControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val streamServer = koinInject<MediaStreamServer>()
@@ -1097,6 +1154,20 @@ private fun InlineStreamPlayer(
         onNext = onNext,
         hasPrevious = hasPrevious,
         hasNext = hasNext,
+        queueItems = queueItems,
+        currentQueueItemId = currentQueueItemId,
+        repeatAll = repeatAll,
+        shuffle = shuffle,
+        sleepTimerLabel = sleepTimerLabel,
+        sleepStopRequest = sleepStopRequest,
+        sleepAtTrackEnd = sleepAtTrackEnd,
+        onToggleRepeatAll = onToggleRepeatAll,
+        onToggleShuffle = onToggleShuffle,
+        onSelectQueueItem = onSelectQueueItem,
+        onSetSleepTimer = onSetSleepTimer,
+        onSleepAtTrackEnd = onSleepAtTrackEnd,
+        onClearSleepTimer = onClearSleepTimer,
+        onPlaybackFinished = onPlaybackFinished,
         onControlsVisibilityChange = onControlsVisibilityChange
     )
 }
