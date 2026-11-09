@@ -23,11 +23,18 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -37,11 +44,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -70,6 +80,7 @@ import com.drdisagree.teledrive.presentation.components.keyboardCollectionItem
 import com.drdisagree.teledrive.presentation.components.liftedTopAppBarColors
 import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollection
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
+import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
@@ -113,12 +124,56 @@ import org.koin.compose.viewmodel.koinViewModel
 @Composable
 fun TransfersScreen(
     onBack: () -> Unit,
+    onOpenFile: (String) -> Unit = {},
     viewModel: TransfersViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val transferConcurrency by viewModel.transferConcurrency.collectAsStateWithLifecycle()
+    val fileRevealer = LocalFileRevealer.current
+    var concurrencyDraft by remember { mutableIntStateOf(transferConcurrency) }
     var confirmClearFinished by remember { mutableStateOf(false) }
     var confirmCancelAll by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    var showTransferSettings by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(transferConcurrency) {
+        concurrencyDraft = transferConcurrency
+    }
+
+    if (showTransferSettings) {
+        AlertDialog(
+            onDismissRequest = { showTransferSettings = false },
+            title = { Text("Transfer concurrency") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Maximum simultaneous Telegram transfer jobs: $concurrencyDraft of 6")
+                    Slider(
+                        value = concurrencyDraft.toFloat(),
+                        onValueChange = { concurrencyDraft = it.toInt().coerceIn(1, 6) },
+                        valueRange = 1f..6f,
+                        steps = 4
+                    )
+                    Text(
+                        "This controls how many queued transfers may run at once. Raising it can use more bandwidth and disk activity.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.setTransferConcurrency(concurrencyDraft)
+                    showTransferSettings = false
+                }) { Text("Apply") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    concurrencyDraft = transferConcurrency
+                    showTransferSettings = false
+                }) { Text("Cancel") }
+            }
+        )
+    }
 
     if (confirmClearFinished) {
         ConfirmDialog(
@@ -164,6 +219,12 @@ fun TransfersScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        concurrencyDraft = transferConcurrency
+                        showTransferSettings = true
+                    }) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Transfer settings")
+                    }
                     if (state.active.isNotEmpty()) {
                         IconButton(onClick = viewModel::pauseAll) {
                             Icon(
@@ -272,6 +333,7 @@ fun TransfersScreen(
                     primaryLabel = stringResource(Res.string.common_pause),
                     onPrimary = { viewModel.pause(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
+                    onPriorityChange = { viewModel.setPriority(transfer.id, it) },
                     actionsFocusable = actionsFocusable(transfer),
                     modifier = itemModifier(transfer)
                 )
@@ -283,6 +345,7 @@ fun TransfersScreen(
                     primaryLabel = stringResource(Res.string.common_resume),
                     onPrimary = { viewModel.resume(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
+                    onPriorityChange = { viewModel.setPriority(transfer.id, it) },
                     actionsFocusable = actionsFocusable(transfer),
                     modifier = itemModifier(transfer)
                 )
@@ -294,12 +357,20 @@ fun TransfersScreen(
                     primaryLabel = stringResource(Res.string.common_retry),
                     onPrimary = { viewModel.retry(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
+                    onPriorityChange = { viewModel.setPriority(transfer.id, it) },
                     actionsFocusable = actionsFocusable(transfer),
                     modifier = itemModifier(transfer)
                 )
             }
             section("finished", finishedTitle, state.completed, state.completedTotal) { transfer ->
-                TransferRow(transfer = transfer, modifier = itemModifier(transfer))
+                TransferRow(
+                    transfer = transfer,
+                    onOpenInApp = transfer.fileId?.let { id -> { onOpenFile(id) } },
+                    onShowInFolder = transfer.localPath?.takeIf { fileRevealer != null }?.let { path ->
+                        { fileRevealer?.reveal(path) }
+                    },
+                    modifier = itemModifier(transfer)
+                )
             }
         }
                 DesktopScrollEdgeControls(
@@ -388,11 +459,15 @@ private fun TransferRow(
     primaryLabel: String? = null,
     onPrimary: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
+    onPriorityChange: ((Int) -> Unit)? = null,
+    onOpenInApp: (() -> Unit)? = null,
+    onShowInFolder: (() -> Unit)? = null,
     actionsFocusable: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val actions = Modifier.focusProperties { canFocus = actionsFocusable }
+    var showRowMenu by remember { mutableStateOf(false) }
     Card(
         shape = MaterialTheme.shapes.large,
         modifier = modifier
@@ -444,16 +519,58 @@ private fun TransferRow(
                         Icon(primaryIcon, contentDescription = primaryLabel)
                     }
                 }
-                if (onCancel != null) {
-                    IconButton(onClick = onCancel, modifier = actions) {
-                        Icon(
-                            imageVector = Icons.Filled.Cancel,
-                            contentDescription = if (transfer.state.isTerminal) {
-                                stringResource(Res.string.common_dismiss)
-                            } else {
-                                stringResource(Res.string.common_cancel)
+                if (onCancel != null || onPriorityChange != null ||
+                    onOpenInApp != null || onShowInFolder != null
+                ) {
+                    Box {
+                        IconButton(onClick = { showRowMenu = true }, modifier = actions) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Transfer actions")
+                        }
+                        DropdownMenu(
+                            expanded = showRowMenu,
+                            onDismissRequest = { showRowMenu = false }
+                        ) {
+                            onOpenInApp?.let { open ->
+                                DropdownMenuItem(
+                                    text = { Text("Open in TeleDrive") },
+                                    leadingIcon = { Icon(Icons.Filled.OpenInNew, contentDescription = null) },
+                                    onClick = {
+                                        showRowMenu = false
+                                        open()
+                                    }
+                                )
                             }
-                        )
+                            onShowInFolder?.let { reveal ->
+                                DropdownMenuItem(
+                                    text = { Text("Show in folder") },
+                                    leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null) },
+                                    onClick = {
+                                        showRowMenu = false
+                                        reveal()
+                                    }
+                                )
+                            }
+                            if (onPriorityChange != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Increase priority") },
+                                    leadingIcon = { Icon(Icons.Filled.ArrowUpward, contentDescription = null) },
+                                    enabled = transfer.priority < 10,
+                                    onClick = {
+                                        showRowMenu = false
+                                        onPriorityChange((transfer.priority + 1).coerceAtMost(10))
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Lower priority") },
+                                    leadingIcon = { Icon(Icons.Filled.ArrowDownward, contentDescription = null) },
+                                    enabled = transfer.priority > -10,
+                                    onClick = {
+                                        showRowMenu = false
+                                        onPriorityChange((transfer.priority - 1).coerceAtLeast(-10))
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
