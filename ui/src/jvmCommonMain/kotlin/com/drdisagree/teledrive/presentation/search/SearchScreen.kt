@@ -248,7 +248,8 @@ fun SearchScreen(
                     )
                 }
 
-            when {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
                 state.searching -> LoadingState()
                 !state.searched -> EmptyState(
                     icon = Icons.Outlined.Search,
@@ -354,6 +355,7 @@ fun SearchScreen(
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                 )
             }
+                }
             }
         }
     }
