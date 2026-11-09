@@ -43,6 +43,7 @@ class TransferRepositoryImpl(
 ) : TransferRepository {
 
     private val enqueueLock = Mutex()
+    private val workerControlLock = Mutex()
     private val uploadBatchGeneration = UploadBatchGeneration()
 
     private sealed interface EnqueueOutcome {
@@ -380,19 +381,19 @@ class TransferRepositoryImpl(
             .forEach { cancel(it) }
     }
 
-    override suspend fun pauseAll() {
+    override suspend fun pauseAll() = workerControlLock.withLock {
         transferDao.pauseAll(System.currentTimeMillis())
-        // Cancel and join the old drain only after the rows are PAUSED. Otherwise an
-        // immediate Resume All can turn them QUEUED while their previous workers still
-        // occupy the slots, leaving the queue visually stuck with no fresh workers.
+        // Mark rows first so each worker's control poll exits cooperatively, then join
+        // the drain before allowing Resume All to enqueue another generation of workers.
         transferScheduler.pause()
         backupSessionTracker.refreshActive()
     }
 
-    override suspend fun resumeAll() {
+    override suspend fun resumeAll() = workerControlLock.withLock {
         transferDao.resumeAll(System.currentTimeMillis())
         backupSessionTracker.refreshActive()
-        kickWorker()
+        val prefs = settingsRepository.preferences.first()
+        transferScheduler.resume(prefs.allowMeteredTransfers)
     }
 
     override suspend fun cancelAll() {
