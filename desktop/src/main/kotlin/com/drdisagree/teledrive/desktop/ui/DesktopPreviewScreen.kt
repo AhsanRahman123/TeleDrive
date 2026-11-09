@@ -203,10 +203,10 @@ fun DesktopPreviewScreen(
     val queueItems = remember(queueFiles) { queueFiles.map { PlayerQueueItem(it.id, it.name) } }
     val queueIndex = queueFiles.indexOfFirst { it.id == file?.id }
 
-    var repeatAll by remember(state.files) { mutableStateOf(false) }
-    var shuffle by remember(state.files) { mutableStateOf(false) }
-    var shuffleHistory by remember(state.files) { mutableStateOf(emptyList<String>()) }
-    var shuffleCursor by remember(state.files) { mutableIntStateOf(-1) }
+    var repeatAll by remember(state.files, mediaCategory) { mutableStateOf(false) }
+    var shuffle by remember(state.files, mediaCategory) { mutableStateOf(false) }
+    var shuffleHistory by remember(state.files, mediaCategory) { mutableStateOf(emptyList<String>()) }
+    var shuffleCursor by remember(state.files, mediaCategory) { mutableIntStateOf(-1) }
 
     LaunchedEffect(shuffle, file?.id, queueFiles) {
         if (!shuffle || file == null || queueFiles.isEmpty()) return@LaunchedEffect
@@ -448,9 +448,10 @@ fun DesktopPreviewScreen(
                                 (shuffle && shuffleCursor > 0)
                         } else index > 0,
                         hasNext = if (mediaCategory != null) {
-                            queueIndex in 0 until queueFiles.lastIndex ||
-                                repeatAll || (shuffle && shuffleCursor < shuffleHistory.lastIndex) ||
-                                (shuffle && repeatAll && queueFiles.size > 1)
+                            (shuffle && shuffleHistory.size < queueFiles.size) ||
+                                (shuffle && shuffleCursor < shuffleHistory.lastIndex) ||
+                                (repeatAll && queueFiles.size > 1) ||
+                                queueIndex in 0 until queueFiles.lastIndex
                         } else index < state.files.lastIndex,
                         onPrevious = if (mediaCategory != null) ::previousMedia
                         else { { if (index > 0) index-- } },
