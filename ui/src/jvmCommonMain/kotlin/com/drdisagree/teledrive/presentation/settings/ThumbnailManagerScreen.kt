@@ -137,7 +137,7 @@ fun ThumbnailManagerScreen(
     val fileDragSelect = rememberDragSelect(
         listState = fileListState,
         onStart = { rangeSelectionBase = selectedIds },
-        isSelected = { index -> files.getOrNull(index)?.fileId in selectedIds },
+        isSelected = { index -> files.getOrNull(index)?.fileId?.let(selectedIds::contains) == true },
         onRange = { range, shouldSelect ->
             val rangeIds = range.mapNotNull { files.getOrNull(it)?.fileId }.toSet()
             selectedIds = if (shouldSelect) {
