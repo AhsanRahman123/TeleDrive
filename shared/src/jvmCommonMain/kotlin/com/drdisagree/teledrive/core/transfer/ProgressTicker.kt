@@ -1,8 +1,7 @@
 package com.drdisagree.teledrive.core.transfer
 
 /**
- * Averages each one-second interval and eases into the last reading, so speed and time left stop
- * jumping.
+ * Averages each two-second interval and eases into the last reading, reducing short progress bursts.
  */
 class ProgressTicker(
     private val intervalMs: Long = INTERVAL_MS,
@@ -36,7 +35,7 @@ class ProgressTicker(
     }
 
     private companion object {
-        const val INTERVAL_MS = 1_000L
+        const val INTERVAL_MS = 2_000L
         const val SMOOTHING = 0.35
     }
 }
