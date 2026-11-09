@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.presentation.settings
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -83,13 +84,8 @@ import com.drdisagree.teledrive.resources.settings_backup_results
 import com.drdisagree.teledrive.resources.settings_block_screenshots
 import com.drdisagree.teledrive.resources.settings_cache_current_size
 import com.drdisagree.teledrive.resources.settings_cache_limit
-import com.drdisagree.teledrive.resources.settings_cached_previews_thumbnails_temporary
 import com.drdisagree.teledrive.resources.settings_change_passphrase
 import com.drdisagree.teledrive.resources.settings_choose_folder_device
-import com.drdisagree.teledrive.resources.settings_clear_cache_action
-import com.drdisagree.teledrive.resources.settings_clear_cache_title
-import com.drdisagree.teledrive.resources.settings_clear_thumbnails_action
-import com.drdisagree.teledrive.resources.settings_clear_thumbnails_title
 import com.drdisagree.teledrive.resources.settings_compact_layout
 import com.drdisagree.teledrive.resources.settings_confirm_removing_lock
 import com.drdisagree.teledrive.resources.settings_debug_logging
@@ -104,7 +100,6 @@ import com.drdisagree.teledrive.resources.settings_files_sealed_leaving_device
 import com.drdisagree.teledrive.resources.settings_files_stay_telegram_channel
 import com.drdisagree.teledrive.resources.settings_folder_unreadable
 import com.drdisagree.teledrive.resources.settings_free_up_space_title
-import com.drdisagree.teledrive.resources.settings_gallery_previews_regenerated_browse
 import com.drdisagree.teledrive.resources.settings_gallery_grid_columns
 import com.drdisagree.teledrive.resources.settings_gallery_grid_view
 import com.drdisagree.teledrive.resources.settings_grid_columns
@@ -202,13 +197,13 @@ fun SettingsSectionScreen(
     onBack: () -> Unit,
     onOpenExclusions: () -> Unit,
     onOpenProxy: () -> Unit,
+    onOpenCacheManager: (String) -> Unit,
     onLoggedOut: () -> Unit,
     viewModel: SettingsViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var confirmLogout by remember { mutableStateOf(false) }
-    var confirmClearCache by remember { mutableStateOf(false) }
 
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
 
@@ -286,7 +281,7 @@ fun SettingsSectionScreen(
                         SettingsSectionType.STORAGE -> StorageSection(
                             state = state,
                             viewModel = viewModel,
-                            onClearCache = { confirmClearCache = true }
+                            onOpenCacheManager = onOpenCacheManager
                         )
 
                         SettingsSectionType.THUMBNAILS -> Unit
@@ -307,6 +302,10 @@ fun SettingsSectionScreen(
                     }
                     Spacer(Modifier.height(24.dp + padding.calculateBottomPadding()))
                 }
+                    DesktopScrollEdgeControls(
+                        state = scrollState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 14.dp)
+                    )
                 DesktopVerticalScrollbar(
                     state = scrollState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
@@ -326,18 +325,6 @@ fun SettingsSectionScreen(
                 viewModel.logout(onLoggedOut)
             },
             onDismiss = { confirmLogout = false }
-        )
-    }
-    if (confirmClearCache) {
-        ConfirmDialog(
-            title = stringResource(Res.string.settings_clear_cache_title),
-            message = stringResource(Res.string.settings_cached_previews_thumbnails_temporary),
-            confirmLabel = stringResource(Res.string.settings_clear_cache_action),
-            onConfirm = {
-                confirmClearCache = false
-                viewModel.clearCache()
-            },
-            onDismiss = { confirmClearCache = false }
         )
     }
 }
@@ -604,43 +591,11 @@ private fun BackupSection(
 private fun StorageSection(
     state: SettingsUiState,
     viewModel: SettingsViewModel,
-    onClearCache: () -> Unit
+    onOpenCacheManager: (String) -> Unit
 ) {
     val prefs = state.preferences
     val reclaimable by viewModel.reclaimableBytes.collectAsStateWithLifecycle()
     var showTrashDialog by remember { mutableStateOf(false) }
-    var confirmFreeUpSpace by remember { mutableStateOf(false) }
-    var confirmClearThumbnails by remember { mutableStateOf(false) }
-
-    if (confirmClearThumbnails) {
-        ConfirmDialog(
-            title = stringResource(Res.string.settings_clear_thumbnails_title),
-            message = stringResource(Res.string.settings_gallery_previews_regenerated_browse),
-            confirmLabel = stringResource(Res.string.common_clear),
-            onConfirm = {
-                confirmClearThumbnails = false
-                viewModel.clearThumbnails()
-            },
-            onDismiss = { confirmClearThumbnails = false }
-        )
-    }
-
-    if (confirmFreeUpSpace) {
-        ConfirmDialog(
-            title = stringResource(
-                Res.string.settings_free_up_space_title,
-                Formatters.bytes(reclaimable)
-            ),
-            message = stringResource(Res.string.settings_local_copies_files_already),
-            confirmLabel = stringResource(Res.string.common_free_space),
-            destructive = true,
-            onConfirm = {
-                confirmFreeUpSpace = false
-                viewModel.freeUpSpace()
-            },
-            onDismiss = { confirmFreeUpSpace = false }
-        )
-    }
 
     if (showTrashDialog) {
         ChoiceDialog(
@@ -700,30 +655,24 @@ private fun StorageSection(
                 } else {
                     stringResource(Res.string.settings_free_up_none)
                 },
-                onClick = {
-                    if (reclaimable > 0) {
-                        confirmFreeUpSpace = true
-                    } else {
-                        viewModel.reportNothingToFree()
-                    }
-                }
+                onClick = { onOpenCacheManager("ALL") }
             )
         }
         add {
             SettingsClickRow(
-                title = stringResource(Res.string.settings_clear_cache_action),
+                title = "Manage cache",
                 subtitle = stringResource(
                     Res.string.settings_cache_current_size,
                     Formatters.bytes(state.cacheStats.totalBytes)
                 ),
-                onClick = onClearCache
+                onClick = { onOpenCacheManager("ALL") }
             )
         }
         add {
             SettingsClickRow(
-                title = stringResource(Res.string.settings_clear_thumbnails_action),
+                title = "Manage thumbnail cache",
                 subtitle = Formatters.bytes(state.cacheStats.thumbnailBytes),
-                onClick = { confirmClearThumbnails = true }
+                onClick = { onOpenCacheManager("THUMBNAIL") }
             )
         }
         add {

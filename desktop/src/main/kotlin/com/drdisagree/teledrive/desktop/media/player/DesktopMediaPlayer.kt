@@ -36,7 +36,9 @@ import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ZoomOutMap
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,6 +58,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
@@ -106,7 +109,15 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
@@ -146,6 +157,12 @@ fun DesktopMediaPlayer(
     var scaling by remember { mutableStateOf(VideoScaling.FIT) }
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionTick by remember { mutableIntStateOf(0) }
+    var controlsPinned by remember { mutableStateOf(false) }
+    var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
+    // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
+    // a play/resume event cannot reapply the initial 100% / unmuted values.
+    val latestVolume = rememberUpdatedState(volume)
+    val latestMuted = rememberUpdatedState(muted)
 
     val player = remember(mrl, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
@@ -155,6 +172,13 @@ fun DesktopMediaPlayer(
                     playing = true
                     finished = false
                     buffering = false
+                    // VLC may create its audio output after the initial media.play() call.
+                    // Reapply the current output state at the actual playing event as well.
+                    runCatching {
+                        val currentVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
+                        mediaPlayer.audio().setVolume(currentVolume)
+                        mediaPlayer.audio().isMute = latestMuted.value || currentVolume <= 0
+                    }
                     trackTick++
                 }
 
@@ -196,6 +220,54 @@ fun DesktopMediaPlayer(
         }
     }
 
+    var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(false) }
+    var brightnessMonitor by remember(mrl) { mutableStateOf("") }
+    var brightnessDragging by remember(mrl) { mutableStateOf(false) }
+    var brightnessLastInputAt by remember(mrl) { mutableLongStateOf(0L) }
+    val brightnessUpdates = remember(mrl) { Channel<Float>(Channel.CONFLATED) }
+
+    // Mirror Monitorian: read physical monitor brightness, but never let a polling
+    // result overwrite an in-progress drag or a value just sent to the monitor.
+    LaunchedEffect(mrl, isAudio) {
+        if (isAudio) {
+            brightnessAvailable = false
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            val shouldRead = !brightnessDragging &&
+                System.currentTimeMillis() - brightnessLastInputAt >= BRIGHTNESS_READ_GUARD_MS
+            if (shouldRead) {
+                val reading = withContext(Dispatchers.IO) {
+                    WindowsMonitorBrightness.read()
+                }
+                val stillIdle = !brightnessDragging &&
+                    System.currentTimeMillis() - brightnessLastInputAt >= BRIGHTNESS_READ_GUARD_MS
+                if (stillIdle) {
+                    brightnessAvailable = reading != null
+                    if (reading != null) {
+                        brightness = reading.percent.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
+                        brightnessMonitor = reading.monitorDescription
+                    }
+                }
+            }
+            delay(BRIGHTNESS_POLL_INTERVAL_MS)
+        }
+    }
+
+    // Latest-value-wins DDC/CI writes avoid flooding the monitor while dragging.
+    // The slider itself updates immediately; polling is paused until the write settles.
+    LaunchedEffect(brightnessUpdates) {
+        for (requested in brightnessUpdates) {
+            val applied = withContext(Dispatchers.IO) {
+                WindowsMonitorBrightness.setPercent(requested)
+            }
+            if (applied) brightnessAvailable = true
+        }
+    }
+    DisposableEffect(brightnessUpdates) {
+        onDispose { brightnessUpdates.cancel() }
+    }
+
     DisposableEffect(playing, isAudio) {
         ScreenAwake.keepAwake(playing && !isAudio)
         onDispose { ScreenAwake.keepAwake(false) }
@@ -205,12 +277,35 @@ fun DesktopMediaPlayer(
     DisposableEffect(player, mrl) {
         player.media().play(mrl)
         onDispose {
-            runCatching {
-                player.controls().stop()
-                player.release()
+            // Release VLC off the Compose UI thread so switching files stays responsive.
+            val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            teardownScope.launch {
+                try {
+                    runCatching { player.controls().stop() }
+                    runCatching { player.release() }
+                } finally {
+                    teardownScope.cancel()
+                }
             }
             fullscreenController?.let { controller ->
                 if (controller.isFullscreen()) controller.toggle()
+            }
+        }
+    }
+
+    // VLC can report playback before its audio output has fully attached. Reapply the
+    // saved level after the playing/track events so Gallery launches never need a manual
+    // slider nudge to become audible.
+    LaunchedEffect(player, mrl, playing, trackTick) {
+        if (playing) {
+            delay(AUDIO_OUTPUT_SETTLE_MS)
+            val requestedVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
+            val shouldMute = latestMuted.value || requestedVolume <= 0
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    player.audio().setVolume(requestedVolume)
+                    player.audio().isMute = shouldMute
+                }
             }
         }
     }
@@ -319,17 +414,26 @@ fun DesktopMediaPlayer(
         trackTick++
     }
 
-    LaunchedEffect(playing, interactionTick) {
-        if (!playing) {
-            controlsVisible = true
-            onControlsVisibilityChange(true)
-            return@LaunchedEffect
-        }
+    LaunchedEffect(
+        mrl,
+        playing,
+        interactionTick,
+        controlsPinned,
+        controlPreferences.autoHidePlayerControls,
+        controlPreferences.hideDelayMillis
+    ) {
         controlsVisible = true
         onControlsVisibilityChange(true)
-        delay(CONTROLS_HIDE_DELAY_MS.milliseconds)
-        controlsVisible = false
-        onControlsVisibilityChange(false)
+        if (!controlPreferences.autoHidePlayerControls || controlsPinned) {
+            return@LaunchedEffect
+        }
+        // Hide the complete player chrome after inactivity even while paused.
+        // Previously the !playing early return left every button permanently visible.
+        delay(controlPreferences.hideDelayMillis.milliseconds)
+        if (!controlsPinned) {
+            controlsVisible = false
+            onControlsVisibilityChange(false)
+        }
     }
 
     val blankCursor = remember {
@@ -625,7 +729,7 @@ fun DesktopMediaPlayer(
         }
 
         AnimatedVisibility(
-            visible = controlsVisible || isAudio,
+            visible = controlsVisible,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -640,6 +744,8 @@ fun DesktopMediaPlayer(
                 muted = muted,
                 volume = volume,
                 brightness = brightness,
+                brightnessAvailable = brightnessAvailable,
+                brightnessMonitor = brightnessMonitor,
                 rate = rate,
                 repeatOne = repeatOne,
                 trackTick = trackTick,
@@ -663,13 +769,30 @@ fun DesktopMediaPlayer(
                 onSeekTo = { millis -> player.controls().setTime(millis) },
                 onToggleMute = toggleMute,
                 onVolumeChange = { setPlayerVolume(it) },
-                onBrightnessChange = { brightness = it.coerceIn(0, MAX_BRIGHTNESS) },
+                onBrightnessChange = {
+                    val requested = it.coerceIn(0, MAX_BRIGHTNESS)
+                    brightness = requested
+                    brightnessLastInputAt = System.currentTimeMillis()
+                    brightnessUpdates.trySend(requested.toFloat())
+                    interactionTick++
+                },
+                onBrightnessDragging = { dragging ->
+                    brightnessDragging = dragging
+                    if (!dragging) brightnessLastInputAt = System.currentTimeMillis()
+                },
+                onControlsKeepVisible = { controlsPinned = it },
                 onRate = ::setPlaybackRate,
                 onToggleRepeat = {
                     repeatOne = !repeatOne
                     player.controls().repeat = repeatOne
                 },
-                onScaling = { scaling = it }
+                onScaling = { scaling = it },
+                controlPreferences = controlPreferences,
+                onControlPreferencesChange = { updated ->
+                    controlPreferences = updated
+                    PlayerControlPreferencesStore.save(updated)
+                    interactionTick++
+                }
             )
         }
     }
@@ -686,6 +809,8 @@ private fun PlayerControlsBar(
     muted: Boolean,
     volume: Int,
     brightness: Int,
+    brightnessAvailable: Boolean,
+    brightnessMonitor: String,
     rate: Float,
     repeatOne: Boolean,
     trackTick: Int,
@@ -700,11 +825,15 @@ private fun PlayerControlsBar(
     onToggleMute: () -> Unit,
     onVolumeChange: (Int) -> Unit,
     onBrightnessChange: (Int) -> Unit,
+    onBrightnessDragging: (Boolean) -> Unit,
+    onControlsKeepVisible: (Boolean) -> Unit,
     onRate: (Float) -> Unit,
     onToggleRepeat: () -> Unit,
     onSelectAudioTrack: (VlcTrack) -> Unit,
     onSelectTextTrack: (VlcTrack?) -> Unit,
-    onScaling: (VideoScaling) -> Unit
+    onScaling: (VideoScaling) -> Unit,
+    controlPreferences: PlayerControlPreferences,
+    onControlPreferencesChange: (PlayerControlPreferences) -> Unit
 ) {
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
@@ -769,62 +898,162 @@ private fun PlayerControlsBar(
             modifier = Modifier.fillMaxWidth()
         )
 
+        var showSliderSettings by remember { mutableStateOf(false) }
+        var volumeSliderActive by remember { mutableStateOf(false) }
+        var brightnessSliderActive by remember { mutableStateOf(false) }
+
+        LaunchedEffect(
+            showSliderSettings,
+            showRateMenu,
+            showAudioMenu,
+            showSubtitleMenu,
+            volumeSliderActive,
+            brightnessSliderActive
+        ) {
+            onControlsKeepVisible(
+                showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
+                    volumeSliderActive || brightnessSliderActive
+            )
+        }
+        DisposableEffect(Unit) {
+            onDispose { onControlsKeepVisible(false) }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = if (muted) Icons.AutoMirrored.Filled.VolumeOff
-                    else Icons.AutoMirrored.Filled.VolumeUp,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-                Slider(
-                    value = volume.toFloat(),
+            PlayerAutoHideSlider(
+                icon = if (muted) Icons.AutoMirrored.Filled.VolumeOff
+                else Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = if (muted) "Unmute video" else "Mute video",
+                value = volume.toFloat(),
+                valueRange = 0f..MAX_VOLUME.toFloat(),
+                autoHide = controlPreferences.autoHideVolumeSlider,
+                hideDelayMillis = controlPreferences.hideDelayMillis,
+                onButtonClick = {
+                    onInteraction()
+                    onToggleMute()
+                },
+                onValueChange = { value ->
+                    onInteraction()
+                    onVolumeChange(value.roundToInt())
+                },
+                onActiveChange = { volumeSliderActive = it }
+            )
+
+            if (!isAudio && brightnessAvailable) {
+                PlayerAutoHideSlider(
+                    icon = Icons.Filled.Brightness6,
+                    contentDescription = if (brightnessMonitor.isBlank()) {
+                        "Display brightness"
+                    } else {
+                        "Display brightness: $brightnessMonitor"
+                    },
+                    value = brightness.toFloat(),
+                    valueRange = 0f..MAX_BRIGHTNESS.toFloat(),
+                    autoHide = controlPreferences.autoHideBrightnessSlider,
+                    hideDelayMillis = controlPreferences.hideDelayMillis,
+                    onButtonClick = onInteraction,
                     onValueChange = { value ->
                         onInteraction()
-                        onVolumeChange(value.roundToInt())
+                        onBrightnessChange(value.roundToInt())
                     },
-                    valueRange = 0f..MAX_VOLUME.toFloat(),
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    if (muted) "Muted" else "$volume%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White
+                    onDraggingChange = onBrightnessDragging,
+                    onActiveChange = { brightnessSliderActive = it },
+                    expandOnClick = true
                 )
             }
-            if (!isAudio) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically
+
+            Box {
+                IconButton(
+                    onClick = {
+                        onInteraction()
+                        showSliderSettings = true
+                    },
+                    modifier = Modifier.size(38.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Filled.Brightness6,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "Player slider settings",
+                        tint = Color.White
                     )
-                    Slider(
-                        value = brightness.toFloat(),
-                        onValueChange = { value ->
-                            onInteraction()
-                            onBrightnessChange(value.roundToInt())
+                }
+                DropdownMenu(
+                    expanded = showSliderSettings,
+                    onDismissRequest = { showSliderSettings = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Auto-hide volume slider") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.autoHideVolumeSlider,
+                                onCheckedChange = null
+                            )
                         },
-                        valueRange = 0f..MAX_BRIGHTNESS.toFloat(),
-                        modifier = Modifier.weight(1f)
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    autoHideVolumeSlider = !controlPreferences.autoHideVolumeSlider
+                                )
+                            )
+                            onInteraction()
+                        }
                     )
-                    Text(
-                        "$brightness%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White
+                    DropdownMenuItem(
+                        text = { Text("Auto-hide brightness slider") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.autoHideBrightnessSlider,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    autoHideBrightnessSlider = !controlPreferences.autoHideBrightnessSlider
+                                )
+                            )
+                            onInteraction()
+                        }
                     )
+                    DropdownMenuItem(
+                        text = { Text("Auto-hide player buttons") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.autoHidePlayerControls,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    autoHidePlayerControls = !controlPreferences.autoHidePlayerControls
+                                )
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Auto-hide delay (all enabled controls)") },
+                        enabled = false,
+                        onClick = {}
+                    )
+                    listOf(1_000L, 2_000L, 3_000L, 5_000L, 10_000L).forEach { delay ->
+                        val selected = controlPreferences.hideDelayMillis == delay
+                        DropdownMenuItem(
+                            text = { Text("${delay / 1_000L} ${if (delay == 1_000L) "second" else "seconds"}") },
+                            leadingIcon = {
+                                RadioButton(selected = selected, onClick = null)
+                            },
+                            onClick = {
+                                onControlPreferencesChange(
+                                    controlPreferences.copy(hideDelayMillis = delay)
+                                )
+                                onInteraction()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1033,18 +1262,6 @@ private fun PlayerControlsBar(
                         )
                     }
                 }
-                IconButton(
-                    onClick = { onInteraction(); onToggleMute() },
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Icon(
-                        imageVector = if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                        contentDescription = stringResource(
-                            if (muted) Res.string.player_unmute else Res.string.player_mute
-                        ),
-                        tint = Color.White
-                    )
-                }
                 fullscreen?.let { controller ->
                     IconButton(
                         onClick = { onInteraction(); controller.toggle() },
@@ -1084,13 +1301,15 @@ private val PLAYBACK_RATE_PRESETS = listOf(
     2.0f, 2.5f, 3.0f, 4.0f
 )
 
-private const val CONTROLS_HIDE_DELAY_MS = 3_000L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
 private const val VOLUME_STEP = 5
 private const val MAX_VOLUME = 200
-private const val MAX_BRIGHTNESS = 200
+private const val MAX_BRIGHTNESS = 100
+private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_500L
+private const val BRIGHTNESS_READ_GUARD_MS = 1_800L
+private const val AUDIO_OUTPUT_SETTLE_MS = 150L
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 

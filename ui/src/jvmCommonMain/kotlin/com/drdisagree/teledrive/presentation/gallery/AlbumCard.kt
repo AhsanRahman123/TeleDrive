@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,7 +37,10 @@ import org.jetbrains.compose.resources.stringResource
 fun AlbumCard(
     album: MediaAlbum,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onSelectionChange: ((Boolean) -> Unit)? = null
 ) {
     val albumName = album.name ?: stringResource(Res.string.album_not_in_folder)
     Column(
@@ -70,6 +74,13 @@ fun AlbumCard(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            if (selectionMode && album.folderId != null && onSelectionChange != null) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = onSelectionChange,
+                    modifier = Modifier.align(Alignment.TopEnd)
+                )
+            }
         }
         Column(modifier = Modifier.padding(horizontal = 2.dp, vertical = 6.dp)) {
             Text(
@@ -91,7 +102,10 @@ fun AlbumCard(
 fun AlbumListItem(
     album: MediaAlbum,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onSelectionChange: ((Boolean) -> Unit)? = null
 ) {
     val albumName = album.name ?: stringResource(Res.string.album_not_in_folder)
     Row(
@@ -103,6 +117,12 @@ fun AlbumListItem(
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (selectionMode && album.folderId != null && onSelectionChange != null) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = onSelectionChange
+            )
+        }
         Box(
             modifier = Modifier
                 .size(76.dp)

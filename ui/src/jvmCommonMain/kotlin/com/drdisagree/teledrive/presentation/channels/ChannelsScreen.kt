@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.presentation.channels
 
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -255,6 +256,10 @@ fun ChannelsScreen(
                 )
             }
         }
+                DesktopScrollEdgeControls(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                    )
                 DesktopVerticalScrollbar(
                     state = listState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()

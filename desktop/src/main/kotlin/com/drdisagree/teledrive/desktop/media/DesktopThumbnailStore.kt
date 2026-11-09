@@ -753,7 +753,7 @@ class DesktopThumbnailStore(
 
     private companion object {
         const val TARGET_FILE = "FILE"
-        const val MAX_BACKGROUND_ATTEMPTS = 3
+        const val MAX_BACKGROUND_ATTEMPTS = 5
         const val MAX_PARALLEL_GENERATIONS = 6
         const val MIN_HEAP_PER_WORKER_BYTES = 384L * 1024L * 1024L
         const val JOB_INSERT_BATCH_SIZE = 250

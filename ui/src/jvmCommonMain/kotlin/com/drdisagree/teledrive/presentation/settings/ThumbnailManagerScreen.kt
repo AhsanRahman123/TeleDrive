@@ -75,10 +75,22 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailFolderSort
 import com.drdisagree.teledrive.domain.repository.ThumbnailTargetType
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+
+private fun formatThumbnailQueueEta(totalSeconds: Long): String {
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return when {
+        hours > 0L -> "${hours}h ${minutes}m"
+        minutes > 0L -> "${minutes}m ${seconds}s"
+        else -> "${seconds}s"
+    }
+}
 
 private const val THUMBNAIL_PAGE_SIZE = 60
 
@@ -92,6 +104,7 @@ fun ThumbnailManagerScreen(
     val scrollState = rememberScrollState()
 
     var summary by remember { mutableStateOf(ThumbnailManagerSummary()) }
+    var queueEstimate by remember { mutableStateOf("Estimating completion rate…") }
     var folderPath by remember { mutableStateOf(emptyList<ThumbnailFolderUsage>()) }
     var folders by remember { mutableStateOf(emptyList<ThumbnailFolderUsage>()) }
     var files by remember { mutableStateOf(emptyList<ThumbnailFileUsage>()) }
@@ -119,18 +132,44 @@ fun ThumbnailManagerScreen(
     var searchInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
+    var folderRangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
     val fileListState = rememberLazyListState()
+    val folderListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
+    val folderDragSelect = rememberDragSelect(
+        listState = folderListState,
+        onStart = { folderRangeSelectionBase = selectedFolderIds },
+        isSelected = { index ->
+            folders.getOrNull(index)?.id?.let(selectedFolderIds::contains) == true
+        },
+        onRange = { range, shouldSelect ->
+            val rangeIds = range.mapNotNull { folders.getOrNull(it)?.id }.toSet()
+            selectedFolderIds = if (shouldSelect) {
+                folderRangeSelectionBase + rangeIds
+            } else {
+                folderRangeSelectionBase - rangeIds
+            }
+        },
+        onEnd = { folderRangeSelectionBase = emptySet() }
+    )
     val fileDragSelect = rememberDragSelect(
         listState = fileListState,
         onStart = { rangeSelectionBase = selectedIds },
-        onRange = { range ->
-            selectedIds = rangeSelectionBase + range.mapNotNull { files.getOrNull(it)?.fileId }
+        isSelected = { index -> files.getOrNull(index)?.fileId?.let(selectedIds::contains) == true },
+        onRange = { range, shouldSelect ->
+            val rangeIds = range.mapNotNull { files.getOrNull(it)?.fileId }.toSet()
+            selectedIds = if (shouldSelect) {
+                rangeSelectionBase + rangeIds
+            } else {
+                rangeSelectionBase - rangeIds
+            }
         },
         onEnd = { rangeSelectionBase = emptySet() }
     )
     LaunchedEffect(folderId) {
+        folderListState.scrollToItem(0)
+        fileListState.scrollToItem(0)
         selectedIds = emptySet()
         selectedFolderIds = emptySet()
         generationMessage = ""
@@ -179,6 +218,58 @@ fun ThumbnailManagerScreen(
             cacheRepository.thumbnailPolicy(ThumbnailTargetType.FOLDER, folderId)
         }
         loading = false
+    }
+
+    // Keep the manager and queue page independently live, using the same
+    // one-second queue-reduction estimate on both screens.
+    LaunchedEffect(folderId) {
+        var previousCount = -1
+        var previousFailedCount = 0
+        var previousSampleAt = 0L
+        var throughputFilesPerMinute = 0.0
+        while (true) {
+            val liveQueueCount = cacheRepository.thumbnailQueueCount()
+            val failedCount = cacheRepository.thumbnailQueueFailedFileIds().size
+            val remainingWork = (liveQueueCount - failedCount).coerceAtLeast(0)
+            val paused = cacheRepository.thumbnailQueuePaused()
+            val sampleAt = System.currentTimeMillis()
+            if (paused) {
+                throughputFilesPerMinute = 0.0
+            } else if (previousCount >= 0 && previousSampleAt > 0L) {
+                val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
+                val removed = previousCount - liveQueueCount
+                if (removed > 0) {
+                    val sampleRate = removed * 60_000.0 / elapsed
+                    throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
+                        sampleRate
+                    } else {
+                        throughputFilesPerMinute * 0.65 + sampleRate * 0.35
+                    }
+                } else if (liveQueueCount > previousCount || failedCount != previousFailedCount) {
+                    throughputFilesPerMinute = 0.0
+                }
+            }
+            previousCount = liveQueueCount
+            previousFailedCount = failedCount
+            previousSampleAt = sampleAt
+            if (summary.pendingJobs != liveQueueCount) {
+                summary = summary.copy(pendingJobs = liveQueueCount)
+            }
+            queueEstimate = when {
+                paused -> "ETA unavailable while paused"
+                remainingWork == 0 && failedCount > 0 ->
+                    "$failedCount failed jobs need retry · ETA unavailable"
+                remainingWork == 0 -> "All queued jobs completed"
+                throughputFilesPerMinute > 0.0 -> {
+                    val etaSeconds = (remainingWork * 60.0 / throughputFilesPerMinute)
+                        .toLong().coerceAtLeast(1L)
+                    "Recent queue reduction: ${throughputFilesPerMinute.toInt()} files/min · " +
+                        "Estimated remaining: ${formatThumbnailQueueEta(etaSeconds)}"
+                }
+                else -> "Estimating completion rate…"
+            }
+            delay(1_000L)
+        }
     }
 
     // Update totals and folder aggregates without resetting the current file page or selection.
@@ -492,6 +583,12 @@ fun ThumbnailManagerScreen(
             }
 
             Text(
+                queueEstimate,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Text(
                 "Existing library files are Manual only by default. New successful uploads are " +
                     "automatically prepared. Choose individual files or folders to prepare older previews.",
                 style = MaterialTheme.typography.bodySmall,
@@ -526,7 +623,30 @@ fun ThumbnailManagerScreen(
                                 }
                             }
                         }
-                    ) { Text(if (selectingAll) "Selecting…" else "Select matching files") }
+                    ) {
+                        Text(
+                            if (selectingAll) "Selecting…"
+                            else if (folderId == null) "Select matching unfiled files"
+                            else "Select matching files"
+                        )
+                    }
+                    if (folderId == null) {
+                        TextButton(
+                            enabled = !selectingAll,
+                            onClick = {
+                                scope.launch {
+                                    selectingAll = true
+                                    try {
+                                        selectedIds = cacheRepository.thumbnailAllMissingFileIds().toSet()
+                                        selectedFolderIds = emptySet()
+                                        generationMessage = "Selected ${selectedIds.size} missing files across the drive."
+                                    } finally {
+                                        selectingAll = false
+                                    }
+                                }
+                            }
+                        ) { Text(if (selectingAll) "Selecting…" else "Select all missing (drive)") }
+                    }
                     TextButton(
                         enabled = !selectingAll && files.isNotEmpty(),
                         onClick = { selectedIds = selectedIds + files.map { it.fileId } }
@@ -754,40 +874,58 @@ fun ThumbnailManagerScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
-                folders.forEach { folder ->
-                    ThumbnailFolderRow(
-                        folder = folder,
-                        selected = folder.id in selectedFolderIds,
-                        onSelectionChange = { checked ->
-                            selectedFolderIds = if (checked) selectedFolderIds + folder.id
-                            else selectedFolderIds - folder.id
-                        },
-                        onOpen = {
-                            folderPath = folderPath + folder
-                            pageOffset = 0
-                        },
-                        onPolicy = { policy ->
-                            scope.launch {
-                                cacheRepository.setThumbnailPolicy(
-                                    ThumbnailTargetType.FOLDER,
-                                    folder.id,
-                                    policy
-                                )
-                                refreshKey++
-                            }
-                        },
-                        currentPolicy = folder.policy,
-                        onGenerate = {
-                            scope.launch {
-                                val result = cacheRepository.generateFolderThumbnails(folder.id)
-                                generationMessage = enqueueResultMessage(
-                                    result.newlyQueued,
-                                    result.alreadyQueued
-                                )
-                                summary = cacheRepository.thumbnailManagerSummary()
-                            }
-                        },
-                        onRemove = { confirmClearFolderId = folder.id }
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(280.dp)
+                ) {
+                    LazyColumn(
+                        state = folderListState,
+                        modifier = Modifier.fillMaxSize().then(folderDragSelect),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        itemsIndexed(folders, key = { _, folder -> folder.id }) { _, folder ->
+                            ThumbnailFolderRow(
+                                folder = folder,
+                                selected = folder.id in selectedFolderIds,
+                                onSelectionChange = { checked ->
+                                    selectedFolderIds = if (checked) selectedFolderIds + folder.id
+                                    else selectedFolderIds - folder.id
+                                },
+                                onOpen = {
+                                    folderPath = folderPath + folder
+                                    pageOffset = 0
+                                },
+                                onPolicy = { policy ->
+                                    scope.launch {
+                                        cacheRepository.setThumbnailPolicy(
+                                            ThumbnailTargetType.FOLDER,
+                                            folder.id,
+                                            policy
+                                        )
+                                        refreshKey++
+                                    }
+                                },
+                                currentPolicy = folder.policy,
+                                onGenerate = {
+                                    scope.launch {
+                                        val result = cacheRepository.generateFolderThumbnails(folder.id)
+                                        generationMessage = enqueueResultMessage(
+                                            result.newlyQueued,
+                                            result.alreadyQueued
+                                        )
+                                        summary = cacheRepository.thumbnailManagerSummary()
+                                    }
+                                },
+                                onRemove = { confirmClearFolderId = folder.id }
+                            )
+                        }
+                    }
+                    DesktopScrollEdgeControls(
+                        state = folderListState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
+                    )
+                    DesktopVerticalScrollbar(
+                        state = folderListState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                     )
                 }
             }
@@ -871,6 +1009,10 @@ fun ThumbnailManagerScreen(
                             )
                         }
                     }
+                    DesktopScrollEdgeControls(
+                        state = fileListState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
+                    )
                     DesktopVerticalScrollbar(
                         state = fileListState,
                         modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()

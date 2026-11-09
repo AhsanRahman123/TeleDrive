@@ -45,6 +45,9 @@ import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.DriveFolderUpload
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -132,6 +135,7 @@ import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.FileDetailsItem
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.FolderGridItem
 import com.drdisagree.teledrive.presentation.components.FolderInfoSheet
 import com.drdisagree.teledrive.presentation.components.FolderPickerDialog
@@ -239,6 +243,7 @@ fun FilesScreen(
     onOpenFile: (String, PreviewSequence) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenTransfers: () -> Unit,
+    onViewThumbnailQueue: () -> Unit,
     onNewNote: (String?) -> Unit,
     onEditNote: (String, String) -> Unit,
     onBack: (() -> Unit)?,
@@ -464,6 +469,18 @@ fun FilesScreen(
                                         }
                                         add(
                                             MenuAction(
+                                                label = "Generate thumbnails",
+                                                icon = Icons.Filled.Image
+                                            ) { viewModel.generateThumbnailsSelected() }
+                                        )
+                                        add(
+                                            MenuAction(
+                                                label = "View thumbnail queue",
+                                                icon = Icons.Filled.Refresh
+                                            ) { onViewThumbnailQueue() }
+                                        )
+                                        add(
+                                            MenuAction(
                                                 label = stringResource(Res.string.files_copy),
                                                 icon = Icons.Filled.ContentCopy
                                             ) { showCopyPicker = true }
@@ -566,6 +583,12 @@ fun FilesScreen(
                                     Icon(
                                         Icons.Filled.CheckBoxOutlineBlank,
                                         contentDescription = stringResource(Res.string.common_select)
+                                    )
+                                }
+                                IconButton(onClick = onViewThumbnailQueue) {
+                                    Icon(
+                                        Icons.Filled.CloudQueue,
+                                        contentDescription = "View thumbnail queue"
                                     )
                                 }
                                 RefreshAction(
@@ -1083,7 +1106,14 @@ private fun FilesContent(
     val dragSelect = rememberDragSelect(
         gridState = gridState,
         onStart = viewModel::startRangeSelection,
-        onRange = { range ->
+        isSelected = { index ->
+            if (index < state.folders.size) {
+                state.folderSelection.contains(state.folders[index].id)
+            } else {
+                files.peek(index - state.folders.size)?.id?.let(state.selection::contains) == true
+            }
+        },
+        onRange = { range, shouldSelect ->
             val folderIds = mutableListOf<String>()
             val fileIds = mutableListOf<String>()
             for (index in range) {
@@ -1096,7 +1126,7 @@ private fun FilesContent(
                     }
                 }
             }
-            viewModel.extendRangeSelection(fileIds, folderIds)
+            viewModel.extendRangeSelection(fileIds, folderIds, shouldSelect)
         },
         onEnd = viewModel::endRangeSelection
     )
@@ -1262,6 +1292,10 @@ private fun FilesContent(
             }
         }
         }
+        DesktopScrollEdgeControls(
+            state = gridState,
+            modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+        )
         DesktopVerticalScrollbar(
             state = gridState,
             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()

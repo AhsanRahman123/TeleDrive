@@ -5,15 +5,28 @@ import androidx.lifecycle.viewModelScope
 import com.drdisagree.teledrive.domain.model.TransferSection
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.repository.TransferRepository
+import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class TransfersViewModel(
-    private val transferRepository: TransferRepository
+    private val transferRepository: TransferRepository,
+    private val settingsRepository: SettingsRepository
 ) : ViewModel() {
+
+    val transferConcurrency: StateFlow<Int> = settingsRepository.preferences
+        .map { it.transferConcurrency.coerceIn(1, 6) }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 2)
+
+    fun setTransferConcurrency(value: Int) = launch {
+        settingsRepository.update { it.copy(transferConcurrency = value.coerceIn(1, 6)) }
+    }
 
     private val rows = combine(
         transferRepository.observeSection(TransferSection.ACTIVE, SECTION_LIMIT),
@@ -61,6 +74,25 @@ class TransfersViewModel(
     fun cancel(id: String) = launch { transferRepository.cancel(id) }
 
     fun retry(id: String) = launch { transferRepository.retry(id) }
+
+    fun setPriority(id: String, priority: Int) =
+        launch { transferRepository.setPriority(id, priority) }
+
+    fun pauseSelected(ids: List<String>) = launch {
+        ids.forEach { transferRepository.pause(it) }
+    }
+
+    fun resumeSelected(ids: List<String>) = launch {
+        ids.forEach { transferRepository.resume(it) }
+    }
+
+    fun cancelSelected(ids: List<String>) = launch {
+        ids.forEach { transferRepository.cancel(it) }
+    }
+
+    fun retrySelected(ids: List<String>) = launch {
+        ids.forEach { transferRepository.retry(it) }
+    }
 
     fun pauseAll() = launch { transferRepository.pauseAll() }
 

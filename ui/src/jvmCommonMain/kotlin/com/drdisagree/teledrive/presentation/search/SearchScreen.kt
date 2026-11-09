@@ -5,6 +5,7 @@ import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollb
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.Alignment
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -131,8 +132,9 @@ fun SearchScreen(
     val dragSelect = rememberDragSelect(
         listState = listState,
         onStart = viewModel::startRangeSelection,
-        onRange = { range ->
-            viewModel.extendRangeSelection(range.mapNotNull(fileIdAt))
+        isSelected = { index -> fileIdAt(index)?.let(state.selection::contains) == true },
+        onRange = { range, shouldSelect ->
+            viewModel.extendRangeSelection(range.mapNotNull(fileIdAt), shouldSelect)
         },
         onEnd = viewModel::endRangeSelection
     )
@@ -343,6 +345,10 @@ fun SearchScreen(
                         )
                     }
                 }
+                DesktopScrollEdgeControls(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                )
                 DesktopVerticalScrollbar(
                     state = listState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()

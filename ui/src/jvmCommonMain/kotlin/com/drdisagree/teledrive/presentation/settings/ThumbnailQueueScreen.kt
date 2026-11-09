@@ -7,6 +7,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,12 +48,26 @@ import com.drdisagree.teledrive.domain.repository.ThumbnailQueueItem
 import com.drdisagree.teledrive.domain.repository.ThumbnailQueueSort
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
+
+private fun formatThumbnailQueueEta(totalSeconds: Long): String {
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return when {
+        hours > 0L -> "${hours}h ${minutes}m"
+        minutes > 0L -> "${minutes}m ${seconds}s"
+        else -> "${seconds}s"
+    }
+}
+
 private const val THUMBNAIL_QUEUE_PAGE_SIZE = 100
-private const val MAX_THUMBNAIL_ATTEMPTS = 3
+private const val MAX_THUMBNAIL_ATTEMPTS = 5
 
 @Composable
 fun ThumbnailQueueScreen(
@@ -70,14 +88,56 @@ fun ThumbnailQueueScreen(
     var selectingAll by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
     var sortOrder by remember { mutableStateOf(ThumbnailQueueSort.OLDEST_FIRST) }
+    var throughputFilesPerMinute by remember { mutableStateOf(0.0) }
+    var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
+    val queueListState = rememberLazyListState()
+    val queueDragSelect = rememberDragSelect(
+        listState = queueListState,
+        onStart = { rangeSelectionBase = selectedIds },
+        isSelected = { index -> items.getOrNull(index)?.fileId?.let(selectedIds::contains) == true },
+        onRange = { range, shouldSelect ->
+            val ids = range.mapNotNull { items.getOrNull(it)?.fileId }.toSet()
+            selectedIds = if (shouldSelect) rangeSelectionBase + ids
+                else rangeSelectionBase - ids
+        },
+        onEnd = { rangeSelectionBase = emptySet() }
+    )
 
     LaunchedEffect(offset, sortOrder) {
+        queueListState.scrollToItem(0)
+        var previousCount = -1
+        var previousFailedCount = 0
+        var previousSampleAt = 0L
+        throughputFilesPerMinute = 0.0
         while (true) {
             refreshing = true
             val page = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
             pendingCount = repository.thumbnailQueueCount()
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
+            val remainingWork = (pendingCount - failedQueueIds.size).coerceAtLeast(0)
+
+            val sampleAt = System.currentTimeMillis()
+            if (queuePaused) {
+                throughputFilesPerMinute = 0.0
+            } else if (previousCount >= 0 && previousSampleAt > 0L) {
+                val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
+                val removed = previousCount - pendingCount
+                if (removed > 0) {
+                    val sampleRate = removed * 60_000.0 / elapsed
+                    throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
+                        sampleRate
+                    } else {
+                        throughputFilesPerMinute * 0.65 + sampleRate * 0.35
+                    }
+                } else if (pendingCount > previousCount || failedQueueIds.size != previousFailedCount) {
+                    throughputFilesPerMinute = 0.0
+                }
+            }
+            previousCount = pendingCount
+            previousFailedCount = failedQueueIds.size
+            previousSampleAt = sampleAt
+
             if (page.isEmpty() && offset > 0) {
                 // The live queue shrank while this page was open. Move to the last valid page,
                 // including page zero when the queue has become empty.
@@ -140,6 +200,25 @@ fun ThumbnailQueueScreen(
                         "${(pendingCount - activeJobs.size).coerceAtLeast(0)} waiting · " +
                             activeJobs.size + " generating · " + pendingCount + " total" +
                             if (queuePaused) " · Paused" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    val remainingWork = (pendingCount - failedQueueIds.size).coerceAtLeast(0)
+                    val queueEstimate = when {
+                        queuePaused -> "ETA unavailable while paused"
+                        remainingWork == 0 && failedQueueIds.isNotEmpty() ->
+                            "${failedQueueIds.size} failed jobs need retry · ETA unavailable"
+                        remainingWork == 0 -> "All queued jobs completed"
+                        throughputFilesPerMinute > 0.0 -> {
+                            val etaSeconds = (remainingWork * 60.0 / throughputFilesPerMinute).toLong()
+                                .coerceAtLeast(1L)
+                            "Recent queue reduction: ${throughputFilesPerMinute.toInt()} files/min · " +
+                                "Estimated remaining: ${formatThumbnailQueueEta(etaSeconds)}"
+                        }
+                        else -> "Estimating completion rate…"
+                    }
+                    Text(
+                        queueEstimate,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -249,6 +328,22 @@ fun ThumbnailQueueScreen(
                     color = MaterialTheme.colorScheme.primary
                 )
 
+                if (failedQueueIds.isNotEmpty()) {
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            val failedIds = failedQueueIds.toList()
+                            scope.launch {
+                                repository.retryThumbnailJobs(failedIds)
+                                selectedIds = selectedIds - failedIds.toSet()
+                                offset = 0
+                            }
+                        }
+                    ) {
+                        Text("Retry all failed (${failedQueueIds.size})")
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -313,31 +408,48 @@ fun ThumbnailQueueScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    items.forEach { item ->
-                        ThumbnailQueueRow(
-                            item = item,
-                            selected = item.fileId in selectedIds,
-                            active = item.fileId in activeJobs,
-                            globallyPaused = queuePaused,
-                            onSelect = { checked ->
-                                selectedIds = if (checked) selectedIds + item.fileId
-                                else selectedIds - item.fileId
-                            },
-                            onPause = {
-                                scope.launch { repository.pauseThumbnailJobs(listOf(item.fileId)) }
-                            },
-                            onResume = {
-                                scope.launch { repository.resumeThumbnailJobs(listOf(item.fileId)) }
-                            },
-                            onCancel = {
-                                scope.launch {
-                                    repository.cancelThumbnailJobs(listOf(item.fileId))
-                                    selectedIds = selectedIds - item.fileId
-                                }
-                            },
-                            onRetry = {
-                                scope.launch { repository.retryThumbnailJobs(listOf(item.fileId)) }
+                    Box(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
+                        LazyColumn(
+                            state = queueListState,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                                .then(queueDragSelect),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            itemsIndexed(items, key = { _, item -> item.fileId }) { _, item ->
+                                ThumbnailQueueRow(
+                                    item = item,
+                                    selected = item.fileId in selectedIds,
+                                    active = item.fileId in activeJobs,
+                                    globallyPaused = queuePaused,
+                                    onSelect = { checked ->
+                                        selectedIds = if (checked) selectedIds + item.fileId
+                                        else selectedIds - item.fileId
+                                    },
+                                    onPause = {
+                                        scope.launch { repository.pauseThumbnailJobs(listOf(item.fileId)) }
+                                    },
+                                    onResume = {
+                                        scope.launch { repository.resumeThumbnailJobs(listOf(item.fileId)) }
+                                    },
+                                    onCancel = {
+                                        scope.launch {
+                                            repository.cancelThumbnailJobs(listOf(item.fileId))
+                                            selectedIds = selectedIds - item.fileId
+                                        }
+                                    },
+                                    onRetry = {
+                                        scope.launch { repository.retryThumbnailJobs(listOf(item.fileId)) }
+                                    }
+                                )
                             }
+                        }
+                        DesktopScrollEdgeControls(
+                            state = queueListState,
+                            modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
+                        )
+                        DesktopVerticalScrollbar(
+                            state = queueListState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                         )
                     }
                 }

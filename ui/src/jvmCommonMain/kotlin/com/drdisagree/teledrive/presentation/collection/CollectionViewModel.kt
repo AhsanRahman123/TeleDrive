@@ -178,11 +178,15 @@ class CollectionViewModel(
         rangeBase = _selection.value to _folderSelection.value
     }
 
-    fun extendRangeSelection(fileIds: List<String>, folderIds: List<String>) {
+    fun extendRangeSelection(
+        fileIds: List<String>,
+        folderIds: List<String>,
+        shouldSelect: Boolean
+    ) {
         val base = rangeBase ?: return
         _allSelected.update { false }
-        _selection.update { base.first + fileIds }
-        _folderSelection.update { base.second + folderIds }
+        _selection.update { if (shouldSelect) base.first + fileIds else base.first - fileIds.toSet() }
+        _folderSelection.update { if (shouldSelect) base.second + folderIds else base.second - folderIds.toSet() }
     }
 
     fun endRangeSelection() {

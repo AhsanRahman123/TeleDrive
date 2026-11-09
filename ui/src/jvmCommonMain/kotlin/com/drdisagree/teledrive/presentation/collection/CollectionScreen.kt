@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.presentation.collection
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.Alignment
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -292,7 +293,14 @@ fun CollectionScreen(
         val dragSelect = rememberDragSelect(
             listState = listState,
             onStart = viewModel::startRangeSelection,
-            onRange = { range ->
+            isSelected = { index ->
+                if (index < folders.size) {
+                    folders[index].id in folderSelection
+                } else {
+                    files.peek(index - folders.size)?.id?.let(selection::contains) == true
+                }
+            },
+            onRange = { range, shouldSelect ->
                 val folderIds = mutableListOf<String>()
                 val fileIds = mutableListOf<String>()
                 for (index in range) {
@@ -305,7 +313,7 @@ fun CollectionScreen(
                         }
                     }
                 }
-                viewModel.extendRangeSelection(fileIds, folderIds)
+                viewModel.extendRangeSelection(fileIds, folderIds, shouldSelect)
             },
             onEnd = viewModel::endRangeSelection
         )
@@ -402,6 +410,10 @@ fun CollectionScreen(
                 )
             }
         }
+                DesktopScrollEdgeControls(
+                    state = listState,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                )
                 DesktopVerticalScrollbar(
                     state = listState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()

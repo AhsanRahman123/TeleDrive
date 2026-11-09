@@ -49,6 +49,8 @@ interface TransferRepository {
 
     suspend fun retry(id: String)
 
+    suspend fun setPriority(id: String, priority: Int)
+
     suspend fun pauseAll()
 
     suspend fun resumeAll()

@@ -14,7 +14,8 @@ data class TransferTask(
     val stage: TransferStage? = null,
     val createdAt: Long,
     val updatedAt: Long,
-    val completedAt: Long?
+    val completedAt: Long?,
+    val localPath: String? = null
 ) {
     val progress: Float
         get() = if (sizeBytes > 0) {

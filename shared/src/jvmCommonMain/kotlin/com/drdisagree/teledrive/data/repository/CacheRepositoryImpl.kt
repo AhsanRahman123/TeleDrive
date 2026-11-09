@@ -24,6 +24,10 @@ import com.drdisagree.teledrive.data.local.dao.ThumbnailDao
 import com.drdisagree.teledrive.data.local.entity.CacheEntryType
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.CacheStats
+import com.drdisagree.teledrive.domain.repository.CacheEntryUsage
+import com.drdisagree.teledrive.domain.repository.CacheFolderUsage
+import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
+import com.drdisagree.teledrive.domain.repository.CacheRemovalResult
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -97,12 +101,14 @@ class CacheRepositoryImpl(
     override suspend fun clearTemp() {
         clearType(CacheEntryType.TEMP)
         stagingDir().deleteRecursively()
+        partsDir().deleteRecursively()
         assemblyDir().deleteRecursively()
         refreshStats()
     }
 
     override suspend fun clearAll() {
-        clearThumbnails()
+        // Storage > Clear cache must not remove Thumbnail Manager's independent cache.
+        // Thumbnails have their own explicit Clear thumbnails action and accounting.
         clearType(CacheEntryType.PREVIEW)
         clearType(CacheEntryType.STREAM)
         clearTemp()
@@ -113,7 +119,7 @@ class CacheRepositoryImpl(
 
     override suspend fun enforceLimit(maxBytes: Long) {
         refreshStats()
-        var total = stats.value.totalBytes
+        var total = stats.value.nonThumbnailBytes
         if (total <= maxBytes) return
 
         while (total > maxBytes) {
@@ -127,24 +133,165 @@ class CacheRepositoryImpl(
             }
         }
 
-        while (total > maxBytes) {
-            val victims = thumbnailDao.leastRecentlyUsed(64)
-            if (victims.isEmpty()) break
-            for (victim in victims) {
-                val cachedFile = File(victim.path)
-                if (cachedFile.exists() && !withContext(Dispatchers.IO) { cachedFile.delete() }) {
-                    continue
-                }
-                // Cache eviction must not rewrite the file's independent generation policy.
-                thumbnailJobDao.delete(victim.fileId)
-                thumbnailPolicyDao.clearQueueItemPauses(listOf(victim.fileId))
-                thumbnailStore.cancelJobs(listOf(victim.fileId))
-                thumbnailDao.delete(victim.fileId)
-                thumbnailMemoryCache.remove(victim.fileId)
-                total -= victim.sizeBytes
-                if (total <= maxBytes) break
+        refreshStats()
+    }
+
+    override suspend fun cacheManagerSummary(): CacheManagerSummary {
+        val previewBytes = cacheDao.sizeByType(CacheEntryType.PREVIEW)
+        val streamBytes = cacheDao.sizeByType(CacheEntryType.STREAM)
+        val tempBytes = cacheDao.sizeByType(CacheEntryType.TEMP)
+        val thumbnailBytes = thumbnailDao.totalSizeBytes()
+        val untrackedBytes = withContext(Dispatchers.IO) {
+            stagingSize() + partSize() + storageInspector.directorySize(tdlibFilesDir())
+        }
+        return CacheManagerSummary(
+            totalBytes = previewBytes + streamBytes + tempBytes + thumbnailBytes + untrackedBytes,
+            entryCount = cacheDao.entryCount() + thumbnailDao.count(),
+            previewBytes = previewBytes,
+            streamBytes = streamBytes,
+            tempBytes = tempBytes,
+            thumbnailBytes = thumbnailBytes,
+            thumbnailEntries = thumbnailDao.count(),
+            untrackedBytes = untrackedBytes
+        )
+    }
+
+    override suspend fun cacheFolders(
+        parentId: String?,
+        sortOrder: String
+    ): List<CacheFolderUsage> = cacheDao.managerFolders(parentId, sortOrder)
+
+    override suspend fun cacheEntries(
+        folderId: String?,
+        offset: Int,
+        limit: Int,
+        typeFilter: String,
+        searchQuery: String,
+        sortOrder: String
+    ): List<CacheEntryUsage> {
+        val requestedLimit = (offset.coerceAtLeast(0) + limit.coerceIn(1, 500))
+            .coerceIn(1, 10_000)
+        val trackedFilter = if (typeFilter == "THUMBNAIL") "NO_MATCH" else typeFilter
+        val tracked = cacheDao.managerEntries(
+            folderId = folderId,
+            typeFilter = trackedFilter,
+            searchQuery = searchQuery.trim(),
+            sortOrder = sortOrder,
+            limit = requestedLimit,
+            offset = 0
+        )
+        val thumbnails = if (typeFilter == "ALL" || typeFilter == "THUMBNAIL") {
+            thumbnailDao.managerThumbnails(
+                folderId = folderId,
+                searchQuery = searchQuery.trim(),
+                sortOrder = sortOrder,
+                limit = requestedLimit,
+                offset = 0
+            )
+        } else {
+            emptyList()
+        }
+        val combined = tracked + thumbnails
+        val sorted = when (sortOrder) {
+            "SMALLEST" -> combined.sortedBy { it.sizeBytes }
+            "NEWEST" -> combined.sortedByDescending { it.lastAccessAt }
+            "OLDEST" -> combined.sortedBy { it.lastAccessAt }
+            "NAME_ASC" -> combined.sortedBy { it.name.lowercase() }
+            else -> combined.sortedByDescending { it.sizeBytes }
+        }
+        return sorted.drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 500))
+    }
+
+    override suspend fun cacheEntryPathsMatching(
+        folderId: String?,
+        typeFilter: String,
+        searchQuery: String
+    ): List<String> {
+        val trackedFilter = if (typeFilter == "THUMBNAIL") "NO_MATCH" else typeFilter
+        val tracked = cacheDao.managerEntryPathsMatching(
+            folderId,
+            trackedFilter,
+            searchQuery.trim()
+        )
+        val thumbnails = if (typeFilter == "ALL" || typeFilter == "THUMBNAIL") {
+            thumbnailDao.managerThumbnailPathsMatching(folderId, searchQuery.trim())
+        } else {
+            emptyList()
+        }
+        return (tracked + thumbnails).distinct()
+    }
+
+    override suspend fun cacheEntryPathsInFolderTree(
+        folderId: String,
+        typeFilter: String,
+        searchQuery: String
+    ): List<String> {
+        val trackedFilter = if (typeFilter == "THUMBNAIL") "NO_MATCH" else typeFilter
+        val tracked = cacheDao.managerEntryPathsInFolderTree(
+            folderId,
+            trackedFilter,
+            searchQuery.trim()
+        )
+        val thumbnails = if (typeFilter == "ALL" || typeFilter == "THUMBNAIL") {
+            thumbnailDao.managerThumbnailPathsInFolderTree(folderId, searchQuery.trim())
+        } else {
+            emptyList()
+        }
+        return (tracked + thumbnails).distinct()
+    }
+
+    override suspend fun removeCacheEntries(paths: List<String>): CacheRemovalResult {
+        var removedEntries = 0
+        var removedBytes = 0L
+        val thumbnailFileIds = linkedSetOf<String>()
+        val thumbnailSizesByPath = mutableMapOf<String, Long>()
+
+        paths.distinct().chunked(JOB_BATCH_SIZE).forEach { batch ->
+            val entries = cacheDao.entriesByPaths(batch)
+            val removedPaths = withContext(Dispatchers.IO) {
+                entries.filter { entry ->
+                    val file = File(entry.path)
+                    !file.exists() || file.delete()
+                }.map { it.path }
+            }
+            if (removedPaths.isNotEmpty()) {
+                val removedSet = removedPaths.toSet()
+                removedBytes += entries.filter { it.path in removedSet }.sumOf { it.sizeBytes }
+                removedEntries += removedPaths.size
+                cacheDao.deletePaths(removedPaths)
+            }
+
+            thumbnailDao.entriesByPaths(batch).forEach { thumbnail ->
+                thumbnailFileIds += thumbnail.fileId
+                thumbnailSizesByPath[thumbnail.path] = thumbnail.sizeBytes
             }
         }
+
+        // Pause/resume the thumbnail worker once for the whole selected set, not once per
+        // SQLite batch. This keeps large folder selections from repeatedly interrupting it.
+        if (thumbnailFileIds.isNotEmpty()) {
+            removeThumbnails(thumbnailFileIds.toList())
+            val thumbnailPaths = thumbnailSizesByPath.keys.toList()
+            val remainingPaths = thumbnailPaths.chunked(JOB_BATCH_SIZE)
+                .flatMap { thumbnailDao.entriesByPaths(it) }
+                .mapTo(mutableSetOf()) { it.path }
+            val removedThumbnailPaths = thumbnailPaths.filterNot { it in remainingPaths }
+            removedEntries += removedThumbnailPaths.size
+            removedBytes += removedThumbnailPaths.sumOf { thumbnailSizesByPath[it] ?: 0L }
+        }
+
+        refreshStats()
+        return CacheRemovalResult(removedEntries, removedBytes)
+    }
+
+    override suspend fun clearUntrackedCache() {
+        withContext(Dispatchers.IO) {
+            stagingDir().deleteRecursively()
+            partsDir().deleteRecursively()
+            assemblyDir().deleteRecursively()
+        }
+        runCatching { telegramClient.clearDownloadedFiles() }
+            .onFailure { SafeLog.w(TAG, "Clearing Telegram's untracked downloads failed", it) }
         refreshStats()
     }
 
@@ -289,6 +436,27 @@ class CacheRepositoryImpl(
         effectivePolicyFilter = effectivePolicyFilter,
         searchQuery = searchQuery.trim()
     )
+
+    override suspend fun thumbnailAllMissingFileIds(): List<String> {
+        var afterAddedAt: Long? = null
+        var afterFileId: String? = null
+        val ids = mutableListOf<String>()
+        while (true) {
+            val page = thumbnailDao.allEligibleFileIdsPage(
+                onlyMissing = true,
+                afterAddedAt = afterAddedAt,
+                afterFileId = afterFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (page.isEmpty()) break
+            ids += page.map { it.fileId }
+            val last = page.last()
+            afterAddedAt = last.addedAt
+            afterFileId = last.fileId
+            if (page.size < JOB_BATCH_SIZE) break
+        }
+        return ids.distinct()
+    }
 
     private suspend fun effectiveFolderPolicy(folderId: String?): ThumbnailPolicy {
         if (folderId == null) return ThumbnailPolicy.MANUAL_ONLY
@@ -491,8 +659,31 @@ class CacheRepositoryImpl(
         }
     }
 
+    /**
+     * A stale thumbnail row must not make a file look generated. Validate the
+     * physical preview before taking a bulk "missing" snapshot; the viewer used
+     * to discover these only when each file was opened individually.
+     */
+    private suspend fun missingThumbnailIds(fileIds: List<String>): List<String> {
+        val ids = fileIds.distinct()
+        if (ids.isEmpty()) return emptyList()
+
+        val invalidIds = withContext(Dispatchers.IO) {
+            thumbnailDao.pathsForFiles(ids).filter { ref ->
+                val cachedFile = File(ref.path)
+                !cachedFile.isFile || cachedFile.length() <= 0L
+            }.map { it.fileId }.distinct()
+        }
+        if (invalidIds.isNotEmpty()) {
+            thumbnailDao.deleteAll(invalidIds)
+            invalidIds.forEach(thumbnailMemoryCache::remove)
+            refreshThumbnailStats()
+        }
+        return thumbnailDao.missingEligibleFileIds(ids)
+    }
+
     override suspend fun generateThumbnail(fileId: String) {
-        val missingIds = thumbnailDao.missingEligibleFileIds(listOf(fileId))
+        val missingIds = missingThumbnailIds(listOf(fileId))
         if (missingIds.isEmpty()) return
         thumbnailPolicyDao.clearQueueItemPauses(missingIds)
         thumbnailStore.enqueueManual(missingIds)
@@ -502,10 +693,10 @@ class CacheRepositoryImpl(
         val ids = fileIds.distinct()
         if (ids.isEmpty()) return ThumbnailEnqueueResult()
 
-        // Filter in safe SQLite-sized batches. A selected item already in the queue is
-        // refreshed as a forced manual job, never inserted as a duplicate row.
+        // Filter in SQLite-sized batches and repair stale cache rows before treating
+        // a selected item as already generated.
         val missingIds = ids.chunked(JOB_BATCH_SIZE)
-            .flatMap { batch -> thumbnailDao.missingEligibleFileIds(batch) }
+            .flatMap { batch -> missingThumbnailIds(batch) }
             .distinct()
         if (missingIds.isEmpty()) return ThumbnailEnqueueResult()
 
@@ -524,12 +715,18 @@ class CacheRepositoryImpl(
     override suspend fun generateFolderThumbnails(folderId: String?): ThumbnailEnqueueResult {
         var afterAddedAt: Long? = null
         var afterFileId: String? = null
-        var newlyQueued = 0
-        var alreadyQueued = 0
+        val missingIds = mutableListOf<String>()
+
+        // Take the complete missing-file snapshot before starting any workers.
+        // Previously each page was enqueued while the next page was still being queried.
+        // Workers could finish and mutate the thumbnails table during that scan, making
+        // a long folder operation depend on concurrent generation timing.
         while (true) {
+            // Scan all eligible files so stale thumbnail DB rows are included.
+            // missingThumbnailIds verifies each physical cache file before filtering.
             val page = if (folderId == null) {
                 thumbnailDao.unfiledFileIdsPage(
-                    onlyMissing = true,
+                    onlyMissing = false,
                     afterAddedAt = afterAddedAt,
                     afterFileId = afterFileId,
                     limit = JOB_BATCH_SIZE
@@ -537,52 +734,69 @@ class CacheRepositoryImpl(
             } else {
                 thumbnailDao.fileIdsInFolderTreePage(
                     folderId = folderId,
-                    onlyMissing = true,
+                    onlyMissing = false,
                     afterAddedAt = afterAddedAt,
                     afterFileId = afterFileId,
                     limit = JOB_BATCH_SIZE
                 )
             }
             if (page.isEmpty()) break
-            val pageIds = page.map { it.fileId }
-            val existingIds = thumbnailJobDao.existingFileIds(pageIds).toSet()
-            newlyQueued += pageIds.count { it !in existingIds }
-            alreadyQueued += existingIds.size
-            thumbnailPolicyDao.clearQueueItemPauses(pageIds)
-            thumbnailStore.enqueueManual(pageIds)
+            missingIds += missingThumbnailIds(page.map { it.fileId })
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
-        return ThumbnailEnqueueResult(newlyQueued, alreadyQueued)
+
+        val ids = missingIds.distinct()
+        if (ids.isEmpty()) return ThumbnailEnqueueResult()
+        var alreadyQueued = 0
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            alreadyQueued += thumbnailJobDao.existingFileIds(batch).size
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
+        }
+        // One durable manual batch means the queue starts only after the full target set
+        // has been discovered; the store itself inserts safely in SQLite-sized chunks.
+        thumbnailStore.enqueueManual(ids)
+        return ThumbnailEnqueueResult(
+            newlyQueued = (ids.size - alreadyQueued).coerceAtLeast(0),
+            alreadyQueued = alreadyQueued
+        )
     }
 
     override suspend fun generateAllThumbnails(): ThumbnailEnqueueResult {
         var afterAddedAt: Long? = null
         var afterFileId: String? = null
-        var newlyQueued = 0
-        var alreadyQueued = 0
+        val missingIds = mutableListOf<String>()
         while (true) {
+            // Include cached-row candidates and validate their actual files, so
+            // missing/corrupt preview files are queued in this one bulk operation.
             val page = thumbnailDao.allEligibleFileIdsPage(
-                onlyMissing = true,
+                onlyMissing = false,
                 afterAddedAt = afterAddedAt,
                 afterFileId = afterFileId,
                 limit = JOB_BATCH_SIZE
             )
             if (page.isEmpty()) break
-            val pageIds = page.map { it.fileId }
-            val existingIds = thumbnailJobDao.existingFileIds(pageIds).toSet()
-            newlyQueued += pageIds.count { it !in existingIds }
-            alreadyQueued += existingIds.size
-            thumbnailPolicyDao.clearQueueItemPauses(pageIds)
-            thumbnailStore.enqueueManual(pageIds)
+            missingIds += missingThumbnailIds(page.map { it.fileId })
             val last = page.last()
             afterAddedAt = last.addedAt
             afterFileId = last.fileId
             if (page.size < JOB_BATCH_SIZE) break
         }
-        return ThumbnailEnqueueResult(newlyQueued, alreadyQueued)
+
+        val ids = missingIds.distinct()
+        if (ids.isEmpty()) return ThumbnailEnqueueResult()
+        var alreadyQueued = 0
+        ids.chunked(JOB_BATCH_SIZE).forEach { batch ->
+            alreadyQueued += thumbnailJobDao.existingFileIds(batch).size
+            thumbnailPolicyDao.clearQueueItemPauses(batch)
+        }
+        thumbnailStore.enqueueManual(ids)
+        return ThumbnailEnqueueResult(
+            newlyQueued = (ids.size - alreadyQueued).coerceAtLeast(0),
+            alreadyQueued = alreadyQueued
+        )
     }
 
     override suspend fun thumbnailQueue(

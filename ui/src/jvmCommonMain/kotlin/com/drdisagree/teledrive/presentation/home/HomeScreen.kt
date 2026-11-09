@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.presentation.home
 
 import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -446,6 +447,10 @@ fun HomeScreen(
                 }
             }
         }
+            DesktopScrollEdgeControls(
+                state = homeListState,
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+            )
             DesktopVerticalScrollbar(
                 state = homeListState,
                 modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
