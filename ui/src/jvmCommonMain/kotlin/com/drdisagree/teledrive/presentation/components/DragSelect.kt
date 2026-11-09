@@ -38,7 +38,8 @@ import androidx.compose.ui.util.fastFirstOrNull
 fun rememberDragSelect(
     gridState: LazyGridState,
     onStart: () -> Unit,
-    onRange: (IntRange) -> Unit,
+    isSelected: (Int) -> Boolean,
+    onRange: (IntRange, shouldSelect: Boolean) -> Unit,
     onEnd: () -> Unit,
     edgeSize: Dp = EDGE_SIZE,
     scrollPerFrame: Dp = SCROLL_PER_FRAME
@@ -53,6 +54,7 @@ fun rememberDragSelect(
         }?.index
     },
     onStart = onStart,
+    isSelected = isSelected,
     onRange = onRange,
     onEnd = onEnd,
     edgeSize = edgeSize,
@@ -63,7 +65,8 @@ fun rememberDragSelect(
 fun rememberDragSelect(
     listState: LazyListState,
     onStart: () -> Unit,
-    onRange: (IntRange) -> Unit,
+    isSelected: (Int) -> Boolean,
+    onRange: (IntRange, shouldSelect: Boolean) -> Unit,
     onEnd: () -> Unit,
     edgeSize: Dp = EDGE_SIZE,
     scrollPerFrame: Dp = SCROLL_PER_FRAME
@@ -75,6 +78,7 @@ fun rememberDragSelect(
         }?.index
     },
     onStart = onStart,
+    isSelected = isSelected,
     onRange = onRange,
     onEnd = onEnd,
     edgeSize = edgeSize,
@@ -86,7 +90,8 @@ private fun dragSelect(
     scrollable: ScrollableState,
     indexAt: (Offset) -> Int?,
     onStart: () -> Unit,
-    onRange: (IntRange) -> Unit,
+    isSelected: (Int) -> Boolean,
+    onRange: (IntRange, shouldSelect: Boolean) -> Unit,
     onEnd: () -> Unit,
     edgeSize: Dp,
     scrollPerFrame: Dp
@@ -96,11 +101,13 @@ private fun dragSelect(
     val maxScrollPx = with(density) { scrollPerFrame.toPx() }
     var autoScroll by remember { mutableFloatStateOf(0f) }
     var activeAnchor by remember { mutableIntStateOf(-1) }
+    var activeShouldSelect by remember { mutableStateOf(true) }
     var latestPointerPosition by remember { mutableStateOf<Offset?>(null) }
     val scrolling = autoScroll != 0f
 
     val currentIndexAt by rememberUpdatedState(indexAt)
     val currentOnStart by rememberUpdatedState(onStart)
+    val currentIsSelected by rememberUpdatedState(isSelected)
     val currentOnRange by rememberUpdatedState(onRange)
     val currentOnEnd by rememberUpdatedState(onEnd)
 
@@ -118,7 +125,7 @@ private fun dragSelect(
                 null
             }
             if (anchor >= 0 && current != null) {
-                currentOnRange(minOf(anchor, current)..maxOf(anchor, current))
+                currentOnRange(minOf(anchor, current)..maxOf(anchor, current), activeShouldSelect)
             }
         }
     }
@@ -149,13 +156,21 @@ private fun dragSelect(
             val initialPosition = clampPosition(mouseDragStart?.position ?: down.position)
             latestPointerPosition = initialPosition
             val initialIndex = currentIndexAt(initialPosition)
-            if (initialIndex != null) {
-                val start = anchor ?: initialIndex.also { anchor = it }
-                activeAnchor = start
-                currentOnRange(minOf(start, initialIndex)..maxOf(start, initialIndex))
+            val selectionAnchor = anchor ?: initialIndex
+            if (selectionAnchor != null) {
+                activeAnchor = selectionAnchor
+                // The anchor's state at pointer-down fixes the operation for this
+                // entire gesture. Dragging from a selected item removes the range;
+                // dragging from an unselected item adds it.
+                activeShouldSelect = !currentIsSelected(selectionAnchor)
+                val current = initialIndex ?: selectionAnchor
+                currentOnRange(
+                    minOf(selectionAnchor, current)..maxOf(selectionAnchor, current),
+                    activeShouldSelect
+                )
             } else {
-                activeAnchor = anchor ?: -1
-                anchor?.let { currentOnRange(it..it) }
+                activeAnchor = -1
+                activeShouldSelect = true
             }
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -170,7 +185,7 @@ private fun dragSelect(
                         anchor = it
                         activeAnchor = it
                     }
-                    currentOnRange(minOf(start, current)..maxOf(start, current))
+                    currentOnRange(minOf(start, current)..maxOf(start, current), activeShouldSelect)
                 }
                 autoScroll = edgeScroll(change.position.y, size.height, edgePx, maxScrollPx)
             }
