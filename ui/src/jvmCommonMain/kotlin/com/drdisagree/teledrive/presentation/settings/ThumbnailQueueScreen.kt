@@ -104,6 +104,7 @@ fun ThumbnailQueueScreen(
     )
 
     LaunchedEffect(offset, sortOrder) {
+        queueListState.scrollToItem(0)
         var previousCount = -1
         var previousFailedCount = 0
         var previousSampleAt = 0L
