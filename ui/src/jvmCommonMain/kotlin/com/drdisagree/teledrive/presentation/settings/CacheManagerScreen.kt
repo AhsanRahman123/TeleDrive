@@ -58,6 +58,7 @@ private const val CACHE_MANAGER_PAGE_SIZE = 60
 @Composable
 fun CacheManagerScreen(
     onBack: () -> Unit,
+    initialFilter: String = "ALL",
     modifier: Modifier = Modifier
 ) {
     val repository = koinInject<CacheRepository>()
@@ -72,7 +73,7 @@ fun CacheManagerScreen(
     var selectedFolderIds by remember { mutableStateOf(emptySet<String>()) }
     var searchInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
-    var typeFilter by remember { mutableStateOf("ALL") }
+    var typeFilter by remember(initialFilter) { mutableStateOf(initialFilter) }
     var sortOrder by remember { mutableStateOf("LARGEST") }
     var pageOffset by remember { mutableStateOf(0) }
     var hasMore by remember { mutableStateOf(false) }
