@@ -140,15 +140,18 @@ class CacheRepositoryImpl(
         val previewBytes = cacheDao.sizeByType(CacheEntryType.PREVIEW)
         val streamBytes = cacheDao.sizeByType(CacheEntryType.STREAM)
         val tempBytes = cacheDao.sizeByType(CacheEntryType.TEMP)
+        val thumbnailBytes = thumbnailDao.totalSizeBytes()
         val untrackedBytes = withContext(Dispatchers.IO) {
             stagingSize() + partSize() + storageInspector.directorySize(tdlibFilesDir())
         }
         return CacheManagerSummary(
-            totalBytes = previewBytes + streamBytes + tempBytes + untrackedBytes,
-            entryCount = cacheDao.entryCount(),
+            totalBytes = previewBytes + streamBytes + tempBytes + thumbnailBytes + untrackedBytes,
+            entryCount = cacheDao.entryCount() + thumbnailDao.count(),
             previewBytes = previewBytes,
             streamBytes = streamBytes,
             tempBytes = tempBytes,
+            thumbnailBytes = thumbnailBytes,
+            thumbnailEntries = thumbnailDao.count(),
             untrackedBytes = untrackedBytes
         )
     }
@@ -165,34 +168,77 @@ class CacheRepositoryImpl(
         typeFilter: String,
         searchQuery: String,
         sortOrder: String
-    ): List<CacheEntryUsage> = cacheDao.managerEntries(
-        folderId = folderId,
-        typeFilter = typeFilter,
-        searchQuery = searchQuery.trim(),
-        sortOrder = sortOrder,
-        limit = limit.coerceIn(1, 500),
-        offset = offset.coerceAtLeast(0)
-    )
+    ): List<CacheEntryUsage> {
+        val requestedLimit = (offset.coerceAtLeast(0) + limit.coerceIn(1, 500))
+            .coerceIn(1, 10_000)
+        val trackedFilter = if (typeFilter == "THUMBNAIL") "NO_MATCH" else typeFilter
+        val tracked = cacheDao.managerEntries(
+            folderId = folderId,
+            typeFilter = trackedFilter,
+            searchQuery = searchQuery.trim(),
+            sortOrder = sortOrder,
+            limit = requestedLimit,
+            offset = 0
+        )
+        val thumbnails = if (typeFilter == "ALL" || typeFilter == "THUMBNAIL") {
+            thumbnailDao.managerThumbnails(
+                folderId = folderId,
+                searchQuery = searchQuery.trim(),
+                sortOrder = sortOrder,
+                limit = requestedLimit,
+                offset = 0
+            )
+        } else {
+            emptyList()
+        }
+        val combined = tracked + thumbnails
+        val sorted = when (sortOrder) {
+            "SMALLEST" -> combined.sortedBy { it.sizeBytes }
+            "NEWEST" -> combined.sortedByDescending { it.lastAccessAt }
+            "OLDEST" -> combined.sortedBy { it.lastAccessAt }
+            "NAME_ASC" -> combined.sortedBy { it.name.lowercase() }
+            else -> combined.sortedByDescending { it.sizeBytes }
+        }
+        return sorted.drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 500))
+    }
 
     override suspend fun cacheEntryPathsMatching(
         folderId: String?,
         typeFilter: String,
         searchQuery: String
-    ): List<String> = cacheDao.managerEntryPathsMatching(
-        folderId = folderId,
-        typeFilter = typeFilter,
-        searchQuery = searchQuery.trim()
-    )
+    ): List<String> {
+        val trackedFilter = if (typeFilter == "THUMBNAIL") "NO_MATCH" else typeFilter
+        val tracked = cacheDao.managerEntryPathsMatching(
+            folderId,
+            trackedFilter,
+            searchQuery.trim()
+        )
+        val thumbnails = if (typeFilter == "ALL" || typeFilter == "THUMBNAIL") {
+            thumbnailDao.managerThumbnailPathsMatching(folderId, searchQuery.trim())
+        } else {
+            emptyList()
+        }
+        return (tracked + thumbnails).distinct()
+    }
 
     override suspend fun cacheEntryPathsInFolderTree(
         folderId: String,
         typeFilter: String,
         searchQuery: String
-    ): List<String> = cacheDao.managerEntryPathsInFolderTree(
-        folderId,
-        typeFilter,
-        searchQuery.trim()
-    )
+    ): List<String> {
+        val trackedFilter = if (typeFilter == "THUMBNAIL") "NO_MATCH" else typeFilter
+        val tracked = cacheDao.managerEntryPathsInFolderTree(
+            folderId,
+            trackedFilter,
+            searchQuery.trim()
+        )
+        val thumbnails = if (typeFilter == "ALL" || typeFilter == "THUMBNAIL") {
+            thumbnailDao.managerThumbnailPathsInFolderTree(folderId, searchQuery.trim())
+        } else {
+            emptyList()
+        }
+        return (tracked + thumbnails).distinct()
+    }
 
     override suspend fun removeCacheEntries(paths: List<String>): CacheRemovalResult {
         var removedEntries = 0
@@ -210,6 +256,16 @@ class CacheRepositoryImpl(
                 removedBytes += entries.filter { it.path in removedSet }.sumOf { it.sizeBytes }
                 removedEntries += removedPaths.size
                 cacheDao.deletePaths(removedPaths)
+            }
+
+            val thumbnailEntries = thumbnailDao.entriesByPaths(batch)
+            if (thumbnailEntries.isNotEmpty()) {
+                val thumbnailIds = thumbnailEntries.map { it.fileId }.distinct()
+                removeThumbnails(thumbnailIds)
+                val remainingPaths = thumbnailDao.entriesByPaths(batch).mapTo(mutableSetOf()) { it.path }
+                val removedThumbnails = thumbnailEntries.filter { it.path !in remainingPaths }
+                removedEntries += removedThumbnails.size
+                removedBytes += removedThumbnails.sumOf { it.sizeBytes }
             }
         }
         refreshStats()
