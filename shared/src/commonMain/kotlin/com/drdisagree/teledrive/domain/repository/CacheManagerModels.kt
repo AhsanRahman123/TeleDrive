@@ -31,6 +31,8 @@ data class CacheManagerSummary(
     val previewBytes: Long = 0L,
     val streamBytes: Long = 0L,
     val tempBytes: Long = 0L,
+    val thumbnailBytes: Long = 0L,
+    val thumbnailEntries: Int = 0,
     val untrackedBytes: Long = 0L
 )
 
