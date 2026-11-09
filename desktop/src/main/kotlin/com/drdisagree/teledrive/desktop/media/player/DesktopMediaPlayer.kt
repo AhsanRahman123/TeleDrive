@@ -277,12 +277,12 @@ fun DesktopMediaPlayer(
                 }
                 val stillIdle = !brightnessDragging &&
                     System.currentTimeMillis() - brightnessLastInputAt >= BRIGHTNESS_READ_GUARD_MS
-                if (stillIdle) {
-                    brightnessAvailable = reading != null
-                    if (reading != null) {
-                        brightness = reading.percent.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
-                        brightnessMonitor = reading.monitorDescription
-                    }
+                if (stillIdle && reading != null) {
+                    // Once DDC/CI has been detected for this video, keep the slider visible
+                    // through temporary monitor-read failures (sleep/wake, focus, hot-plug).
+                    brightnessAvailable = true
+                    brightness = reading.percent.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
+                    brightnessMonitor = reading.monitorDescription
                 }
             }
             delay(BRIGHTNESS_POLL_INTERVAL_MS)
