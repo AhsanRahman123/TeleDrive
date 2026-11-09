@@ -37,6 +37,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -51,17 +53,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.drdisagree.teledrive.domain.repository.CacheEntryUsage
 import com.drdisagree.teledrive.domain.repository.CacheFolderUsage
 import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
+import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
+import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.common.Formatters
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import org.koin.compose.viewmodel.koinViewModel
 
 
 private fun formatCacheQueueEta(totalSeconds: Long): String {
@@ -85,8 +91,16 @@ fun CacheManagerScreen(
     modifier: Modifier = Modifier
 ) {
     val repository = koinInject<CacheRepository>()
+    val settingsViewModel = koinViewModel<SettingsViewModel>()
+    val reclaimableBytes by settingsViewModel.reclaimableBytes.collectAsStateWithLifecycle()
+    val deleteConsentLauncher = LocalDeleteConsentLauncher.current
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var selectedTool by remember { mutableStateOf("CACHE") }
+    var confirmFreeLocalCopies by remember { mutableStateOf(false) }
+    var confirmClearAllCache by remember { mutableStateOf(false) }
+    var confirmClearThumbnailCache by remember { mutableStateOf(false) }
 
     var summary by remember { mutableStateOf(CacheManagerSummary()) }
     var thumbnailQueueCount by remember { mutableStateOf(0) }
@@ -112,6 +126,18 @@ fun CacheManagerScreen(
     var folderRangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
     val cacheEntryListState = rememberLazyListState()
     val folderListState = rememberLazyListState()
+
+    LaunchedEffect(Unit) {
+        settingsViewModel.deleteConsentRequests.collect { request ->
+            deleteConsentLauncher.launch(request) { granted ->
+                if (granted) settingsViewModel.retryLocalCopyRemoval()
+            }
+        }
+    }
+    CollectSnackbarMessages(
+        messages = settingsViewModel.messages,
+        hostState = snackbarHostState
+    )
 
     val folderId = folderPath.lastOrNull()?.id
     val folderDragSelect = rememberDragSelect(
@@ -236,34 +262,68 @@ fun CacheManagerScreen(
 
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Cache manager") },
+                title = { Text("Free up space") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        pageOffset = 0
-                        entries = emptyList()
-                        refreshKey++
-                    }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh cache inventory")
+                    if (selectedTool == "CACHE") {
+                        IconButton(onClick = {
+                            pageOffset = 0
+                            entries = emptyList()
+                            refreshKey++
+                        }) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh cache inventory")
+                        }
                     }
                 }
             )
         }
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier.fillMaxSize()
-                .padding(top = padding.calculateTopPadding())
-                .verticalScroll(scrollState)
-                .padding(horizontal = 18.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = selectedTool == "CACHE",
+                    onClick = { selectedTool = "CACHE" },
+                    label = { Text("Cache cleanup") }
+                )
+                FilterChip(
+                    selected = selectedTool == "THUMBNAILS",
+                    onClick = { selectedTool = "THUMBNAILS" },
+                    label = { Text("Thumbnail manager") }
+                )
+                FilterChip(
+                    selected = selectedTool == "QUEUE",
+                    onClick = { selectedTool = "QUEUE" },
+                    label = { Text("View queue") }
+                )
+            }
+            when (selectedTool) {
+                "THUMBNAILS" -> ThumbnailManagerScreen(
+                    onBack = { selectedTool = "CACHE" },
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+                "QUEUE" -> ThumbnailQueueScreen(
+                    onBack = { selectedTool = "THUMBNAILS" },
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
+                else -> Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.fillMaxSize()
+                            .verticalScroll(scrollState)
+                            .padding(horizontal = 18.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Card(modifier = Modifier.weight(1f)) {
                     Column(Modifier.padding(14.dp)) {
@@ -291,6 +351,25 @@ fun CacheManagerScreen(
             }
 
             Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Free local copies", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        Formatters.bytes(reclaimableBytes),
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        "Removes copies already backed up to Telegram while preserving the remote originals.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        enabled = reclaimableBytes > 0L,
+                        onClick = { confirmFreeLocalCopies = true }
+                    ) { Text("Remove backed-up local copies") }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Thumbnail preparation queue", style = MaterialTheme.typography.labelMedium)
                     Text(
@@ -306,10 +385,18 @@ fun CacheManagerScreen(
             }
 
             Text(
-                "Thumbnail previews are included here for selective cleanup. Use Thumbnail Manager for generation policies and queue controls.",
+                "Thumbnail previews are included here for selective cleanup. Use the tabs above for thumbnail generation rules, sorting, bulk actions and every queue control.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { confirmClearAllCache = true }) {
+                    Text("Clear all app cache")
+                }
+                OutlinedButton(onClick = { confirmClearThumbnailCache = true }) {
+                    Text("Clear thumbnail cache")
+                }
+            }
 
             OutlinedTextField(
                 value = searchInput,
@@ -540,16 +627,78 @@ fun CacheManagerScreen(
                 }
             }
             Spacer(Modifier.height(24.dp))
+                    }
+                    DesktopScrollEdgeControls(
+                        state = scrollState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = 8.dp, end = 12.dp)
+                    )
+                    DesktopVerticalScrollbar(
+                        state = scrollState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                    )
+                }
+            }
         }
-            DesktopScrollEdgeControls(
-                state = scrollState,
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = padding.calculateTopPadding() + 8.dp, end = 12.dp)
-            )
-            DesktopVerticalScrollbar(
-                state = scrollState,
-                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
-            )
-        }
+    }
+
+    if (confirmFreeLocalCopies) {
+        AlertDialog(
+            onDismissRequest = { confirmFreeLocalCopies = false },
+            title = { Text("Remove local copies?") },
+            text = {
+                Text("TeleDrive will remove ${Formatters.bytes(reclaimableBytes)} of local copies that are already backed up remotely. Remote files remain in Telegram.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmFreeLocalCopies = false
+                    settingsViewModel.freeUpSpace()
+                    refreshKey++
+                }) { Text("Free up space") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFreeLocalCopies = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (confirmClearAllCache) {
+        AlertDialog(
+            onDismissRequest = { confirmClearAllCache = false },
+            title = { Text("Clear all app cache?") },
+            text = {
+                Text("This clears the app-managed preview, stream and temporary cache. It does not delete original Telegram files or thumbnail queue jobs.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmClearAllCache = false
+                    settingsViewModel.clearCache()
+                    refreshKey++
+                }) { Text("Clear all cache") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearAllCache = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (confirmClearThumbnailCache) {
+        AlertDialog(
+            onDismissRequest = { confirmClearThumbnailCache = false },
+            title = { Text("Clear thumbnail cache?") },
+            text = {
+                Text("This removes generated thumbnail previews. It does not delete the original media or cancel queued thumbnail jobs.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmClearThumbnailCache = false
+                    settingsViewModel.clearThumbnails()
+                    refreshKey++
+                }) { Text("Clear thumbnails") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearThumbnailCache = false }) { Text("Cancel") }
+            }
+        )
     }
 
     if (confirmRemove) {
