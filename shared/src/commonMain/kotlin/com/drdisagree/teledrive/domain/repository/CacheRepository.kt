@@ -80,6 +80,9 @@ interface CacheRepository {
         searchQuery: String
     ): List<String> = emptyList()
 
+    /** All eligible files without a cached preview across the entire drive. */
+    suspend fun thumbnailAllMissingFileIds(): List<String> = emptyList()
+
     /** Fetch IDs only when the user explicitly selects every file in a folder. */
     suspend fun thumbnailFileIds(
         folderId: String?,
