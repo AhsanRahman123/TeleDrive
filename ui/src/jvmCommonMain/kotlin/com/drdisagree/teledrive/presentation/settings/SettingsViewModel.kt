@@ -316,17 +316,19 @@ class SettingsViewModel(
         }
     }
 
-    fun clearCache() {
+    fun clearCache(onCompleted: () -> Unit = {}) {
         viewModelScope.launch {
             cacheRepository.clearAll()
             _messages.tryEmit(UiText.Resource(Res.string.message_cache_cleared))
+            onCompleted()
         }
     }
 
-    fun clearThumbnails() {
+    fun clearThumbnails(onCompleted: () -> Unit = {}) {
         viewModelScope.launch {
             cacheRepository.clearThumbnails()
             _messages.tryEmit(UiText.Resource(Res.string.message_thumbnails_cleared))
+            onCompleted()
         }
     }
 
