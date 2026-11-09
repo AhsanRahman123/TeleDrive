@@ -95,9 +95,12 @@ fun CacheManagerScreen(
         }
     }
 
-    LaunchedEffect(folderId, typeFilter, sortOrder, searchQuery, pageOffset, refreshKey) {
-        loading = true
+    LaunchedEffect(refreshKey) {
         summary = repository.cacheManagerSummary()
+    }
+
+    LaunchedEffect(folderId, typeFilter, sortOrder, searchQuery, pageOffset) {
+        loading = true
         folders = repository.cacheFolders(folderId, sortOrder)
         val page = repository.cacheEntries(
             folderId = folderId,
