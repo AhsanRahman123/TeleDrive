@@ -12,7 +12,6 @@ import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.CloudQueue
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Storage
@@ -464,20 +463,26 @@ fun GalleryScreen(
 
 
     val viewTransfersLabel = stringResource(Res.string.snackbar_view_transfers)
+    val isThumbnailQueueMessage: (UiText) -> Boolean = { message ->
+        message is UiText.Plain &&
+            message.value.startsWith("Added ") &&
+            message.value.contains("missing thumbnails to the priority queue")
+    }
     CollectSnackbarMessages(
         messages = viewModel.messages,
         hostState = snackbarHostState,
         actionLabel = { message ->
-            if (
+            when {
+                isThumbnailQueueMessage(message) -> "View queue"
                 message is UiText.Resource &&
-                message.resource == Res.string.files_queued_for_download
-            ) {
-                viewTransfersLabel
-            } else {
-                null
+                    message.resource == Res.string.files_queued_for_download -> viewTransfersLabel
+                else -> null
             }
         },
-        onAction = { onOpenTransfers() }
+        onAction = { message ->
+            if (isThumbnailQueueMessage(message)) onViewThumbnailQueue()
+            else onOpenTransfers()
+        }
     )
 
     if (showMovePicker) {
@@ -718,12 +723,6 @@ fun GalleryScreen(
                                         label = "Generate thumbnails",
                                         icon = Icons.Filled.Image
                                     ) { viewModel.generateThumbnailsSelected() }
-                                )
-                                add(
-                                    MenuAction(
-                                        label = "View thumbnail queue",
-                                        icon = Icons.Filled.Refresh
-                                    ) { onViewThumbnailQueue() }
                                 )
                                 add(
                                     MenuAction(
