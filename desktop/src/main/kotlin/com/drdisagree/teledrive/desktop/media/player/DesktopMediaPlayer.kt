@@ -59,6 +59,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
@@ -108,6 +109,7 @@ import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -116,6 +118,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
@@ -161,6 +164,7 @@ fun DesktopMediaPlayer(
     // a play/resume event cannot reapply the initial 100% / unmuted values.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
+    val playerScope = rememberCoroutineScope()
 
     val player = remember(mrl, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
@@ -324,19 +328,17 @@ fun DesktopMediaPlayer(
     }
     val toggleMute: () -> Unit = {
         muted = !muted
-        player.audio().isMute = muted
+        player.submitAudioState(volume, muted)
     }
     fun setPlayerVolume(value: Int, unmute: Boolean = true) {
         val nextVolume = value.coerceIn(0, MAX_VOLUME)
         volume = nextVolume
-        player.audio().setVolume(nextVolume)
         if (nextVolume == 0) {
             muted = true
-            player.audio().isMute = true
         } else if (unmute) {
             muted = false
-            player.audio().isMute = false
         }
+        player.submitAudioState(nextVolume, muted)
     }
     fun adjustPlayerVolume(delta: Int) {
         setPlayerVolume(volume + delta, unmute = delta > 0)
@@ -357,58 +359,83 @@ fun DesktopMediaPlayer(
         interactionTick++
     }
     fun cycleAudioTrack() {
-        val tracks = player.audioTracks(trackWord)
-        if (tracks.isEmpty()) return
-        val selected = tracks.indexOfFirst { it.selected }
-        val next = tracks[(selected + 1).coerceAtLeast(0) % tracks.size]
-        player.audio().setTrack(next.id)
-        onPreferredAudioLanguage(next.language)
-        trackTick++
+        player.submit {
+            val tracks = runCatching { player.audioTracks(trackWord) }.getOrDefault(emptyList())
+            if (tracks.isNotEmpty()) {
+                val selected = tracks.indexOfFirst { it.selected }
+                val next = tracks[(selected + 1).coerceAtLeast(0) % tracks.size]
+                runCatching { player.audio().setTrack(next.id) }
+                playerScope.launch {
+                    onPreferredAudioLanguage(next.language)
+                    trackTick++
+                }
+            }
+        }
     }
     fun cycleSubtitleTrack(reverse: Boolean = false) {
-        val tracks = player.textTracks(trackWord)
-        if (tracks.isEmpty()) return
-        val selected = tracks.indexOfFirst { it.selected }
-        val nextIndex = if (reverse) {
-            if (selected <= 0) tracks.lastIndex else selected - 1
-        } else {
-            (selected + 1) % tracks.size
+        player.submit {
+            val tracks = runCatching { player.textTracks(trackWord) }.getOrDefault(emptyList())
+            if (tracks.isNotEmpty()) {
+                val selected = tracks.indexOfFirst { it.selected }
+                val nextIndex = if (reverse) {
+                    if (selected <= 0) tracks.lastIndex else selected - 1
+                } else {
+                    (selected + 1) % tracks.size
+                }
+                val next = tracks[nextIndex]
+                runCatching { player.subpictures().setTrack(next.id) }
+                playerScope.launch {
+                    onPreferredSubtitleLanguage(next.language)
+                    trackTick++
+                }
+            }
         }
-        val next = tracks[nextIndex]
-        player.subpictures().setTrack(next.id)
-        onPreferredSubtitleLanguage(next.language)
-        trackTick++
     }
     fun toggleSubtitles() {
-        val tracks = player.textTracks(trackWord)
-        if (tracks.isEmpty()) return
-        val selected = tracks.firstOrNull { it.selected }
-        if (selected != null) {
-            player.subpictures().setTrack(VLC_TRACK_DISABLED)
-        } else {
-            val next = tracks.firstOrNull { it.language == preferredSubtitleLanguage }
-                ?: tracks.first()
-            player.subpictures().setTrack(next.id)
-            onPreferredSubtitleLanguage(next.language)
+        player.submit {
+            val tracks = runCatching { player.textTracks(trackWord) }.getOrDefault(emptyList())
+            if (tracks.isNotEmpty()) {
+                val selected = tracks.firstOrNull { it.selected }
+                if (selected != null) {
+                    runCatching { player.subpictures().setTrack(VLC_TRACK_DISABLED) }
+                } else {
+                    val next = tracks.firstOrNull { it.language == preferredSubtitleLanguage }
+                        ?: tracks.first()
+                    runCatching { player.subpictures().setTrack(next.id) }
+                    playerScope.launch { onPreferredSubtitleLanguage(next.language) }
+                }
+                playerScope.launch { trackTick++ }
+            }
         }
-        trackTick++
     }
 
     var languagesApplied by remember(mrl) { mutableStateOf(false) }
     LaunchedEffect(mrl, trackTick, preferredAudioLanguage, preferredSubtitleLanguage) {
         if (languagesApplied || trackTick == 0) return@LaunchedEffect
-        val audio = player.audioTracks(trackWord)
-        val text = player.textTracks(trackWord)
-        if (audio.isEmpty() && text.isEmpty()) return@LaunchedEffect
+        val applied = CompletableDeferred<Boolean>()
+        runCatching {
+            player.submit {
+                val audio = runCatching { player.audioTracks(trackWord) }.getOrDefault(emptyList())
+                val text = runCatching { player.textTracks(trackWord) }.getOrDefault(emptyList())
+                if (audio.isEmpty() && text.isEmpty()) {
+                    applied.complete(false)
+                } else {
+                    if (preferredAudioLanguage.isNotEmpty()) {
+                        audio.firstOrNull { it.language == preferredAudioLanguage }
+                            ?.let { runCatching { player.audio().setTrack(it.id) } }
+                    }
+                    if (preferredSubtitleLanguage.isNotEmpty()) {
+                        text.firstOrNull { it.language == preferredSubtitleLanguage }
+                            ?.let { runCatching { player.subpictures().setTrack(it.id) } }
+                    }
+                    applied.complete(true)
+                }
+            }
+        }.onFailure { applied.complete(false) }
+        if (withTimeoutOrNull(PLAYER_NATIVE_CALL_TIMEOUT_MS) { applied.await() } != true) {
+            return@LaunchedEffect
+        }
         languagesApplied = true
-        if (preferredAudioLanguage.isNotEmpty()) {
-            audio.firstOrNull { it.language == preferredAudioLanguage }
-                ?.let { player.audio().setTrack(it.id) }
-        }
-        if (preferredSubtitleLanguage.isNotEmpty()) {
-            text.firstOrNull { it.language == preferredSubtitleLanguage }
-                ?.let { player.subpictures().setTrack(it.id) }
-        }
         trackTick++
     }
 
@@ -608,12 +635,16 @@ fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.J && !ctrl && !alt && !shift -> {
-                        player.audio().setDelay(player.audio().delay() - SYNC_STEP_US)
+                        player.submit {
+                            runCatching { player.audio().setDelay(player.audio().delay() - SYNC_STEP_US) }
+                        }
                         interactionTick++
                         true
                     }
                     key == Key.K && !ctrl && !alt && !shift -> {
-                        player.audio().setDelay(player.audio().delay() + SYNC_STEP_US)
+                        player.submit {
+                            runCatching { player.audio().setDelay(player.audio().delay() + SYNC_STEP_US) }
+                        }
                         interactionTick++
                         true
                     }
@@ -745,12 +776,13 @@ fun DesktopMediaPlayer(
                 hasPrevious = hasPrevious,
                 hasNext = hasNext,
                 onSelectAudioTrack = { track ->
-                    player.audio().setTrack(track.id)
+                    player.submit { runCatching { player.audio().setTrack(track.id) } }
                     onPreferredAudioLanguage(track.language)
                     trackTick++
                 },
                 onSelectTextTrack = { track ->
-                    player.subpictures().setTrack(track?.id ?: VLC_TRACK_DISABLED)
+                    val trackId = track?.id ?: VLC_TRACK_DISABLED
+                    player.submit { runCatching { player.subpictures().setTrack(trackId) } }
                     onPreferredSubtitleLanguage(track?.language.orEmpty())
                     trackTick++
                 },
@@ -1291,6 +1323,20 @@ private val PLAYBACK_RATE_PRESETS = listOf(
     2.0f, 2.5f, 3.0f, 4.0f
 )
 
+private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
+    val requestedVolume = volume.coerceIn(0, MAX_VOLUME)
+    val requestedMute = muted || requestedVolume <= 0
+    runCatching {
+        submit {
+            runCatching {
+                audio().setVolume(requestedVolume)
+                audio().isMute = requestedMute
+            }
+        }
+    }
+}
+
+private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
