@@ -24,6 +24,7 @@ import com.drdisagree.teledrive.presentation.onboarding.OnboardingScreen
 import com.drdisagree.teledrive.presentation.search.SearchScreen
 import com.drdisagree.teledrive.presentation.proxy.ProxyScreen
 import com.drdisagree.teledrive.presentation.settings.ExclusionsScreen
+import com.drdisagree.teledrive.presentation.settings.CacheManagerScreen
 import com.drdisagree.teledrive.presentation.settings.SettingsScreen
 import com.drdisagree.teledrive.presentation.settings.SettingsSectionScreen
 import com.drdisagree.teledrive.presentation.settings.SettingsSectionType
@@ -219,6 +220,9 @@ fun AppNavHost(
                     }
                 }
             )
+        }
+        composable<Route.CacheManager> {
+            CacheManagerScreen(onBack = { navController.popBackStackOnce() })
         }
         composable<Route.Exclusions> {
             ExclusionsScreen(onBack = { navController.popBackStackOnce() })
