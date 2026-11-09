@@ -18,6 +18,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -1031,14 +1032,13 @@ class DesktopTelegramClient(
             }
 
             try {
-                awaitClose {
-                    resumer.cancel()
-                    job.cancel()
-                }
+                awaitClose { }
             } finally {
-                // Wait for TDLib to acknowledge cancellation before the transfer worker is
-                // released, so Resume All cannot race a still-active native download.
+                // Stop and join both update/resume helpers before sending the native cancel.
+                // Then wait for TDLib's acknowledgement before releasing this worker slot.
                 withContext(NonCancellable) {
+                    resumer.cancelAndJoin()
+                    job.cancelAndJoin()
                     val activeClient = client
                     if (activeClient != null) {
                         val acknowledged = CompletableDeferred<Unit>()
