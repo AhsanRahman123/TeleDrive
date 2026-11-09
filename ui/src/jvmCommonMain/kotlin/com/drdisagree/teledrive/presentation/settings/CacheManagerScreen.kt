@@ -48,6 +48,7 @@ import com.drdisagree.teledrive.domain.repository.CacheFolderUsage
 import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.presentation.common.Formatters
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
