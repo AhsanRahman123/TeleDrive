@@ -80,6 +80,17 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
+private fun formatThumbnailQueueEta(totalSeconds: Long): String {
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return when {
+        hours > 0L -> "${hours}h ${minutes}m"
+        minutes > 0L -> "${minutes}m ${seconds}s"
+        else -> "${seconds}s"
+    }
+}
+
 private const val THUMBNAIL_PAGE_SIZE = 60
 
 @Composable
@@ -92,6 +103,7 @@ fun ThumbnailManagerScreen(
     val scrollState = rememberScrollState()
 
     var summary by remember { mutableStateOf(ThumbnailManagerSummary()) }
+    var queueEstimate by remember { mutableStateOf("Estimating completion rate…") }
     var folderPath by remember { mutableStateOf(emptyList<ThumbnailFolderUsage>()) }
     var folders by remember { mutableStateOf(emptyList<ThumbnailFolderUsage>()) }
     var files by remember { mutableStateOf(emptyList<ThumbnailFileUsage>()) }
@@ -203,13 +215,47 @@ fun ThumbnailManagerScreen(
         loading = false
     }
 
-    // Keep the queue total in sync with the queue screen's one-second live count.
-    // The heavier cache/folder aggregates continue on their separate five-second refresh.
+    // Keep the manager and queue page independently live, using the same
+    // one-second queue-reduction estimate on both screens.
     LaunchedEffect(folderId) {
+        var previousCount = -1
+        var previousSampleAt = 0L
+        var throughputFilesPerMinute = 0.0
         while (true) {
             val liveQueueCount = cacheRepository.thumbnailQueueCount()
+            val paused = cacheRepository.thumbnailQueuePaused()
+            val sampleAt = System.currentTimeMillis()
+            if (paused) {
+                throughputFilesPerMinute = 0.0
+            } else if (previousCount >= 0 && previousSampleAt > 0L) {
+                val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
+                val removed = previousCount - liveQueueCount
+                if (removed > 0) {
+                    val sampleRate = removed * 60_000.0 / elapsed
+                    throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
+                        sampleRate
+                    } else {
+                        throughputFilesPerMinute * 0.65 + sampleRate * 0.35
+                    }
+                } else if (liveQueueCount > previousCount) {
+                    throughputFilesPerMinute = 0.0
+                }
+            }
+            previousCount = liveQueueCount
+            previousSampleAt = sampleAt
             if (summary.pendingJobs != liveQueueCount) {
                 summary = summary.copy(pendingJobs = liveQueueCount)
+            }
+            queueEstimate = when {
+                paused -> "ETA unavailable while paused"
+                liveQueueCount == 0 -> "All queued jobs completed"
+                throughputFilesPerMinute > 0.0 -> {
+                    val etaSeconds = (liveQueueCount * 60.0 / throughputFilesPerMinute)
+                        .toLong().coerceAtLeast(1L)
+                    "Recent queue reduction: ${throughputFilesPerMinute.toInt()} files/min · " +
+                        "Estimated remaining: ${formatThumbnailQueueEta(etaSeconds)}"
+                }
+                else -> "Estimating completion rate…"
             }
             delay(1_000L)
         }
@@ -524,6 +570,12 @@ fun ThumbnailManagerScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
+
+            Text(
+                queueEstimate,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
+            )
 
             Text(
                 "Existing library files are Manual only by default. New successful uploads are " +
