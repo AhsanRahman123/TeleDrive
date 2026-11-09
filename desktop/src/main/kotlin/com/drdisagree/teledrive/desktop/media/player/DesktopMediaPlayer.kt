@@ -281,13 +281,14 @@ fun DesktopMediaPlayer(
     // Initial native audio setup can block briefly on a newly-created VLC player.
     // Do it on IO before starting playback, never on Compose's UI thread.
     LaunchedEffect(player, mrl) {
+        // Media startup is native VLC work too; keep it off the Compose UI thread.
         withContext(Dispatchers.IO) {
             runCatching {
                 player.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
                 player.audio().isMute = muted || volume <= 0
+                player.media().play(mrl)
             }
         }
-        player.media().play(mrl)
     }
     DisposableEffect(player, mrl) {
         onDispose {
