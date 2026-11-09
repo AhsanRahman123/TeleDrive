@@ -151,6 +151,7 @@ fun DesktopMediaPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionTick by remember { mutableIntStateOf(0) }
     var controlsPinned by remember { mutableStateOf(false) }
+    var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
 
     val player = remember(mrl, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
@@ -256,11 +257,18 @@ fun DesktopMediaPlayer(
         Channel<Pair<Int, Boolean>>(Channel.CONFLATED)
     }
     LaunchedEffect(player) {
+        var lastMuteState: Boolean? = null
         for ((level, shouldMute) in audioStateUpdates) {
             withContext(Dispatchers.IO) {
                 runCatching {
                     player.audio().setVolume(level.coerceIn(0, MAX_VOLUME))
-                    player.audio().isMute = shouldMute || level <= 0
+                    val nextMuteState = shouldMute || level <= 0
+                    // VLC mute is a separate native call. Avoid repeating it for every
+                    // slider tick; only change it when the mute state actually changes.
+                    if (lastMuteState != nextMuteState) {
+                        player.audio().isMute = nextMuteState
+                        lastMuteState = nextMuteState
+                    }
                 }
             }
         }
@@ -270,11 +278,18 @@ fun DesktopMediaPlayer(
     }
 
     val fullscreenController = LocalFullscreenController.current
-    DisposableEffect(player, mrl) {
-        // Set the initial audio state before starting the media.
-        player.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
-        player.audio().isMute = muted || volume <= 0
+    // Initial native audio setup can block briefly on a newly-created VLC player.
+    // Do it on IO before starting playback, never on Compose's UI thread.
+    LaunchedEffect(player, mrl) {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                player.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
+                player.audio().isMute = muted || volume <= 0
+            }
+        }
         player.media().play(mrl)
+    }
+    DisposableEffect(player, mrl) {
         onDispose {
             runCatching {
                 player.controls().stop()
@@ -397,13 +412,26 @@ fun DesktopMediaPlayer(
         trackTick++
     }
 
-    LaunchedEffect(playing, interactionTick, controlsPinned) {
+    LaunchedEffect(
+        mrl,
+        playing,
+        interactionTick,
+        controlsPinned,
+        controlPreferences.autoHidePlayerControls,
+        controlPreferences.hideDelayMillis
+    ) {
         controlsVisible = true
         onControlsVisibilityChange(true)
-        if (!playing || controlsPinned) return@LaunchedEffect
-        delay(CONTROLS_HIDE_DELAY_MS.milliseconds)
-        controlsVisible = false
-        onControlsVisibilityChange(false)
+        if (!controlPreferences.autoHidePlayerControls || controlsPinned) {
+            return@LaunchedEffect
+        }
+        // Hide the complete player chrome after inactivity even while paused.
+        // Previously the !playing early return left every button permanently visible.
+        delay(controlPreferences.hideDelayMillis.milliseconds)
+        if (!controlsPinned) {
+            controlsVisible = false
+            onControlsVisibilityChange(false)
+        }
     }
 
     val blankCursor = remember {
@@ -691,7 +719,7 @@ fun DesktopMediaPlayer(
         }
 
         AnimatedVisibility(
-            visible = controlsVisible || isAudio,
+            visible = controlsVisible,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -744,7 +772,13 @@ fun DesktopMediaPlayer(
                     repeatOne = !repeatOne
                     player.controls().repeat = repeatOne
                 },
-                onScaling = { scaling = it }
+                onScaling = { scaling = it },
+                controlPreferences = controlPreferences,
+                onControlPreferencesChange = { updated ->
+                    controlPreferences = updated
+                    PlayerControlPreferencesStore.save(updated)
+                    interactionTick++
+                }
             )
         }
     }
@@ -783,7 +817,9 @@ private fun PlayerControlsBar(
     onToggleRepeat: () -> Unit,
     onSelectAudioTrack: (VlcTrack) -> Unit,
     onSelectTextTrack: (VlcTrack?) -> Unit,
-    onScaling: (VideoScaling) -> Unit
+    onScaling: (VideoScaling) -> Unit,
+    controlPreferences: PlayerControlPreferences,
+    onControlPreferencesChange: (PlayerControlPreferences) -> Unit
 ) {
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
@@ -849,13 +885,20 @@ private fun PlayerControlsBar(
         )
 
         var showSliderSettings by remember { mutableStateOf(false) }
-        var sliderPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
         var volumeSliderActive by remember { mutableStateOf(false) }
         var brightnessSliderActive by remember { mutableStateOf(false) }
 
-        LaunchedEffect(showSliderSettings, volumeSliderActive, brightnessSliderActive) {
+        LaunchedEffect(
+            showSliderSettings,
+            showRateMenu,
+            showAudioMenu,
+            showSubtitleMenu,
+            volumeSliderActive,
+            brightnessSliderActive
+        ) {
             onControlsKeepVisible(
-                showSliderSettings || volumeSliderActive || brightnessSliderActive
+                showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
+                    volumeSliderActive || brightnessSliderActive
             )
         }
         DisposableEffect(Unit) {
@@ -873,8 +916,8 @@ private fun PlayerControlsBar(
                 contentDescription = if (muted) "Unmute video" else "Mute video",
                 value = volume.toFloat(),
                 valueRange = 0f..MAX_VOLUME.toFloat(),
-                autoHide = sliderPreferences.autoHideVolumeSlider,
-                hideDelayMillis = sliderPreferences.hideDelayMillis,
+                autoHide = controlPreferences.autoHideVolumeSlider,
+                hideDelayMillis = controlPreferences.hideDelayMillis,
                 onButtonClick = {
                     onInteraction()
                     onToggleMute()
@@ -896,8 +939,8 @@ private fun PlayerControlsBar(
                     },
                     value = brightness.toFloat(),
                     valueRange = 0f..MAX_BRIGHTNESS.toFloat(),
-                    autoHide = sliderPreferences.autoHideBrightnessSlider,
-                    hideDelayMillis = sliderPreferences.hideDelayMillis,
+                    autoHide = controlPreferences.autoHideBrightnessSlider,
+                    hideDelayMillis = controlPreferences.hideDelayMillis,
                     onButtonClick = onInteraction,
                     onValueChange = { value ->
                         onInteraction()
@@ -931,15 +974,16 @@ private fun PlayerControlsBar(
                         text = { Text("Auto-hide volume slider") },
                         leadingIcon = {
                             Checkbox(
-                                checked = sliderPreferences.autoHideVolumeSlider,
+                                checked = controlPreferences.autoHideVolumeSlider,
                                 onCheckedChange = null
                             )
                         },
                         onClick = {
-                            sliderPreferences = sliderPreferences.copy(
-                                autoHideVolumeSlider = !sliderPreferences.autoHideVolumeSlider
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    autoHideVolumeSlider = !controlPreferences.autoHideVolumeSlider
+                                )
                             )
-                            PlayerControlPreferencesStore.save(sliderPreferences)
                             onInteraction()
                         }
                     )
@@ -947,35 +991,51 @@ private fun PlayerControlsBar(
                         text = { Text("Auto-hide brightness slider") },
                         leadingIcon = {
                             Checkbox(
-                                checked = sliderPreferences.autoHideBrightnessSlider,
+                                checked = controlPreferences.autoHideBrightnessSlider,
                                 onCheckedChange = null
                             )
                         },
                         onClick = {
-                            sliderPreferences = sliderPreferences.copy(
-                                autoHideBrightnessSlider = !sliderPreferences.autoHideBrightnessSlider
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    autoHideBrightnessSlider = !controlPreferences.autoHideBrightnessSlider
+                                )
                             )
-                            PlayerControlPreferencesStore.save(sliderPreferences)
                             onInteraction()
                         }
                     )
                     DropdownMenuItem(
-                        text = { Text("Auto-hide delay") },
+                        text = { Text("Auto-hide player buttons") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.autoHidePlayerControls,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    autoHidePlayerControls = !controlPreferences.autoHidePlayerControls
+                                )
+                            )
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Auto-hide delay (all enabled controls)") },
                         enabled = false,
                         onClick = {}
                     )
                     listOf(1_000L, 2_000L, 3_000L, 5_000L, 10_000L).forEach { delay ->
-                        val selected = sliderPreferences.hideDelayMillis == delay
+                        val selected = controlPreferences.hideDelayMillis == delay
                         DropdownMenuItem(
                             text = { Text("${delay / 1_000L} ${if (delay == 1_000L) "second" else "seconds"}") },
                             leadingIcon = {
                                 RadioButton(selected = selected, onClick = null)
                             },
                             onClick = {
-                                sliderPreferences = sliderPreferences.copy(
-                                    hideDelayMillis = delay
+                                onControlPreferencesChange(
+                                    controlPreferences.copy(hideDelayMillis = delay)
                                 )
-                                PlayerControlPreferencesStore.save(sliderPreferences)
                                 onInteraction()
                             }
                         )
