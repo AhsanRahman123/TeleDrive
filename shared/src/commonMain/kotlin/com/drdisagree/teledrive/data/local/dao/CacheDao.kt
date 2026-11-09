@@ -176,9 +176,16 @@ interface CacheDao {
              FROM cache_entries ce
              JOIN files f ON f.id = ce.fileId
             WHERE COALESCE(f.folderId, f.preTrashFolderId) IN (SELECT id FROM child_folders)
+              AND (:typeFilter = 'ALL' OR CAST(ce.type AS TEXT) = :typeFilter)
+              AND (:searchQuery = '' OR
+                   COALESCE(f.name, ce.path) LIKE '%' || :searchQuery || '%')
             ORDER BY ce.path ASC"""
     )
-    suspend fun managerEntryPathsInFolderTree(folderId: String): List<String>
+    suspend fun managerEntryPathsInFolderTree(
+        folderId: String,
+        typeFilter: String = "ALL",
+        searchQuery: String = ""
+    ): List<String>
 
     @Query("DELETE FROM cache_entries WHERE path IN (:paths)")
     suspend fun deletePaths(paths: List<String>)
