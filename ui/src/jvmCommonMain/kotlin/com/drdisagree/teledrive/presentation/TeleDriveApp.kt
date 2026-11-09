@@ -102,6 +102,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
+import com.drdisagree.teledrive.presentation.common.platformConfiguration
 
 @Composable
 fun TeleDriveApp(
@@ -149,7 +150,8 @@ fun TeleDriveApp(
     }
 
     val systemDefault = remember { java.util.Locale.getDefault() }
-    remember(state.language) {
+    val configuration = platformConfiguration()
+    remember(state.language, configuration) {
         java.util.Locale.setDefault(
             when (state.language) {
                 AppLanguage.SYSTEM -> systemDefault
