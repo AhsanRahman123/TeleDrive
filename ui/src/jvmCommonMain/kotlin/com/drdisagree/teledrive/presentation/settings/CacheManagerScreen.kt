@@ -399,7 +399,7 @@ fun CacheManagerScreen(
                             try {
                                 val paths = selectedPaths.toMutableSet()
                                 selectedFolderIds.forEach { id ->
-                                    paths += repository.cacheEntryPathsInFolderTree(id)
+                                    paths += repository.cacheEntryPathsInFolderTree(id, typeFilter, searchQuery)
                                 }
                                 val result = repository.removeCacheEntries(paths.toList())
                                 selectedPaths = emptySet()
