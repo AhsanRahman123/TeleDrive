@@ -2,9 +2,11 @@ package com.drdisagree.teledrive.presentation.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -52,6 +54,8 @@ import com.drdisagree.teledrive.domain.repository.CacheFolderUsage
 import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.common.Formatters
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -103,9 +107,24 @@ fun CacheManagerScreen(
     var confirmUntracked by remember { mutableStateOf(false) }
     var refreshKey by remember { mutableStateOf(0) }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
+    var folderRangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
     val cacheEntryListState = rememberLazyListState()
+    val folderListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
+    val folderDragSelect = rememberDragSelect(
+        listState = folderListState,
+        onStart = { folderRangeSelectionBase = selectedFolderIds },
+        isSelected = { index ->
+            folders.getOrNull(index)?.id?.let(selectedFolderIds::contains) == true
+        },
+        onRange = { range, shouldSelect ->
+            val ids = range.mapNotNull { folders.getOrNull(it)?.id }.toSet()
+            selectedFolderIds = if (shouldSelect) folderRangeSelectionBase + ids
+                else folderRangeSelectionBase - ids
+        },
+        onEnd = { folderRangeSelectionBase = emptySet() }
+    )
     val cacheEntryDragSelect = rememberDragSelect(
         listState = cacheEntryListState,
         onStart = { rangeSelectionBase = selectedPaths },
@@ -233,6 +252,7 @@ fun CacheManagerScreen(
             )
         }
     ) { padding ->
+        Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier.fillMaxSize()
                 .padding(top = padding.calculateTopPadding())
@@ -338,40 +358,56 @@ fun CacheManagerScreen(
 
             if (folders.isNotEmpty()) {
                 Text("Folders", style = MaterialTheme.typography.titleMedium)
-                folders.forEach { folder ->
-                    Card {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                folderPath = folderPath + folder
-                                pageOffset = 0
-                                selectedPaths = emptySet()
-                            }.padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Checkbox(
-                                checked = folder.id in selectedFolderIds,
-                                onCheckedChange = { checked ->
-                                    selectedFolderIds = if (checked) selectedFolderIds + folder.id
-                                        else selectedFolderIds - folder.id
+                Box(modifier = Modifier.fillMaxWidth().height(280.dp)) {
+                    LazyColumn(
+                        state = folderListState,
+                        modifier = Modifier.fillMaxSize().then(folderDragSelect),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(folders, key = { _, folder -> folder.id }) { _, folder ->
+                            Card {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        folderPath = folderPath + folder
+                                        pageOffset = 0
+                                        selectedPaths = emptySet()
+                                    }.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = folder.id in selectedFolderIds,
+                                        onCheckedChange = { checked ->
+                                            selectedFolderIds = if (checked) selectedFolderIds + folder.id
+                                                else selectedFolderIds - folder.id
+                                        }
+                                    )
+                                    Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(folder.name, style = MaterialTheme.typography.bodyLarge)
+                                        Text(
+                                            "${folder.entryCount} cached entries · ${Formatters.bytes(folder.totalBytes)} including subfolders",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    TextButton(onClick = {
+                                        folderPath = folderPath + folder
+                                        pageOffset = 0
+                                        selectedPaths = emptySet()
+                                    }) { Text("Open") }
                                 }
-                            )
-                            Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(folder.name, style = MaterialTheme.typography.bodyLarge)
-                                Text(
-                                    "${folder.entryCount} cached entries · ${Formatters.bytes(folder.totalBytes)} including subfolders",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
                             }
-                            TextButton(onClick = {
-                                folderPath = folderPath + folder
-                                pageOffset = 0
-                                selectedPaths = emptySet()
-                            }) { Text("Open") }
                         }
                     }
+                    DesktopScrollEdgeControls(
+                        state = folderListState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
+                    )
+                    DesktopVerticalScrollbar(
+                        state = folderListState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                    )
                 }
             }
 
@@ -441,30 +477,40 @@ fun CacheManagerScreen(
             } else if (entries.isEmpty()) {
                 Text("No indexed cache entries in this folder match the current filters.")
             } else {
-                LazyColumn(
-                    state = cacheEntryListState,
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)
-                        .then(cacheEntryDragSelect),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    itemsIndexed(entries, key = { _, entry -> entry.path }) { _, entry ->
-                        CacheEntryRow(
-                            entry = entry,
-                            selected = entry.path in selectedPaths,
-                            onSelected = { checked ->
-                                selectedPaths = if (checked) selectedPaths + entry.path
-                                    else selectedPaths - entry.path
+                Box(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
+                    LazyColumn(
+                        state = cacheEntryListState,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)
+                            .then(cacheEntryDragSelect),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(entries, key = { _, entry -> entry.path }) { _, entry ->
+                            CacheEntryRow(
+                                entry = entry,
+                                selected = entry.path in selectedPaths,
+                                onSelected = { checked ->
+                                    selectedPaths = if (checked) selectedPaths + entry.path
+                                        else selectedPaths - entry.path
+                                }
+                            )
+                        }
+                        if (hasMore) {
+                            item {
+                                OutlinedButton(
+                                    enabled = !loading,
+                                    onClick = { pageOffset += CACHE_MANAGER_PAGE_SIZE }
+                                ) { Text("Load more") }
                             }
-                        )
-                    }
-                    if (hasMore) {
-                        item {
-                            OutlinedButton(
-                                enabled = !loading,
-                                onClick = { pageOffset += CACHE_MANAGER_PAGE_SIZE }
-                            ) { Text("Load more") }
                         }
                     }
+                    DesktopScrollEdgeControls(
+                        state = cacheEntryListState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 2.dp)
+                    )
+                    DesktopVerticalScrollbar(
+                        state = cacheEntryListState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                    )
                 }
             }
 
@@ -490,6 +536,15 @@ fun CacheManagerScreen(
                 }
             }
             Spacer(Modifier.height(24.dp))
+        }
+            DesktopScrollEdgeControls(
+                state = scrollState,
+                modifier = Modifier.align(Alignment.TopEnd).padding(top = padding.calculateTopPadding() + 8.dp, end = 12.dp)
+            )
+            DesktopVerticalScrollbar(
+                state = scrollState,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+            )
         }
     }
 
