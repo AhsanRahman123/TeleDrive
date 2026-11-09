@@ -36,6 +36,7 @@ import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -112,9 +113,11 @@ class TransferExecutor(
                 send(received.getOrThrow())
             }
         } finally {
-            // Wait for the underlying TDLib flow's awaitClose cleanup before releasing
-            // this worker slot. Otherwise Resume All can race a still-active native request.
-            producer.cancelAndJoin()
+            // The parent drain can itself be cancelled by Pause All. Keep cleanup non-cancellable
+            // so the TDLib flow's awaitClose handler finishes before this worker slot is released.
+            withContext(NonCancellable) {
+                producer.cancelAndJoin()
+            }
         }
     }
 
