@@ -264,7 +264,13 @@ private fun AlbumGrid(
     bottomPadding: Dp,
     onOpenAlbum: (MediaAlbum) -> Unit,
     onZoomIn: () -> Unit,
-    onZoomOut: () -> Unit
+    onZoomOut: () -> Unit,
+    selectionMode: Boolean,
+    selectedAlbumIds: Set<String>,
+    onToggleAlbum: (String) -> Unit,
+    onStartRange: () -> Unit,
+    onRange: (IntRange, Boolean) -> Unit,
+    onEndRange: () -> Unit
 ) {
     if (albums.isEmpty()) {
         EmptyState(
@@ -276,6 +282,15 @@ private fun AlbumGrid(
     }
     if (viewMode == ViewMode.LIST) {
         val listState = rememberLazyListState()
+        val albumDragSelect = rememberDragSelect(
+            listState = listState,
+            onStart = onStartRange,
+            isSelected = { index ->
+                albums.getOrNull(index)?.folderId?.let(selectedAlbumIds::contains) == true
+            },
+            onRange = onRange,
+            onEnd = onEnd
+        )
         val keyboard = rememberKeyboardCollection(listState)
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
@@ -283,6 +298,7 @@ private fun AlbumGrid(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(end = 10.dp)
+                .then(albumDragSelect)
                 .keyboardCollection(keyboard, albums.size),
             contentPadding = PaddingValues(
                 start = 12.dp,
@@ -298,7 +314,16 @@ private fun AlbumGrid(
             ) { index, album ->
                 AlbumListItem(
                     album = album,
-                    onClick = { onOpenAlbum(album) },
+                    onClick = {
+                        val folderId = album.folderId
+                        if (selectionMode && folderId != null) onToggleAlbum(folderId)
+                        else onOpenAlbum(album)
+                    },
+                    selectionMode = selectionMode,
+                    selected = album.folderId?.let(selectedAlbumIds::contains) == true,
+                    onSelectionChange = album.folderId?.let { id -> { checked ->
+                        if (checked != (id in selectedAlbumIds)) onToggleAlbum(id)
+                    } },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
@@ -316,6 +341,15 @@ private fun AlbumGrid(
         }
     } else {
         val gridState = rememberLazyGridState()
+        val albumDragSelect = rememberDragSelect(
+            gridState = gridState,
+            onStart = onStartRange,
+            isSelected = { index ->
+                albums.getOrNull(index)?.folderId?.let(selectedAlbumIds::contains) == true
+            },
+            onRange = onRange,
+            onEnd = onEnd
+        )
         val keyboard = rememberKeyboardCollection(gridState, columns)
         Box(modifier = Modifier.fillMaxSize()) {
             LazyVerticalGrid(
@@ -324,6 +358,7 @@ private fun AlbumGrid(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(end = 10.dp)
+                .then(albumDragSelect)
                 .keyboardCollection(keyboard, albums.size)
                 .pinchZoom(onZoomIn = onZoomIn, onZoomOut = onZoomOut),
             contentPadding = PaddingValues(
@@ -341,7 +376,16 @@ private fun AlbumGrid(
             ) { index, album ->
                 AlbumCard(
                     album = album,
-                    onClick = { onOpenAlbum(album) },
+                    onClick = {
+                        val folderId = album.folderId
+                        if (selectionMode && folderId != null) onToggleAlbum(folderId)
+                        else onOpenAlbum(album)
+                    },
+                    selectionMode = selectionMode,
+                    selected = album.folderId?.let(selectedAlbumIds::contains) == true,
+                    onSelectionChange = album.folderId?.let { id -> { checked ->
+                        if (checked != (id in selectedAlbumIds)) onToggleAlbum(id)
+                    } },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
@@ -503,7 +547,7 @@ fun GalleryScreen(
         ConfirmDialog(
             title = stringResource(
                 Res.string.common_confirm_trash_count_title,
-                state.selection.size
+                state.selectionCount
             ),
             message = stringResource(Res.string.common_restore_trash_emptied),
             confirmLabel = stringResource(Res.string.common_move_trash),
@@ -559,7 +603,7 @@ fun GalleryScreen(
                         Text(
                             text = stringResource(
                                 Res.string.common_selection_count,
-                                state.selection.size
+                                state.selectionCount
                             ),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -592,7 +636,7 @@ fun GalleryScreen(
                                 }
                             )
                         }
-                        if (state.selection.size > 0) {
+                        if (state.selectionCount > 0) {
                             Box {
                                 IconButton(onClick = { showSelectionOverflow = true }) {
                                 Icon(
@@ -601,7 +645,7 @@ fun GalleryScreen(
                                 )
                             }
                             val storage = buildList {
-                                if (state.capabilities.canDownload) {
+                                if (state.capabilities.canDownload || state.albumSelection.isNotEmpty()) {
                                     add(
                                         MenuAction(
                                             label = stringResource(Res.string.common_download),
@@ -617,7 +661,7 @@ fun GalleryScreen(
                                         ) { viewModel.uploadSelected() }
                                     )
                                 }
-                                if (state.capabilities.canFreeUpSpace) {
+                                if (state.capabilities.canFreeUpSpace || state.albumSelection.isNotEmpty()) {
                                     add(
                                         MenuAction(
                                             label = stringResource(Res.string.common_free_space),
@@ -693,7 +737,7 @@ fun GalleryScreen(
                                         icon = Icons.Filled.ContentCopy
                                     ) { showCopyPicker = true }
                                 )
-                                if (state.selection.size == 1) {
+                                if (state.selection.size == 1 && state.albumSelection.isEmpty()) {
                                     add(
                                         MenuAction(
                                             label = stringResource(Res.string.info_details),
@@ -768,8 +812,7 @@ fun GalleryScreen(
                                 )
                             }
                         }
-                        if (state.isAlbumView || state.tab != GalleryTab.ALBUMS) {
-                            IconButton(onClick = viewModel::startSelectionMode) {
+                        IconButton(onClick = viewModel::startSelectionMode) {
                                 Icon(
                                     Icons.Filled.CheckBoxOutlineBlank,
                                     contentDescription = stringResource(Res.string.common_select)
@@ -838,8 +881,7 @@ fun GalleryScreen(
                                 )
                             }
                         }
-                        if (state.isAlbumView || state.tab != GalleryTab.ALBUMS) {
-                            IconButton(onClick = viewModel::startSelectionMode) {
+                        IconButton(onClick = viewModel::startSelectionMode) {
                                 Icon(
                                     Icons.Filled.CheckBoxOutlineBlank,
                                     contentDescription = stringResource(Res.string.common_select)
@@ -1081,7 +1123,18 @@ fun GalleryScreen(
                     bottomPadding = padding.calculateBottomPadding() + LocalBottomBarInset.current,
                     onOpenAlbum = onOpenAlbum,
                     onZoomIn = viewModel::zoomAlbumsIn,
-                    onZoomOut = viewModel::zoomAlbumsOut
+                    onZoomOut = viewModel::zoomAlbumsOut,
+                    selectionMode = selectionMode,
+                    selectedAlbumIds = state.albumSelection,
+                    onToggleAlbum = viewModel::toggleAlbumSelection,
+                    onStartRange = viewModel::startAlbumRangeSelection,
+                    onRange = { range, shouldSelect ->
+                        viewModel.extendAlbumRangeSelection(
+                            range.mapNotNull { state.albums.getOrNull(it)?.folderId },
+                            shouldSelect
+                        )
+                    },
+                    onEndRange = viewModel::endAlbumRangeSelection
                 )
                 return@Column
             }
