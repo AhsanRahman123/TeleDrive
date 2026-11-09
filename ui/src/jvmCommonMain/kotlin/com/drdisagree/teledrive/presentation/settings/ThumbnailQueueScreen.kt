@@ -61,7 +61,7 @@ private fun formatThumbnailQueueEta(totalSeconds: Long): String {
 }
 
 private const val THUMBNAIL_QUEUE_PAGE_SIZE = 100
-private const val MAX_THUMBNAIL_ATTEMPTS = 3
+private const val MAX_THUMBNAIL_ATTEMPTS = 5
 
 @Composable
 fun ThumbnailQueueScreen(
