@@ -4,8 +4,8 @@ import java.util.prefs.Preferences
 
 internal data class PlayerControlPreferences(
     val autoHideVolumeSlider: Boolean = true,
-    val autoHideBrightnessSlider: Boolean = true,
-    val autoHidePlayerControls: Boolean = true,
+    val autoHideBrightnessSlider: Boolean = false,
+    val autoHidePlayerControls: Boolean = false,
     val showPlayerControls: Boolean = true,
     val hideDelayMillis: Long = 3_000L
 )
@@ -19,8 +19,8 @@ internal object PlayerControlPreferencesStore {
     fun load(): PlayerControlPreferences = runCatching {
         PlayerControlPreferences(
             autoHideVolumeSlider = preferences.getBoolean(KEY_AUTO_HIDE_VOLUME, true),
-            autoHideBrightnessSlider = preferences.getBoolean(KEY_AUTO_HIDE_BRIGHTNESS, true),
-            autoHidePlayerControls = preferences.getBoolean(KEY_AUTO_HIDE_PLAYER_CONTROLS, true),
+            autoHideBrightnessSlider = preferences.getBoolean(KEY_AUTO_HIDE_BRIGHTNESS, false),
+            autoHidePlayerControls = preferences.getBoolean(KEY_AUTO_HIDE_PLAYER_CONTROLS, false),
             showPlayerControls = preferences.getBoolean(KEY_SHOW_PLAYER_CONTROLS, true),
             hideDelayMillis = preferences.getLong(KEY_HIDE_DELAY, 3_000L)
                 .coerceIn(500L, 10_000L)
