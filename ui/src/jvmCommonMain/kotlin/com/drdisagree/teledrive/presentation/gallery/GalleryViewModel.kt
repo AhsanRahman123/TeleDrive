@@ -196,6 +196,7 @@ class GalleryViewModel(
     val listPosition = ListPosition(savedStateHandle)
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
+    private val albumSelection = MutableStateFlow<Set<String>>(emptySet())
     private val _selectionModeEnabled = MutableStateFlow(false)
     val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
     private var rangeBase: Set<String>? = null
@@ -302,6 +303,7 @@ class GalleryViewModel(
     val uiState: StateFlow<GalleryUiState> = combine(
         browseState,
         selectionCapabilities,
+        albumSelection,
         settingsRepository.preferences
             .map { it.galleryGridSize to it.albumGridSize }
             .distinctUntilChanged(),
@@ -309,7 +311,7 @@ class GalleryViewModel(
             albums,
             settingsRepository.preferences.map { it.galleryViewMode }.distinctUntilChanged()
         ) { albumList, mode -> albumList to mode }
-    ) { browse, selectionState, sizes, extras ->
+    ) { browse, selectionState, selectedAlbums, sizes, extras ->
         val (selected, capabilities) = selectionState
         val (albumList, mode) = extras
         val (gridSize, albumGridSize) = sizes
@@ -325,6 +327,7 @@ class GalleryViewModel(
             sortDirection = browse.sortDirection,
             filters = browse.filters,
             selection = selected,
+            albumSelection = selectedAlbums,
             capabilities = capabilities,
             loaded = true
         )
@@ -474,31 +477,61 @@ class GalleryViewModel(
     }
 
     fun selectFileForContext(id: String) {
+        albumSelection.update { emptySet() }
         _selectionModeEnabled.update { true }
         _allSelected.update { false }
         if (id !in selection.value) selection.update { setOf(id) }
     }
 
     fun toggleSelection(id: String) {
+        albumSelection.update { emptySet() }
+        _selectionModeEnabled.update { true }
         _allSelected.update { false }
         selection.update { if (id in it) it - id else it + id }
+    }
+
+    fun toggleAlbumSelection(folderId: String) {
+        selection.update { emptySet() }
+        _allSelected.update { false }
+        albumSelection.update { current ->
+            if (folderId in current) current - folderId else current + folderId
+        }
+        _selectionModeEnabled.update { albumSelection.value.isNotEmpty() }
     }
 
     fun clearSelection() {
         _selectionModeEnabled.update { false }
         _allSelected.update { false }
         selection.update { emptySet() }
+        albumSelection.update { emptySet() }
     }
 
-    fun hasSelection(): Boolean = selection.value.isNotEmpty()
+    fun hasSelection(): Boolean = selection.value.isNotEmpty() || albumSelection.value.isNotEmpty()
+
+    private fun takeSelection(): Pair<List<String>, List<String>> {
+        val fileIds = selection.value.toList()
+        val folderIds = albumSelection.value.toList()
+        clearSelection()
+        return fileIds to folderIds
+    }
 
     fun generateThumbnailsSelected() {
-        val ids = selection.value.toList()
-        if (ids.isEmpty()) return
-        clearSelection()
+        val (ids, folders) = takeSelection()
+        if (ids.isEmpty() && folders.isEmpty()) return
         viewModelScope.launch {
-            val result = cacheRepository.generateThumbnails(ids)
-            val submitted = result.newlyQueued + result.alreadyQueued
+            var newlyQueued = 0
+            var alreadyQueued = 0
+            if (ids.isNotEmpty()) {
+                val result = cacheRepository.generateThumbnails(ids)
+                newlyQueued += result.newlyQueued
+                alreadyQueued += result.alreadyQueued
+            }
+            folders.forEach { folderId ->
+                val result = cacheRepository.generateFolderThumbnails(folderId)
+                newlyQueued += result.newlyQueued
+                alreadyQueued += result.alreadyQueued
+            }
+            val submitted = newlyQueued + alreadyQueued
             _messages.tryEmit(
                 UiText.Plain(
                     if (submitted > 0) {
@@ -513,8 +546,21 @@ class GalleryViewModel(
 
     fun selectAll() {
         viewModelScope.launch {
-            selection.update { fileRepository.fileIds(spec.first()).toSet() }
-            _allSelected.update { true }
+            if (tab.value == GalleryTab.ALBUMS && !isAlbumView) {
+                val folders = fileRepository.observeAlbums(
+                    showHidden = false,
+                    showArchived = false
+                ).first().mapNotNull { it.folderId }.toSet()
+                selection.update { emptySet() }
+                albumSelection.value = folders
+                _selectionModeEnabled.value = folders.isNotEmpty()
+                _allSelected.update { folders.isNotEmpty() }
+            } else {
+                albumSelection.update { emptySet() }
+                selection.update { fileRepository.fileIds(spec.first()).toSet() }
+                _selectionModeEnabled.update { true }
+                _allSelected.update { true }
+            }
         }
     }
 
@@ -551,49 +597,61 @@ class GalleryViewModel(
     }
 
     fun moveSelected(targetFolderId: String?) {
-        val ids = selection.value.toList()
-        clearSelection()
-        if (ids.isEmpty()) return
-        viewModelScope.launch { fileRepository.moveFiles(ids, targetFolderId).reportFailure() }
+        val (ids, folders) = takeSelection()
+        if (ids.isEmpty() && folders.isEmpty()) return
+        viewModelScope.launch {
+            if (ids.isNotEmpty()) fileRepository.moveFiles(ids, targetFolderId).reportFailure()
+            folders.forEach { fileRepository.moveFolder(it, targetFolderId).reportFailure() }
+        }
     }
 
     fun cutSelected() {
-        val ids = selection.value.toList()
-        if (ids.isEmpty()) return
-        clearSelection()
-        clipboard.cut(CutItems(ids, emptyList()))
-        _messages.tryEmit(UiText.Resource(Res.string.files_cut_count, ids.size))
+        val (ids, folders) = takeSelection()
+        val total = ids.size + folders.size
+        if (total == 0) return
+        clipboard.cut(CutItems(ids, folders))
+        _messages.tryEmit(UiText.Resource(Res.string.files_cut_count, total))
     }
 
     fun trashSelected() {
-        val ids = selection.value.toList()
-        clearSelection()
-        viewModelScope.launch { trashRepository.moveFilesToTrash(ids).reportFailure() }
+        val (ids, folders) = takeSelection()
+        if (ids.isEmpty() && folders.isEmpty()) return
+        viewModelScope.launch {
+            if (ids.isNotEmpty()) trashRepository.moveFilesToTrash(ids).reportFailure()
+            folders.forEach { trashRepository.moveFolderToTrash(it).reportFailure() }
+        }
     }
 
     fun copySelected(targetFolderId: String?) {
-        val ids = selection.value.toList()
-        clearSelection()
-        if (ids.isEmpty()) return
+        val (ids, folders) = takeSelection()
+        if (ids.isEmpty() && folders.isEmpty()) return
         viewModelScope.launch {
-            when (val result = fileRepository.copyFiles(ids, targetFolderId)) {
-                is AppResult.Success -> _messages.tryEmit(
-                    if (result.value == ids.size) {
-                        UiText.Resource(Res.string.files_copied_all, result.value)
-                    } else {
-                        UiText.Resource(Res.string.files_copied_partial, result.value, ids.size)
-                    }
-                )
-                is AppResult.Failure -> report(result.error)
+            if (ids.isNotEmpty()) {
+                when (val result = fileRepository.copyFiles(ids, targetFolderId)) {
+                    is AppResult.Success -> _messages.tryEmit(
+                        if (result.value == ids.size) {
+                            UiText.Resource(Res.string.files_copied_all, result.value)
+                        } else {
+                            UiText.Resource(Res.string.files_copied_partial, result.value, ids.size)
+                        }
+                    )
+                    is AppResult.Failure -> report(result.error)
+                }
+            }
+            folders.forEach { folderId ->
+                when (val result = fileRepository.copyFolder(folderId, targetFolderId)) {
+                    is AppResult.Success -> Unit
+                    is AppResult.Failure -> report(result.error)
+                }
             }
         }
     }
 
     fun shareSelected() {
-        val ids = selection.value.toList()
-        if (ids.isEmpty()) return
-        clearSelection()
+        val (fileIds, folderIds) = takeSelection()
+        if (fileIds.isEmpty() && folderIds.isEmpty()) return
         viewModelScope.launch {
+            val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
             val files = fileRepository.getFiles(ids)
             val paths = files.mapNotNull { it.localPath }
             if (files.size != ids.size || paths.size != files.size) {
@@ -606,9 +664,12 @@ class GalleryViewModel(
     }
 
     fun deleteLocalCopies() {
-        val ids = selection.value.toList()
-        clearSelection()
-        removeLocalCopies(ids)
+        val (fileIds, folderIds) = takeSelection()
+        if (fileIds.isEmpty() && folderIds.isEmpty()) return
+        viewModelScope.launch {
+            val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
+            removeLocalCopies(ids)
+        }
     }
 
     fun retryLocalCopyRemoval() {
@@ -662,9 +723,9 @@ class GalleryViewModel(
     }
 
     fun downloadSelected() {
-        val ids = selection.value.toList()
-        clearSelection()
+        val (fileIds, folderIds) = takeSelection()
         viewModelScope.launch {
+            val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
             var queued = 0
             ids.forEach { id ->
                 when (val result = transferRepository.enqueueDownload(id)) {
@@ -672,16 +733,14 @@ class GalleryViewModel(
                     is AppResult.Failure -> report(result.error)
                 }
             }
-            if (queued > 0) {
-                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
-            }
+            if (queued > 0) _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
         }
     }
 
     fun uploadSelected() {
-        val ids = selection.value.toList()
-        clearSelection()
+        val (fileIds, folderIds) = takeSelection()
         viewModelScope.launch {
+            val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
             var queued = 0
             ids.forEach { id ->
                 when (val result = transferRepository.enqueueUpload(id)) {
@@ -689,9 +748,7 @@ class GalleryViewModel(
                     is AppResult.Failure -> report(result.error)
                 }
             }
-            if (queued > 0) {
-                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_upload, queued))
-            }
+            if (queued > 0) _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_upload, queued))
         }
     }
 
@@ -718,32 +775,35 @@ class GalleryViewModel(
     }
 
     fun favoriteSelected(favorite: Boolean) {
-        val ids = selection.value.toList()
-        clearSelection()
-        viewModelScope.launch { fileRepository.setFilesFavorite(ids, favorite) }
+        val (ids, folders) = takeSelection()
+        viewModelScope.launch {
+            if (ids.isNotEmpty()) fileRepository.setFilesFavorite(ids, favorite)
+            folders.forEach { fileRepository.setFolderFavorite(it, favorite) }
+        }
     }
 
     fun setSelectedAvailableOffline(available: Boolean) {
-        val ids = selection.value.toList()
-        clearSelection()
+        val (ids, folders) = takeSelection()
         viewModelScope.launch {
-            val queued = makeAvailableOffline(ids, available = available)
-            if (queued > 0) {
-                _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
-            }
+            val queued = makeAvailableOffline(ids, folders, available)
+            if (queued > 0) _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
         }
     }
 
     fun hideSelected(hidden: Boolean) {
-        val ids = selection.value.toList()
-        clearSelection()
-        viewModelScope.launch { fileRepository.setFilesHidden(ids, hidden) }
+        val (ids, folders) = takeSelection()
+        viewModelScope.launch {
+            if (ids.isNotEmpty()) fileRepository.setFilesHidden(ids, hidden)
+            folders.forEach { fileRepository.setFolderHidden(it, hidden) }
+        }
     }
 
     fun archiveSelected(archived: Boolean) {
-        val ids = selection.value.toList()
-        clearSelection()
-        viewModelScope.launch { fileRepository.setFilesArchived(ids, archived) }
+        val (ids, folders) = takeSelection()
+        viewModelScope.launch {
+            if (ids.isNotEmpty()) fileRepository.setFilesArchived(ids, archived)
+            folders.forEach { fileRepository.setFolderArchived(it, archived) }
+        }
     }
 
     companion object {
