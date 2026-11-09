@@ -114,6 +114,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withContext
 import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
@@ -164,6 +167,12 @@ fun DesktopMediaPlayer(
                     playing = true
                     finished = false
                     buffering = false
+                    // VLC may create its audio output after the initial media.play() call.
+                    // Reapply the current output state at the actual playing event as well.
+                    runCatching {
+                        mediaPlayer.audio().setVolume(volume.coerceIn(0, MAX_VOLUME))
+                        mediaPlayer.audio().isMute = muted || volume <= 0
+                    }
                     trackTick++
                 }
 
@@ -205,6 +214,54 @@ fun DesktopMediaPlayer(
         }
     }
 
+    var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(false) }
+    var brightnessMonitor by remember(mrl) { mutableStateOf("") }
+    var brightnessDragging by remember(mrl) { mutableStateOf(false) }
+    var brightnessLastInputAt by remember(mrl) { mutableLongStateOf(0L) }
+    val brightnessUpdates = remember(mrl) { Channel<Float>(Channel.CONFLATED) }
+
+    // Mirror Monitorian: read physical monitor brightness, but never let a polling
+    // result overwrite an in-progress drag or a value just sent to the monitor.
+    LaunchedEffect(mrl, isAudio) {
+        if (isAudio) {
+            brightnessAvailable = false
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            val shouldRead = !brightnessDragging &&
+                System.currentTimeMillis() - brightnessLastInputAt >= BRIGHTNESS_READ_GUARD_MS
+            if (shouldRead) {
+                val reading = withContext(Dispatchers.IO) {
+                    WindowsMonitorBrightness.read()
+                }
+                val stillIdle = !brightnessDragging &&
+                    System.currentTimeMillis() - brightnessLastInputAt >= BRIGHTNESS_READ_GUARD_MS
+                if (stillIdle) {
+                    brightnessAvailable = reading != null
+                    if (reading != null) {
+                        brightness = reading.percent.roundToInt().coerceIn(0, MAX_BRIGHTNESS)
+                        brightnessMonitor = reading.monitorDescription
+                    }
+                }
+            }
+            delay(BRIGHTNESS_POLL_INTERVAL_MS)
+        }
+    }
+
+    // Latest-value-wins DDC/CI writes avoid flooding the monitor while dragging.
+    // The slider itself updates immediately; polling is paused until the write settles.
+    LaunchedEffect(brightnessUpdates) {
+        for (requested in brightnessUpdates) {
+            val applied = withContext(Dispatchers.IO) {
+                WindowsMonitorBrightness.setPercent(requested)
+            }
+            if (applied) brightnessAvailable = true
+        }
+    }
+    DisposableEffect(brightnessUpdates) {
+        onDispose { brightnessUpdates.cancel() }
+    }
+
     DisposableEffect(playing, isAudio) {
         ScreenAwake.keepAwake(playing && !isAudio)
         onDispose { ScreenAwake.keepAwake(false) }
@@ -226,6 +283,23 @@ fun DesktopMediaPlayer(
             }
             fullscreenController?.let { controller ->
                 if (controller.isFullscreen()) controller.toggle()
+            }
+        }
+    }
+
+    // VLC can report playback before its audio output has fully attached. Reapply the
+    // saved level after the playing/track events so Gallery launches never need a manual
+    // slider nudge to become audible.
+    LaunchedEffect(player, mrl, playing, trackTick) {
+        if (playing) {
+            delay(AUDIO_OUTPUT_SETTLE_MS)
+            val requestedVolume = volume.coerceIn(0, MAX_VOLUME)
+            val shouldMute = muted || requestedVolume <= 0
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    player.audio().setVolume(requestedVolume)
+                    player.audio().isMute = shouldMute
+                }
             }
         }
     }
@@ -664,6 +738,8 @@ fun DesktopMediaPlayer(
                 muted = muted,
                 volume = volume,
                 brightness = brightness,
+                brightnessAvailable = brightnessAvailable,
+                brightnessMonitor = brightnessMonitor,
                 rate = rate,
                 repeatOne = repeatOne,
                 trackTick = trackTick,
@@ -688,8 +764,15 @@ fun DesktopMediaPlayer(
                 onToggleMute = toggleMute,
                 onVolumeChange = { setPlayerVolume(it) },
                 onBrightnessChange = {
-                    brightness = it.coerceIn(0, MAX_BRIGHTNESS)
+                    val requested = it.coerceIn(0, MAX_BRIGHTNESS)
+                    brightness = requested
+                    brightnessLastInputAt = System.currentTimeMillis()
+                    brightnessUpdates.trySend(requested.toFloat())
                     interactionTick++
+                },
+                onBrightnessDragging = { dragging ->
+                    brightnessDragging = dragging
+                    if (!dragging) brightnessLastInputAt = System.currentTimeMillis()
                 },
                 onControlsKeepVisible = { controlsPinned = it },
                 onRate = ::setPlaybackRate,
@@ -720,6 +803,8 @@ private fun PlayerControlsBar(
     muted: Boolean,
     volume: Int,
     brightness: Int,
+    brightnessAvailable: Boolean,
+    brightnessMonitor: String,
     rate: Float,
     repeatOne: Boolean,
     trackTick: Int,
@@ -734,6 +819,7 @@ private fun PlayerControlsBar(
     onToggleMute: () -> Unit,
     onVolumeChange: (Int) -> Unit,
     onBrightnessChange: (Int) -> Unit,
+    onBrightnessDragging: (Boolean) -> Unit,
     onControlsKeepVisible: (Boolean) -> Unit,
     onRate: (Float) -> Unit,
     onToggleRepeat: () -> Unit,
@@ -851,10 +937,14 @@ private fun PlayerControlsBar(
                 onActiveChange = { volumeSliderActive = it }
             )
 
-            if (!isAudio) {
+            if (!isAudio && brightnessAvailable) {
                 PlayerAutoHideSlider(
                     icon = Icons.Filled.Brightness6,
-                    contentDescription = "Video brightness",
+                    contentDescription = if (brightnessMonitor.isBlank()) {
+                        "Display brightness"
+                    } else {
+                        "Display brightness: $brightnessMonitor"
+                    },
                     value = brightness.toFloat(),
                     valueRange = 0f..MAX_BRIGHTNESS.toFloat(),
                     autoHide = controlPreferences.autoHideBrightnessSlider,
@@ -864,6 +954,7 @@ private fun PlayerControlsBar(
                         onInteraction()
                         onBrightnessChange(value.roundToInt())
                     },
+                    onDraggingChange = onBrightnessDragging,
                     onActiveChange = { brightnessSliderActive = it },
                     expandOnClick = true
                 )
@@ -1210,7 +1301,9 @@ private const val KEY_SEEK_STEP_MS = 10_000L
 private const val VOLUME_STEP = 5
 private const val MAX_VOLUME = 200
 private const val MAX_BRIGHTNESS = 100
-private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_000L
+private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_500L
+private const val BRIGHTNESS_READ_GUARD_MS = 1_800L
+private const val AUDIO_OUTPUT_SETTLE_MS = 150L
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 
