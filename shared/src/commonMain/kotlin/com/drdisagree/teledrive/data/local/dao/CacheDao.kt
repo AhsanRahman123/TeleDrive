@@ -134,10 +134,10 @@ interface CacheDao {
            ),
            folder_usage AS (
                SELECT roots.id AS id,
-                      COALESCE(cache_folder_usage.totalBytes, 0) +
-                          COALESCE(thumbnail_folder_usage.totalBytes, 0) AS totalBytes,
-                      COALESCE(cache_folder_usage.entryCount, 0) +
-                          COALESCE(thumbnail_folder_usage.entryCount, 0) AS entryCount
+                      COALESCE(cache_usage.totalBytes, 0) +
+                          COALESCE(thumbnail_usage.totalBytes, 0) AS totalBytes,
+                      COALESCE(cache_usage.entryCount, 0) +
+                          COALESCE(thumbnail_usage.entryCount, 0) AS entryCount
                  FROM (SELECT DISTINCT rootId AS id FROM folder_tree) roots
                  LEFT JOIN cache_usage ON cache_usage.id = roots.id
                  LEFT JOIN thumbnail_usage ON thumbnail_usage.id = roots.id
@@ -145,15 +145,15 @@ interface CacheDao {
            SELECT folder.id AS id,
                   folder.name AS name,
                   folder.parentId AS parentId,
-                  COALESCE(folder_folder_usage.totalBytes, 0) AS totalBytes,
-                  COALESCE(folder_folder_usage.entryCount, 0) AS entryCount
+                  COALESCE(folder_usage.totalBytes, 0) AS totalBytes,
+                  COALESCE(folder_usage.entryCount, 0) AS entryCount
              FROM folders folder
              LEFT JOIN folder_usage ON folder_usage.id = folder.id
             WHERE folder.parentId IS :parentId
               AND folder.trashedAt IS NULL
               AND COALESCE(folder_usage.totalBytes, 0) > 0
             ORDER BY
-                CASE WHEN :sortOrder = 'LARGEST' THEN folder_folder_usage.totalBytes END DESC,
+                CASE WHEN :sortOrder = 'LARGEST' THEN folder_usage.totalBytes END DESC,
                 CASE WHEN :sortOrder = 'SMALLEST' THEN folder_usage.totalBytes END ASC,
                 folder.name COLLATE NOCASE ASC"""
     )
