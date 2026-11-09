@@ -301,6 +301,7 @@ fun CacheManagerScreen(
                                     }
                                 }
                                 selectedPaths = paths
+                                selectedFolderIds = emptySet()
                             } finally {
                                 busy = false
                             }
