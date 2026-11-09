@@ -166,7 +166,12 @@ fun AppNavHost(
             )
         }
         composable<Route.Transfers> {
-            TransfersScreen(onBack = { navController.popBackStackOnce() })
+            TransfersScreen(
+                onBack = { navController.popBackStackOnce() },
+                onOpenFile = { fileId ->
+                    navController.navigateOnce(Route.Preview(fileId = fileId))
+                }
+            )
         }
         composable<Route.Search> {
             SearchScreen(
