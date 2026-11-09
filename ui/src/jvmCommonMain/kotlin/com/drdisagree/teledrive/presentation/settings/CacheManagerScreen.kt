@@ -52,6 +52,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
+
+private fun formatCacheQueueEta(totalSeconds: Long): String {
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return when {
+        hours > 0L -> "${hours}h ${minutes}m"
+        minutes > 0L -> "${minutes}m ${seconds}s"
+        else -> "${seconds}s"
+    }
+}
+
 private const val CACHE_MANAGER_PAGE_SIZE = 60
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +78,8 @@ fun CacheManagerScreen(
     val scrollState = rememberScrollState()
 
     var summary by remember { mutableStateOf(CacheManagerSummary()) }
+    var thumbnailQueueCount by remember { mutableStateOf(0) }
+    var thumbnailQueueEstimate by remember { mutableStateOf("Estimating completion rate…") }
     var folderPath by remember { mutableStateOf(emptyList<CacheFolderUsage>()) }
     var folders by remember { mutableStateOf(emptyList<CacheFolderUsage>()) }
     var entries by remember { mutableStateOf(emptyList<CacheEntryUsage>()) }
@@ -103,6 +117,50 @@ fun CacheManagerScreen(
 
     LaunchedEffect(refreshKey) {
         summary = repository.cacheManagerSummary()
+    }
+
+    // Keep the queue estimate live on this page as well as on Thumbnail Manager
+    // and View Queue. The rate is based on completed queue rows, not guessed network KB/s.
+    LaunchedEffect(folderId) {
+        var previousCount = -1
+        var previousSampleAt = 0L
+        var throughputFilesPerMinute = 0.0
+        while (true) {
+            val count = repository.thumbnailQueueCount()
+            val paused = repository.thumbnailQueuePaused()
+            val sampleAt = System.currentTimeMillis()
+            if (paused) {
+                throughputFilesPerMinute = 0.0
+            } else if (previousCount >= 0 && previousSampleAt > 0L) {
+                val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
+                val removed = previousCount - count
+                if (removed > 0) {
+                    val sampleRate = removed * 60_000.0 / elapsed
+                    throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
+                        sampleRate
+                    } else {
+                        throughputFilesPerMinute * 0.65 + sampleRate * 0.35
+                    }
+                } else if (count > previousCount) {
+                    throughputFilesPerMinute = 0.0
+                }
+            }
+            thumbnailQueueCount = count
+            thumbnailQueueEstimate = when {
+                paused -> "ETA unavailable while paused"
+                count == 0 -> "No thumbnail jobs pending"
+                throughputFilesPerMinute > 0.0 -> {
+                    val etaSeconds = (count * 60.0 / throughputFilesPerMinute)
+                        .toLong().coerceAtLeast(1L)
+                    "Recent queue reduction: ${throughputFilesPerMinute.toInt()} files/min · " +
+                        "Estimated remaining: ${formatCacheQueueEta(etaSeconds)}"
+                }
+                else -> "Estimating completion rate…"
+            }
+            previousCount = count
+            previousSampleAt = sampleAt
+            delay(1_000L)
+        }
     }
 
     LaunchedEffect(folderId, typeFilter, sortOrder, searchQuery, pageOffset, refreshKey) {
@@ -187,6 +245,21 @@ fun CacheManagerScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                }
+            }
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Thumbnail preparation queue", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        "$thumbnailQueueCount queued + running",
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        thumbnailQueueEstimate,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
