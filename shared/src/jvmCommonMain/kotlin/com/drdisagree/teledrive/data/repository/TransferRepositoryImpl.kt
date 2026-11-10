@@ -433,6 +433,8 @@ class TransferRepositoryImpl(
         val requestedIds = requested.map { it.id }.toSet()
         val ordered = requested + current.filterNot { it.id in requestedIds }
         persistDownloadOrder(ordered)
+        val first = ordered.firstOrNull()
+        if (first != null) freeWorkerSlotForPromotedDownload(first)
         applyNativeDownloadPriorities()
         if (ordered.any { it.state == TransferState.QUEUED }) kickWorker()
     }
@@ -442,8 +444,32 @@ class TransferRepositoryImpl(
         val target = current.firstOrNull { it.id == id } ?: return@withLock
         val ordered = listOf(target) + current.filterNot { it.id == id }
         persistDownloadOrder(ordered)
+        freeWorkerSlotForPromotedDownload(target)
         applyNativeDownloadPriorities()
         if (target.state == TransferState.QUEUED) kickWorker()
+    }
+
+    /**
+     * If a queued file is promoted while every TeleDrive worker slot is occupied, pause the
+     * lowest-priority active incoming job to release one slot. It remains QUEUED in Room and
+     * PAUSED in TDLib, so its partial bytes are retained and it resumes after the promoted file.
+     * Uploads/backups are never preempted by download reordering.
+     */
+    private suspend fun freeWorkerSlotForPromotedDownload(promoted: TransferEntity) {
+        if (!promoted.type.isIncoming || promoted.state != TransferState.QUEUED) return
+        val maxWorkers = settingsRepository.preferences.first().transferConcurrency.coerceIn(1, 6)
+        val runningCount = transferDao.runningTransferCount()
+        val slotsToFree = (runningCount - maxWorkers + 1).coerceAtLeast(0)
+        if (slotsToFree == 0) return
+
+        val victims = transferDao.runningIncomingTransfers()
+            .asReversed()
+            .filterNot { it.id == promoted.id }
+            .take(slotsToFree)
+        for (victim in victims) {
+            transferDao.setState(victim.id, TransferState.QUEUED, System.currentTimeMillis())
+            pauseNativeDownloadIfPresent(victim)
+        }
     }
 
     private suspend fun persistDownloadOrder(ordered: List<TransferEntity>) {
