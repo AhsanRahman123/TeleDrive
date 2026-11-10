@@ -388,7 +388,7 @@ class TransferRepositoryImpl(
         // Capture active native downloads before changing the app rows to PAUSED.
         // The desktop scheduler cancels its drain job, so every native TDLib download must be
         // explicitly paused before that cancellation can detach the app's observer.
-        val runningDownloads = transferDao.runningIncomingTransfers()
+        val runningDownloads = transferDao.activeIncomingTransfersForPause()
         transferDao.pauseAll(System.currentTimeMillis())
         runningDownloads.forEach { pauseNativeDownloadIfPresent(it) }
         // Pause TDLib's persistent queue before joining the drain.
