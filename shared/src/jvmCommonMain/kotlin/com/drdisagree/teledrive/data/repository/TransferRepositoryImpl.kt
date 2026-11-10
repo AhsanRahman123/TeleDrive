@@ -415,11 +415,74 @@ class TransferRepositoryImpl(
         backupSessionTracker.refreshActive()
     }
 
-    override suspend fun setPriority(id: String, priority: Int) {
-        val transfer = transferDao.byId(id) ?: return
-        if (transfer.state.isTerminal) return
-        transferDao.setPriority(id, priority.coerceIn(-10, 10), System.currentTimeMillis())
+    override suspend fun setPriority(id: String, priority: Int) = workerControlLock.withLock {
+        val transfer = transferDao.byId(id) ?: return@withLock
+        if (transfer.state.isTerminal) return@withLock
+        transferDao.setPriority(id, priority, System.currentTimeMillis())
+        // Room ordering alone is not enough for a download already registered in TDLib.
+        // Re-apply native priorities so active downloads react immediately.
+        applyNativeDownloadPriorities()
         if (transfer.state == TransferState.QUEUED) kickWorker()
+    }
+
+    override suspend fun reorderDownloads(orderedIds: List<String>) = workerControlLock.withLock {
+        val current = transferDao.incomingQueueOrder()
+        if (current.isEmpty()) return@withLock
+        val byId = current.associateBy { it.id }
+        val requested = orderedIds.distinct().mapNotNull(byId::get)
+        val requestedIds = requested.map { it.id }.toSet()
+        val ordered = requested + current.filterNot { it.id in requestedIds }
+        persistDownloadOrder(ordered)
+        applyNativeDownloadPriorities()
+        if (ordered.any { it.state == TransferState.QUEUED }) kickWorker()
+    }
+
+    override suspend fun moveDownloadToTop(id: String) = workerControlLock.withLock {
+        val current = transferDao.incomingQueueOrder()
+        val target = current.firstOrNull { it.id == id } ?: return@withLock
+        val ordered = listOf(target) + current.filterNot { it.id == id }
+        persistDownloadOrder(ordered)
+        applyNativeDownloadPriorities()
+        if (target.state == TransferState.QUEUED) kickWorker()
+    }
+
+    private suspend fun persistDownloadOrder(ordered: List<TransferEntity>) {
+        val now = System.currentTimeMillis()
+        val firstPriority = ordered.size + 100
+        ordered.forEachIndexed { index, transfer ->
+            transferDao.setPriority(transfer.id, firstPriority - index, now)
+        }
+    }
+
+    /**
+     * Keep TDLib's persistent queue aligned with Room's priority/FIFO order.
+     * AddFileToDownloads replaces an existing queue entry without deleting the partial cache.
+     */
+    private suspend fun applyNativeDownloadPriorities() {
+        val active = transferDao.runningIncomingTransfers()
+        active.forEachIndexed { index, transfer ->
+            val fileId = transfer.fileId ?: return@forEachIndexed
+            val file = fileDao.byId(fileId) ?: return@forEachIndexed
+            val remoteFileId = file.remoteFileId ?: return@forEachIndexed
+            val chatId = file.chatId ?: transfer.chatId ?: return@forEachIndexed
+            val messageId = file.messageId ?: transfer.messageId ?: return@forEachIndexed
+            val nativePriority = (32 - index).coerceAtLeast(1)
+            try {
+                telegramClient.updateManagedDownloadPriority(
+                    remoteFileId = remoteFileId,
+                    chatId = chatId,
+                    messageId = messageId,
+                    priority = nativePriority
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                SafeLog.w(
+                    TAG,
+                    "Could not refresh native download priority for ${transfer.id}: ${error.message}"
+                )
+            }
+        }
     }
 
     override suspend fun retry(id: String) = workerControlLock.withLock {
