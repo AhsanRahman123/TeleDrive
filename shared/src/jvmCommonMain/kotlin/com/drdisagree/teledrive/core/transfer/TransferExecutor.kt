@@ -133,6 +133,31 @@ class TransferExecutor(
         }
     }
 
+    /**
+     * A dead connection stops emitting without an error, which would leave the row RUNNING forever.
+     * This overload intentionally matches upstream for downloads: it only observes TDLib events
+     * and uses the same native event cadence and stall timeout as the original implementation.
+     */
+    private fun <T> Flow<T>.failWhenIdle(message: String): Flow<T> = channelFlow {
+        val relay = Channel<T>(Channel.BUFFERED)
+        launch {
+            try {
+                collect { relay.send(it) }
+                relay.close()
+            } catch (e: Throwable) {
+                relay.close(e)
+            }
+        }
+        while (true) {
+            val received =
+                withTimeoutOrNull(STALL_TIMEOUT_MS.milliseconds) { relay.receiveCatching() }
+                    ?: throw TelegramException(STALL_CODE, message)
+            received.exceptionOrNull()?.let { throw it }
+            if (received.isClosed) break
+            send(received.getOrThrow())
+        }
+    }
+
     suspend fun execute(transfer: TransferEntity): TransferOutcome = try {
         when (transfer.type) {
             TransferType.UPLOAD, TransferType.BACKUP -> executeUpload(transfer)
@@ -543,7 +568,7 @@ class TransferExecutor(
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.downloadEnded)
             telegramClient.downloadDocument(remoteFileId)
-                .failWhenIdle(transfer.id, messages.downloadStalled)
+                .failWhenIdle(messages.downloadStalled)
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
@@ -603,7 +628,7 @@ class TransferExecutor(
 
         return try {
             partDownloader.download(entity.id, entity.isEncrypted, target)
-                .failWhenIdle(transfer.id, messages.downloadStalled)
+                .failWhenIdle(messages.downloadStalled)
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
