@@ -112,6 +112,14 @@ interface TelegramClient {
         queuePriority: Int = 16
     ): Flow<TelegramDownloadEvent>
 
+    /** Re-applies the native queue priority without deleting the downloaded cache bytes. */
+    suspend fun updateManagedDownloadPriority(
+        remoteFileId: String,
+        chatId: Long,
+        messageId: Long,
+        priority: Int
+    )
+
     /** Pauses a file already submitted to TDLib's persistent download queue. */
     suspend fun pauseManagedDownload(remoteFileId: String)
 
