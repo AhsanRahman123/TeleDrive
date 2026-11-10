@@ -420,8 +420,8 @@ class TransferRepositoryImpl(
         if (transfer.state.isTerminal) return@withLock
         transferDao.setPriority(id, priority, System.currentTimeMillis())
         // Room ordering alone is not enough for a download already registered in TDLib.
-        // Re-apply native priorities so active downloads react immediately.
-        applyNativeDownloadPriorities()
+        // Re-apply native priorities only when an incoming transfer was reordered.
+        if (transfer.type.isIncoming) applyNativeDownloadPriorities()
         if (transfer.state == TransferState.QUEUED) kickWorker()
     }
 
