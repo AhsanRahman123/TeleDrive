@@ -258,7 +258,7 @@ class DesktopDatabaseTest {
             assertEquals(listOf(job), database.thumbnailJobDao().next(10))
             assertEquals(1, database.thumbnailJobDao().count())
 
-            database.thumbnailJobDao().recordAttempt("photo")
+            database.thumbnailJobDao().recordAttempt("photo", 456L)
             assertEquals(2, database.thumbnailJobDao().next(1).single().attempts)
             database.thumbnailJobDao().delete("photo")
             assertEquals(0, database.thumbnailJobDao().count())
@@ -316,7 +316,17 @@ class DesktopDatabaseTest {
                 )
             )
 
-            val rows = database.thumbnailDao().filesInFolder("album", 60, 0)
+            val rows = database.thumbnailDao().filesInFolder(
+                    "album",
+                    "MANUAL_ONLY",
+                    "ALL",
+                    "ALL",
+                    "ALL",
+                    "",
+                    "NAME_ASC",
+                    60,
+                    0
+                )
             assertEquals(1, rows.size)
             assertEquals("photo", rows.single().fileId)
             assertEquals(12_345L, rows.single().thumbnailSizeBytes)
@@ -360,7 +370,17 @@ class DesktopDatabaseTest {
             )
 
             val trashed = database.thumbnailDao()
-                .filesInFolder("album", 60, 0)
+                .filesInFolder(
+                    "album",
+                    "MANUAL_ONLY",
+                    "ALL",
+                    "ALL",
+                    "ALL",
+                    "",
+                    "NAME_ASC",
+                    60,
+                    0
+                )
                 .single { it.fileId == "trashed-photo" }
             assertEquals(true, trashed.isTrashed)
             assertEquals("album", trashed.folderId)

@@ -138,7 +138,7 @@ import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun DesktopMediaPlayer(
+internal fun DesktopMediaPlayer(
     mrl: String,
     isAudio: Boolean,
     modifier: Modifier = Modifier,
@@ -330,7 +330,7 @@ fun DesktopMediaPlayer(
     LaunchedEffect(player, sleepStopRequest) {
         if (sleepStopRequest > lastSleepStopRequest) {
             lastSleepStopRequest = sleepStopRequest
-            player.submit { runCatching { controls().pause() } }
+            player.submit { runCatching { player.controls().pause() } }
             playing = false
         }
     }
@@ -340,7 +340,7 @@ fun DesktopMediaPlayer(
         // must override VLC's native repeat flag so the timer can stop playback.
         if (repeatAll || sleepAtTrackEnd) {
             repeatOne = false
-            player.submit { runCatching { controls().repeat = false } }
+            player.submit { runCatching { player.controls().repeat = false } }
         }
     }
 
@@ -685,7 +685,7 @@ fun DesktopMediaPlayer(
                     key == Key.L && !ctrl && !alt && !shift -> {
                         repeatOne = !repeatOne
                         if (repeatOne && repeatAll) onToggleRepeatAll()
-                        player.submit { runCatching { controls().repeat = repeatOne } }
+                        player.submit { runCatching { player.controls().repeat = repeatOne } }
                         interactionTick++
                         true
                     }
@@ -922,7 +922,7 @@ fun DesktopMediaPlayer(
                 onToggleRepeat = {
                     repeatOne = !repeatOne
                     if (repeatOne && repeatAll) onToggleRepeatAll()
-                    player.submit { runCatching { controls().repeat = repeatOne } }
+                    player.submit { runCatching { player.controls().repeat = repeatOne } }
                 },
                 onToggleRepeatAll = onToggleRepeatAll,
                 onToggleShuffle = onToggleShuffle,
