@@ -124,6 +124,22 @@ class BackupHoldDrainTest {
     }
 
     @Test
+    fun `incoming persistent queue order includes paused and queued files`() = runBlocking {
+        queue("old-first", TransferType.DOWNLOAD)
+        queue("new-second", TransferType.DOWNLOAD)
+        queue("top-paused", TransferType.RESTORE)
+        transfers.setState("top-paused", TransferState.PAUSED, 2)
+        transfers.setPriority("old-first", 10, 3)
+        transfers.setPriority("new-second", 20, 4)
+        transfers.setPriority("top-paused", 30, 5)
+
+        assertEquals(
+            listOf("top-paused", "new-second", "old-first"),
+            transfers.incomingQueueOrder().map { it.id }
+        )
+    }
+
+    @Test
     fun `running incoming transfers keep priority then FIFO order`() = runBlocking {
         fun row(
             id: String,
