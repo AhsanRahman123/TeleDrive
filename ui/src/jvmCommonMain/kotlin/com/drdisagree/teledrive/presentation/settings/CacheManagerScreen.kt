@@ -351,9 +351,6 @@ fun CacheManagerScreen(
             }
 
             Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Thumbnail preparation queue", style = MaterialTheme.typography.labelMedium)
-            Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Free local copies", style = MaterialTheme.typography.labelMedium)
                     Text(
@@ -372,6 +369,9 @@ fun CacheManagerScreen(
                 }
             }
 
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Thumbnail preparation queue", style = MaterialTheme.typography.labelMedium)
                     Text(
                         "$thumbnailQueueCount queued + running",
                         style = MaterialTheme.typography.titleLarge
