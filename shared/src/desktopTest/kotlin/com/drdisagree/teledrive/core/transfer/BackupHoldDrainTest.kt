@@ -105,6 +105,47 @@ class BackupHoldDrainTest {
         assertEquals(TransferState.QUEUED, transfers.byId("backup")!!.state)
     }
 
+    @Test
+    fun `running incoming transfers keep priority then FIFO order`() = runBlocking {
+        fun row(
+            id: String,
+            type: TransferType,
+            state: TransferState,
+            priority: Int,
+            createdAt: Long
+        ) = TransferEntity(
+            id = id,
+            type = type,
+            fileId = id,
+            displayName = id,
+            localPath = null,
+            chatId = 1,
+            messageId = createdAt,
+            remoteFileId = id,
+            sizeBytes = 1,
+            state = state,
+            priority = priority,
+            createdAt = createdAt,
+            updatedAt = createdAt
+        )
+
+        transfers.upsertAll(
+            listOf(
+                row("older", TransferType.DOWNLOAD, TransferState.RUNNING, 0, 100),
+                row("newer", TransferType.DOWNLOAD, TransferState.RUNNING, 0, 200),
+                row("high-priority", TransferType.RESTORE, TransferState.RUNNING, 5, 300),
+                row("queued", TransferType.DOWNLOAD, TransferState.QUEUED, 10, 50),
+                row("paused", TransferType.DOWNLOAD, TransferState.PAUSED, 20, 40),
+                row("upload", TransferType.UPLOAD, TransferState.RUNNING, 10, 30)
+            )
+        )
+
+        assertEquals(
+            listOf("high-priority", "older", "newer"),
+            transfers.runningIncomingTransfers().map { it.id }
+        )
+    }
+
     private suspend fun queue(id: String, type: TransferType) {
         transfers.upsert(
             TransferEntity(
