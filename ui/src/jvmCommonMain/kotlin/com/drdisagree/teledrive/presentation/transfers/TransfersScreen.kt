@@ -167,15 +167,15 @@ fun TransfersScreen(
             title = { Text("Transfer concurrency") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Maximum transfer workers: $concurrencyDraft of 3")
+                    Text("Maximum simultaneous Telegram transfer jobs: $concurrencyDraft of 6")
                     Slider(
                         value = concurrencyDraft.toFloat(),
-                        onValueChange = { concurrencyDraft = it.toInt().coerceIn(1, 3) },
-                        valueRange = 1f..3f,
-                        steps = 1
+                        onValueChange = { concurrencyDraft = it.toInt().coerceIn(1, 6) },
+                        valueRange = 1f..6f,
+                        steps = 4
                     )
                     Text(
-                        "This sets TeleDrive's worker pool. Telegram's per-data-centre guidance allows up to 2 large files (over 20 MB) or 5 small files to download at once, so a third large file may wait for another to finish.",
+                        "This controls how many queued transfers may run at once. Raising it can use more bandwidth and disk activity.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
