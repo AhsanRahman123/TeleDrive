@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.transfers
 
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -23,6 +25,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -65,7 +68,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -125,6 +130,7 @@ import com.drdisagree.teledrive.resources.transfers_uploads_downloads_appear_her
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -149,6 +155,8 @@ fun TransfersScreen(
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
     var detailsTransfer by remember { mutableStateOf<TransferTask?>(null) }
     var speedClock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var draggedTransferId by remember { mutableStateOf<String?>(null) }
+    var draggedOffsetY by remember { mutableStateOf(0f) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -407,6 +415,74 @@ fun TransfersScreen(
         )
         val itemModifier: (TransferTask) -> Modifier = { transfer ->
             Modifier.keyboardCollectionItem(keyboard, rows.indexOf(transfer))
+        }
+        val activeIncomingIds = visibleActive
+            .filter { it.type.isIncoming }
+            .map { it.id }
+        val dragModifier: (TransferTask) -> Modifier = { transfer ->
+            val canDrag = transfer.type.isIncoming &&
+                (transfer.state == TransferState.RUNNING || transfer.state == TransferState.QUEUED)
+            if (canDrag) {
+                Modifier
+                    .graphicsLayer {
+                        translationY = if (draggedTransferId == transfer.id) draggedOffsetY else 0f
+                    }
+                    .pointerInput(transfer.id, activeIncomingIds) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                draggedTransferId = transfer.id
+                                draggedOffsetY = 0f
+                            },
+                            onDragEnd = {
+                                val items = listState.layoutInfo.visibleItemsInfo
+                                val draggedInfo = items.firstOrNull {
+                                    it.key == "active-${transfer.id}"
+                                }
+                                val draggedCenter = draggedInfo?.let {
+                                    it.offset + it.size / 2 + draggedOffsetY
+                                }
+                                val targetId = if (draggedCenter != null) {
+                                    items.asSequence()
+                                        .filter { info ->
+                                            val key = info.key.toString()
+                                            key.startsWith("active-") &&
+                                                key.removePrefix("active-") in activeIncomingIds
+                                        }
+                                        .minByOrNull { info ->
+                                            abs(draggedCenter - (info.offset + info.size / 2))
+                                        }
+                                        ?.key
+                                        ?.toString()
+                                        ?.removePrefix("active-")
+                                } else {
+                                    null
+                                }
+                                val reordered = activeIncomingIds.toMutableList()
+                                val fromIndex = reordered.indexOf(transfer.id)
+                                val toIndex = targetId?.let(reordered::indexOf) ?: -1
+                                if (fromIndex >= 0 && toIndex >= 0 && fromIndex != toIndex) {
+                                    val moved = reordered.removeAt(fromIndex)
+                                    reordered.add(toIndex, moved)
+                                    viewModel.reorderDownloads(reordered)
+                                }
+                                draggedTransferId = null
+                                draggedOffsetY = 0f
+                            },
+                            onDragCancel = {
+                                draggedTransferId = null
+                                draggedOffsetY = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                if (draggedTransferId == transfer.id) {
+                                    draggedOffsetY += dragAmount.y
+                                }
+                            }
+                        )
+                    }
+            } else {
+                Modifier
+            }
         }
         val actionsFocusable: (TransferTask) -> Boolean = { transfer ->
             keyboard.current == rows.indexOf(transfer)
