@@ -104,6 +104,9 @@ interface TransferDao {
     )
     suspend fun runningIncomingTransfers(): List<TransferEntity>
 
+    @Query("SELECT COUNT(*) FROM transfers WHERE state = 'RUNNING'")
+    suspend fun runningTransferCount(): Int
+
     /** All unfinished incoming jobs in the persistent app queue's priority/FIFO order. */
     @Query(
         """SELECT * FROM transfers
