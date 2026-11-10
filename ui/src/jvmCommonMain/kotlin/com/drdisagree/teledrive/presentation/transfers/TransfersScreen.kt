@@ -143,7 +143,7 @@ fun TransfersScreen(
     var showTransferSettings by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var typeFilter by remember { mutableStateOf("ALL") }
-    var sortOrder by remember { mutableStateOf("STATUS") }
+    var sortOrder by remember { mutableStateOf("PRIORITY") }
     var showFilterMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
@@ -357,11 +357,15 @@ fun TransfersScreen(
                 transfer
             }
         }
+        // Count recent TDLib progress updates as active even when the one-second speed
+        // sampler has not produced a new rate yet.
         val runningCount = visibleActive.count {
-            it.state == TransferState.RUNNING && it.speedBytesPerSecond > 0L
+            it.state == TransferState.RUNNING &&
+                speedClock - it.updatedAt <= SPEED_STALE_AFTER_MS
         }
         val waitingCount = visibleActive.count {
-            it.state == TransferState.RUNNING && it.speedBytesPerSecond <= 0L
+            it.state == TransferState.RUNNING &&
+                speedClock - it.updatedAt > SPEED_STALE_AFTER_MS
         }
         val queuedCount = visibleActive.count { it.state == TransferState.QUEUED }
         val visiblePaused = filterAndSort(state.paused)
@@ -748,7 +752,7 @@ private fun failedSectionTitle(failed: List<TransferTask>): String {
     }
 }
 
-private const val SPEED_STALE_AFTER_MS = 1_500L
+private const val SPEED_STALE_AFTER_MS = 5_000L
 
 @Composable
 private fun transferRate(transfer: TransferTask): String {
@@ -831,9 +835,8 @@ private fun TransferRow(
                                     transfer.state == TransferState.QUEUED -> "Queued"
                                     transfer.state == TransferState.RUNNING &&
                                         transfer.stage == null &&
-                                        (transfer.speedBytesPerSecond <= 0L ||
-                                            System.currentTimeMillis() - transfer.updatedAt > SPEED_STALE_AFTER_MS) ->
-                                        "Waiting for Telegram"
+                                        System.currentTimeMillis() - transfer.updatedAt > SPEED_STALE_AFTER_MS ->
+                                        "No recent progress"
                                     transfer.state == TransferState.RUNNING -> "Running"
                                     transfer.state == TransferState.PAUSED -> "Paused"
                                     transfer.state == TransferState.FAILED -> "Failed"
