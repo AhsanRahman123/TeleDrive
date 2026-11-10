@@ -60,6 +60,7 @@ import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
+import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -91,10 +92,13 @@ fun CacheManagerScreen(
 ) {
     val repository = koinInject<CacheRepository>()
     val settingsViewModel = koinViewModel<SettingsViewModel>()
+    val reclaimableBytes by settingsViewModel.reclaimableBytes.collectAsStateWithLifecycle()
+    val deleteConsentLauncher = LocalDeleteConsentLauncher.current
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTool by remember { mutableStateOf("CACHE") }
+    var confirmFreeLocalCopies by remember { mutableStateOf(false) }
     var confirmClearAllCache by remember { mutableStateOf(false) }
     var confirmClearThumbnailCache by remember { mutableStateOf(false) }
 
@@ -123,6 +127,13 @@ fun CacheManagerScreen(
     val cacheEntryListState = rememberLazyListState()
     val folderListState = rememberLazyListState()
 
+    LaunchedEffect(Unit) {
+        settingsViewModel.deleteConsentRequests.collect { request ->
+            deleteConsentLauncher.launch(request) { granted ->
+                if (granted) settingsViewModel.retryLocalCopyRemoval()
+            }
+        }
+    }
     CollectSnackbarMessages(
         messages = settingsViewModel.messages,
         hostState = snackbarHostState
@@ -342,6 +353,25 @@ fun CacheManagerScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Thumbnail preparation queue", style = MaterialTheme.typography.labelMedium)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Free local copies", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        Formatters.bytes(reclaimableBytes),
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        "Removes copies already backed up to Telegram while preserving the remote originals.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        enabled = reclaimableBytes > 0L,
+                        onClick = { confirmFreeLocalCopies = true }
+                    ) { Text("Remove backed-up local copies") }
+                }
+            }
+
                     Text(
                         "$thumbnailQueueCount queued + running",
                         style = MaterialTheme.typography.titleLarge
@@ -612,6 +642,26 @@ fun CacheManagerScreen(
     }
 
     if (confirmClearAllCache) {
+    if (confirmFreeLocalCopies) {
+        AlertDialog(
+            onDismissRequest = { confirmFreeLocalCopies = false },
+            title = { Text("Remove local copies?") },
+            text = {
+                Text("TeleDrive will remove ${Formatters.bytes(reclaimableBytes)} of local copies that are already backed up remotely. Remote files remain in Telegram.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmFreeLocalCopies = false
+                    settingsViewModel.freeUpSpace()
+                    refreshKey++
+                }) { Text("Free up space") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFreeLocalCopies = false }) { Text("Cancel") }
+            }
+        )
+    }
+
         AlertDialog(
             onDismissRequest = { confirmClearAllCache = false },
             title = { Text("Clear all app cache?") },
