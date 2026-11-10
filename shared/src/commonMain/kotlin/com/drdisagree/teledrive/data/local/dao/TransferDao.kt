@@ -104,6 +104,13 @@ interface TransferDao {
     )
     suspend fun runningIncomingTransfers(): List<TransferEntity>
 
+    /** Incoming jobs that may still own a native TDLib download, including recovered rows. */
+    @Query(
+        """SELECT * FROM transfers
+           WHERE type IN ('DOWNLOAD', 'RESTORE') AND state IN ('QUEUED', 'RUNNING')"""
+    )
+    suspend fun activeIncomingTransfersForPause(): List<TransferEntity>
+
     @Query("SELECT EXISTS(SELECT 1 FROM transfers WHERE state = 'QUEUED' AND type = :type)")
     suspend fun hasQueued(type: TransferType): Boolean
 
