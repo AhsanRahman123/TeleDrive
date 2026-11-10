@@ -96,6 +96,14 @@ interface TransferDao {
     )
     suspend fun nextQueuedOf(types: List<TransferType>, limit: Int): List<TransferEntity>
 
+    /** Active incoming transfers in the same order used by TeleDrive's worker queue. */
+    @Query(
+        """SELECT * FROM transfers
+           WHERE type IN ('DOWNLOAD', 'RESTORE') AND state = 'RUNNING'
+           ORDER BY priority DESC, createdAt ASC"""
+    )
+    suspend fun runningIncomingTransfers(): List<TransferEntity>
+
     @Query("SELECT EXISTS(SELECT 1 FROM transfers WHERE state = 'QUEUED' AND type = :type)")
     suspend fun hasQueued(type: TransferType): Boolean
 
