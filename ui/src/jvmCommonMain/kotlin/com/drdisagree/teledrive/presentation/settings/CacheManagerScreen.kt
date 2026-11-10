@@ -641,7 +641,6 @@ fun CacheManagerScreen(
         }
     }
 
-    if (confirmClearAllCache) {
     if (confirmFreeLocalCopies) {
         AlertDialog(
             onDismissRequest = { confirmFreeLocalCopies = false },
@@ -662,6 +661,7 @@ fun CacheManagerScreen(
         )
     }
 
+    if (confirmClearAllCache) {
         AlertDialog(
             onDismissRequest = { confirmClearAllCache = false },
             title = { Text("Clear all app cache?") },
