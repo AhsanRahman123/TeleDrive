@@ -560,6 +560,9 @@ class TransferExecutor(
 
         val remoteFileId = entity.remoteFileId
             ?: return TransferOutcome.Failed(messages.noRemoteCopy)
+        val sourceChatId = entity.chatId ?: transfer.chatId
+        val sourceMessageId = entity.messageId ?: transfer.messageId
+        val managedDownload = sourceChatId != null && sourceMessageId != null
 
         val startedAt = System.currentTimeMillis()
         val ticker = ProgressTicker().apply { start(0, startedAt) }
@@ -567,8 +570,14 @@ class TransferExecutor(
         return try {
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.downloadEnded)
-            telegramClient.downloadDocument(remoteFileId)
-                .failWhenIdle(messages.downloadStalled)
+            telegramClient.downloadDocument(
+                remoteFileId = remoteFileId,
+                chatId = sourceChatId,
+                messageId = sourceMessageId
+            )
+                // Poll transfer state as well as TDLib events so Pause/Cancel can update the
+                // persistent TDLib queue even while Telegram is temporarily not emitting bytes.
+                .failWhenIdle(transfer.id, messages.downloadStalled)
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
@@ -585,13 +594,34 @@ class TransferExecutor(
                         is TelegramDownloadEvent.Completed -> {
                             outcome = finalizeDownload(transfer, entity.id, event.localPath)
                             if (outcome == TransferOutcome.Completed) {
-                                runCatching { telegramClient.deleteLocalCopy(remoteFileId) }
+                                runCatching {
+                                    if (managedDownload) {
+                                        telegramClient.removeManagedDownload(remoteFileId)
+                                    } else {
+                                        telegramClient.deleteLocalCopy(remoteFileId)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             outcome
         } catch (e: TransferControlException) {
+            if (managedDownload) {
+                withContext(NonCancellable) {
+                    runCatching {
+                        if (e.paused) {
+                            // Resume All can race with an old worker winding down. Only pause
+                            // TDLib if the transfer is still PAUSED, not already QUEUED again.
+                            if (transferDao.byId(transfer.id)?.state == TransferState.PAUSED) {
+                                telegramClient.pauseManagedDownload(remoteFileId)
+                            }
+                        } else {
+                            telegramClient.removeManagedDownload(remoteFileId)
+                        }
+                    }
+                }
+            }
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
         } catch (e: TelegramException) {
             TransferOutcome.Failed(e.message, e.retryAfterSeconds)
