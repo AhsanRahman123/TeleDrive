@@ -108,7 +108,8 @@ interface TelegramClient {
     fun downloadDocument(
         remoteFileId: String,
         chatId: Long? = null,
-        messageId: Long? = null
+        messageId: Long? = null,
+        queuePriority: Int = 16
     ): Flow<TelegramDownloadEvent>
 
     /** Pauses a file already submitted to TDLib's persistent download queue. */
