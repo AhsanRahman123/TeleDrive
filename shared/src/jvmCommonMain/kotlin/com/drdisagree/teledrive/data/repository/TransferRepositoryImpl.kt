@@ -24,6 +24,7 @@ import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.domain.usecase.ValidateUploadUseCase
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -349,6 +350,7 @@ class TransferRepositoryImpl(
         val transfer = transferDao.byId(id) ?: return
         if (transfer.state == TransferState.QUEUED || transfer.state == TransferState.RUNNING) {
             transferDao.setState(id, TransferState.PAUSED, System.currentTimeMillis())
+            pauseNativeDownloadIfPresent(transfer)
             backupSessionTracker.refresh(transfer.backupSessionId)
         }
     }
@@ -383,9 +385,13 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun pauseAll() = workerControlLock.withLock {
+        // Capture active native downloads before changing the app rows to PAUSED.
+        // The desktop scheduler cancels its drain job, so every native TDLib download must be
+        // explicitly paused before that cancellation can detach the app's observer.
+        val runningDownloads = transferDao.runningIncomingTransfers()
         transferDao.pauseAll(System.currentTimeMillis())
-        // Mark rows first so each worker's control poll exits cooperatively, then join
-        // the drain before allowing Resume All to enqueue another generation of workers.
+        runningDownloads.forEach { pauseNativeDownloadIfPresent(it) }
+        // Pause TDLib's persistent queue before joining the drain.
         transferScheduler.pause()
         backupSessionTracker.refreshActive()
     }
@@ -447,6 +453,31 @@ class TransferRepositoryImpl(
     override suspend fun wakeWorker() {
         val prefs = settingsRepository.preferences.first()
         transferScheduler.rekick(prefs.allowMeteredTransfers)
+    }
+
+    /**
+     * The app's transfer row and TDLib's persistent download queue are separate state stores.
+     * Pausing only the Room row is insufficient: TDLib can continue downloading after the
+     * worker is cancelled or the app is closed. Explicitly pause the native queue entry too.
+     */
+    private suspend fun pauseNativeDownloadIfPresent(transfer: TransferEntity) {
+        if (!transfer.type.isIncoming) return
+        val remoteFileId = transfer.fileId
+            ?.let { fileDao.byId(it)?.remoteFileId }
+            ?.takeIf { it.isNotBlank() }
+            ?: return
+        try {
+            telegramClient.pauseManagedDownload(remoteFileId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // A queued-but-not-yet-added or already-completed file has no native queue entry.
+            // The Room row is still paused; record the mismatch for diagnostics.
+            SafeLog.w(
+                TAG,
+                "Could not pause native download for transfer ${transfer.id}: ${error.message}"
+            )
+        }
     }
 
     /** A backup state only means something while a transfer backs the file up. */
