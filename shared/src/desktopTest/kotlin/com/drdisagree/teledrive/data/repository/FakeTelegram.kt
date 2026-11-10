@@ -151,7 +151,8 @@ internal class FakeTelegram : TelegramClient by unused() {
     override fun downloadDocument(
         remoteFileId: String,
         chatId: Long?,
-        messageId: Long?
+        messageId: Long?,
+        queuePriority: Int
     ): Flow<TelegramDownloadEvent> {
         if (failDownloads) return flowOf()
         val file = storedFiles.entries.firstOrNull { it.key.remoteFileId == remoteFileId }?.value
