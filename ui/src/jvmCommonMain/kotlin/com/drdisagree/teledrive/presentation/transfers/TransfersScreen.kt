@@ -653,6 +653,10 @@ fun TransfersScreen(
                     onPrimary = { viewModel.pause(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
                     onPriorityChange = { viewModel.setPriority(transfer.id, it) },
+                    onMoveToTop = if (transfer.type.isIncoming) {
+                        { viewModel.moveDownloadToTop(transfer.id) }
+                    } else null,
+                    dragEnabled = transfer.type.isIncoming,
                     selected = transfer.id in selectedTransferIds,
                     onSelect = { checked ->
                         selectedTransferIds = if (checked) selectedTransferIds + transfer.id
@@ -660,7 +664,7 @@ fun TransfersScreen(
                     },
                     onDetails = { detailsTransfer = transfer },
                     actionsFocusable = actionsFocusable(transfer),
-                    modifier = itemModifier(transfer)
+                    modifier = itemModifier(transfer).then(dragModifier(transfer))
                 )
             }
             section("paused", pausedTitle, visiblePaused, pausedTotal) { transfer ->
@@ -671,6 +675,10 @@ fun TransfersScreen(
                     onPrimary = { viewModel.resume(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
                     onPriorityChange = { viewModel.setPriority(transfer.id, it) },
+                    onMoveToTop = if (transfer.type.isIncoming) {
+                        { viewModel.moveDownloadToTop(transfer.id) }
+                    } else null,
+                    dragEnabled = transfer.type.isIncoming,
                     selected = transfer.id in selectedTransferIds,
                     onSelect = { checked ->
                         selectedTransferIds = if (checked) selectedTransferIds + transfer.id
@@ -856,6 +864,8 @@ private fun TransferRow(
     onPrimary: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
     onPriorityChange: ((Int) -> Unit)? = null,
+    onMoveToTop: (() -> Unit)? = null,
+    dragEnabled: Boolean = false,
     onOpenInApp: (() -> Unit)? = null,
     onShowInFolder: (() -> Unit)? = null,
     selected: Boolean = false,
@@ -883,6 +893,15 @@ private fun TransferRow(
                         onCheckedChange = onSelect,
                         modifier = actions
                     )
+                }
+                if (dragEnabled) {
+                    Icon(
+                        Icons.Filled.DragHandle,
+                        contentDescription = "Drag to reorder downloads",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
                 }
                 TransferThumbnail(transfer = transfer)
                 Spacer(Modifier.width(12.dp))
@@ -980,23 +999,33 @@ private fun TransferRow(
                                     }
                                 )
                             }
+                            onMoveToTop?.let { move ->
+                                DropdownMenuItem(
+                                    text = { Text("Move to top") },
+                                    leadingIcon = { Icon(Icons.Filled.ArrowUpward, contentDescription = null) },
+                                    onClick = {
+                                        showRowMenu = false
+                                        move()
+                                    }
+                                )
+                            }
                             if (onPriorityChange != null) {
                                 DropdownMenuItem(
                                     text = { Text("Increase priority") },
                                     leadingIcon = { Icon(Icons.Filled.ArrowUpward, contentDescription = null) },
-                                    enabled = transfer.priority < 10,
+                                    enabled = transfer.priority < Int.MAX_VALUE,
                                     onClick = {
                                         showRowMenu = false
-                                        onPriorityChange((transfer.priority + 1).coerceAtMost(10))
+                                        onPriorityChange(transfer.priority + 1)
                                     }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Lower priority") },
                                     leadingIcon = { Icon(Icons.Filled.ArrowDownward, contentDescription = null) },
-                                    enabled = transfer.priority > -10,
+                                    enabled = transfer.priority > Int.MIN_VALUE,
                                     onClick = {
                                         showRowMenu = false
-                                        onPriorityChange((transfer.priority - 1).coerceAtLeast(-10))
+                                        onPriorityChange(transfer.priority - 1)
                                     }
                                 )
                             }
