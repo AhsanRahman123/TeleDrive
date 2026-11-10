@@ -630,11 +630,26 @@ class TransferExecutor(
                 }
             outcome
         } catch (e: TransferControlException) {
-            if (managedDownload && !e.paused) {
-                // Pause is issued by TransferRepository before the worker is stopped. Do not
-                // send a second pause while Resume may already be starting a new worker.
+            if (managedDownload) {
+                // The repository pauses TDLib before stopping the worker. There is one startup
+                // race, however: this flow may add its native queue entry just after that pause.
+                // Reconcile the native queue after collection has stopped so the new entry cannot
+                // continue in the background. Only pause it while the app row is still PAUSED or
+                // QUEUED (the latter is a preempted job); if a new worker already owns RUNNING,
+                // leave its native request alone.
                 withContext(NonCancellable) {
-                    runCatching { telegramClient.removeManagedDownload(remoteFileId) }
+                    val currentState = transferDao.byId(transfer.id)?.state
+                    when {
+                        e.paused && currentState in setOf(
+                            TransferState.PAUSED,
+                            TransferState.QUEUED
+                        ) -> runCatching {
+                            telegramClient.pauseManagedDownload(remoteFileId)
+                        }
+                        !e.paused -> runCatching {
+                            telegramClient.removeManagedDownload(remoteFileId)
+                        }
+                    }
                 }
             }
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
