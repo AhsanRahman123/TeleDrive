@@ -564,8 +564,8 @@ class TransferExecutor(
         val sourceMessageId = entity.messageId ?: transfer.messageId
         val managedDownload = sourceChatId != null && sourceMessageId != null
 
-        val startedAt = System.currentTimeMillis()
-        val ticker = ProgressTicker().apply { start(0, startedAt) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
 
         return try {
             var outcome: TransferOutcome =
@@ -588,10 +588,28 @@ class TransferExecutor(
                     when (event) {
                         is TelegramDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
-                                transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                            if (!tickerStarted) {
+                                // TDLib may immediately report bytes already cached before this
+                                // worker attached. Seed the meter from that value so reattaching
+                                // cannot turn the whole saved file into a fake one-second speed burst.
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
+                                transferDao.updateTransferredBytes(
+                                    transfer.id, event.transferredBytes, now
                                 )
+                            } else {
+                                val speed = ticker.tick(event.transferredBytes, now)
+                                if (speed != null) {
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                } else {
+                                    // Keep progress timestamps fresh for every TDLib update;
+                                    // the speed sample itself is only refreshed once per second.
+                                    transferDao.updateTransferredBytes(
+                                        transfer.id, event.transferredBytes, now
+                                    )
+                                }
                             }
                             checkControl(transfer.id)
                         }
