@@ -1154,6 +1154,18 @@ class DesktopTelegramClient(
         send(TdApi.CancelDownloadFile(fileId, false))
     }
 
+    override suspend fun updateManagedDownloadPriority(
+        remoteFileId: String,
+        chatId: Long,
+        messageId: Long,
+        priority: Int
+    ) {
+        val file = remoteFile(remoteFileId)
+        send<TdApi.File>(
+            TdApi.AddFileToDownloads(file.id, chatId, messageId, priority.coerceIn(1, 32))
+        )
+    }
+
     override suspend fun pauseManagedDownload(remoteFileId: String) {
         val file = remoteFile(remoteFileId)
         send<TdApi.Ok>(TdApi.ToggleDownloadIsPaused(file.id, true))
