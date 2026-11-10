@@ -463,6 +463,8 @@ fun TransfersScreen(
                                 if (fromIndex >= 0 && toIndex >= 0 && fromIndex != toIndex) {
                                     val moved = reordered.removeAt(fromIndex)
                                     reordered.add(toIndex, moved)
+                                    // Manual order becomes the active sort order after a drop.
+                                    sortOrder = "PRIORITY"
                                     viewModel.reorderDownloads(reordered)
                                 }
                                 draggedTransferId = null
@@ -678,7 +680,6 @@ fun TransfersScreen(
                     onMoveToTop = if (transfer.type.isIncoming) {
                         { viewModel.moveDownloadToTop(transfer.id) }
                     } else null,
-                    dragEnabled = transfer.type.isIncoming,
                     selected = transfer.id in selectedTransferIds,
                     onSelect = { checked ->
                         selectedTransferIds = if (checked) selectedTransferIds + transfer.id
