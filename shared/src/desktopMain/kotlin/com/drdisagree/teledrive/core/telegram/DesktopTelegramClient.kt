@@ -1036,7 +1036,7 @@ class DesktopTelegramClient(
                 resumer.cancel()
                 job.cancel()
                 // false cancels active as well as pending requests, preserving Pause All.
-                client?.send(TdApi.CancelDownloadFile(fileId, false)) { }
+                client?.send(TdApi.CancelDownloadFile(fileId, true)) { }
             }
         }.buffer(capacity = 64)
 
