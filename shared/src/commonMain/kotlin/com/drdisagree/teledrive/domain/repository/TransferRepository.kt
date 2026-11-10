@@ -51,6 +51,12 @@ interface TransferRepository {
 
     suspend fun setPriority(id: String, priority: Int)
 
+    /** Persist a user-defined order for the active/queued incoming download list. */
+    suspend fun reorderDownloads(orderedIds: List<String>) = Unit
+
+    /** Promote one incoming transfer to the front of the persistent download queue. */
+    suspend fun moveDownloadToTop(id: String) = Unit
+
     suspend fun pauseAll()
 
     suspend fun resumeAll()
