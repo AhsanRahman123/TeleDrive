@@ -148,13 +148,21 @@ internal class FakeTelegram : TelegramClient by unused() {
         closedChats++
     }
 
-    override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> {
+    override fun downloadDocument(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ): Flow<TelegramDownloadEvent> {
         if (failDownloads) return flowOf()
         val file = storedFiles.entries.firstOrNull { it.key.remoteFileId == remoteFileId }?.value
             ?: folderStateFile
             ?: return flowOf()
         return flowOf(TelegramDownloadEvent.Completed(file.absolutePath, file.length()))
     }
+
+    override suspend fun pauseManagedDownload(remoteFileId: String) = Unit
+
+    override suspend fun removeManagedDownload(remoteFileId: String) = Unit
 
     var onEditCaption: suspend (messageId: Long) -> Unit = {}
 
