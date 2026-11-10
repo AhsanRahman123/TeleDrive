@@ -131,7 +131,8 @@ class PartDownloaderTest {
         override fun downloadDocument(
             remoteFileId: String,
             chatId: Long?,
-            messageId: Long?
+            messageId: Long?,
+            queuePriority: Int
         ): Flow<TelegramDownloadEvent> {
             downloaded += remoteFileId
             val index = remoteFileId.removePrefix("r").toInt()
