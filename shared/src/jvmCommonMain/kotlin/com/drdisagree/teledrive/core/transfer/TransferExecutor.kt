@@ -685,8 +685,8 @@ class TransferExecutor(
             return TransferOutcome.Failed(messages.cacheFull(cacheNeeded))
         }
 
-        val startedAt = System.currentTimeMillis()
-        val ticker = ProgressTicker().apply { start(0, startedAt) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
         var outcome: TransferOutcome =
             TransferOutcome.Failed(messages.downloadEnded)
 
@@ -699,10 +699,25 @@ class TransferExecutor(
                         is PartDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
                             transferDao.setStage(transfer.id, null, now)
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
-                                transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                            if (!tickerStarted) {
+                                // The first progress event includes any complete parts already
+                                // present in the resumable target. Seed the rate meter from it.
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
+                                transferDao.updateTransferredBytes(
+                                    transfer.id, event.transferredBytes, now
                                 )
+                            } else {
+                                val speed = ticker.tick(event.transferredBytes, now)
+                                if (speed != null) {
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                } else {
+                                    transferDao.updateTransferredBytes(
+                                        transfer.id, event.transferredBytes, now
+                                    )
+                                }
                             }
                             checkControl(transfer.id)
                         }
