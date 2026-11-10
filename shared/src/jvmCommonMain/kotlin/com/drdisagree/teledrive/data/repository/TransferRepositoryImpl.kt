@@ -346,8 +346,8 @@ class TransferRepositoryImpl(
         return AppResult.Success(transfer.id)
     }
 
-    override suspend fun pause(id: String) {
-        val transfer = transferDao.byId(id) ?: return
+    override suspend fun pause(id: String) = workerControlLock.withLock {
+        val transfer = transferDao.byId(id) ?: return@withLock
         if (transfer.state == TransferState.QUEUED || transfer.state == TransferState.RUNNING) {
             transferDao.setState(id, TransferState.PAUSED, System.currentTimeMillis())
             pauseNativeDownloadIfPresent(transfer)
