@@ -967,7 +967,8 @@ class DesktopTelegramClient(
     override fun downloadDocument(
         remoteFileId: String,
         chatId: Long?,
-        messageId: Long?
+        messageId: Long?,
+        queuePriority: Int
     ): Flow<TelegramDownloadEvent> = callbackFlow<TelegramDownloadEvent> {
         val useManagedQueue = chatId != null && messageId != null
         val subscribed = CompletableDeferred<Unit>()
@@ -1014,7 +1015,7 @@ class DesktopTelegramClient(
                         send<TdApi.Ok>(TdApi.RemoveFileFromDownloads(fileId, true))
                     }
                 }
-                ensureManagedDownload(fileId, chatId!!, messageId!!)
+                ensureManagedDownload(fileId, chatId!!, messageId!!, queuePriority)
                 val current = send<TdApi.File>(TdApi.GetFile(fileId))
                 current.readyPath()?.let { path ->
                     trySend(TelegramDownloadEvent.Completed(path, current.size))
@@ -1062,31 +1063,21 @@ class DesktopTelegramClient(
         }
     }.buffer(capacity = 64)
 
-    private suspend fun ensureManagedDownload(fileId: Int, chatId: Long, messageId: Long) {
-        val existing = findManagedDownload(fileId)
-        when {
-            existing?.isPaused == true ->
-                send<TdApi.Ok>(TdApi.ToggleDownloadIsPaused(fileId, false))
-
-            existing == null ->
-                send<TdApi.File>(
-                    TdApi.AddFileToDownloads(fileId, chatId, messageId, DOWNLOAD_PRIORITY)
-                )
-
-            else -> Unit
-        }
-    }
-
-    private suspend fun findManagedDownload(fileId: Int): TdApi.FileDownload? {
-        var offset = ""
-        while (true) {
-            val page = send<TdApi.FoundFileDownloads>(
-                TdApi.SearchFileDownloads("", true, false, offset, 100)
-            )
-            page.files.firstOrNull { it.fileId == fileId }?.let { return it }
-            if (page.nextOffset.isEmpty()) return null
-            offset = page.nextOffset
-        }
+    /**
+     * TDLib reorders an already-listed file when AddFileToDownloads is called again. Its
+     * implementation removes the old queue entry without deleting cache data, then re-adds it
+     * with the supplied priority. This refreshes ordering after restart/resume while retaining
+     * downloaded bytes.
+     */
+    private suspend fun ensureManagedDownload(
+        fileId: Int,
+        chatId: Long,
+        messageId: Long,
+        priority: Int
+    ) {
+        send<TdApi.File>(
+            TdApi.AddFileToDownloads(fileId, chatId, messageId, priority.coerceIn(1, 32))
+        )
     }
 
     override suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray? {
