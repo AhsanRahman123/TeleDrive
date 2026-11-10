@@ -420,9 +420,10 @@ class TransferRepositoryImpl(
         if (transfer.state.isTerminal) return@withLock
         transferDao.setPriority(id, priority, System.currentTimeMillis())
         if (transfer.type.isIncoming) {
-            val next = transferDao.incomingQueueOrder().firstOrNull()
-            if (transfer.state == TransferState.QUEUED && next?.id == id) {
-                freeWorkerSlotForPromotedDownload(next)
+            val nextRunnable = transferDao.incomingQueueOrder()
+                .firstOrNull { it.state != TransferState.PAUSED }
+            if (transfer.state == TransferState.QUEUED && nextRunnable?.id == id) {
+                freeWorkerSlotForPromotedDownload(nextRunnable)
             }
             // Room ordering alone is not enough for a download already registered in TDLib.
             // Re-apply native priorities so active downloads react immediately.
