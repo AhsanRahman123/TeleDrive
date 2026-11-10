@@ -104,6 +104,14 @@ interface TransferDao {
     )
     suspend fun runningIncomingTransfers(): List<TransferEntity>
 
+    /** All unfinished incoming jobs in the persistent app queue's priority/FIFO order. */
+    @Query(
+        """SELECT * FROM transfers
+           WHERE type IN ('DOWNLOAD', 'RESTORE') AND state IN ('QUEUED', 'RUNNING', 'PAUSED')
+           ORDER BY priority DESC, createdAt ASC"""
+    )
+    suspend fun incomingQueueOrder(): List<TransferEntity>
+
     /** Incoming jobs that may still own a native TDLib download, including recovered rows. */
     @Query(
         """SELECT * FROM transfers
@@ -137,6 +145,13 @@ interface TransferDao {
            updatedAt = :updatedAt WHERE id = :id AND state = 'RUNNING'"""
     )
     suspend fun updateProgress(id: String, transferred: Long, speed: Long, updatedAt: Long)
+
+    /** Refresh byte progress on every TDLib update without resetting the last valid speed sample. */
+    @Query(
+        """UPDATE transfers SET transferredBytes = :transferred, updatedAt = :updatedAt
+           WHERE id = :id AND state = 'RUNNING'"""
+    )
+    suspend fun updateTransferredBytes(id: String, transferred: Long, updatedAt: Long)
 
     @Query(
         """UPDATE transfers SET state = :state,
