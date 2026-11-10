@@ -106,6 +106,24 @@ class BackupHoldDrainTest {
     }
 
     @Test
+    fun `pause selection includes queued and running incoming jobs only`() = runBlocking {
+        queue("download-queued", TransferType.DOWNLOAD)
+        queue("restore-queued", TransferType.RESTORE)
+        queue("download-running", TransferType.DOWNLOAD)
+        queue("restore-paused", TransferType.RESTORE)
+        queue("upload-running", TransferType.UPLOAD)
+
+        transfers.setState("download-running", TransferState.RUNNING, 2)
+        transfers.setState("restore-paused", TransferState.PAUSED, 3)
+        transfers.setState("upload-running", TransferState.RUNNING, 4)
+
+        assertEquals(
+            setOf("download-queued", "restore-queued", "download-running"),
+            transfers.activeIncomingTransfersForPause().map { it.id }.toSet()
+        )
+    }
+
+    @Test
     fun `running incoming transfers keep priority then FIFO order`() = runBlocking {
         fun row(
             id: String,
