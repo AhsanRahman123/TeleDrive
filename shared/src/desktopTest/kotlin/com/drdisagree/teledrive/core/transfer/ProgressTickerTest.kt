@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class ProgressTickerTest {
+class DesktopProgressTickerTest {
 
     @Test
     fun `resumed download seeds speed from cached bytes instead of counting them as new`() {
