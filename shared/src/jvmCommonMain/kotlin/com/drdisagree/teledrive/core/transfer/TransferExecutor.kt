@@ -630,19 +630,11 @@ class TransferExecutor(
                 }
             outcome
         } catch (e: TransferControlException) {
-            if (managedDownload) {
+            if (managedDownload && !e.paused) {
+                // Pause is issued by TransferRepository before the worker is stopped. Do not
+                // send a second pause while Resume may already be starting a new worker.
                 withContext(NonCancellable) {
-                    runCatching {
-                        if (e.paused) {
-                            // Resume All can race with an old worker winding down. Only pause
-                            // TDLib if the transfer is still PAUSED, not already QUEUED again.
-                            if (transferDao.byId(transfer.id)?.state == TransferState.PAUSED) {
-                                telegramClient.pauseManagedDownload(remoteFileId)
-                            }
-                        } else {
-                            telegramClient.removeManagedDownload(remoteFileId)
-                        }
-                    }
+                    runCatching { telegramClient.removeManagedDownload(remoteFileId) }
                 }
             }
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
