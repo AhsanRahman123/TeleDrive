@@ -217,7 +217,8 @@ class LargeDownloadTest {
             override fun downloadDocument(
                 remoteFileId: String,
                 chatId: Long?,
-                messageId: Long?
+                messageId: Long?,
+                queuePriority: Int
             ): Flow<TelegramDownloadEvent> {
                 downloaded += remoteFileId
                 val bytes = if (remoteFileId == "single") {
