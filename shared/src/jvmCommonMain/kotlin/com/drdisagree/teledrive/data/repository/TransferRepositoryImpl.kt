@@ -418,11 +418,29 @@ class TransferRepositoryImpl(
     override suspend fun setPriority(id: String, priority: Int) = workerControlLock.withLock {
         val transfer = transferDao.byId(id) ?: return@withLock
         if (transfer.state.isTerminal) return@withLock
-        transferDao.setPriority(id, priority, System.currentTimeMillis())
+
+        if (transfer.type.isIncoming && priority - transfer.priority in -1..1 && priority != transfer.priority) {
+            // The row menu sends +/-1. Treat that as a relative move in the saved queue rather
+            // than relying on a small numeric range: drag ordering assigns larger rank values.
+            val current = transferDao.incomingQueueOrder()
+            val fromIndex = current.indexOfFirst { it.id == id }
+            if (fromIndex >= 0) {
+                val toIndex = (fromIndex - (priority - transfer.priority)).coerceIn(0, current.lastIndex)
+                if (toIndex != fromIndex) {
+                    val ordered = current.toMutableList()
+                    val moved = ordered.removeAt(fromIndex)
+                    ordered.add(toIndex, moved)
+                    persistDownloadOrder(ordered)
+                }
+            }
+        } else {
+            transferDao.setPriority(id, priority, System.currentTimeMillis())
+        }
+
         if (transfer.type.isIncoming) {
             val nextRunnable = transferDao.incomingQueueOrder()
                 .firstOrNull { it.state != TransferState.PAUSED }
-            if (transfer.state == TransferState.QUEUED && nextRunnable?.id == id) {
+            if (nextRunnable != null && nextRunnable.state == TransferState.QUEUED) {
                 freeWorkerSlotForPromotedDownload(nextRunnable)
             }
             // Room ordering alone is not enough for a download already registered in TDLib.
