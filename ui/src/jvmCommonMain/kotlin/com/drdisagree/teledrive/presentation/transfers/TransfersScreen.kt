@@ -175,7 +175,7 @@ fun TransfersScreen(
                         steps = 4
                     )
                     Text(
-                        "This controls how many queued transfers may run at once. Raising it can use more bandwidth and disk activity.",
+                        "Applies to uploads, backups and downloads. Telegram still manages its own network limits; higher values can use more bandwidth and disk activity.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
