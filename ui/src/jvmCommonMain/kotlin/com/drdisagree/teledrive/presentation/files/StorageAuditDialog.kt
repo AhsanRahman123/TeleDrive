@@ -127,7 +127,7 @@ fun StorageAuditDialog(
                                 when {
                                     file.localPath == null -> "No local path recorded"
                                     !file.localExists -> "Recorded path is missing"
-                                    file.localIsTeleDriveManaged -> "TeleDrive-managed copy exists · ${file.localSizeBytes?.let(Formatters::bytes).orEmpty()}"
+                                    file.localIsTeleDriveManaged -> "TeleDrive-managed copy exists · ${file.localSizeBytes?.let { Formatters.bytes(it) }.orEmpty()}"
                                     else -> "External/original file exists · ${file.localSizeBytes?.let(Formatters::bytes).orEmpty()} · protected from Free up space"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -149,7 +149,7 @@ fun StorageAuditDialog(
                                 when {
                                     file.tdlibError != null -> "TDLib lookup failed: ${file.tdlibError}"
                                     file.tdlibPath == null -> "TDLib reports no local path"
-                                    file.tdlibPathExists -> "File exists · ${file.tdlibSizeBytes?.let(Formatters::bytes).orEmpty()} · completed=${file.tdlibDownloadComplete}"
+                                    file.tdlibPathExists -> "File exists · ${file.tdlibSizeBytes?.let { Formatters.bytes(it) }.orEmpty()} · completed=${file.tdlibDownloadComplete}"
                                     else -> "TDLib reports a path, but the file is not present"
                                 },
                                 style = MaterialTheme.typography.bodySmall
