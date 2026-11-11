@@ -718,7 +718,17 @@ class FilesViewModel(
                             if (cleanup.keptUnmanaged > 0) {
                                 append(" Preserved ")
                                 append(cleanup.keptUnmanaged)
-                                append(" original/external locations because TeleDrive does not own those files.")
+                                append(" external/original locations because TeleDrive does not own those files.")
+                            }
+                            if (cleanup.unverifiedCount > 0) {
+                                append(" Left ")
+                                append(cleanup.unverifiedCount)
+                                append(" files untouched because their TDLib location could not be verified.")
+                            }
+                            if (cleanup.failedCount > 0) {
+                                append(" ")
+                                append(cleanup.failedCount)
+                                append(" cleanup operations failed; refresh the storage audit to inspect them.")
                             }
                         }
                         _messages.tryEmit(UiText.Plain(summary))
