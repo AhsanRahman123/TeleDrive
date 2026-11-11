@@ -47,7 +47,8 @@ fun FileListItem(
     modifier: Modifier = Modifier,
     showFavorite: Boolean = true,
     showAvailableOffline: Boolean = true,
-    status: (@Composable () -> Unit)? = null
+    status: (@Composable () -> Unit)? = null,
+    details: Boolean = false
 ) {
     val compact = LocalCompactLayout.current
     val background = if (selected) {
@@ -101,7 +102,22 @@ fun FileListItem(
                     modifier = Modifier.weight(1f, fill = false)
                 )
             }
-            if (!compact) {
+            if (details) {
+                Text(
+                    text = file.extension.ifBlank { file.mimeType.ifBlank { "—" } },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${Formatters.bytes(file.sizeBytes)} · ${Formatters.dateTime(file.modifiedAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else if (!compact) {
                 Text(
                     text = stringResource(
                         Res.string.common_file_size_and_date,

@@ -124,6 +124,12 @@ interface TransferDao {
     suspend fun setState(id: String, state: TransferState, updatedAt: Long)
 
     @Query(
+        """UPDATE transfers SET priority = :priority, updatedAt = :updatedAt
+           WHERE id = :id AND type = 'DOWNLOAD' AND state = 'QUEUED'"""
+    )
+    suspend fun prioritizeQueuedDownload(id: String, priority: Int, updatedAt: Long): Int
+
+    @Query(
         """UPDATE transfers SET state = :state, errorMessage = :error, updatedAt = :updatedAt
            WHERE id = :id"""
     )

@@ -11,11 +11,13 @@ import com.drdisagree.teledrive.core.files.Hashing
 import com.drdisagree.teledrive.core.files.LocalCopyDeleter
 import com.drdisagree.teledrive.core.files.PartialDownload
 import com.drdisagree.teledrive.core.media.ThumbnailStore
+import com.drdisagree.teledrive.core.publish.PublishScheduler
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.core.telegram.TelegramLimits
 import com.drdisagree.teledrive.core.telegram.TelegramUploadEvent
+import com.drdisagree.teledrive.core.telegram.uploadOrReplaceDocument
 import com.drdisagree.teledrive.data.local.dao.BackupDao
 import com.drdisagree.teledrive.data.local.dao.FileDao
 import com.drdisagree.teledrive.data.local.dao.FilePartDao
@@ -65,6 +67,7 @@ class TransferExecutor(
     private val downloadWriter: DownloadWriter,
     private val fileImporter: FileImporter,
     private val settingsRepository: SettingsRepository,
+    private val publishScheduler: PublishScheduler,
     private val filePartDao: FilePartDao,
     private val partUploader: PartUploader,
     private val partDownloader: PartDownloader,
@@ -199,10 +202,12 @@ class TransferExecutor(
         val ticker = ProgressTicker().apply { start(0, startedAt) }
 
         return try {
+            checkControl(transfer.id)
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.uploadEnded)
-            telegramClient.uploadDocument(
+            telegramClient.uploadOrReplaceDocument(
                 chatId = chatId,
+                existingMessageId = supersededMessageId,
                 localPath = uploadPath,
                 fileName = uploadName,
                 mimeType = if (encrypt) "application/octet-stream" else entity.mimeType,
@@ -248,13 +253,6 @@ class TransferExecutor(
                                 )
                             )
                         }
-                        supersededMessageId
-                            ?.takeIf { it != document.messageId }
-                            ?.let { stale ->
-                                runCatching {
-                                    telegramClient.deleteMessages(chatId, listOf(stale))
-                                }
-                            }
                         releaseLocalCopy(transfer.type, entity, localPath, contentHash)
                         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
                         outcome = TransferOutcome.Completed
@@ -263,13 +261,17 @@ class TransferExecutor(
             }
             outcome
         } catch (e: TransferControlException) {
-            fileDao.setBackupStateIfLocalOnly(
+            fileDao.setBackupState(
                 entity.id,
-                if (e.paused) BackupState.QUEUED else BackupState.NONE
+                when {
+                    e.paused -> BackupState.QUEUED
+                    supersededMessageId != null -> BackupState.FAILED
+                    else -> BackupState.NONE
+                }
             )
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
         } catch (e: TelegramException) {
-            fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.FAILED)
+            fileDao.setBackupState(entity.id, BackupState.FAILED)
             TransferOutcome.Failed(e.message, e.retryAfterSeconds)
         } finally {
             stagingFile?.delete()
@@ -339,12 +341,17 @@ class TransferExecutor(
                             checkControl(transfer.id)
                         }
 
+                        is PartUploadEvent.SourceChanged -> {
+                            fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.FAILED)
+                            outcome = TransferOutcome.Failed(messages.verifyFailed)
+                        }
+
                         is PartUploadEvent.Completed -> {
                             val first = event.parts.firstOrNull()
                                 ?: error("Upload finished with no parts")
-                            event.contentHash
+                            val updatedContentHash = event.contentHash
                                 ?.takeIf { it != entity.contentHash }
-                                ?.let { fileDao.setContentHash(entity.id, it) }
+                            updatedContentHash?.let { fileDao.setContentHash(entity.id, it) }
                             fileDao.setPartCount(entity.id, event.parts.size)
                             fileDao.setRemoteMapping(
                                 id = entity.id,
@@ -356,6 +363,10 @@ class TransferExecutor(
                                 iconFileId = manifest.iconFileId
                             )
                             fileDao.setRemoteBase(entity.id, FileBase.of(manifest).toText())
+                            if (updatedContentHash != null) {
+                                fileDao.markPendingPublish(listOf(entity.id))
+                                publishScheduler.kick()
+                            }
                             if (transfer.type == TransferType.BACKUP) {
                                 backupDao.upsertRecord(
                                     BackupRecordEntity(
@@ -383,16 +394,20 @@ class TransferExecutor(
                 }
             outcome
         } catch (e: TransferControlException) {
-            fileDao.setBackupStateIfLocalOnly(
+            fileDao.setBackupState(
                 entity.id,
-                if (e.paused) BackupState.QUEUED else BackupState.NONE
+                when {
+                    e.paused -> BackupState.QUEUED
+                    entity.messageId != null -> BackupState.FAILED
+                    else -> BackupState.NONE
+                }
             )
             if (!e.paused && fileDao.byId(entity.id)?.messageId == null) {
                 partUploader.discardParts(entity.id)
             }
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
         } catch (e: TelegramException) {
-            fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.FAILED)
+            fileDao.setBackupState(entity.id, BackupState.FAILED)
             TransferOutcome.Failed(e.message, e.retryAfterSeconds)
         }
     }
@@ -493,6 +508,11 @@ class TransferExecutor(
                                 System.currentTimeMillis()
                             )
                             checkControl(transfer.id)
+                        }
+
+                        is PartDownloadEvent.IntegrityFailure -> {
+                            transferDao.setStage(transfer.id, null, System.currentTimeMillis())
+                            outcome = TransferOutcome.Failed(messages.verifyFailed)
                         }
 
                         is PartDownloadEvent.Completed -> {

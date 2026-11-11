@@ -75,23 +75,33 @@ in `%APPDATA%\TeleDrive` and survive reinstalls.
 
 ### Linux (x86_64)
 
-Download from the [releases page](../../releases). Everything is included, so
-there is nothing else to install.
+Download either package from the [releases page](../../releases). Linux builds
+are currently x86_64 only; ARM64 Linux packages are not produced.
 
-**AppImage** (most distros from 2022 or later)
+**AppImage** (recommended for other mainstream x86_64 distributions)
 
 1. Download `TeleDrive-<version>-x86_64.AppImage`.
 2. Make it executable: right-click → **Properties** → **Allow executing file as
-   program**, or `chmod +x TeleDrive-<version>-x86_64.AppImage`.
-3. Double-click it.
+   program**, or run `chmod +x TeleDrive-<version>-x86_64.AppImage`.
+3. Double-click it, or launch it from a terminal.
 
-**.deb** (Ubuntu 24.04, Debian 13 or newer)
+The AppImage bundles the Java runtime and VLC playback libraries. It still uses
+standard system graphics and desktop libraries, and normally needs working
+FUSE support. See the [AppImage FUSE troubleshooting guide](https://docs.appimage.org/user-guide/troubleshooting/fuse.html)
+if it reports that FUSE is unavailable. For type-2 AppImages, the runtime also
+supports the `--appimage-extract-and-run` fallback when FUSE cannot be used.
+
+**.deb** (Ubuntu 22.04 or newer; Debian 12 or newer)
 
 ```bash
 sudo apt install ./teledrive_<version>_amd64.deb
 ```
 
-Then open TeleDrive from the applications menu.
+APT installs the declared system dependencies, including libVLC and its video
+output plugins. Then open TeleDrive from the applications menu.
+
+Linux desktop data is stored under `$XDG_DATA_HOME/TeleDrive`, or
+`~/.local/share/TeleDrive` when `XDG_DATA_HOME` is not set.
 
 ### macOS (Apple Silicon)
 
@@ -183,7 +193,7 @@ Point the build at a full JDK with a `desktopJavaHome` property in your global
 ```bash
 ./gradlew :desktop:packageMsi           # Windows installer
 ./gradlew :desktop:packageDebUser       # Linux .deb with system dependencies
-./gradlew :desktop:packageAppImage      # Linux AppImage for any distro
+./gradlew :desktop:packageAppImage      # Linux x86_64 AppImage (host libraries required)
 ./gradlew :desktop:packageDmg           # macOS disk image
 ./gradlew :desktop:createDistributable  # portable app folder
 ```

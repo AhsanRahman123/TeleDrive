@@ -185,23 +185,8 @@ class ChannelRepositoryImpl(
         AppResult.Success(Unit)
     }
 
-    override suspend fun deleteRemotely(chatId: Long): AppResult<Unit> {
-        if (channelDao.all().size <= 1) {
-            return AppResult.Failure(AppError.LastDriveRemaining)
-        }
-        return deleteConfirmed(chatId)
-    }
-
-    private suspend fun deleteConfirmed(chatId: Long): AppResult<Unit> = runTelegram {
-        try {
-            telegramClient.deleteStorageChannel(chatId)
-        } catch (e: TelegramException) {
-            if (telegramClient.chatExists(chatId) != false) throw e
-            SafeLog.w(TAG, "Drive channel was already gone, removing it here")
-        }
-        forget(chatId)
-        AppResult.Success(Unit)
-    }
+    override suspend fun deleteRemotely(chatId: Long): AppResult<Unit> =
+        AppResult.Failure(AppError.RemoteDeletionDisabled)
 
     /**
      * The first drive to ask adopts folders configured in the device preferences, so an upgrade

@@ -49,6 +49,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -148,6 +150,8 @@ import com.drdisagree.teledrive.resources.preview_no_preview
 import com.drdisagree.teledrive.resources.preview_preparing
 import com.drdisagree.teledrive.resources.preview_progress_bytes
 import com.drdisagree.teledrive.resources.preview_remove_favorites
+import com.drdisagree.teledrive.resources.preview_slideshow_pause
+import com.drdisagree.teledrive.resources.preview_slideshow_start
 import com.drdisagree.teledrive.resources.preview_requires_download
 import com.drdisagree.teledrive.resources.preview_share_chooser_title
 import com.drdisagree.teledrive.resources.preview_share_copy
@@ -221,6 +225,19 @@ fun PreviewScreen(
     val liveFile by viewModel.observeFile(pagedFile.id)
         .collectAsStateWithLifecycle(initialValue = pagedFile)
     val currentFile = liveFile ?: pagedFile
+
+    val canSlideshow = state.files.size > 1 &&
+            state.files.all { it.category == FileCategory.IMAGE }
+    var slideshowPlaying by remember(state.files, state.autoStartSlideshow) {
+        mutableStateOf(state.autoStartSlideshow && canSlideshow)
+    }
+    LaunchedEffect(slideshowPlaying, pagerState.currentPage, canSlideshow) {
+        if (!slideshowPlaying || !canSlideshow) return@LaunchedEffect
+        delay(PREVIEW_SLIDESHOW_INTERVAL_MS)
+        val nextPage = nextSlideshowIndex(pagerState.currentPage, state.files.size)
+        if (nextPage == null) slideshowPlaying = false
+        else pagerState.animateScrollToPage(nextPage)
+    }
 
     val immersive = currentFile.category == FileCategory.IMAGE ||
             currentFile.category == FileCategory.VIDEO
@@ -317,6 +334,21 @@ fun PreviewScreen(
                         }
                     },
                     actions = {
+                        if (canSlideshow) {
+                            IconButton(onClick = { slideshowPlaying = !slideshowPlaying }) {
+                                Icon(
+                                    imageVector = if (slideshowPlaying) {
+                                        Icons.Filled.Pause
+                                    } else {
+                                        Icons.Filled.PlayArrow
+                                    },
+                                    contentDescription = stringResource(
+                                        if (slideshowPlaying) Res.string.preview_slideshow_pause
+                                        else Res.string.preview_slideshow_start
+                                    )
+                                )
+                            }
+                        }
                         if (MimeTypes.isText(currentFile.mimeType)) {
                             IconButton(
                                 onClick = {

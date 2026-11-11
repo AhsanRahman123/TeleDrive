@@ -18,6 +18,7 @@ import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.UserPreferences
+import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.SyncRepository
@@ -295,6 +296,9 @@ class FilesViewModel(
     fun endRangeSelection() {
         rangeBase = null
     }
+
+    fun setViewMode(viewMode: ViewMode) =
+        updatePrefs { it.copy(viewMode = viewMode) }
 
     fun zoomIn() = applyZoom(GridZoomLevel::zoomedIn)
 

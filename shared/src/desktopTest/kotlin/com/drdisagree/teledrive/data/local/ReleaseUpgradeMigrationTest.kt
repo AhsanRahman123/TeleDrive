@@ -9,6 +9,7 @@ import com.drdisagree.teledrive.data.local.database.MIGRATION_13_14
 import com.drdisagree.teledrive.data.local.database.MIGRATION_14_15
 import com.drdisagree.teledrive.data.local.database.MIGRATION_15_16
 import com.drdisagree.teledrive.data.local.database.MIGRATION_16_17
+import com.drdisagree.teledrive.data.local.database.MIGRATION_17_18
 import com.drdisagree.teledrive.data.local.database.TeleDriveDatabase
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +35,9 @@ class ReleaseUpgradeMigrationTest {
                    VALUES ('dcim', 7, NULL, 'DCIM', 0, 0, 0, NULL, NULL, 0, 1, 1)""",
             file("a", "/storage/emulated/0/DCIM/Screenshots/a.jpg"),
             file("b", null),
+            """INSERT INTO file_parts (fileId, partIndex, chatId, messageId, remoteFileId,
+                   remoteUniqueId, plainOffset, plainSize, storedSize, uploadedAt)
+                   VALUES ('a', 0, 7, 40, 'part-a', 'part-unique-a', 0, 10, 10, 1)""",
             """INSERT INTO backup_records (id, sourcePath, fileId, sizeBytes, modifiedAt, contentHash,
                    backedUpAt)
                    VALUES ('r1', '/storage/emulated/0/DCIM/Screenshots/a.jpg', 'a', 10, 1, NULL, 2)""",
@@ -54,7 +58,7 @@ class ReleaseUpgradeMigrationTest {
         val database = Room.databaseBuilder<TeleDriveDatabase>(name = file.absolutePath)
             .addMigrations(
                 MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
-                MIGRATION_15_16, MIGRATION_16_17
+                MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18
             )
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(Dispatchers.IO)
@@ -68,6 +72,13 @@ class ReleaseUpgradeMigrationTest {
                     .recordByPath("/storage/emulated/0/DCIM/Screenshots/a.jpg", 7)!!.fileId
             )
             assertEquals(1, database.transferDao().bySession("s1").size)
+            val migratedPart = database.filePartDao().partsOf("a").single()
+            assertEquals(40L, migratedPart.messageId)
+            assertEquals("part-a", migratedPart.remoteFileId)
+            assertEquals(null, migratedPart.plainHash)
+
+            database.filePartDao().upsert(migratedPart.copy(plainHash = "abc123"))
+            assertEquals("abc123", database.filePartDao().partsOf("a").single().plainHash)
         } finally {
             database.close()
             file.delete()
