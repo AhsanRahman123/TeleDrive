@@ -2,7 +2,7 @@ package com.drdisagree.teledrive.desktop.files
 
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import java.io.File
-import kotlin.io.path.createTempDirectory
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -13,7 +13,7 @@ class DesktopFileImporterTest {
 
     @Test
     fun `import copies selected source into app managed storage without owning the original`() {
-        val root = createTempDirectory("teledrive-import-test").toFile()
+        val root = Files.createTempDirectory("teledrive-import-test").toFile()
         try {
             val filesDir = File(root, "app/files").apply { mkdirs() }
             val source = File(root, "external/source.bin").apply {
@@ -41,9 +41,9 @@ class DesktopFileImporterTest {
         }
     }
 
-    private fun testStoragePaths(filesDir: File): AppStoragePaths = object : AppStoragePaths {
-        override val filesDir: File = filesDir
-        override val cacheDir: File = File(filesDir.parentFile, "cache")
+    private fun testStoragePaths(appFilesDir: File): AppStoragePaths = object : AppStoragePaths {
+        override val filesDir: File = appFilesDir
+        override val cacheDir: File = File(appFilesDir.parentFile, "cache")
         override val externalCacheDir: File? = null
         override val externalStorageRoot: File? = null
     }
