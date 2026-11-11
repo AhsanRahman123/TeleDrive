@@ -56,6 +56,7 @@ class LocalCopyCacheCleanupTest {
         assertFalse(local.exists())
         assertEquals(local.absolutePath, fileDao.byId("file-1")?.localPath)
         assertEquals(0, firstCleanup.deletedCount)
+        assertEquals(1, firstCleanup.failedCount)
         assertEquals(listOf("remote-1"), harness.telegram.managedDownloadRemovalRequests)
 
         harness.telegram.failManagedDownloadRemoval = false
