@@ -20,11 +20,15 @@ Write-Host "TeleDrive source checkout :" -ForegroundColor Cyan
 Write-Host $repoRoot
 Write-Host "Isolated TeleDrive profile:" -ForegroundColor Cyan
 Write-Host $profileRoot
-Write-Host "Installed-app default profile:" -ForegroundColor Cyan
+Write-Host "Current process APPDATA profile:" -ForegroundColor Cyan
 if ($env:APPDATA) {
     Write-Host (Join-Path $env:APPDATA "TeleDrive")
 } else {
     Write-Host "(APPDATA is not set on this platform)"
+}
+if ($env:USERPROFILE) {
+    Write-Host "Typical Windows installed-app profile:" -ForegroundColor Cyan
+    Write-Host (Join-Path $env:USERPROFILE "AppData\\Roaming\\TeleDrive")
 }
 Write-Host "The installed app profile is not used by this process." -ForegroundColor Green
 Write-Host ""
