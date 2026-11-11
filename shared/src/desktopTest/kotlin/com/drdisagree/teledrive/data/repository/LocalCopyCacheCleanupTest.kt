@@ -68,6 +68,27 @@ class LocalCopyCacheCleanupTest {
     }
 
     @Test
+    fun `external TDLib cache paths are reported and preserved by free up space`() = runBlocking {
+        val local = localFile()
+        val externalCache = File.createTempFile("tdlib-external-cache", ".bin").apply {
+            writeBytes(byteArrayOf(9, 8, 7, 6))
+        }
+        harness.telegram.resolvedLocalPaths["remote-1"] = externalCache.absolutePath
+        fileDao.upsert(fileEntity(local))
+
+        val result = repository().deleteLocalCopy(listOf("file-1"))
+        val cleanup = (result as AppResult.Success<LocalCleanup>).value
+
+        assertTrue(local.isFile)
+        assertTrue(externalCache.isFile)
+        assertEquals(local.absolutePath, fileDao.byId("file-1")?.localPath)
+        assertTrue(harness.telegram.managedDownloadRemovalRequests.isEmpty())
+        assertEquals(0, cleanup.deletedCount)
+        assertEquals(1, cleanup.keptUnmanaged)
+        externalCache.delete()
+    }
+
+    @Test
     fun `available offline files are preserved and never removed from TDLib`() = runBlocking {
         val local = localFile()
         fileDao.upsert(fileEntity(local).copy(isAvailableOffline = true))
