@@ -1182,7 +1182,15 @@ class DesktopTelegramClient(
 
     override suspend fun removeManagedDownload(remoteFileId: String) {
         val file = remoteFile(remoteFileId)
-        send<TdApi.Ok>(TdApi.RemoveFileFromDownloads(file.id, true))
+        val removedFromQueue = runCatching {
+            send<TdApi.Ok>(TdApi.RemoveFileFromDownloads(file.id, true))
+        }
+        if (removedFromQueue.isFailure) {
+            // A cached file may not have an active managed-queue entry (for example, an
+            // uploaded file whose local TDLib path still points at its original source).
+            // DeleteFile clears the TDLib cache even when there is no queue row to remove.
+            send<TdApi.Ok>(TdApi.DeleteFile(file.id))
+        }
     }
 
     override suspend fun clearDownloadedFiles() {
