@@ -774,18 +774,34 @@ class FilesViewModel(
                 ?: File(System.getProperty("user.home").orEmpty(), "Downloads")
             val downloadsRoot = File(downloadsBase, "TeleDrive")
             val appDataRoot = storagePaths.filesDir.parentFile ?: storagePaths.filesDir
-            val installedAppProfile = System.getenv("APPDATA")
+            val appDataEnvironmentProfile = System.getenv("APPDATA")
                 ?.takeIf { it.isNotBlank() }
                 ?.let { File(it, "TeleDrive") }
+            val typicalWindowsProfile = System.getProperty("os.name").orEmpty()
+                .contains("win", ignoreCase = true)
+                .takeIf { it }
+                ?.let {
+                    File(System.getProperty("user.home").orEmpty(), "AppData/Roaming/TeleDrive")
+                }
             val tdlibRoot = File(storagePaths.filesDir, "tdlib")
             val tdlibFiles = File(tdlibRoot, "files")
             val roots = buildList {
                 add(StorageAuditRoot("This app instance / profile", appDataRoot.absolutePath, appDataRoot.exists(), true))
                 add(StorageAuditRoot("Build working directory", System.getProperty("user.dir").orEmpty(), File(System.getProperty("user.dir").orEmpty()).isDirectory, true))
-                installedAppProfile?.let {
+                appDataEnvironmentProfile?.let {
                     add(
                         StorageAuditRoot(
-                            "Default installed-app profile (%APPDATA%\\TeleDrive)",
+                            "Current process APPDATA profile",
+                            it.absolutePath,
+                            it.exists(),
+                            true
+                        )
+                    )
+                }
+                typicalWindowsProfile?.let {
+                    add(
+                        StorageAuditRoot(
+                            "Typical Windows installed-app profile",
                             it.absolutePath,
                             it.exists(),
                             true
