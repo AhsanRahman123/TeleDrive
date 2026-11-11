@@ -768,16 +768,18 @@ class FilesViewModel(
                 add(StorageAuditRoot("This app instance / profile", appDataRoot.absolutePath, appDataRoot.exists(), true))
                 add(StorageAuditRoot("Build working directory", System.getProperty("user.dir").orEmpty(), File(System.getProperty("user.dir").orEmpty()).isDirectory, true))
                 installedAppProfile?.let {
-                    StorageAuditRoot(
-                        "Default installed-app profile (%APPDATA%\\TeleDrive)",
-                        it.absolutePath,
-                        it.exists(),
-                        true
+                    add(
+                        StorageAuditRoot(
+                            "Default installed-app profile (%APPDATA%\\TeleDrive)",
+                            it.absolutePath,
+                            it.exists(),
+                            true
+                        )
                     )
-                },
-                StorageAuditRoot("App files and database", storagePaths.filesDir.absolutePath, storagePaths.filesDir.exists(), true),
-                StorageAuditRoot("Room database", File(storagePaths.filesDir, "teledrive.db").absolutePath, File(storagePaths.filesDir, "teledrive.db").isFile, false, File(storagePaths.filesDir, "teledrive.db").length()),
-                StorageAuditRoot("Settings file", File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").absolutePath, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").isFile, false, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").length()),
+                }
+                add(StorageAuditRoot("App files and database", storagePaths.filesDir.absolutePath, storagePaths.filesDir.exists(), true))
+                add(StorageAuditRoot("Room database", File(storagePaths.filesDir, "teledrive.db").absolutePath, File(storagePaths.filesDir, "teledrive.db").isFile, false, File(storagePaths.filesDir, "teledrive.db").length()))
+                add(StorageAuditRoot("Settings file", File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").absolutePath, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").isFile, false, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").length()))
                 add(StorageAuditRoot("TDLib database", File(tdlibRoot, "db").absolutePath, File(tdlibRoot, "db").isDirectory, true))
                 add(StorageAuditRoot("TDLib local file cache", tdlibFiles.absolutePath, tdlibFiles.isDirectory, true))
                 add(StorageAuditRoot("TeleDrive-owned upload copies", File(storagePaths.filesDir, "local-copies").absolutePath, File(storagePaths.filesDir, "local-copies").isDirectory, true))
