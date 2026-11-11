@@ -183,6 +183,7 @@ internal class FakeTelegram : TelegramClient by unused() {
         if (failManagedDownloadRemoval) {
             error("simulated TDLib cache cleanup failure")
         }
+        resolvedLocalPaths.remove(remoteFileId)
     }
 
     var onEditCaption: suspend (messageId: Long) -> Unit = {}
