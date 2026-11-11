@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.desktop.files
 
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import java.io.File
+import kotlin.io.path.createTempDirectory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
