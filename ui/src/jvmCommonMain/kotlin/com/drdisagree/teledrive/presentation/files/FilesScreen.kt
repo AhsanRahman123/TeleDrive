@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -171,6 +172,7 @@ import com.drdisagree.teledrive.resources.common_confirm_trash_count_title
 import com.drdisagree.teledrive.resources.common_create
 import com.drdisagree.teledrive.resources.common_deselect_all
 import com.drdisagree.teledrive.resources.common_download
+import com.drdisagree.teledrive.resources.common_free_space
 import com.drdisagree.teledrive.resources.common_make_available_offline
 import com.drdisagree.teledrive.resources.common_move_trash
 import com.drdisagree.teledrive.resources.common_remove_from_offline
@@ -462,6 +464,14 @@ fun FilesScreen(
                                                     label = stringResource(Res.string.common_download),
                                                     icon = Icons.Filled.Download
                                                 ) { viewModel.downloadSelected() }
+                                            )
+                                        }
+                                        if (filesOnly && state.capabilities.canFreeUpSpace) {
+                                            add(
+                                                MenuAction(
+                                                    label = stringResource(Res.string.common_free_space),
+                                                    icon = Icons.Filled.CleaningServices
+                                                ) { confirmDeleteLocal = true }
                                             )
                                         }
                                         if (selectedItemCount == 1) {
