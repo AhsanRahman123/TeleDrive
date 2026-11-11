@@ -801,6 +801,7 @@ class FileRepositoryImpl(
         val candidates = fileDao.byIds(ids - kept).filter { entity ->
             entity.localPath != null &&
                     entity.messageId != null &&
+                    entity.remoteFileId != null &&
                     entity.backupState == BackupState.BACKED_UP
         }
         if (candidates.isEmpty()) {
@@ -814,6 +815,12 @@ class FileRepositoryImpl(
         for (entity in candidates) {
             val path = entity.localPath ?: continue
             if (localCopyDeleter.isGone(path)) {
+                val remoteFileId = entity.remoteFileId ?: continue
+                val cacheReleased = runCatching {
+                    telegramClient.removeManagedDownload(remoteFileId)
+                }.isSuccess
+                if (!cacheReleased) continue
+
                 fileDao.setLocalPath(entity.id, null)
                 cleared++
             }
