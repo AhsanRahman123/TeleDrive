@@ -156,6 +156,7 @@ import com.drdisagree.teledrive.presentation.navigation.FabBottomBarInset
 import com.drdisagree.teledrive.presentation.navigation.LocalBottomBarInset
 import com.drdisagree.teledrive.presentation.platform.FileDropArea
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
+import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalFolderPicker
 import com.drdisagree.teledrive.presentation.platform.LocalMultiFilePicker
@@ -256,12 +257,12 @@ fun FilesScreen(
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val files = viewModel.pagedFiles.collectAsLazyPagingItems()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
+    val storageAudit by viewModel.storageAudit.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showCreateFolder by remember { mutableStateOf(false) }
-    var confirmDeleteLocal by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showViewMenu by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -471,7 +472,7 @@ fun FilesScreen(
                                                 MenuAction(
                                                     label = stringResource(Res.string.common_free_space),
                                                     icon = Icons.Filled.CleaningServices
-                                                ) { confirmDeleteLocal = true }
+                                                ) { viewModel.inspectSelectedStorage() }
                                             )
                                         }
                                         if (selectedItemCount == 1) {
@@ -923,17 +924,14 @@ fun FilesScreen(
             onDismiss = { confirmTrash = false }
         )
     }
-    if (confirmDeleteLocal) {
-        ConfirmDialog(
-            title = stringResource(Res.string.files_delete_local_copies),
-            message = stringResource(Res.string.files_only_files_verified_telegram),
-            confirmLabel = stringResource(Res.string.files_delete_local),
-            destructive = true,
-            onConfirm = {
-                confirmDeleteLocal = false
-                viewModel.deleteLocalCopies()
-            },
-            onDismiss = { confirmDeleteLocal = false }
+    val fileRevealer = LocalFileRevealer.current
+    storageAudit?.let { snapshot ->
+        StorageAuditDialog(
+            snapshot = snapshot,
+            onRefresh = viewModel::refreshStorageAudit,
+            onDismiss = viewModel::dismissStorageAudit,
+            onReveal = { path -> fileRevealer?.reveal(path) ?: false },
+            onDeleteManagedCopies = viewModel::deleteAuditedLocalCopies
         )
     }
     LaunchedEffect(Unit) {
