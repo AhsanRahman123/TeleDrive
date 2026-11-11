@@ -28,7 +28,7 @@ if ($env:APPDATA) {
 }
 if ($env:USERPROFILE) {
     Write-Host "Typical Windows installed-app profile:" -ForegroundColor Cyan
-    Write-Host (Join-Path $env:USERPROFILE "AppData\\Roaming\\TeleDrive")
+    Write-Host (Join-Path $env:USERPROFILE "AppData\Roaming\TeleDrive")
 }
 Write-Host "The installed app profile is not used by this process." -ForegroundColor Green
 Write-Host ""
