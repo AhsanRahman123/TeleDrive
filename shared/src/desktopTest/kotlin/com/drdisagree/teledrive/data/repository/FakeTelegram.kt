@@ -20,6 +20,8 @@ internal class FakeTelegram : TelegramClient by unused() {
     val editedCaptions = mutableMapOf<Long, String>()
     val uploads = mutableListOf<Pair<String, String>>()
     val deletedMessages = mutableListOf<Long>()
+    val managedDownloadRemovalRequests = mutableListOf<String>()
+    var failManagedDownloadRemoval = false
     var failDownloads = false
     val changes = MutableSharedFlow<MessageChange>(extraBufferCapacity = 1_000)
     var openedChats = 0
@@ -163,7 +165,12 @@ internal class FakeTelegram : TelegramClient by unused() {
 
     override suspend fun pauseManagedDownload(remoteFileId: String) = Unit
 
-    override suspend fun removeManagedDownload(remoteFileId: String) = Unit
+    override suspend fun removeManagedDownload(remoteFileId: String) {
+        managedDownloadRemovalRequests += remoteFileId
+        if (failManagedDownloadRemoval) {
+            error("simulated TDLib cache cleanup failure")
+        }
+    }
 
     var onEditCaption: suspend (messageId: Long) -> Unit = {}
 
