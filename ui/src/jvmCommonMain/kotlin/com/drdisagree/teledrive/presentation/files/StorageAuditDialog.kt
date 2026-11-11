@@ -207,6 +207,19 @@ fun StorageAuditDialog(
                                     color = if (file.tdlibPathIsTeleDriveManaged) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.error
                                 )
+                                Text(
+                                    when (file.tdlibCanBeDeleted) {
+                                        true -> "TDLib deletion permission: allowed"
+                                        false -> "TDLib deletion permission: not allowed"
+                                        null -> "TDLib deletion permission: unknown"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = when (file.tdlibCanBeDeleted) {
+                                        true -> MaterialTheme.colorScheme.primary
+                                        false -> MaterialTheme.colorScheme.error
+                                        null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
                             }
 
                             HorizontalDivider()
