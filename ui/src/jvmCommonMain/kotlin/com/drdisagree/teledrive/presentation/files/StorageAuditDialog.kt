@@ -162,7 +162,7 @@ fun StorageAuditDialog(
                                     file.localPath == null -> "No local path recorded"
                                     !file.localExists -> "Recorded path is missing"
                                     file.localIsTeleDriveManaged -> "TeleDrive-managed copy exists · ${file.localSizeBytes?.let { Formatters.bytes(it) }.orEmpty()}"
-                                    else -> "External/original file exists · ${file.localSizeBytes?.let(Formatters::bytes).orEmpty()} · protected from Free up space"
+                                    else -> "External/original file exists · ${file.localSizeBytes?.let { Formatters.bytes(it) }.orEmpty()} · protected from Free up space"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (file.localIsTeleDriveManaged) MaterialTheme.colorScheme.primary
@@ -194,6 +194,7 @@ fun StorageAuditDialog(
                                     path = path,
                                     exists = file.tdlibPathExists,
                                     onReveal = onReveal,
+                                    canReveal = canReveal,
                                     onCopy = { clipboard.setText(AnnotatedString(path)) }
                                 )
                                 Text(
@@ -220,6 +221,9 @@ fun StorageAuditDialog(
                             )
                             file.telegramRemoteFileId?.let {
                                 Text("Remote file ID: $it", style = MaterialTheme.typography.bodySmall)
+                            }
+                            file.tdlibFileId?.let {
+                                Text("TDLib file ID: $it", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -290,6 +294,7 @@ private fun PathValue(
     path: String,
     exists: Boolean,
     onReveal: (String) -> Boolean,
+    canReveal: Boolean,
     onCopy: () -> Unit
 ) {
     Row(
