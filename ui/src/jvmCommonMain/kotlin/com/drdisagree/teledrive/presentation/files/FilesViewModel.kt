@@ -838,7 +838,8 @@ class FilesViewModel(
                     }
                 }
                 val remoteInfo = remoteInfoResult?.getOrNull()
-                val nativeFile = remoteInfo?.localPath?.let(::File)
+                val tdlibPath = remoteInfo?.localPath
+                val nativeFile = tdlibPath?.let(::File)
                 val localManaged = driveFile.localPath?.let { path ->
                     isWithinManagedRoots(path, managedRoots)
                 } ?: false
@@ -854,11 +855,11 @@ class FilesViewModel(
                     telegramMessageId = driveFile.messageId,
                     telegramRemoteFileId = driveFile.remoteFileId,
                     tdlibFileId = remoteInfo?.fileId,
-                    tdlibPath = remoteInfo?.localPath,
+                    tdlibPath = tdlibPath,
                     tdlibPathExists = nativeFile?.isFile == true,
                     tdlibPathIsTeleDriveManaged = remoteInfo != null &&
-                            (remoteInfo.localPath == null ||
-                                    isWithinManagedRoots(remoteInfo.localPath, managedRoots)),
+                            (tdlibPath == null ||
+                                    isWithinManagedRoots(tdlibPath, managedRoots)),
                     tdlibSizeBytes = nativeFile?.takeIf { it.isFile }?.length(),
                     tdlibDownloadComplete = remoteInfo?.isDownloadingCompleted,
                     tdlibError = remoteInfoResult?.exceptionOrNull()?.message
