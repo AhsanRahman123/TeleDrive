@@ -766,6 +766,7 @@ class FilesViewModel(
             val tdlibFiles = File(tdlibRoot, "files")
             val roots = listOf(
                 StorageAuditRoot("This app instance / profile", appDataRoot.absolutePath, appDataRoot.exists(), true),
+                StorageAuditRoot("Build working directory", System.getProperty("user.dir").orEmpty(), File(System.getProperty("user.dir").orEmpty()).isDirectory, true),
                 StorageAuditRoot("App files and database", storagePaths.filesDir.absolutePath, storagePaths.filesDir.exists(), true),
                 StorageAuditRoot("Room database", File(storagePaths.filesDir, "teledrive.db").absolutePath, File(storagePaths.filesDir, "teledrive.db").isFile, false, File(storagePaths.filesDir, "teledrive.db").length()),
                 StorageAuditRoot("Settings file", File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").absolutePath, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").isFile, false, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").length()),
