@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onSubscription
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -976,6 +977,14 @@ class DesktopTelegramClient(
 
         val job = launch {
             updates.onSubscription { subscribed.complete(Unit) }
+                .onEach { update ->
+                    if (update is TdApi.UpdateSpeedLimitNotification) {
+                        SafeLog.w(
+                            "TransferDiagnostics",
+                            "TELEGRAM_SPEED_LIMIT direction=${if (update.isUpload) "UPLOAD" else "DOWNLOAD"}"
+                        )
+                    }
+                }
                 .filterIsInstance<TdApi.UpdateFile>()
                 .filter { it.file.id == downloadedFileId.await() }
                 .collect { update ->
@@ -1486,5 +1495,12 @@ private fun TdApi.File.readyPath(): String? {
     if (!local.isDownloadingCompleted) return null
     val path = local.path
     if (path.isNullOrEmpty()) return null
-    return path.takeIf { File(it).exists() }
+
+    val candidate = File(path)
+    if (!candidate.isFile) return null
+
+    val expectedBytes = size.takeIf { it > 0 } ?: expectedSize
+    if (expectedBytes > 0 && candidate.length() != expectedBytes) return null
+
+    return path
 }
