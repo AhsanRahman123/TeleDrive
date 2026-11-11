@@ -11,6 +11,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import org.jetbrains.compose.resources.stringResource
@@ -41,6 +42,7 @@ import com.drdisagree.teledrive.resources.info_yes
 import com.drdisagree.teledrive.domain.model.BackupState
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.presentation.common.Formatters
+import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,6 +52,7 @@ fun FileInfoSheet(
     onDismiss: () -> Unit,
     folderPath: String? = null
 ) {
+    val fileRevealer = LocalFileRevealer.current
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -92,12 +95,17 @@ fun FileInfoSheet(
                 stringResource(Res.string.info_local_copy),
                 stringResource(if (file.hasLocalCopy) Res.string.info_yes else Res.string.info_no)
             )
-            file.localPath?.let {
+            file.localPath?.let { path ->
                 InfoRow(
                     stringResource(Res.string.info_path),
-                    it,
+                    path,
                     monospace = true
                 )
+                if (fileRevealer != null) {
+                    TextButton(onClick = { fileRevealer.reveal(path) }) {
+                        Text("Open local file location")
+                    }
+                }
             }
 
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
