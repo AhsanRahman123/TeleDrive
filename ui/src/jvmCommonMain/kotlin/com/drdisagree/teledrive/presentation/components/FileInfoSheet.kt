@@ -98,6 +98,9 @@ fun FileInfoSheet(
                     BackupState.NONE -> stringResource(Res.string.info_backup_none)
                 }
             )
+            file.chatId?.let { InfoRow("Telegram storage chat ID", it.toString(), monospace = true) }
+            file.messageId?.let { InfoRow("Telegram message ID", it.toString(), monospace = true) }
+            file.remoteFileId?.let { InfoRow("Telegram remote file ID", it, monospace = true) }
             InfoRow(
                 stringResource(Res.string.info_local_copy),
                 stringResource(if (file.hasLocalCopy) Res.string.info_yes else Res.string.info_no)
