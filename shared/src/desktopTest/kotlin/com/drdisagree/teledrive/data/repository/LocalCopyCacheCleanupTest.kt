@@ -111,7 +111,8 @@ class LocalCopyCacheCleanupTest {
         streamCrypto = StreamCrypto(),
         wrappedKeyRepository = unused<WrappedKeyRepository>(),
         settingsRepository = harness.settings,
-        fileImporter = unused<FileImporter>()
+        fileImporter = unused<FileImporter>(),
+        storagePaths = harness.storagePaths
     )
 
     private val localCopyDeleter = object : LocalCopyDeleter {
@@ -127,8 +128,29 @@ class LocalCopyCacheCleanupTest {
         override fun isGone(path: String): Boolean = !File(path).exists()
     }
 
-    private fun localFile(): File = File.createTempFile("teledrive-local-copy", ".bin").apply {
-        writeBytes(byteArrayOf(1, 2, 3, 4))
+    private fun localFile(): File {
+        val directory = File(harness.storagePaths.filesDir, "local-copies").apply { mkdirs() }
+        return File.createTempFile("teledrive-local-copy", ".bin", directory).apply {
+            writeBytes(byteArrayOf(1, 2, 3, 4))
+        }
+    }
+
+    @Test
+    fun `external original files are preserved by free up space`() = runBlocking {
+        val original = File.createTempFile("user-original", ".bin").apply {
+            writeBytes(byteArrayOf(9, 8, 7, 6))
+        }
+        fileDao.upsert(fileEntity(original))
+
+        val result = repository().deleteLocalCopy(listOf("file-1"))
+        val cleanup = (result as AppResult.Success<LocalCleanup>).value
+
+        assertTrue(original.isFile)
+        assertEquals(original.absolutePath, fileDao.byId("file-1")?.localPath)
+        assertTrue(harness.telegram.managedDownloadRemovalRequests.isEmpty())
+        assertEquals(0, cleanup.deletedCount)
+        assertEquals(1, cleanup.keptUnmanaged)
+        original.delete()
     }
 
     private fun fileEntity(local: File) = FileEntity(
