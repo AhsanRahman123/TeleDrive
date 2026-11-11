@@ -809,6 +809,9 @@ class FilesViewModel(
                     tdlibFileId = remoteInfo?.fileId,
                     tdlibPath = remoteInfo?.localPath,
                     tdlibPathExists = nativeFile?.isFile == true,
+                    tdlibPathIsTeleDriveManaged = remoteInfo != null &&
+                            (remoteInfo.localPath == null ||
+                                    isWithinManagedRoots(remoteInfo.localPath, managedRoots)),
                     tdlibSizeBytes = nativeFile?.takeIf { it.isFile }?.length(),
                     tdlibDownloadComplete = remoteInfo?.isDownloadingCompleted,
                     tdlibError = remoteInfoResult?.exceptionOrNull()?.message
