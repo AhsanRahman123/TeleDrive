@@ -36,7 +36,7 @@ interface ThumbnailJobDao {
            )
            DELETE FROM thumbnail_jobs
             WHERE fileId IN (
-                SELECT id FROM files WHERE folderId IN (SELECT id FROM child_folders)
+                SELECT id FROM files WHERE COALESCE(folderId, preTrashFolderId) IN (SELECT id FROM child_folders)
             )"""
     )
     suspend fun deleteInFolderTree(folderId: String): Int

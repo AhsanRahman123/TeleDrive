@@ -112,7 +112,8 @@ class CacheRepositoryImpl(
             val victims = thumbnailDao.leastRecentlyUsed(64)
             if (victims.isEmpty()) break
             for (victim in victims) {
-                File(victim.path).delete()
+                val cachedFile = File(victim.path)
+                if (cachedFile.exists() && !cachedFile.delete()) continue
                 thumbnailDao.delete(victim.fileId)
                 thumbnailPolicyDao.upsert(
                     ThumbnailPolicyEntity(
@@ -123,6 +124,7 @@ class CacheRepositoryImpl(
                     )
                 )
                 thumbnailJobDao.delete(victim.fileId)
+                thumbnailMemoryCache.remove(victim.fileId)
                 total -= victim.sizeBytes
                 if (total <= maxBytes) break
             }
@@ -133,12 +135,15 @@ class CacheRepositoryImpl(
     override suspend fun thumbnailManagerSummary(): ThumbnailManagerSummary {
         refreshThumbnailStats()
         val unfiled = thumbnailDao.unfiledAggregate()
+        val orphaned = thumbnailDao.orphanedAggregate()
         return ThumbnailManagerSummary(
             totalBytes = thumbnailDao.totalSizeBytes(),
             cachedFiles = thumbnailDao.count(),
             pendingJobs = thumbnailJobDao.count(),
             unfiledBytes = unfiled.totalBytes,
-            unfiledCachedFiles = unfiled.cachedFiles
+            unfiledCachedFiles = unfiled.cachedFiles,
+            orphanedBytes = orphaned.totalBytes,
+            orphanedCachedFiles = orphaned.cachedFiles
         )
     }
 
@@ -159,7 +164,10 @@ class CacheRepositoryImpl(
             }
         }
         val result = folders.asSequence()
-            .filter { it.parentId == parentId && it.trashedAt == null }
+            .filter { folder ->
+                folder.parentId == parentId &&
+                    (folder.trashedAt == null || (totals[folder.id]?.first ?: 0L) > 0L)
+            }
             .map { folder ->
                 val usage = totals[folder.id] ?: (0L to 0)
                 val own = direct[folder.id]
@@ -170,7 +178,8 @@ class CacheRepositoryImpl(
                     totalBytes = usage.first,
                     cachedFiles = usage.second,
                     directBytes = own?.totalBytes ?: 0L,
-                    directCachedFiles = own?.cachedFiles ?: 0
+                    directCachedFiles = own?.cachedFiles ?: 0,
+                    isTrashed = folder.trashedAt != null
                 )
             }
             .toList()
@@ -206,7 +215,8 @@ class CacheRepositoryImpl(
             generatedAt = row.generatedAt,
             lastAccessAt = row.lastAccessAt,
             encrypted = row.encrypted,
-            policy = policy
+            policy = policy,
+            isTrashed = row.isTrashed
         )
     }
 
@@ -237,6 +247,15 @@ class CacheRepositoryImpl(
         ) {
             thumbnailStore.enqueueAutomatic(targetId)
         }
+        if (targetType == ThumbnailTargetType.FILE &&
+            policy == ThumbnailPolicy.INHERIT
+        ) {
+            val inherited = thumbnailPolicyDao.effectivePolicy(targetId)
+                ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+            if (inherited == ThumbnailPolicy.AUTOMATIC) {
+                thumbnailStore.enqueueAutomatic(targetId)
+            }
+        }
         if (targetType == ThumbnailTargetType.FOLDER &&
             policy == ThumbnailPolicy.MANUAL_ONLY
         ) {
@@ -255,6 +274,15 @@ class CacheRepositoryImpl(
             policy == ThumbnailPolicy.AUTOMATIC
         ) {
             queueAutomaticFolderThumbnails(targetId)
+        }
+        if (targetType == ThumbnailTargetType.FOLDER &&
+            policy == ThumbnailPolicy.INHERIT
+        ) {
+            val inherited = thumbnailPolicyDao.inheritedFolderPolicy(targetId)
+                ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+            if (inherited == ThumbnailPolicy.AUTOMATIC) {
+                queueAutomaticFolderThumbnails(targetId)
+            }
         }
     }
 
@@ -372,6 +400,30 @@ class CacheRepositoryImpl(
                 changedAt = System.currentTimeMillis()
             )
         )
+        refreshThumbnailStats()
+    }
+
+    override suspend fun clearOrphanedThumbnails() {
+        var afterFileId: String? = null
+        while (true) {
+            val batch = thumbnailDao.orphanedFilePathsPage(
+                afterFileId = afterFileId,
+                limit = JOB_BATCH_SIZE
+            )
+            if (batch.isEmpty()) break
+            val removedIds = batch.filter { ref ->
+                val cachedFile = File(ref.path)
+                !cachedFile.exists() || cachedFile.delete()
+            }.map { it.fileId }
+            if (removedIds.isNotEmpty()) {
+                thumbnailDao.deleteAll(removedIds)
+                thumbnailJobDao.delete(removedIds)
+                thumbnailPolicyDao.deleteFileOverrides(removedIds)
+                removedIds.forEach(thumbnailMemoryCache::remove)
+            }
+            afterFileId = batch.last().fileId
+            if (batch.size < JOB_BATCH_SIZE) break
+        }
         refreshThumbnailStats()
     }
 

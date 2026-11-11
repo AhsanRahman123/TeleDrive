@@ -12,7 +12,9 @@ data class ThumbnailManagerSummary(
     val cachedFiles: Int = 0,
     val pendingJobs: Int = 0,
     val unfiledBytes: Long = 0L,
-    val unfiledCachedFiles: Int = 0
+    val unfiledCachedFiles: Int = 0,
+    val orphanedBytes: Long = 0L,
+    val orphanedCachedFiles: Int = 0
 )
 
 data class ThumbnailFolderUsage(
@@ -23,7 +25,8 @@ data class ThumbnailFolderUsage(
     val cachedFiles: Int,
     val directBytes: Long,
     val directCachedFiles: Int,
-    val policy: ThumbnailPolicy = ThumbnailPolicy.INHERIT
+    val policy: ThumbnailPolicy = ThumbnailPolicy.INHERIT,
+    val isTrashed: Boolean = false
 )
 
 data class ThumbnailFileUsage(
@@ -36,7 +39,8 @@ data class ThumbnailFileUsage(
     val generatedAt: Long?,
     val lastAccessAt: Long?,
     val encrypted: Boolean?,
-    val policy: ThumbnailPolicy
+    val policy: ThumbnailPolicy,
+    val isTrashed: Boolean = false
 ) {
     val isCached: Boolean
         get() = thumbnailSizeBytes != null

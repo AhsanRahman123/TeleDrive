@@ -22,6 +22,7 @@ import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.files.Urls
 import com.drdisagree.teledrive.core.media.ThumbnailStore
+import com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier
 import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailJobDao
 import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
@@ -206,9 +207,13 @@ class DesktopThumbnailStore(
                 thumbnailJobDao.delete(job.fileId)
                 continue
             }
-            val bytes = runCatching {
+            val bytes = try {
                 generationSemaphore.withPermit { generate(job.fileId) }
-            }.getOrNull()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
             if (bytes != null) {
                 thumbnailJobDao.delete(job.fileId)
                 continue
@@ -222,6 +227,56 @@ class DesktopThumbnailStore(
             jobWakeups.trySend(Unit)
             return
         }
+    }
+
+    override suspend fun cacheUploadedThumbnail(
+        fileId: String,
+        temporaryPath: String
+    ): Boolean {
+        val existing = thumbnailDao.byFileId(fileId)
+        if (existing != null) {
+            if (File(existing.path).exists()) return true
+            thumbnailDao.delete(fileId)
+        }
+
+        val inherited = thumbnailPolicyDao.effectivePolicy(fileId)
+            ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
+        if (inherited == ThumbnailPolicy.MANUAL_ONLY) return false
+
+        val temporary = File(temporaryPath)
+        if (!temporary.isFile || temporary.length() == 0L) return false
+        val jpegBytes = runCatching { temporary.readBytes() }.getOrNull() ?: return false
+        val encrypt = settingsRepository.preferences.first().encryptThumbnails
+        val stored = if (encrypt) {
+            streamCrypto.encryptBytes(thumbnailKey(), jpegBytes)
+        } else jpegBytes
+        val dir = File(storagePaths.cacheDir, "thumbnails").apply { mkdirs() }
+        val target = File(dir, "$fileId.thumb")
+        if (!runCatching { target.writeBytes(stored) }.isSuccess) return false
+
+        val now = System.currentTimeMillis()
+        thumbnailDao.upsert(
+            ThumbnailEntity(
+                fileId = fileId,
+                path = target.absolutePath,
+                encrypted = encrypt,
+                width = MAX_DIMENSION,
+                height = MAX_DIMENSION,
+                sizeBytes = stored.size.toLong(),
+                generatedAt = now,
+                lastAccessAt = now
+            )
+        )
+        thumbnailPolicyDao.upsert(
+            ThumbnailPolicyEntity(
+                targetType = TARGET_FILE,
+                targetId = fileId,
+                policy = ThumbnailPolicy.AUTOMATIC.name,
+                changedAt = now
+            )
+        )
+        ThumbnailChangeNotifier.notifyChanged(fileId, stored.size.toLong(), now, encrypt)
+        return true
     }
 
     override suspend fun uploadThumbnailFile(fileId: String): File? {
@@ -288,6 +343,7 @@ class DesktopThumbnailStore(
                     lastAccessAt = now
                 )
             )
+            ThumbnailChangeNotifier.notifyChanged(fileId, stored.size.toLong(), now, encrypt)
         }
         return jpegBytes
     }

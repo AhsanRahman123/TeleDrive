@@ -25,7 +25,7 @@ interface ThumbnailPolicyDao {
         """
         WITH RECURSIVE ancestors(id, parentId, depth) AS (
             SELECT folders.id, folders.parentId, 0
-              FROM files JOIN folders ON folders.id = files.folderId
+              FROM files JOIN folders ON folders.id = COALESCE(files.folderId, files.preTrashFolderId)
              WHERE files.id = :fileId
             UNION ALL
             SELECT parent.id, parent.parentId, ancestors.depth + 1
@@ -54,6 +54,25 @@ interface ThumbnailPolicyDao {
     suspend fun delete(targetType: String, targetId: String)
 
     @Query(
+        """WITH RECURSIVE parents(id, parentId, depth) AS (
+               SELECT id, parentId, 0 FROM folders WHERE id = :folderId
+               UNION ALL
+               SELECT parent.id, parent.parentId, parents.depth + 1
+                 FROM folders AS parent
+                 JOIN parents ON parent.id = parents.parentId
+           )
+           SELECT policies.policy
+             FROM parents
+             JOIN thumbnail_policies AS policies
+               ON policies.targetType = 'FOLDER'
+              AND policies.targetId = parents.id
+            WHERE parents.depth > 0
+            ORDER BY parents.depth ASC
+            LIMIT 1"""
+    )
+    suspend fun inheritedFolderPolicy(folderId: String): String?
+
+    @Query(
         "DELETE FROM thumbnail_policies WHERE targetType = 'FILE' AND targetId IN (:fileIds)"
     )
     suspend fun deleteFileOverrides(fileIds: List<String>)
@@ -73,7 +92,7 @@ interface ThumbnailPolicyDao {
            DELETE FROM thumbnail_policies
             WHERE (targetType = 'FOLDER' AND targetId IN (SELECT id FROM child_folders))
                OR (targetType = 'FILE' AND targetId IN (
-                    SELECT id FROM files WHERE folderId IN (SELECT id FROM child_folders)
+                    SELECT id FROM files WHERE COALESCE(folderId, preTrashFolderId) IN (SELECT id FROM child_folders)
                ))"""
     )
     suspend fun deleteOverridesInFolderTree(folderId: String): Int

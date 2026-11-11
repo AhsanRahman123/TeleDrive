@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.collect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,6 +53,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.drdisagree.teledrive.core.media.ThumbnailModel
+import com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailFileUsage
@@ -83,18 +85,24 @@ fun ThumbnailManagerScreen(
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var loading by remember { mutableStateOf(true) }
     var hasMore by remember { mutableStateOf(false) }
-    var loadingMore by remember { mutableStateOf(false) }
+    var pageOffset by remember { mutableStateOf(0) }
     var refreshKey by remember { mutableStateOf(0) }
     var confirmClearFolder by remember { mutableStateOf(false) }
+    var confirmClearOrphans by remember { mutableStateOf(false) }
 
     val folderId = folderPath.lastOrNull()?.id
-    LaunchedEffect(folderId, refreshKey) {
+    LaunchedEffect(folderId) { selectedIds = emptySet() }
+    LaunchedEffect(folderId, refreshKey, pageOffset) {
         loading = true
         summary = cacheRepository.thumbnailManagerSummary()
         folders = cacheRepository.thumbnailFolders(folderId)
-        files = cacheRepository.thumbnailFiles(folderId, 0, THUMBNAIL_PAGE_SIZE)
-        hasMore = files.size == THUMBNAIL_PAGE_SIZE
-        selectedIds = emptySet()
+        val page = cacheRepository.thumbnailFiles(
+            folderId,
+            pageOffset,
+            THUMBNAIL_PAGE_SIZE + 1
+        )
+        files = page.take(THUMBNAIL_PAGE_SIZE)
+        hasMore = page.size > THUMBNAIL_PAGE_SIZE
         filePolicy = if (folderId == null) {
             ThumbnailPolicy.INHERIT
         } else {
@@ -103,16 +111,81 @@ fun ThumbnailManagerScreen(
         loading = false
     }
 
-    // Keep the pending-job count and cache total fresh while background work is running.
-    LaunchedEffect(Unit) {
+    // Update totals and folder aggregates without resetting the current file page or selection.
+    LaunchedEffect(folderId) {
         while (true) {
             val latest = cacheRepository.thumbnailManagerSummary()
             val cacheChanged = latest.totalBytes != summary.totalBytes ||
-                latest.cachedFiles != summary.cachedFiles
+                latest.cachedFiles != summary.cachedFiles ||
+                latest.unfiledBytes != summary.unfiledBytes ||
+                latest.unfiledCachedFiles != summary.unfiledCachedFiles ||
+                latest.orphanedBytes != summary.orphanedBytes ||
+                latest.orphanedCachedFiles != summary.orphanedCachedFiles
             summary = latest
-            if (cacheChanged) refreshKey++
+            if (cacheChanged) {
+                folders = cacheRepository.thumbnailFolders(folderId)
+            }
             delay(5_000L)
         }
+    }
+
+    // Update visible file rows as their persistent cache entries are written.
+    LaunchedEffect(folderId) {
+        ThumbnailChangeNotifier.events.collect { change ->
+            val existing = files.firstOrNull { it.fileId == change.fileId }
+            // Only update the visible page incrementally. Off-page events are reflected by the
+            // lightweight five-second summary refresh, avoiding an unbounded 100k-ID set.
+            if (existing != null) {
+                val wasCached = existing.isCached
+                val delta = if (wasCached) {
+                    change.sizeBytes - (existing.thumbnailSizeBytes ?: 0L)
+                } else {
+                    change.sizeBytes
+                }
+                summary = summary.copy(
+                    totalBytes = (summary.totalBytes + delta).coerceAtLeast(0L),
+                    cachedFiles = if (wasCached) summary.cachedFiles
+                    else summary.cachedFiles + 1
+                )
+                files = files.map { file ->
+                    if (file.fileId == change.fileId) {
+                        file.copy(
+                            thumbnailSizeBytes = change.sizeBytes,
+                            generatedAt = change.generatedAt,
+                            lastAccessAt = change.generatedAt,
+                            encrypted = change.encrypted
+                        )
+                    } else file
+                }
+            }
+        }
+    }
+
+    if (confirmClearOrphans) {
+        AlertDialog(
+            onDismissRequest = { confirmClearOrphans = false },
+            title = { Text("Remove unlinked thumbnails?") },
+            text = {
+                Text(
+                    "These preview files no longer have a matching TeleDrive file record. " +
+                        "Only the orphaned thumbnail cache files and metadata will be removed."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearOrphans = false
+                        scope.launch {
+                            cacheRepository.clearOrphanedThumbnails()
+                            refreshKey++
+                        }
+                    }
+                ) { Text("Remove unlinked cache") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearOrphans = false }) { Text("Cancel") }
+            }
+        )
     }
 
     if (confirmClearFolder && folderId != null) {
@@ -158,7 +231,10 @@ fun ThumbnailManagerScreen(
                 IconButton(
                     onClick = {
                         if (folderPath.isEmpty()) onBack()
-                        else folderPath = folderPath.dropLast(1)
+                        else {
+                            folderPath = folderPath.dropLast(1)
+                            pageOffset = 0
+                        }
                     }
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -199,6 +275,26 @@ fun ThumbnailManagerScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (summary.orphanedCachedFiles > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Unlinked cache", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            "${summary.orphanedCachedFiles} entries · ${Formatters.bytes(summary.orphanedBytes)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OutlinedButton(onClick = { confirmClearOrphans = true }) {
+                        Text("Clean up")
+                    }
+                }
+            }
 
             if (folderId != null) {
                 Row(
@@ -270,7 +366,10 @@ fun ThumbnailManagerScreen(
                 folders.forEach { folder ->
                     ThumbnailFolderRow(
                         folder = folder,
-                        onOpen = { folderPath = folderPath + folder },
+                        onOpen = {
+                            folderPath = folderPath + folder
+                            pageOffset = 0
+                        },
                         onPolicy = { policy ->
                             scope.launch {
                                 cacheRepository.setThumbnailPolicy(
@@ -296,7 +395,7 @@ fun ThumbnailManagerScreen(
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        "${files.size}${if (hasMore) "+" else ""} shown · largest cached previews first",
+                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1} · ${files.size} files · largest cached previews first",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -374,27 +473,25 @@ fun ThumbnailManagerScreen(
                         }
                     )
                 }
-                if (hasMore) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     OutlinedButton(
                         onClick = {
-                            if (loadingMore) return@OutlinedButton
-                            loadingMore = true
-                            scope.launch {
-                                val next = cacheRepository.thumbnailFiles(
-                                    folderId,
-                                    files.size,
-                                    THUMBNAIL_PAGE_SIZE
-                                )
-                                files = files + next
-                                hasMore = next.size == THUMBNAIL_PAGE_SIZE
-                                loadingMore = false
-                            }
+                            pageOffset = (pageOffset - THUMBNAIL_PAGE_SIZE).coerceAtLeast(0)
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !loadingMore
-                    ) {
-                        Text(if (loadingMore) "Loading…" else "Load more files")
-                    }
+                        enabled = pageOffset > 0
+                    ) { Text("Previous") }
+                    Text(
+                        "Page ${pageOffset / THUMBNAIL_PAGE_SIZE + 1}",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    OutlinedButton(
+                        onClick = { pageOffset += THUMBNAIL_PAGE_SIZE },
+                        enabled = hasMore
+                    ) { Text("Next") }
                 }
             }
         }
@@ -450,7 +547,8 @@ private fun ThumbnailFolderRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
             Text(
-                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · ${policyLabel(currentPolicy)}",
+                "${Formatters.bytes(folder.totalBytes)} · ${folder.cachedFiles} cached · direct ${Formatters.bytes(folder.directBytes)} · ${policyLabel(currentPolicy)}" +
+                    if (folder.isTrashed) " · In Trash" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
@@ -469,6 +567,12 @@ private fun ThumbnailFileRow(
     onGenerate: () -> Unit,
     onRemove: () -> Unit
 ) {
+    var thumbnailRevision by remember(file.fileId) { mutableStateOf(0L) }
+    LaunchedEffect(file.fileId) {
+        ThumbnailChangeNotifier.events.collect { change ->
+            if (change.fileId == file.fileId) thumbnailRevision++
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -491,7 +595,7 @@ private fun ThumbnailFileRow(
         ) {
             if (file.isCached) {
                 AsyncImage(
-                    model = ThumbnailModel(file.fileId),
+                    model = ThumbnailModel(file.fileId, thumbnailRevision),
                     contentDescription = file.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -507,11 +611,11 @@ private fun ThumbnailFileRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(file.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
             Text(
-                if (file.isCached) {
+                (if (file.isCached) {
                     "${Formatters.bytes(file.thumbnailSizeBytes ?: 0L)} thumbnail · ${Formatters.bytes(file.fileSizeBytes)} file"
                 } else {
                     "Not cached · ${Formatters.bytes(file.fileSizeBytes)} file"
-                },
+                }) + if (file.isTrashed) " · In Trash" else "",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1

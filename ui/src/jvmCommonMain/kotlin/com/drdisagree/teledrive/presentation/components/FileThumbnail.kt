@@ -14,6 +14,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.media.ThumbnailModel
+import com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier
+import kotlinx.coroutines.flow.collect
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -43,6 +46,16 @@ fun FileThumbnail(
             MimeTypes.isText(file.mimeType) ||
             MimeTypes.isApk(file.mimeType, file.name)
     var failed by remember(file.id) { mutableStateOf(false) }
+    var thumbnailRevision by remember(file.id) { mutableStateOf(0L) }
+
+    LaunchedEffect(file.id) {
+        ThumbnailChangeNotifier.events.collect { change ->
+            if (change.fileId == file.id) {
+                failed = false
+                thumbnailRevision++
+            }
+        }
+    }
 
     BoxWithConstraints(
         modifier = modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -54,7 +67,7 @@ fun FileThumbnail(
 
         if (supportsThumbnail && (file.hasLocalCopy || file.hasRemoteCopy) && !failed) {
             AsyncImage(
-                model = ThumbnailModel(file.id),
+                model = ThumbnailModel(file.id, thumbnailRevision),
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = contentScale,

@@ -322,7 +322,57 @@ class DesktopDatabaseTest {
             assertEquals(12_345L, rows.single().thumbnailSizeBytes)
             assertEquals(4096L, rows.single().fileSizeBytes)
             assertEquals(true, rows.single().encrypted)
-            assertEquals(12_345L, database.thumbnailDao().folderAggregates().single().totalBytes)
+            assertEquals(false, rows.single().isTrashed)
+
+            database.fileDao().upsert(
+                FileEntity(
+                    id = "trashed-photo",
+                    folderId = null,
+                    name = "trashed-photo.jpg",
+                    sizeBytes = 2048L,
+                    mimeType = "image/jpeg",
+                    category = FileCategory.IMAGE,
+                    localPath = null,
+                    contentHash = null,
+                    chatId = 7L,
+                    messageId = null,
+                    remoteFileId = null,
+                    remoteUniqueId = null,
+                    backupState = BackupState.NONE,
+                    trashedAt = 50L,
+                    preTrashFolderId = "album",
+                    createdAt = 1L,
+                    modifiedAt = 1L,
+                    addedAt = 1L
+                )
+            )
+            database.thumbnailDao().upsert(
+                ThumbnailEntity(
+                    fileId = "trashed-photo",
+                    path = "/cache/trashed-photo.thumb",
+                    encrypted = false,
+                    width = 512,
+                    height = 512,
+                    sizeBytes = 4096L,
+                    generatedAt = 30L,
+                    lastAccessAt = 40L
+                )
+            )
+
+            val trashed = database.thumbnailDao()
+                .filesInFolder("album", 60, 0)
+                .single { it.fileId == "trashed-photo" }
+            assertEquals(true, trashed.isTrashed)
+            assertEquals("album", trashed.folderId)
+            assertEquals(16_441L, database.thumbnailDao().folderAggregates().single().totalBytes)
+            assertEquals(0L, database.thumbnailDao().unfiledAggregate().totalBytes)
+            assertEquals(
+                listOf("photo", "trashed-photo"),
+                database.thumbnailDao()
+                    .cachedFilePathsInFolderTreePage("album", null, 60)
+                    .map { it.fileId }
+                    .sorted()
+            )
         } finally {
             database.close()
             file.delete()
