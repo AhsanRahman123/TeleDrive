@@ -1337,6 +1337,7 @@ class TdLibTelegramClient(
         localPath = local?.path?.takeIf { it.isNotEmpty() },
         isDownloadingCompleted = local?.isDownloadingCompleted == true,
         isDownloadingActive = local?.isDownloadingActive == true,
+        canBeDeleted = local?.canBeDeleted == true,
         downloadOffset = local?.downloadOffset ?: 0,
         downloadedPrefixSize = local?.downloadedPrefixSize ?: 0
     )
