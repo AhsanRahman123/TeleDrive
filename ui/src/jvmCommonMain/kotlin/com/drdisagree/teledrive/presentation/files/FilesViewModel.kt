@@ -790,7 +790,6 @@ class FilesViewModel(
                 .filter { it.label in setOf(
                     "TDLib local file cache",
                     "TeleDrive-owned upload copies",
-                    "App cache",
                     "Download destination"
                 ) }
                 .map { File(it.path) } +
