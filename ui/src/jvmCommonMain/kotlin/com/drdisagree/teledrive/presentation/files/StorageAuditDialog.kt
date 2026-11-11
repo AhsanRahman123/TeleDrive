@@ -34,10 +34,12 @@ fun StorageAuditDialog(
     snapshot: StorageAuditSnapshot,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
+    canReveal: Boolean,
     onReveal: (String) -> Boolean,
     onDeleteManagedCopies: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
+    var confirmRemoval by remember(snapshot.lastCheckedAt) { mutableStateOf(false) }
     val deletableCount = snapshot.files.count { file ->
         file.localPath != null &&
                 file.localExists &&
@@ -46,7 +48,37 @@ fun StorageAuditDialog(
                 file.tdlibPathIsTeleDriveManaged
     }
 
-    AlertDialog(
+    if (confirmRemoval) {
+        AlertDialog(
+            onDismissRequest = { confirmRemoval = false },
+            title = { Text("Remove $deletableCount TeleDrive-managed copies?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Only the app-owned local copies and their TDLib cache files will be removed.")
+                    snapshot.files.filter { file ->
+                        file.localPath != null && file.localExists &&
+                                file.localIsTeleDriveManaged && file.telegramRemoteFileId != null &&
+                                file.tdlibPathIsTeleDriveManaged
+                    }.forEach { file ->
+                        Text("• ${file.name}", style = MaterialTheme.typography.bodySmall)
+                        file.localPath?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                    Text("Original files outside TeleDrive-managed folders and Telegram cloud backups will be preserved.")
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    confirmRemoval = false
+                    onDeleteManagedCopies()
+                }) { Text("Remove local copies") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRemoval = false }) { Text("Keep files") }
+            }
+        )
+    } else AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -82,6 +114,7 @@ fun StorageAuditDialog(
                     exists = snapshot.roots.firstOrNull { it.label == "This app instance / profile" }?.exists == true,
                     sizeBytes = null,
                     onReveal = onReveal,
+                    canReveal = canReveal,
                     onCopy = { clipboard.setText(AnnotatedString(snapshot.instanceRoot)) }
                 )
 
@@ -98,6 +131,7 @@ fun StorageAuditDialog(
                         exists = root.exists,
                         sizeBytes = root.sizeBytes,
                         onReveal = onReveal,
+                        canReveal = canReveal,
                         onCopy = { clipboard.setText(AnnotatedString(root.path)) }
                     )
                 }
@@ -139,6 +173,7 @@ fun StorageAuditDialog(
                                     path = path,
                                     exists = file.localExists,
                                     onReveal = onReveal,
+                                    canReveal = canReveal,
                                     onCopy = { clipboard.setText(AnnotatedString(path)) }
                                 )
                             }
@@ -206,7 +241,7 @@ fun StorageAuditDialog(
                     Text("Refresh")
                 }
                 Button(
-                    onClick = onDeleteManagedCopies,
+                    onClick = { confirmRemoval = true },
                     enabled = !snapshot.loading && deletableCount > 0
                 ) {
                     Text("Remove $deletableCount managed copies")
@@ -226,6 +261,7 @@ private fun AuditPath(
     exists: Boolean,
     sizeBytes: Long?,
     onReveal: (String) -> Boolean,
+    canReveal: Boolean,
     onCopy: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -240,6 +276,7 @@ private fun AuditPath(
             path = path,
             exists = exists,
             onReveal = onReveal,
+            canReveal = canReveal,
             onCopy = onCopy
         )
         sizeBytes?.takeIf { it > 0L }?.let {
@@ -273,10 +310,12 @@ private fun PathValue(
         }
         Column {
             TextButton(onClick = onCopy) { Text("Copy") }
-            TextButton(
-                onClick = { revealFailed = !onReveal(path) },
-                enabled = exists
-            ) { Text("Open") }
+            if (canReveal) {
+                TextButton(
+                    onClick = { revealFailed = !onReveal(path) },
+                    enabled = exists
+                ) { Text("Open") }
+            }
         }
     }
 }
