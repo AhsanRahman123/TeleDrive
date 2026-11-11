@@ -814,6 +814,8 @@ class FileRepositoryImpl(
         val managedRoots = managedLocalCopyRoots()
         val safeCandidates = mutableListOf<FileEntity>()
         var keptUnmanaged = 0
+        var unverifiedCount = 0
+        var failedCount = 0
 
         // Never delete an arbitrary path imported from a user's drive. Both the app's registered
         // local copy and the path TDLib currently reports must belong to a TeleDrive-managed
@@ -833,7 +835,7 @@ class FileRepositoryImpl(
                 null
             }
             if (nativeFile == null) {
-                keptUnmanaged++
+                unverifiedCount++
                 continue
             }
             val nativePath = nativeFile.localPath
@@ -848,13 +850,24 @@ class FileRepositoryImpl(
 
         if (safeCandidates.isEmpty()) {
             return AppResult.Success(
-                LocalCleanup(0, keptOffline = kept.size, keptUnmanaged = keptUnmanaged)
+                LocalCleanup(
+                    0,
+                    keptOffline = kept.size,
+                    keptUnmanaged = keptUnmanaged,
+                    unverifiedCount = unverifiedCount
+                )
             )
         }
 
         val cleanup = localCopyDeleter.delete(safeCandidates.mapNotNull { it.localPath })
         if (cleanup.consentRequest != null) {
-            return AppResult.Success(cleanup.copy(keptOffline = kept.size, keptUnmanaged = keptUnmanaged))
+            return AppResult.Success(
+                cleanup.copy(
+                    keptOffline = kept.size,
+                    keptUnmanaged = keptUnmanaged,
+                    unverifiedCount = unverifiedCount
+                )
+            )
         }
 
         var cleared = 0
@@ -871,16 +884,24 @@ class FileRepositoryImpl(
                     false
                 }
                 if (!cacheReleased) {
-                    keptUnmanaged++
+                    failedCount++
                     continue
                 }
 
                 fileDao.setLocalPath(entity.id, null)
                 cleared++
+            } else {
+                failedCount++
             }
         }
         return AppResult.Success(
-            LocalCleanup(cleared, keptOffline = kept.size, keptUnmanaged = keptUnmanaged)
+            LocalCleanup(
+                cleared,
+                keptOffline = kept.size,
+                keptUnmanaged = keptUnmanaged,
+                unverifiedCount = unverifiedCount,
+                failedCount = failedCount
+            )
         )
     }
 
