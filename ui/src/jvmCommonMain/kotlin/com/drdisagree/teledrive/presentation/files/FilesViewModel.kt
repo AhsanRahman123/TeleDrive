@@ -7,6 +7,8 @@ import androidx.navigation.toRoute
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.core.files.AppStoragePaths
+import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
 import com.drdisagree.teledrive.core.files.FileImporter
 import com.drdisagree.teledrive.core.files.ImportSource
@@ -88,6 +90,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -102,7 +105,9 @@ class FilesViewModel(
     private val fileImporter: FileImporter,
     private val pendingShare: PendingShare,
     private val makeAvailableOffline: MakeAvailableOfflineUseCase,
-    private val clipboard: FileClipboard
+    private val clipboard: FileClipboard,
+    private val storagePaths: AppStoragePaths,
+    private val telegramClient: TelegramClient
 ) : ViewModel() {
 
     private val folderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
@@ -135,6 +140,11 @@ class FilesViewModel(
 
     private val _infoTarget = MutableStateFlow<DriveFile?>(null)
     val infoTarget: StateFlow<DriveFile?> = _infoTarget.asStateFlow()
+
+    private val _storageAudit = MutableStateFlow<StorageAuditSnapshot?>(null)
+    val storageAudit: StateFlow<StorageAuditSnapshot?> = _storageAudit.asStateFlow()
+    private var storageAuditFileIds: List<String> = emptyList()
+    private var refreshAuditAfterConsent = false
 
     private val _copying = MutableStateFlow(false)
     val copying: StateFlow<Boolean> = _copying.asStateFlow()
@@ -651,6 +661,27 @@ class FilesViewModel(
     val deleteConsentRequests = _deleteConsentRequests.asSharedFlow()
     private var pendingLocalCopyIds: List<String> = emptyList()
 
+    fun inspectSelectedStorage() {
+        storageAuditFileIds = selection.value.toList()
+        loadStorageAudit(storageAuditFileIds)
+    }
+
+    fun refreshStorageAudit() {
+        if (storageAuditFileIds.isNotEmpty()) loadStorageAudit(storageAuditFileIds)
+    }
+
+    fun dismissStorageAudit() {
+        _storageAudit.value = null
+        storageAuditFileIds = emptyList()
+    }
+
+    fun deleteAuditedLocalCopies() {
+        val ids = storageAuditFileIds
+        if (ids.isEmpty()) return
+        refreshAuditAfterConsent = true
+        removeLocalCopies(ids, refreshAudit = true)
+    }
+
     fun deleteLocalCopies() {
         val ids = selection.value.toList()
         clearSelection()
@@ -658,10 +689,10 @@ class FilesViewModel(
     }
 
     fun retryLocalCopyRemoval() {
-        removeLocalCopies(pendingLocalCopyIds)
+        removeLocalCopies(pendingLocalCopyIds, refreshAudit = refreshAuditAfterConsent)
     }
 
-    private fun removeLocalCopies(ids: List<String>) {
+    private fun removeLocalCopies(ids: List<String>, refreshAudit: Boolean = false) {
         if (ids.isEmpty()) return
         viewModelScope.launch {
             when (val result = fileRepository.deleteLocalCopy(ids)) {
@@ -669,25 +700,138 @@ class FilesViewModel(
                     val consent = result.value.consentRequest
                     if (consent != null) {
                         pendingLocalCopyIds = ids
+                        refreshAuditAfterConsent = refreshAudit
                         _deleteConsentRequests.tryEmit(consent)
                     } else {
                         pendingLocalCopyIds = emptyList()
-                        val kept = result.value.keptOffline
-                        _messages.tryEmit(
-                            if (kept > 0 && result.value.deletedCount == 0) {
-                                UiText.Resource(Res.string.files_kept_offline_copies, kept)
-                            } else {
-                                UiText.Resource(
-                                    Res.string.files_removed_local_copies,
-                                    result.value.deletedCount
-                                )
+                        refreshAuditAfterConsent = false
+                        val cleanup = result.value
+                        val summary = buildString {
+                            append("Removed ")
+                            append(cleanup.deletedCount)
+                            append(" TeleDrive-managed local copies.")
+                            if (cleanup.keptOffline > 0) {
+                                append(" Kept ")
+                                append(cleanup.keptOffline)
+                                append(" Available Offline files.")
                             }
-                        )
+                            if (cleanup.keptUnmanaged > 0) {
+                                append(" Preserved ")
+                                append(cleanup.keptUnmanaged)
+                                append(" original/external locations because TeleDrive does not own those files.")
+                            }
+                        }
+                        _messages.tryEmit(UiText.Plain(summary))
+                        if (refreshAudit) loadStorageAudit(ids)
                     }
                 }
 
-                is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+                is AppResult.Failure -> {
+                    _messages.tryEmit(result.error.toUiText())
+                    if (refreshAudit) loadStorageAudit(ids)
+                }
             }
+        }
+    }
+
+    private fun loadStorageAudit(ids: List<String>) {
+        if (ids.isEmpty()) return
+        _storageAudit.update { current -> current?.copy(loading = true) }
+        viewModelScope.launch {
+            val files = runCatching { fileRepository.getFiles(ids) }.getOrElse {
+                _storageAudit.value = StorageAuditSnapshot(
+                    loading = false,
+                    instanceRoot = storagePaths.filesDir.parentFile?.absolutePath.orEmpty(),
+                    roots = emptyList(),
+                    files = emptyList(),
+                    lastCheckedAt = System.currentTimeMillis(),
+                    error = it.message ?: "Could not load file records"
+                )
+                return@launch
+            }
+
+            val preferences = settingsRepository.preferences.first()
+            val configuredDownloads = preferences.downloadDirectory
+                ?.takeIf { it.isNotBlank() }
+                ?.let(::File)
+            val downloadsBase = configuredDownloads
+                ?: if (storagePaths.externalStorageRoot != null) {
+                    File(storagePaths.externalStorageRoot, "Download")
+                } else {
+                    File(System.getProperty("user.home").orEmpty(), "Downloads")
+                }
+            val downloadsRoot = File(downloadsBase, "TeleDrive")
+            val appDataRoot = storagePaths.filesDir.parentFile ?: storagePaths.filesDir
+            val tdlibRoot = File(storagePaths.filesDir, "tdlib")
+            val tdlibFiles = File(tdlibRoot, "files")
+            val roots = listOf(
+                StorageAuditRoot("This app instance / profile", appDataRoot.absolutePath, appDataRoot.exists(), true),
+                StorageAuditRoot("App files and database", storagePaths.filesDir.absolutePath, storagePaths.filesDir.exists(), true),
+                StorageAuditRoot("Room database", File(storagePaths.filesDir, "teledrive.db").absolutePath, File(storagePaths.filesDir, "teledrive.db").isFile, false, File(storagePaths.filesDir, "teledrive.db").length()),
+                StorageAuditRoot("Settings file", File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").absolutePath, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").isFile, false, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").length()),
+                StorageAuditRoot("TDLib database", File(tdlibRoot, "db").absolutePath, File(tdlibRoot, "db").isDirectory, true),
+                StorageAuditRoot("TDLib local file cache", tdlibFiles.absolutePath, tdlibFiles.isDirectory, true),
+                StorageAuditRoot("TeleDrive-owned upload copies", File(storagePaths.filesDir, "local-copies").absolutePath, File(storagePaths.filesDir, "local-copies").isDirectory, true),
+                StorageAuditRoot("App cache", storagePaths.cacheDir.absolutePath, storagePaths.cacheDir.isDirectory, true),
+                StorageAuditRoot("Download destination", downloadsRoot.absolutePath, downloadsRoot.isDirectory, true)
+            )
+            val managedRoots = roots
+                .filter { it.label in setOf(
+                    "TDLib local file cache",
+                    "TeleDrive-owned upload copies",
+                    "App cache",
+                    "Download destination"
+                ) }
+                .map { File(it.path) } +
+                listOf(File(storagePaths.filesDir, "imports"), File(storagePaths.filesDir, "notes"))
+
+            val entries = files.map { driveFile ->
+                val localFile = driveFile.localPath?.let(::File)
+                val remoteInfoResult = driveFile.remoteFileId?.let { remoteId ->
+                    runCatching { telegramClient.resolveFile(remoteId) }
+                }
+                val remoteInfo = remoteInfoResult?.getOrNull()
+                val nativeFile = remoteInfo?.localPath?.let(::File)
+                val localManaged = driveFile.localPath?.let { path ->
+                    isWithinManagedRoots(path, managedRoots)
+                } ?: false
+                StorageAuditFile(
+                    id = driveFile.id,
+                    name = driveFile.name,
+                    expectedSizeBytes = driveFile.sizeBytes,
+                    localPath = driveFile.localPath,
+                    localExists = localFile?.isFile == true,
+                    localSizeBytes = localFile?.takeIf { it.isFile }?.length(),
+                    localIsTeleDriveManaged = localManaged,
+                    telegramChatId = driveFile.chatId,
+                    telegramMessageId = driveFile.messageId,
+                    telegramRemoteFileId = driveFile.remoteFileId,
+                    tdlibFileId = remoteInfo?.fileId,
+                    tdlibPath = remoteInfo?.localPath,
+                    tdlibPathExists = nativeFile?.isFile == true,
+                    tdlibSizeBytes = nativeFile?.takeIf { it.isFile }?.length(),
+                    tdlibDownloadComplete = remoteInfo?.isDownloadingCompleted,
+                    tdlibError = remoteInfoResult?.exceptionOrNull()?.message
+                )
+            }
+
+            _storageAudit.value = StorageAuditSnapshot(
+                loading = false,
+                instanceRoot = appDataRoot.absolutePath,
+                roots = roots,
+                files = entries,
+                lastCheckedAt = System.currentTimeMillis()
+            )
+        }
+    }
+
+    private fun isWithinManagedRoots(path: String, roots: List<File>): Boolean {
+        val candidate = runCatching { File(path).canonicalFile.toPath() }.getOrNull()
+            ?: return false
+        return roots.any { root ->
+            val normalizedRoot = runCatching { root.canonicalFile.toPath() }.getOrNull()
+                ?: return@any false
+            candidate.startsWith(normalizedRoot)
         }
     }
 
