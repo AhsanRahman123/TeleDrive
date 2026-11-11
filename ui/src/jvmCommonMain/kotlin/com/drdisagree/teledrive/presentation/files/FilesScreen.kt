@@ -467,10 +467,10 @@ fun FilesScreen(
                                                 ) { viewModel.downloadSelected() }
                                             )
                                         }
-                                        if (filesOnly && state.capabilities.canFreeUpSpace) {
+                                        if (filesOnly) {
                                             add(
                                                 MenuAction(
-                                                    label = stringResource(Res.string.common_free_space),
+                                                    label = "Storage locations / Free up space",
                                                     icon = Icons.Filled.CleaningServices
                                                 ) { viewModel.inspectSelectedStorage() }
                                             )
