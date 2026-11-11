@@ -812,14 +812,17 @@ class FileRepositoryImpl(
         }
 
         val managedRoots = managedLocalCopyRoots()
-        val safeCandidates = mutableListOf<FileEntity>()
+        // Keep track of whether TDLib's own cache is safe to remove separately from
+        // the database-managed copy. Those two paths do not have to share a storage root.
+        val safeCandidates = mutableListOf<Pair<FileEntity, Boolean>>()
         var keptUnmanaged = 0
         var unverifiedCount = 0
         var failedCount = 0
 
-        // Never delete an arbitrary path imported from a user's drive. Both the app's registered
-        // local copy and the path TDLib currently reports must belong to a TeleDrive-managed
-        // location before cleanup is allowed to touch either one.
+        // The database copy and TDLib cache can be stored in different locations.
+        // The app copy is deletable only when its own path is managed. A separate
+        // TDLib path outside managed roots must be preserved, not used to block deletion
+        // of the safe app copy.
         for (entity in candidates) {
             val localPath = entity.localPath ?: continue
             val remoteFileId = entity.remoteFileId ?: continue
@@ -838,14 +841,14 @@ class FileRepositoryImpl(
                 unverifiedCount++
                 continue
             }
+
             val nativePath = nativeFile.localPath
-            if (!nativePath.isNullOrBlank() &&
-                !isWithinManagedRoots(nativePath, managedRoots)
-            ) {
+            val removeTdlibCache = nativePath.isNullOrBlank() ||
+                    isWithinManagedRoots(nativePath, managedRoots)
+            if (!removeTdlibCache) {
                 keptUnmanaged++
-                continue
             }
-            safeCandidates += entity
+            safeCandidates += entity to removeTdlibCache
         }
 
         if (safeCandidates.isEmpty()) {
@@ -859,7 +862,7 @@ class FileRepositoryImpl(
             )
         }
 
-        val cleanup = localCopyDeleter.delete(safeCandidates.mapNotNull { it.localPath })
+        val cleanup = localCopyDeleter.delete(safeCandidates.mapNotNull { it.first.localPath })
         if (cleanup.consentRequest != null) {
             return AppResult.Success(
                 cleanup.copy(
@@ -871,23 +874,27 @@ class FileRepositoryImpl(
         }
 
         var cleared = 0
-        for (entity in safeCandidates) {
+        for ((entity, removeTdlibCache) in safeCandidates) {
             val path = entity.localPath ?: continue
             if (localCopyDeleter.isGone(path)) {
-                val remoteFileId = entity.remoteFileId ?: continue
-                val cacheReleased = try {
-                    telegramClient.removeManagedDownload(remoteFileId)
-                    true
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: Exception) {
-                    false
-                }
-                if (!cacheReleased) {
-                    failedCount++
-                    continue
+                if (removeTdlibCache) {
+                    val remoteFileId = entity.remoteFileId ?: continue
+                    val cacheReleased = try {
+                        telegramClient.removeManagedDownload(remoteFileId)
+                        true
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!cacheReleased) {
+                        failedCount++
+                        continue
+                    }
                 }
 
+                // The registered app copy is gone. Clear its database path even when a
+                // separate external TDLib path was deliberately left untouched.
                 fileDao.setLocalPath(entity.id, null)
                 cleared++
             } else {
