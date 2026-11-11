@@ -45,7 +45,7 @@ fun StorageAuditDialog(
                 file.localExists &&
                 file.localIsTeleDriveManaged &&
                 file.telegramRemoteFileId != null &&
-                file.tdlibPathIsTeleDriveManaged
+                file.tdlibFileId != null
     }
 
     if (confirmRemoval) {
@@ -54,11 +54,11 @@ fun StorageAuditDialog(
             title = { Text("Remove $deletableCount TeleDrive-managed copies?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Only the app-owned local copies and their TDLib cache files will be removed.")
+                    Text("TeleDrive-managed database copies and TDLib cache files inside managed folders will be removed. External TDLib paths, original files outside TeleDrive-managed folders, and Telegram cloud backups will be preserved.")
                     snapshot.files.filter { file ->
                         file.localPath != null && file.localExists &&
                                 file.localIsTeleDriveManaged && file.telegramRemoteFileId != null &&
-                                file.tdlibPathIsTeleDriveManaged
+                                file.tdlibFileId != null
                     }.forEach { file ->
                         Text("• ${file.name}", style = MaterialTheme.typography.bodySmall)
                         file.localPath?.let {
