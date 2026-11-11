@@ -930,6 +930,7 @@ fun FilesScreen(
             snapshot = snapshot,
             onRefresh = viewModel::refreshStorageAudit,
             onDismiss = viewModel::dismissStorageAudit,
+            canReveal = fileRevealer != null,
             onReveal = { path -> fileRevealer?.reveal(path) ?: false },
             onDeleteManagedCopies = viewModel::deleteAuditedLocalCopies
         )
