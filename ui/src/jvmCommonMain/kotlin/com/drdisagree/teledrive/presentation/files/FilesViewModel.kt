@@ -759,20 +759,31 @@ class FilesViewModel(
                 ?: File(System.getProperty("user.home").orEmpty(), "Downloads")
             val downloadsRoot = File(downloadsBase, "TeleDrive")
             val appDataRoot = storagePaths.filesDir.parentFile ?: storagePaths.filesDir
+            val installedAppProfile = System.getenv("APPDATA")
+                ?.takeIf { it.isNotBlank() }
+                ?.let { File(it, "TeleDrive") }
             val tdlibRoot = File(storagePaths.filesDir, "tdlib")
             val tdlibFiles = File(tdlibRoot, "files")
-            val roots = listOf(
-                StorageAuditRoot("This app instance / profile", appDataRoot.absolutePath, appDataRoot.exists(), true),
-                StorageAuditRoot("Build working directory", System.getProperty("user.dir").orEmpty(), File(System.getProperty("user.dir").orEmpty()).isDirectory, true),
+            val roots = buildList {
+                add(StorageAuditRoot("This app instance / profile", appDataRoot.absolutePath, appDataRoot.exists(), true))
+                add(StorageAuditRoot("Build working directory", System.getProperty("user.dir").orEmpty(), File(System.getProperty("user.dir").orEmpty()).isDirectory, true))
+                installedAppProfile?.let {
+                    StorageAuditRoot(
+                        "Default installed-app profile (%APPDATA%\\TeleDrive)",
+                        it.absolutePath,
+                        it.exists(),
+                        true
+                    )
+                },
                 StorageAuditRoot("App files and database", storagePaths.filesDir.absolutePath, storagePaths.filesDir.exists(), true),
                 StorageAuditRoot("Room database", File(storagePaths.filesDir, "teledrive.db").absolutePath, File(storagePaths.filesDir, "teledrive.db").isFile, false, File(storagePaths.filesDir, "teledrive.db").length()),
                 StorageAuditRoot("Settings file", File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").absolutePath, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").isFile, false, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").length()),
-                StorageAuditRoot("TDLib database", File(tdlibRoot, "db").absolutePath, File(tdlibRoot, "db").isDirectory, true),
-                StorageAuditRoot("TDLib local file cache", tdlibFiles.absolutePath, tdlibFiles.isDirectory, true),
-                StorageAuditRoot("TeleDrive-owned upload copies", File(storagePaths.filesDir, "local-copies").absolutePath, File(storagePaths.filesDir, "local-copies").isDirectory, true),
-                StorageAuditRoot("App cache", storagePaths.cacheDir.absolutePath, storagePaths.cacheDir.isDirectory, true),
-                StorageAuditRoot("Download destination", downloadsRoot.absolutePath, downloadsRoot.isDirectory, true)
-            )
+                add(StorageAuditRoot("TDLib database", File(tdlibRoot, "db").absolutePath, File(tdlibRoot, "db").isDirectory, true))
+                add(StorageAuditRoot("TDLib local file cache", tdlibFiles.absolutePath, tdlibFiles.isDirectory, true))
+                add(StorageAuditRoot("TeleDrive-owned upload copies", File(storagePaths.filesDir, "local-copies").absolutePath, File(storagePaths.filesDir, "local-copies").isDirectory, true))
+                add(StorageAuditRoot("App cache", storagePaths.cacheDir.absolutePath, storagePaths.cacheDir.isDirectory, true))
+                add(StorageAuditRoot("Download destination", downloadsRoot.absolutePath, downloadsRoot.isDirectory, true))
+            }
             val managedRoots = roots
                 .filter { it.label in setOf(
                     "TDLib local file cache",
