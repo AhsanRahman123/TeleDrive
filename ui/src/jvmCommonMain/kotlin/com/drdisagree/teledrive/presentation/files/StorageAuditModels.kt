@@ -25,6 +25,7 @@ data class StorageAuditFile(
     val tdlibPathIsTeleDriveManaged: Boolean,
     val tdlibSizeBytes: Long?,
     val tdlibDownloadComplete: Boolean?,
+    val tdlibCanBeDeleted: Boolean?,
     val tdlibError: String?
 )
 
