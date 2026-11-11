@@ -7,10 +7,11 @@ import android.provider.OpenableColumns
 import androidx.core.net.toUri
 import com.drdisagree.teledrive.core.common.SafeLog
 import java.io.File
+import java.io.InputStream
 
 /**
- * Files the app can already read are used in place so nothing is duplicated; anything else is
- * copied, since a content URI grant may not survive a reboot.
+ * Every import is copied into app-owned local storage. A selected external file or SAF source is
+ * never recorded as a disposable local copy. Free up space only removes this managed copy.
  */
 class AndroidFileImporter(
     private val context: Context
@@ -18,21 +19,17 @@ class AndroidFileImporter(
 
     override fun import(reference: String): ImportedFile? {
         val direct = runCatching { File(reference) }.getOrNull()?.takeIf { it.isFile }
-        if (direct != null) {
-            return ImportedFile(direct.absolutePath, direct.name, direct.length())
-        }
+        if (direct != null) return copyIntoManagedStorage(direct)
         return import(reference.toUri())
     }
 
     private fun import(uri: Uri): ImportedFile? {
         if (uri.scheme == ContentResolver.SCHEME_FILE) {
             val direct = uri.path?.let(::File)?.takeIf { it.isFile }
-            if (direct != null) {
-                return ImportedFile(direct.absolutePath, direct.name, direct.length())
-            }
+            if (direct != null) return copyIntoManagedStorage(direct)
         }
         readablePath(uri)?.let { source ->
-            return ImportedFile(source.absolutePath, source.name, source.length())
+            return copyIntoManagedStorage(source)
         }
 
         val metadata = queryMetadata(uri) ?: run {
@@ -40,23 +37,14 @@ class AndroidFileImporter(
             return null
         }
         val displayName = FileNameUtils.sanitize(metadata.first)
-        val targetDir = File(context.filesDir, IMPORT_DIR).apply { mkdirs() }
-
-        val staged = File(targetDir, displayName)
-        if (staged.isFile && staged.length() == metadata.second && metadata.second > 0) {
-            return ImportedFile(staged.absolutePath, displayName, staged.length())
-        }
-
-        val existingNames = targetDir.list()?.toSet().orEmpty()
-        val stagingName = FileNameUtils.uniqueName(displayName) { it in existingNames }
-        val target = File(targetDir, stagingName)
+        val target = newManagedTarget(displayName) ?: return null
 
         return runCatching {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().buffered().use { output -> input.copyTo(output) }
-            } ?: run {
-                SafeLog.w(TAG, "Import failed: the provider refused to open the document")
-                return null
+            } ?: error("The provider refused to open the selected document")
+            if (metadata.second > 0 && target.length() != metadata.second) {
+                error("Imported copy size does not match the provider metadata")
             }
             ImportedFile(target.absolutePath, displayName, target.length())
         }.getOrElse {
@@ -66,23 +54,59 @@ class AndroidFileImporter(
         }
     }
 
+    private fun copyIntoManagedStorage(source: File): ImportedFile? {
+        val displayName = FileNameUtils.sanitize(source.name)
+        val target = newManagedTarget(displayName) ?: return null
+        return runCatching {
+            source.inputStream().buffered().use { input ->
+                target.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+            if (target.length() != source.length()) {
+                error("Imported copy size does not match the selected source")
+            }
+            ImportedFile(target.absolutePath, displayName, target.length())
+        }.getOrElse {
+            SafeLog.w(TAG, "Import failed", it)
+            target.delete()
+            null
+        }
+    }
+
+    private fun newManagedTarget(displayName: String): File? {
+        val directory = File(context.filesDir, LOCAL_COPY_DIR)
+        if (!directory.exists() && !directory.mkdirs()) return null
+        val existingNames = directory.list()?.toSet().orEmpty()
+        val name = FileNameUtils.uniqueName(displayName) { it in existingNames }
+        return File(directory, name)
+    }
+
     override fun discard(imported: ImportedFile) {
-        if (isStaged(imported.path)) File(imported.path).delete()
+        if (isManagedCopy(imported.path)) File(imported.path).delete()
     }
 
     override fun expand(reference: String): List<ImportSource> =
         expandDirectory(reference) ?: listOf(ImportSource(reference, ""))
 
+    // Only old temporary imports are staged. New local-copies remain available until the user
+    // explicitly removes them with Free up space.
     override fun isStaged(path: String): Boolean =
-        File(path).parentFile == File(context.filesDir, IMPORT_DIR)
+        File(path).parentFile == File(context.filesDir, LEGACY_IMPORT_DIR)
 
     override fun sweepOrphans(referencedPaths: Set<String>) {
-        val staged = File(context.filesDir, IMPORT_DIR).listFiles() ?: return
-        staged.filter { it.isFile && it.absolutePath !in referencedPaths }
+        val legacyImports = File(context.filesDir, LEGACY_IMPORT_DIR).listFiles() ?: return
+        legacyImports.filter { it.isFile && it.absolutePath !in referencedPaths }
             .forEach { orphan ->
-                SafeLog.d(TAG, "Dropping an orphaned import of ${orphan.length()} bytes")
+                SafeLog.d(TAG, "Dropping a legacy staged import of ${orphan.length()} bytes")
                 orphan.delete()
             }
+    }
+
+    private fun isManagedCopy(path: String): Boolean {
+        val target = runCatching { File(path).canonicalFile }.getOrNull() ?: return false
+        val root = runCatching {
+            File(context.filesDir, LOCAL_COPY_DIR).canonicalFile
+        }.getOrNull() ?: return false
+        return target.toPath().startsWith(root.toPath())
     }
 
     private fun readablePath(uri: Uri): File? {
@@ -103,6 +127,7 @@ class AndroidFileImporter(
 
     companion object {
         private const val TAG = "FileImporter"
-        private const val IMPORT_DIR = "imports"
+        private const val LOCAL_COPY_DIR = "local-copies"
+        private const val LEGACY_IMPORT_DIR = "imports"
     }
 }
