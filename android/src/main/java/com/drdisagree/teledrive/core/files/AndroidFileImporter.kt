@@ -32,8 +32,8 @@ class AndroidFileImporter(
         }
 
         val metadata = queryMetadata(uri) ?: run {
-            SafeLog.w(TAG, "Import failed: the provider returned no metadata")
-            return null
+            SafeLog.w(TAG, "Provider returned no metadata; using the URI name and validating the copied stream")
+            (uri.lastPathSegment ?: "file") to 0L
         }
         val displayName = FileNameUtils.sanitize(metadata.first)
         val target = newManagedTarget(displayName) ?: return null
