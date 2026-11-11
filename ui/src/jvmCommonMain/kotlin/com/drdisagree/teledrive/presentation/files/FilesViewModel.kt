@@ -64,6 +64,7 @@ import com.drdisagree.teledrive.resources.message_moved_count
 import com.drdisagree.teledrive.resources.message_moved_to_trash_count
 import com.drdisagree.teledrive.resources.message_nothing_to_download
 import com.drdisagree.teledrive.resources.note_not_editable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -748,14 +749,18 @@ class FilesViewModel(
         if (ids.isEmpty()) return
         _storageAudit.update { current -> current?.copy(loading = true) }
         viewModelScope.launch {
-            val files = runCatching { fileRepository.getFiles(ids) }.getOrElse {
+            val files = try {
+                fileRepository.getFiles(ids)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
                 _storageAudit.value = StorageAuditSnapshot(
                     loading = false,
                     instanceRoot = storagePaths.filesDir.parentFile?.absolutePath.orEmpty(),
                     roots = emptyList(),
                     files = emptyList(),
                     lastCheckedAt = System.currentTimeMillis(),
-                    error = it.message ?: "Could not load file records"
+                    error = error.message ?: "Could not load file records"
                 )
                 return@launch
             }
@@ -808,7 +813,13 @@ class FilesViewModel(
             val entries = files.map { driveFile ->
                 val localFile = driveFile.localPath?.let(::File)
                 val remoteInfoResult = driveFile.remoteFileId?.let { remoteId ->
-                    runCatching { telegramClient.resolveFile(remoteId) }
+                    try {
+                        Result.success(telegramClient.resolveFile(remoteId))
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        Result.failure(error)
+                    }
                 }
                 val remoteInfo = remoteInfoResult?.getOrNull()
                 val nativeFile = remoteInfo?.localPath?.let(::File)
