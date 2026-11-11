@@ -11,4 +11,6 @@ internal class FakeStoragePaths : AppStoragePaths by unused() {
     }
     override val filesDir: File = File(root, "files").also { it.mkdirs() }
     override val cacheDir: File = File(root, "cache").also { it.mkdirs() }
+    override val externalCacheDir: File? = null
+    override val externalStorageRoot: File? = null
 }
