@@ -7,6 +7,8 @@ data class TelegramFileInfo(
     val localPath: String?,
     val isDownloadingCompleted: Boolean,
     val isDownloadingActive: Boolean,
+    /** TDLib's localFile.canBeDeleted flag; false means the backing local file must be preserved. */
+    val canBeDeleted: Boolean = false,
     val downloadOffset: Long,
     val downloadedPrefixSize: Long
 )
