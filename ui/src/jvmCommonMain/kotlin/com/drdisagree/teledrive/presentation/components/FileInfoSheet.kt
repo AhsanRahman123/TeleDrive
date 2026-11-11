@@ -101,13 +101,10 @@ fun FileInfoSheet(
             file.chatId?.let { InfoRow("Telegram storage chat ID", it.toString(), monospace = true) }
             file.messageId?.let { InfoRow("Telegram message ID", it.toString(), monospace = true) }
             file.remoteFileId?.let { InfoRow("Telegram remote file ID", it, monospace = true) }
+            Text("LOCAL STORAGE LOCATION", style = MaterialTheme.typography.labelLarge)
             InfoRow(
                 stringResource(Res.string.info_local_copy),
                 stringResource(if (file.hasLocalCopy) Res.string.info_yes else Res.string.info_no)
-            )
-            InfoRow(
-                stringResource(Res.string.info_encrypted),
-                stringResource(if (file.isEncrypted) Res.string.info_yes else Res.string.info_no)
             )
             file.localPath?.let {
                 InfoRow(
@@ -116,6 +113,26 @@ fun FileInfoSheet(
                     monospace = true
                 )
             }
+
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            Text("TELEGRAM CLOUD BACKUP", style = MaterialTheme.typography.labelLarge)
+            InfoRow(
+                stringResource(Res.string.info_backup),
+                when (file.backupState) {
+                    BackupState.BACKED_UP -> stringResource(Res.string.info_backup_done)
+                    BackupState.UPLOADING -> stringResource(Res.string.info_backup_uploading)
+                    BackupState.QUEUED -> stringResource(Res.string.info_backup_queued)
+                    BackupState.FAILED -> stringResource(Res.string.info_backup_failed)
+                    BackupState.NONE -> stringResource(Res.string.info_backup_none)
+                }
+            )
+            file.chatId?.let { InfoRow("Storage chat ID", it.toString(), monospace = true) }
+            file.messageId?.let { InfoRow("Telegram message ID", it.toString(), monospace = true) }
+            file.remoteFileId?.let { InfoRow("Telegram remote file ID", it, monospace = true) }
+            InfoRow(
+                stringResource(Res.string.info_encrypted),
+                stringResource(if (file.isEncrypted) Res.string.info_yes else Res.string.info_no)
+            )
             file.contentHash?.let {
                 InfoRow(
                     stringResource(Res.string.info_sha256),
