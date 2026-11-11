@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.data.repository
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
+import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.FileImporter
 import com.drdisagree.teledrive.core.files.LocalCleanup
 import com.drdisagree.teledrive.core.files.LocalCopyDeleter
@@ -104,7 +105,9 @@ class LocalCopyCacheCleanupTest {
         manifestCodec = harness.codec,
         folderPathResolver = harness.folderPaths,
         activeChannel = harness.activeChannel,
-        noteStore = unused<NoteStore>(),
+        noteStore = NoteStore(object : AppStoragePaths by harness.storagePaths {
+            override val filesDir: File = harness.storagePaths.cacheDir
+        }),
         streamCrypto = StreamCrypto(),
         wrappedKeyRepository = unused<WrappedKeyRepository>(),
         settingsRepository = harness.settings,
