@@ -45,6 +45,7 @@ import com.drdisagree.teledrive.domain.model.StorageSlice
 import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.usecase.FolderCycleCheck
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -824,9 +825,13 @@ class FileRepositoryImpl(
                 keptUnmanaged++
                 continue
             }
-            val nativeFile = runCatching {
+            val nativeFile = try {
                 telegramClient.resolveFile(remoteFileId)
-            }.getOrNull()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
             if (nativeFile == null) {
                 keptUnmanaged++
                 continue
@@ -857,9 +862,14 @@ class FileRepositoryImpl(
             val path = entity.localPath ?: continue
             if (localCopyDeleter.isGone(path)) {
                 val remoteFileId = entity.remoteFileId ?: continue
-                val cacheReleased = runCatching {
+                val cacheReleased = try {
                     telegramClient.removeManagedDownload(remoteFileId)
-                }.isSuccess
+                    true
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    false
+                }
                 if (!cacheReleased) {
                     keptUnmanaged++
                     continue
