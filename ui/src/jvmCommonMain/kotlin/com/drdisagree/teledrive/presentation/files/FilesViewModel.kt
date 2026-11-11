@@ -862,6 +862,7 @@ class FilesViewModel(
                                     isWithinManagedRoots(tdlibPath, managedRoots)),
                     tdlibSizeBytes = nativeFile?.takeIf { it.isFile }?.length(),
                     tdlibDownloadComplete = remoteInfo?.isDownloadingCompleted,
+                    tdlibCanBeDeleted = remoteInfo?.canBeDeleted,
                     tdlibError = remoteInfoResult?.exceptionOrNull()?.message
                 )
             }
