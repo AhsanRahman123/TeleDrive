@@ -755,11 +755,8 @@ class FilesViewModel(
                 ?.takeIf { it.isNotBlank() }
                 ?.let(::File)
             val downloadsBase = configuredDownloads
-                ?: if (storagePaths.externalStorageRoot != null) {
-                    File(storagePaths.externalStorageRoot, "Download")
-                } else {
-                    File(System.getProperty("user.home").orEmpty(), "Downloads")
-                }
+                ?: storagePaths.externalStorageRoot?.let { root -> File(root, "Download") }
+                ?: File(System.getProperty("user.home").orEmpty(), "Downloads")
             val downloadsRoot = File(downloadsBase, "TeleDrive")
             val appDataRoot = storagePaths.filesDir.parentFile ?: storagePaths.filesDir
             val tdlibRoot = File(storagePaths.filesDir, "tdlib")
