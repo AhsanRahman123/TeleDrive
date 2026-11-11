@@ -87,6 +87,7 @@ class LocalCopyCacheCleanupTest {
         assertEquals(0, cleanup.deletedCount)
         assertEquals(1, cleanup.keptUnmanaged)
         externalCache.delete()
+        Unit
     }
 
     @Test
@@ -173,6 +174,7 @@ class LocalCopyCacheCleanupTest {
         assertEquals(0, cleanup.deletedCount)
         assertEquals(1, cleanup.keptUnmanaged)
         original.delete()
+        Unit
     }
 
     private fun fileEntity(local: File) = FileEntity(
