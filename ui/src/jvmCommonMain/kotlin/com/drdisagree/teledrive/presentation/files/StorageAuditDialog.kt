@@ -3,9 +3,7 @@ package com.drdisagree.teledrive.presentation.files
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -16,7 +14,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,7 +38,6 @@ fun StorageAuditDialog(
     onDeleteManagedCopies: () -> Unit
 ) {
     val clipboard = LocalClipboardManager.current
-    var actionError by remember(snapshot.lastCheckedAt) { mutableStateOf<String?>(null) }
     val deletableCount = snapshot.files.count { file ->
         file.localPath != null &&
                 file.localExists &&
@@ -66,7 +62,7 @@ fun StorageAuditDialog(
         text = {
             Column(
                 modifier = Modifier
-                    .widthIn(min = 480.dp, max = 760.dp)
+                    .widthIn(max = 760.dp)
                     .heightIn(max = 620.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -194,9 +190,6 @@ fun StorageAuditDialog(
                     }
                 }
 
-                actionError?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
                 if (snapshot.error != null) {
                     Text(snapshot.error, color = MaterialTheme.colorScheme.error)
                 }
@@ -266,17 +259,22 @@ private fun PathValue(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = path,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis
-        )
+        var revealFailed by remember(path) { mutableStateOf(false) }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = path,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (revealFailed) {
+                Text("Could not open this location on the current platform.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+            }
+        }
         Column {
             TextButton(onClick = onCopy) { Text("Copy") }
             TextButton(
-                onClick = { onReveal(path) },
+                onClick = { revealFailed = !onReveal(path) },
                 enabled = exists
             ) { Text("Open") }
         }
