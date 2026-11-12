@@ -2,7 +2,7 @@ package com.drdisagree.teledrive.desktop.window
 
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
-import com.sun.jna.Native
+import com.sun.jna.platform.win32.Kernel32
 import com.sun.jna.platform.win32.User32
 import com.sun.jna.platform.win32.WinDef
 import com.sun.jna.platform.win32.WinUser
@@ -112,8 +112,14 @@ internal class WindowsBorderlessFullscreenController(
     }
 
     private fun setStyle(hwnd: WinDef.HWND, style: Int) {
-        val old = User32.INSTANCE.SetWindowLong(hwnd, WinUser.GWL_STYLE, style)
-        check(old != 0) { "SetWindowLong(GWL_STYLE) failed (Win32 " + Native.getLastError() + ")." }
+        // SetWindowLong may legally return zero when the previous value was zero.
+        // Clear last error first so zero can be distinguished from an actual failure.
+        Kernel32.INSTANCE.SetLastError(0)
+        val previous = User32.INSTANCE.SetWindowLong(hwnd, WinUser.GWL_STYLE, style)
+        val error = Kernel32.INSTANCE.GetLastError()
+        check(previous != 0 || error == 0) {
+            "SetWindowLong(GWL_STYLE) failed (Win32 " + error + ")."
+        }
     }
 
     private fun setBounds(hwnd: WinDef.HWND, rect: Rect, flags: Int) {
