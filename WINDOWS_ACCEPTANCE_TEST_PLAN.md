@@ -151,7 +151,8 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] File without confirmed remote verification: cannot be destructively cleaned up.
 - [ ] Storage locations show an accurate count/size after removal.
 - [ ] Verify the file can still be opened/downloaded from Telegram after cleanup.
-- [ ] In Free up space, open the Local copies tab. Inspect app/database paths and TDLib-reported paths for app-managed, external/original, TDLib-only, missing, and Available Offline cases.
+- [ ] In Free up space, open the Local copies tab. Visible rows should automatically inspect TDLib-reported cache paths (without a manual per-file click), show app/database and TDLib paths/sizes or an explicit no-cache state, and keep external/original, TDLib-only, missing, and Available Offline cases distinguishable.
+- [ ] Scroll a large backed-up library quickly; TDLib inspection must stay bounded and not flood the client with concurrent requests. Manual refresh must remain available.
 - [ ] Use Reveal for existing paths; confirm external/original paths are labelled protected and cannot be treated as TeleDrive-owned.
 - [ ] Remove a disposable managed copy only; verify the cloud copy remains and the external/original/Available Offline file is untouched.
 - [ ] Confirm confirmation text accurately explains what will and will not be deleted.
@@ -193,9 +194,9 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] Favorites, Offline, Backed up and Not backed up filters return the correct items.
 - [ ] Next/previous in Preview stays within the current filtered result set.
 - [ ] Grid/List toggle works for media and albums.
-- [ ] Use visible zoom in/out controls and verify the extra thumbnail-size steps; on wide desktop windows the grid may reach eight columns.
+- [ ] Use visible zoom in/out controls and verify the expanded 2–12 column range, including the denser 9–12 column options on wide windows.
 - [ ] Confirm list and compact grid rows show the containing folder path, including nested albums.
-- [ ] Open a large remote-only image and a downloaded local image. Confirm viewer dimensions/zoom use the original source, not the grid thumbnail.
+- [ ] Open a large remote-only image and a downloaded local image. Confirm viewer dimensions/zoom use original file bytes, not the grid thumbnail. For remote-only images above the auto-preview limit, explicitly download from the viewer and confirm it transitions to the full local original after transfer completion.
 - [ ] Confirm grid thumbnail cache stays separate and bounded: larger previews improve sharpness without rewriting or compressing source files.
 - [ ] Album sort by name, item count and latest activity works.
 - [ ] Empty folder albums appear as intended; document-only folders are not incorrectly treated as photo albums.
