@@ -27,7 +27,7 @@ Run one focused stage at a time. Do not repeatedly rerun unrelated tasks after a
 
 - [ ] `.\gradlew.bat --no-daemon :shared:desktopTest`
 - [ ] `.\gradlew.bat --no-daemon :ui:desktopTest`
-- [ ] `.\gradlew.bat --no-daemon :desktop:test`
+- [ ] `.\gradlew.bat --no-daemon :desktop:test` (includes `ThumbnailRefreshQueueRuleTest`)
 - [ ] `.\gradlew.bat --no-daemon :desktop:compileKotlin`
 - [ ] Build output reviewed; record failures by exact task and first meaningful compiler/test error.
 - [ ] Launch isolated desktop app and confirm startup, navigation and clean shutdown.
