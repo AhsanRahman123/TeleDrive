@@ -11,12 +11,10 @@ class ComposeVideoSurfaceTest {
     fun `each published frame receives independent pixel storage`() {
         val source = ByteBuffer.wrap(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8))
 
-        val firstFrame = copyVideoFramePixels(source, rowBytes = 4, height = 2)
-        requireNotNull(firstFrame)
+        val firstFrame = requireNotNull(copyVideoFramePixels(source, rowBytes = 4, height = 2))
 
-        source.put(0, 99)
-        val secondFrame = copyVideoFramePixels(source, rowBytes = 4, height = 2)
-        requireNotNull(secondFrame)
+        source.put(0, 99.toByte())
+        val secondFrame = requireNotNull(copyVideoFramePixels(source, rowBytes = 4, height = 2))
 
         assertArrayEquals(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8), firstFrame)
         assertArrayEquals(byteArrayOf(99, 2, 3, 4, 5, 6, 7, 8), secondFrame)
