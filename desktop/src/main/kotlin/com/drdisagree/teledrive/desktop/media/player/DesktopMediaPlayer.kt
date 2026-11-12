@@ -928,7 +928,6 @@ internal fun DesktopMediaPlayer(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(bottom = 36.dp)
         ) {
             PlayerControlsBar(
                 player = player,
