@@ -267,19 +267,17 @@ fun FilesScreen(
     viewModel: FilesViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
-    // Observe selection IDs independently from FilesUiState: that state also waits for
-    // asynchronous file-capability reconciliation, while row checkmarks must update now.
-    val selectedFileIds by viewModel.selectedFileIds.collectAsStateWithLifecycle()
-    val selectedFolderIds by viewModel.selectedFolderIds.collectAsStateWithLifecycle()
-    val selectedCount = selectedFileIds.size + selectedFolderIds.size
-    val selectionMode = selectedCount > 0 || selectionModeEnabled
+    val selectionSnapshot by viewModel.selectionSnapshot.collectAsStateWithLifecycle()
+    val selectedFileIds = selectionSnapshot.fileIds
+    val selectedFolderIds = selectionSnapshot.folderIds
+    val selectedCount = selectionSnapshot.count
+    val selectionMode = selectedCount > 0 || selectionSnapshot.selectionModeEnabled
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val files = viewModel.pagedFiles.collectAsLazyPagingItems()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
     val storageAudit by viewModel.storageAudit.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
-    val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
+    val allSelected = selectionSnapshot.allSelected
     val activeFolderId by viewModel.activeFolderId.collectAsStateWithLifecycle()
     val tabs by viewModel.workspaceTabs.collectAsStateWithLifecycle()
     val selectedTabId by viewModel.selectedWorkspaceTabId.collectAsStateWithLifecycle()
@@ -486,41 +484,8 @@ fun FilesScreen(
     var snackbarHeight by remember { mutableStateOf(0.dp) }
     val fabLift by animateDpAsState(targetValue = snackbarHeight, label = "fabLift")
 
-    val clipboardShortcutFocusRequester = remember { FocusRequester() }
-    LaunchedEffect(clipboardShortcutFocusRequester) {
-        clipboardShortcutFocusRequester.requestFocus()
-    }
-
     FileDropArea(onDropped = { references -> viewModel.importAndUpload(references) }) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .focusRequester(clipboardShortcutFocusRequester)
-                .onPreviewKeyEvent { event ->
-                    val command = event.isCtrlPressed || event.isMetaPressed
-                    val plainCommand = command && !event.isAltPressed && !event.isShiftPressed
-                    if (event.type != KeyEventType.KeyDown || !plainCommand) {
-                        false
-                    } else {
-                        when {
-                            event.key == Key.C && selectedCount > 0 -> {
-                                viewModel.copyToClipboardSelected()
-                                true
-                            }
-                            event.key == Key.X && selectedCount > 0 -> {
-                                viewModel.cutSelected()
-                                true
-                            }
-                            event.key == Key.V && viewModel.hasClipboardItems() -> {
-                                viewModel.paste()
-                                true
-                            }
-                            else -> false
-                        }
-                    }
-                }
-                .focusable()
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             Scaffold(
                 snackbarHost = {},
                 topBar = {
@@ -994,6 +959,7 @@ fun FilesScreen(
                                 onOpenFile = onOpenFile,
                                 onRequestTrash = { confirmTrash = true },
                                 onCreateFolder = { showCreateFolder = true },
+                                onCreateTab = ::createTab,
                                 onBack = ::navigateBackOneStep,
                                 viewModel = viewModel
                             )
@@ -1279,6 +1245,7 @@ private fun FilesContent(
     onOpenFile: (String, PreviewSequence) -> Unit,
     onRequestTrash: () -> Unit,
     onCreateFolder: () -> Unit,
+    onCreateTab: () -> Unit,
     onBack: (() -> Unit)?,
     viewModel: FilesViewModel
 ) {
@@ -1317,6 +1284,7 @@ private fun FilesContent(
         },
         onPaste = viewModel::paste,
         onNewFolder = onCreateFolder,
+        onNewTab = onCreateTab,
         onBack = onBack,
         onClear = if (selectionMode) viewModel::clearSelection else onBack
     )
@@ -1347,7 +1315,20 @@ private fun FilesContent(
         },
         onEnd = viewModel::endRangeSelection
     )
-    Box(modifier = Modifier.fillMaxSize()) {
+    val collectionFocusRequester = rememberCollectionCommandFocusRequester()
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .collectionCommandShortcuts(
+                focusRequester = collectionFocusRequester,
+                onSelectAll = { viewModel.selectAll(); true },
+                onCopy = { if (selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) { viewModel.copyToClipboardSelected(); true } else false },
+                onCut = { if (selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) { viewModel.cutSelected(); true } else false },
+                onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
+                onNewFolder = { onCreateFolder(); true },
+                onNewTab = { onCreateTab(); true }
+            )
+    ) {
         LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(columns),
