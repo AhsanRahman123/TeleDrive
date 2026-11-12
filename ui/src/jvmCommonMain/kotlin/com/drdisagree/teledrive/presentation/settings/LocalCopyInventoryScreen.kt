@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.files.AppStoragePaths
+import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.FileSortField
@@ -53,7 +54,7 @@ import java.nio.file.Paths
 
 private data class LocalCopyRow(
     val file: DriveFile,
-    val path: String,
+    val path: String?,
     val exists: Boolean,
     val managedByTeleDrive: Boolean
 )
@@ -63,6 +64,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
     val fileRepository = koinInject<FileRepository>()
     val settingsRepository = koinInject<SettingsRepository>()
     val storagePaths = koinInject<AppStoragePaths>()
+    val telegramClient = koinInject<TelegramClient>()
     val scope = rememberCoroutineScope()
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
     val fileRevealer = LocalFileRevealer.current
@@ -105,12 +107,13 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
     }.getOrDefault(false)
 
     val rows = backedUpFiles.mapNotNull { file ->
-        val path = file.localPath ?: return@mapNotNull null
+        val path = file.localPath
+        if (path == null && file.remoteFileId == null) return@mapNotNull null
         LocalCopyRow(
             file = file,
             path = path,
-            exists = runCatching { File(path).isFile }.getOrDefault(false),
-            managedByTeleDrive = isManaged(path)
+            exists = path?.let { runCatching { File(it).isFile }.getOrDefault(false) } ?: false,
+            managedByTeleDrive = path?.let(::isManaged) == true
         )
     }.filter { row ->
         search.isBlank() ||
@@ -120,7 +123,9 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
 
     val selectedRows = rows.filter { it.file.id in selectedIds }
     val visibleBytes = rows.filter { it.exists }.sumOf { it.file.sizeBytes.coerceAtLeast(0L) }
-    val removableSelection = selectedRows.any { it.managedByTeleDrive && it.exists }
+    // The repository makes the final deletion decision using verified remote state and
+    // managed-path checks. Allow selecting TDLib-only rows too; external paths remain protected.
+    val removableSelection = selectedRows.isNotEmpty()
 
     fun removeLocalCopies(ids: List<String>) {
         if (ids.isEmpty()) return
@@ -164,8 +169,8 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.titleLarge
         )
         Text(
-            "These are library files with a verified Telegram backup and a saved local path. " +
-                "The full path and ownership are shown so you can decide what to keep.",
+            "These are library files with a verified Telegram backup. Inspect each app-managed and " +
+                "TDLib cache path before deciding what to keep. External/original paths are protected.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -230,6 +235,10 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(rows, key = { it.file.id }) { row ->
+                    var tdlibPath by remember(row.file.id) { mutableStateOf<String?>(null) }
+                    var tdlibCanBeDeleted by remember(row.file.id) { mutableStateOf<Boolean?>(null) }
+                    var tdlibInspecting by remember(row.file.id) { mutableStateOf(false) }
+                    var tdlibError by remember(row.file.id) { mutableStateOf<String?>(null) }
                     Card {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(10.dp),
@@ -257,26 +266,79 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                                 )
                                 Text(
                                     "${Formatters.bytes(row.file.sizeBytes)} · " +
-                                        if (!row.exists) "Missing at saved path"
-                                        else if (row.file.isAvailableOffline) "Available Offline"
-                                        else if (row.managedByTeleDrive) "TeleDrive-managed local copy"
-                                        else "External/original file (protected)",
+                                        if (row.file.isAvailableOffline) "Available Offline"
+                                        else if (row.exists && row.managedByTeleDrive) "TeleDrive-managed app copy"
+                                        else if (row.exists) "External/original file (protected)"
+                                        else "No app-managed local copy registered",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Text(
-                                    row.path,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                row.path?.let { path ->
+                                    Text(
+                                        "App path: $path",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                tdlibPath?.let { path ->
+                                    Text(
+                                        "TDLib cache path: $path",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        if (tdlibCanBeDeleted == true) {
+                                            "TDLib reports this cache file can be deleted"
+                                        } else {
+                                            "TDLib marks this cache file as protected"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                tdlibError?.let {
+                                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                                }
                             }
-                            if (fileRevealer != null && row.exists) {
-                                TextButton(onClick = { fileRevealer.reveal(row.path) }) {
-                                    Text("Reveal")
+                            Column(horizontalAlignment = Alignment.End) {
+                                if (row.file.remoteFileId != null) {
+                                    TextButton(
+                                        enabled = !tdlibInspecting,
+                                        onClick = {
+                                            scope.launch {
+                                                tdlibInspecting = true
+                                                tdlibError = null
+                                                val info = runCatching {
+                                                    telegramClient.resolveFile(row.file.remoteFileId)
+                                                }
+                                                info.onSuccess { resolved ->
+                                                    tdlibPath = resolved.localPath
+                                                    tdlibCanBeDeleted = resolved.canBeDeleted
+                                                }.onFailure { error ->
+                                                    tdlibError = error.message ?: "Could not inspect TDLib cache"
+                                                }
+                                                tdlibInspecting = false
+                                            }
+                                        }
+                                    ) {
+                                        Text(if (tdlibInspecting) "Inspecting…" else "Inspect TDLib")
+                                    }
+                                }
+                                if (fileRevealer != null && row.exists && row.path != null) {
+                                    TextButton(onClick = { fileRevealer.reveal(row.path) }) {
+                                        Text("Reveal app copy")
+                                    }
+                                }
+                                if (fileRevealer != null && tdlibPath != null) {
+                                    TextButton(onClick = { fileRevealer.reveal(tdlibPath!!) }) {
+                                        Text("Reveal TDLib copy")
+                                    }
                                 }
                             }
                         }
