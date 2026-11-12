@@ -103,6 +103,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -351,7 +356,9 @@ fun FilesScreen(
     val working by viewModel.working.collectAsStateWithLifecycle()
     working?.let { BlockingProgressDialog(message = it.resolve()) }
 
-    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
+    AppBackHandler(enabled = selectionMode || state.folderId != null || onBack != null) {
+        if (selectionMode) viewModel.clearSelection() else navigateBackOneStep()
+    }
 
     val gridState = rememberLazyGridState()
     val tabPositions by rememberSaveable(
@@ -386,6 +393,14 @@ fun FilesScreen(
     fun navigateToFolder(folderId: String?) {
         saveCurrentTabPosition()
         viewModel.setActiveFolder(folderId)
+    }
+    fun navigateBackOneStep() {
+        if (state.folderId != null) {
+            val parentFolderId = state.breadcrumbs.dropLast(1).lastOrNull()?.id
+            navigateToFolder(parentFolderId)
+        } else {
+            onBack?.invoke()
+        }
     }
     fun activateTab(tab: FilesTabState) {
         if (tab.id == selectedTabId) return
@@ -685,13 +700,15 @@ fun FilesScreen(
                             colors = liftedTopAppBarColors(lifted),
                             title = { Text(stringResource(Res.string.files)) },
                             navigationIcon = {
-                                onBack?.let {
-                                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = it) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.ArrowBack,
-                                            contentDescription = stringResource(Res.string.common_back)
-                                        )
-                                    }
+                                TooltipIconButton(
+                                    tooltip = stringResource(Res.string.common_back),
+                                    onClick = ::navigateBackOneStep,
+                                    enabled = state.folderId != null || onBack != null
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = stringResource(Res.string.common_back)
+                                    )
                                 }
                             },
                             actions = {
@@ -950,13 +967,7 @@ fun FilesScreen(
                                 onOpenFile = onOpenFile,
                                 onRequestTrash = { confirmTrash = true },
                                 onCreateFolder = { showCreateFolder = true },
-                                onBack = {
-                                    if (state.folderId != null) {
-                                        navigateToFolder(state.breadcrumbs.dropLast(1).lastOrNull()?.id)
-                                    } else {
-                                        onBack?.invoke()
-                                    }
-                                },
+                                onBack = ::navigateBackOneStep,
                                 viewModel = viewModel
                             )
                         }
@@ -1278,7 +1289,7 @@ private fun FilesContent(
         onPaste = viewModel::paste,
         onNewFolder = onCreateFolder,
         onBack = onBack,
-        onClear = if (selectionMode) viewModel::clearSelection else null
+        onClear = if (selectionMode) viewModel::clearSelection else onBack
     )
     val dragSelect = rememberDragSelect(
         gridState = gridState,
