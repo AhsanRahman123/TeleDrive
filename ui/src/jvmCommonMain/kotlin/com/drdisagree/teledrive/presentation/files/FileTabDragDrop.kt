@@ -37,6 +37,7 @@ data class FileTabDragData(
     }
 }
 
+@Composable
 expect fun Modifier.fileTabDragSource(payload: () -> String): Modifier
 
 @Composable
