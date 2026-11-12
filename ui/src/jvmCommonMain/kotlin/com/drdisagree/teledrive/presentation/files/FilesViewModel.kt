@@ -602,9 +602,9 @@ class FilesViewModel(
     fun dragPayloadForFile(fileId: String): String {
         val selectedFiles = selection.value
         val selectedFolders = folderSelection.value
-        val includeSelection = fileId in selectedFiles || selectedFolders.isNotEmpty()
+        val includeSelection = fileId in selectedFiles
         return FileTabDragData(
-            fileIds = if (includeSelection && fileId in selectedFiles) selectedFiles.toList() else listOf(fileId),
+            fileIds = if (includeSelection) selectedFiles.toList() else listOf(fileId),
             folderIds = if (includeSelection) selectedFolders.toList() else emptyList()
         ).encode()
     }
@@ -612,14 +612,10 @@ class FilesViewModel(
     fun dragPayloadForFolder(folderId: String): String {
         val selectedFiles = selection.value
         val selectedFolders = folderSelection.value
-        val includeSelection = folderId in selectedFolders || selectedFiles.isNotEmpty()
+        val includeSelection = folderId in selectedFolders
         return FileTabDragData(
             fileIds = if (includeSelection) selectedFiles.toList() else emptyList(),
-            folderIds = if (includeSelection && folderId in selectedFolders) {
-                selectedFolders.toList()
-            } else {
-                listOf(folderId)
-            }
+            folderIds = if (includeSelection) selectedFolders.toList() else listOf(folderId)
         ).encode()
     }
 
