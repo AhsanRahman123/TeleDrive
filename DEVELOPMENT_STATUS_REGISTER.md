@@ -173,3 +173,14 @@ For each acceptance item, record:
 - Any regression or limitation.
 
 Only after the exact consolidated commit passes its relevant acceptance tests should the corresponding row be promoted to USER-VERIFIED.
+
+
+## 10. Consolidated workspace smoke test — 2026-11-12
+
+- **Clone:** User created `C:\Users\ahsan\TeleDrive-Desktop-Dev`; HEAD was `1dbb6ba4d2766e941c708f5c182bd63e81eba86b`, the documentation commit on the feature branch. Git working tree was clean in the user's PowerShell output.
+- **Build/test compilation:** User ran `.\gradlew.bat --no-daemon :shared:desktopTest :ui:desktopTest :desktop:test :desktop:compileKotlin`; Gradle reported `BUILD SUCCESSFUL`, 41 actionable tasks executed, in 3m46s. Visible deprecation and safe-call warnings were non-fatal.
+- **Launch:** The provided `scripts/run-isolated-desktop.ps1` initially hit the user's PowerShell execution policy. User used a process-scoped execution-policy bypass and launched successfully.
+- **Login/onboarding:** User completed API credentials and Telegram onboarding in the isolated development instance and reached the Home dashboard.
+- **Visible dashboard:** Screenshot showed Favorites, Recent, and Storage summary (304 files, 14.8 GB). This confirms successful startup/onboarding and that a library overview is displayed. It does not by itself prove that individual file contents are accessible or that every feature works.
+- **Profile separation:** The app process uses `TELEDRIVE_DATA_DIR` pointing at `.teledrive-instance` inside the new clone. The local settings, Room DB, TDLib DB/files and keys are stored under that isolated root. The logged-in Telegram account is nevertheless the user's real account; remote cloud operations affect real Telegram data.
+- **Next:** Perform read-only navigation and viewer smoke tests first. Do not delete, move, rename, upload, clear cache, trash, or otherwise mutate real cloud/library data until the user explicitly chooses a disposable test item or test folder. Record each test against the exact commit.
