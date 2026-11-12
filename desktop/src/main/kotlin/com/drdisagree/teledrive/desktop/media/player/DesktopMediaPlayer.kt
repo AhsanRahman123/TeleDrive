@@ -764,6 +764,7 @@ internal fun DesktopMediaPlayer(
                             controlsVisible = false
                             latestOnControlsVisibilityChange.value(false)
                             lastHiddenHPressAt = 0L
+                            lastVisibilityInteractionTick = interactionTick
                         } else {
                             val now = System.currentTimeMillis()
                             if (now - lastHiddenHPressAt in 1..H_SHOW_DOUBLE_PRESS_MS) {
@@ -773,12 +774,12 @@ internal fun DesktopMediaPlayer(
                                 PlayerControlPreferencesStore.save(updated)
                                 controlsVisible = true
                                 latestOnControlsVisibilityChange.value(true)
+                                lastVisibilityInteractionTick = interactionTick
                                 lastHiddenHPressAt = 0L
                             } else {
                                 lastHiddenHPressAt = now
                             }
                         }
-                        interactionTick++
                         true
                     }
                     key == Key.H && ctrl && !alt && !shift -> {
@@ -974,7 +975,7 @@ internal fun DesktopMediaPlayer(
                     PlayerControlPreferencesStore.save(updated)
                     controlsVisible = false
                     latestOnControlsVisibilityChange.value(false)
-                    interactionTick++
+                    lastVisibilityInteractionTick = interactionTick
                 },
                 onRate = ::setPlaybackRate,
                 onToggleRepeat = {
@@ -1671,7 +1672,7 @@ private fun PlayerControlsBar(
                     }
                 }
                 IconButton(
-                    onClick = { onInteraction(); onToggleControlsVisibility() },
+                    onClick = { onToggleControlsVisibility() },
                     modifier = Modifier.size(38.dp)
                 ) {
                     Icon(
