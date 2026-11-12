@@ -7,15 +7,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -98,7 +102,6 @@ fun main() {
     application {
         val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
         var previousWindowPlacement by remember { mutableStateOf(windowState.placement) }
-        var f11Pressed by remember { mutableStateOf(false) }
         val fullscreenController = remember {
             FullscreenController(
                 isFullscreen = { windowState.placement == WindowPlacement.Fullscreen },
@@ -126,30 +129,7 @@ fun main() {
             onCloseRequest = ::exitApplication,
             title = stringResource(SharedRes.string.app_name),
             icon = painterResource(Res.drawable.app_icon),
-            state = windowState,
-            onPreviewKeyEvent = { event ->
-                if (event.key != Key.F11) {
-                    false
-                } else if (event.type == KeyEventType.KeyUp) {
-                    // Release must clear the latch even when modifier state has changed.
-                    f11Pressed = false
-                    true
-                } else if (
-                    event.type == KeyEventType.KeyDown &&
-                    !event.isCtrlPressed &&
-                    !event.isAltPressed &&
-                    !event.isShiftPressed
-                ) {
-                    // Ignore OS key-repeat; one physical press produces one toggle.
-                    if (!f11Pressed) {
-                        f11Pressed = true
-                        fullscreenController.toggle()
-                    }
-                    true
-                } else {
-                    false
-                }
-            }
+            state = windowState
         ) {
             window.minimumSize = Dimension(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
             setSingletonImageLoaderFactory { context ->
@@ -174,7 +154,23 @@ fun main() {
                 AppTheme.SYSTEM -> systemDark
             }
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
-            Box(modifier = Modifier.fillMaxSize()) {
+            val windowShortcutFocus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { windowShortcutFocus.requestFocus() }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .focusRequester(windowShortcutFocus)
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown &&
+                            event.key == Key.F11 &&
+                            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                        ) {
+                            fullscreenController.toggle()
+                            true
+                        } else false
+                    }
+                    .focusable()
+            ) {
                 CompositionLocalProvider(LocalFullscreenController provides fullscreenController) {
                     ProvideDesktopPlatformActions {
                         TeleDriveApp(
