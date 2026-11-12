@@ -27,6 +27,7 @@ import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailJobDao
 import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
 import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
+import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -200,6 +201,28 @@ class DesktopThumbnailStore(
         }
         readCachedThumbnail(fileId)?.let { return it }
         return generationSemaphore.withPermit { generate(fileId) }
+    }
+
+    /**
+     * A remote-only item may initially have a small Telegram thumbnail. Once its original
+     * image/video is downloaded, replace that cached representation with a bounded local
+     * thumbnail. Keep manual-only folders/files untouched and reuse the same cache slot.
+     */
+    override suspend fun refreshCachedThumbnailFromLocalOriginal(fileId: String) {
+        val entity = fileDao.byId(fileId) ?: return
+        if (entity.category != FileCategory.IMAGE && entity.category != FileCategory.VIDEO) return
+        if (effectivePolicy(fileId) != ThumbnailPolicy.AUTOMATIC) return
+        if (thumbnailDao.byFileId(fileId) == null) return
+
+        thumbnailJobDao.enqueue(
+            ThumbnailJobEntity(
+                fileId = fileId,
+                queuedAt = System.currentTimeMillis(),
+                force = true
+            )
+        )
+        schedulingPaused = false
+        jobWakeups.trySend(Unit)
     }
 
     override suspend fun enqueueAfterUpload(fileId: String) {
@@ -387,7 +410,7 @@ class DesktopThumbnailStore(
         val cachedEntry = thumbnailDao.byFileId(currentJob.fileId)
         val cachedFile = cachedEntry?.let { File(it.path) }
         val cached = cachedFile?.let { it.isFile && it.length() > 0L } == true
-        if (cached || (!currentJob.force &&
+        if ((cached && !currentJob.force) || (!currentJob.force &&
                 effectivePolicy(currentJob.fileId) != ThumbnailPolicy.AUTOMATIC)
         ) {
             thumbnailJobDao.delete(currentJob.fileId)
