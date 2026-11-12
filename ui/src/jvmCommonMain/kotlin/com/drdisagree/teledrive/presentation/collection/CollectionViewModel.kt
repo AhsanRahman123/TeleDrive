@@ -14,6 +14,9 @@ import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.presentation.common.UiText
+import com.drdisagree.teledrive.presentation.common.toUiText
+import com.drdisagree.teledrive.presentation.files.CutItems
+import com.drdisagree.teledrive.presentation.files.FileClipboard
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.files_queued_for_download
 import com.drdisagree.teledrive.domain.repository.FileRepository
@@ -41,7 +44,8 @@ class CollectionViewModel(
     private val fileRepository: FileRepository,
     private val trashRepository: TrashRepository,
     private val transferRepository: TransferRepository,
-    private val makeAvailableOffline: MakeAvailableOfflineUseCase
+    private val makeAvailableOffline: MakeAvailableOfflineUseCase,
+    private val clipboard: FileClipboard
 ) : ViewModel() {
 
     val type: CollectionType = runCatching {
@@ -191,6 +195,90 @@ class CollectionViewModel(
 
     fun endRangeSelection() {
         rangeBase = null
+    }
+
+    fun hasSelection(): Boolean = _selection.value.isNotEmpty() || _folderSelection.value.isNotEmpty()
+
+    fun hasClipboardItems(): Boolean = clipboard.peek() != null
+
+    fun copyToClipboardSelected() {
+        val items = CutItems(
+            fileIds = _selection.value.toList(),
+            folderIds = _folderSelection.value.toList(),
+            isCut = false
+        )
+        if (items.fileIds.isEmpty() && items.folderIds.isEmpty()) return
+        clearSelection()
+        clipboard.copy(items)
+        _messages.tryEmit(
+            UiText.Plain("Copied ${items.fileIds.size + items.folderIds.size} item(s). Navigate to Files and press Ctrl+V.")
+        )
+    }
+
+    fun cutSelected() {
+        val items = CutItems(
+            fileIds = _selection.value.toList(),
+            folderIds = _folderSelection.value.toList()
+        )
+        if (items.fileIds.isEmpty() && items.folderIds.isEmpty()) return
+        clearSelection()
+        clipboard.cut(items)
+        _messages.tryEmit(
+            UiText.Plain("Cut ${items.fileIds.size + items.folderIds.size} item(s). Navigate to Files and press Ctrl+V.")
+        )
+    }
+
+    fun paste() {
+        val items = clipboard.peek() ?: return
+        val targetFolderId: String? = null
+        if (items.isCut) {
+            viewModelScope.launch {
+                var succeeded = true
+                if (items.fileIds.isNotEmpty()) {
+                    when (val result = fileRepository.moveFiles(items.fileIds, targetFolderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            _messages.tryEmit(result.error.toUiText())
+                        }
+                    }
+                }
+                items.folderIds.forEach { folderId ->
+                    when (val result = fileRepository.moveFolder(folderId, targetFolderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            _messages.tryEmit(result.error.toUiText())
+                        }
+                    }
+                }
+                if (succeeded) clipboard.clearIfMatches(items)
+            }
+        } else {
+            copyItems(items.fileIds, items.folderIds, targetFolderId)
+        }
+    }
+
+    private fun copyItems(
+        fileIds: List<String>,
+        folderIds: List<String>,
+        targetFolderId: String?
+    ) {
+        if (fileIds.isEmpty() && folderIds.isEmpty()) return
+        viewModelScope.launch {
+            if (fileIds.isNotEmpty()) {
+                when (val result = fileRepository.copyFiles(fileIds, targetFolderId)) {
+                    is AppResult.Success -> Unit
+                    is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+                }
+            }
+            folderIds.forEach { folderId ->
+                when (val result = fileRepository.copyFolder(folderId, targetFolderId)) {
+                    is AppResult.Success -> Unit
+                    is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+                }
+            }
+        }
     }
 
     fun downloadSelected() {
