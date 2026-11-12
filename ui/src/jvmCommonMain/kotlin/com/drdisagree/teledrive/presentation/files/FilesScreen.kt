@@ -265,7 +265,12 @@ fun FilesScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
-    val selectionMode = state.selectionMode || selectionModeEnabled
+    // Observe selection IDs independently from FilesUiState: that state also waits for
+    // asynchronous file-capability reconciliation, while row checkmarks must update now.
+    val selectedFileIds by viewModel.selectedFileIds.collectAsStateWithLifecycle()
+    val selectedFolderIds by viewModel.selectedFolderIds.collectAsStateWithLifecycle()
+    val selectedCount = selectedFileIds.size + selectedFolderIds.size
+    val selectionMode = selectedCount > 0 || selectionModeEnabled
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val files = viewModel.pagedFiles.collectAsLazyPagingItems()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
@@ -490,7 +495,7 @@ fun FilesScreen(
                                 Text(
                                     text = stringResource(
                                         Res.string.common_selection_count,
-                                        state.selectionCount
+                                        selectedCount
                                     ),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -524,7 +529,7 @@ fun FilesScreen(
                                         }
                                     )
                                 }
-                                if (state.selectionCount > 0) {
+                                if (selectedCount > 0) {
                                     TooltipIconButton(tooltip = stringResource(Res.string.files_move), onClick = { showMovePicker = true }) {
                                         Icon(
                                             Icons.AutoMirrored.Filled.DriveFileMove,
@@ -539,11 +544,11 @@ fun FilesScreen(
                                         )
                                     }
                                     val editableNote = state.capabilities.canEditNote &&
-                                            state.selectionCount == 1 &&
+                                            selectedCount == 1 &&
                                             state.folderSelection.isEmpty()
                                     val filesOnly = !state.folderInSelection
 
-                                    val selectedItemCount = state.selectionCount
+                                    val selectedItemCount = selectedCount
                                     val actions = buildList {
                                         if (filesOnly) {
                                             add(
@@ -941,6 +946,8 @@ fun FilesScreen(
                                 gridState = gridState,
                                 state = state,
                                 selectionMode = selectionMode,
+                                selectedFileIds = selectedFileIds,
+                                selectedFolderIds = selectedFolderIds,
                                 onShowContextMenu = { showSelectionOverflow = true },
                                 files = files,
                                 padding = PaddingValues(
@@ -1070,7 +1077,7 @@ fun FilesScreen(
         ConfirmDialog(
             title = stringResource(
                 Res.string.common_confirm_trash_count_title,
-                state.selectionCount
+                selectedCount
             ),
             message = stringResource(Res.string.common_restore_trash_emptied),
             confirmLabel = stringResource(Res.string.common_move_trash),
@@ -1227,6 +1234,8 @@ private fun FilesContent(
     gridState: LazyGridState,
     state: FilesUiState,
     selectionMode: Boolean,
+    selectedFileIds: Set<String>,
+    selectedFolderIds: Set<String>,
     onShowContextMenu: () -> Unit,
     files: LazyPagingItems<DriveFile>,
     padding: PaddingValues,
@@ -1280,9 +1289,9 @@ private fun FilesContent(
         onStart = viewModel::startRangeSelection,
         isSelected = { index ->
             if (index < state.folders.size) {
-                state.folderSelection.contains(state.folders[index].id)
+                state.folders[index].id in selectedFolderIds
             } else {
-                files.peek(index - state.folders.size)?.id?.let(state.selection::contains) == true
+                files.peek(index - state.folders.size)?.id?.let(selectedFileIds::contains) == true
             }
         },
         onRange = { range, shouldSelect ->
@@ -1314,11 +1323,11 @@ private fun FilesContent(
                     false
                 } else {
                     when {
-                        event.key == Key.C && state.selectionCount > 0 -> {
+                        event.key == Key.C && selectedCount > 0 -> {
                             viewModel.copyToClipboardSelected()
                             true
                         }
-                        event.key == Key.X && state.selectionCount > 0 -> {
+                        event.key == Key.X && selectedCount > 0 -> {
                             viewModel.cutSelected()
                             true
                         }
@@ -1358,7 +1367,7 @@ private fun FilesContent(
             }
         ) { index ->
             val folder = state.folders[index]
-            val folderSelected = folder.id in state.folderSelection
+            val folderSelected = folder.id in selectedFolderIds
             if (state.viewMode == ViewMode.GRID) {
                 FolderGridItem(
                     folder = folder,
@@ -1405,7 +1414,7 @@ private fun FilesContent(
             key = files.itemKey { "file-${it.id}" }
         ) { index ->
             val file = files[index] ?: return@items
-            val selected = file.id in state.selection
+            val selected = file.id in selectedFileIds
             val highlighted = file.id == highlightedFileId
             if (state.viewMode == ViewMode.GRID) {
                 FileGridItem(
