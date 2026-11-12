@@ -167,7 +167,7 @@ fun main() {
                                 val belongsToThisWindow = focusManager.focusedWindow === window
                                 val disallowedModifiers =
                                     KeyEvent.CTRL_DOWN_MASK or KeyEvent.ALT_DOWN_MASK or KeyEvent.SHIFT_DOWN_MASK
-                                if (!belongsToThisWindow || event.modifiersEx and disallowedModifiers != 0) {
+                                if (!belongsToThisWindow || (event.modifiersEx and disallowedModifiers) != 0) {
                                     false
                                 } else {
                                     if (!f11Pressed) {
