@@ -221,6 +221,8 @@ class FilesViewModel(
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
     private val folderSelection = MutableStateFlow<Set<String>>(emptySet())
+    val selectedFileIds: StateFlow<Set<String>> = selection.asStateFlow()
+    val selectedFolderIds: StateFlow<Set<String>> = folderSelection.asStateFlow()
     private val _selectionModeEnabled = MutableStateFlow(false)
     val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
 
@@ -409,6 +411,8 @@ class FilesViewModel(
         selection.update { current ->
             if (fileId in current) current - fileId else current + fileId
         }
+        _selectionModeEnabled.value =
+            selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
     }
 
     fun toggleFolderSelection(folderId: String) {
@@ -416,6 +420,8 @@ class FilesViewModel(
         folderSelection.update { current ->
             if (folderId in current) current - folderId else current + folderId
         }
+        _selectionModeEnabled.value =
+            selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
     }
 
     fun clearSelection() {
@@ -430,6 +436,7 @@ class FilesViewModel(
             val ids = fileRepository.fileIds(querySpec.first())
             folderSelection.update { uiState.value.folders.map { folder -> folder.id }.toSet() }
             selection.update { ids.toSet() }
+            _selectionModeEnabled.update { ids.isNotEmpty() || folderSelection.value.isNotEmpty() }
             _allSelected.update { true }
         }
     }
@@ -447,6 +454,8 @@ class FilesViewModel(
         _allSelected.update { false }
         selection.update { if (shouldSelect) base.first + fileIds else base.first - fileIds.toSet() }
         folderSelection.update { if (shouldSelect) base.second + folderIds else base.second - folderIds.toSet() }
+        _selectionModeEnabled.value =
+            selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
     }
 
     fun endRangeSelection() {
