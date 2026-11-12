@@ -62,7 +62,7 @@ If a task does not exist in this branch, record that rather than inventing an al
 - [ ] Click/tap the video surface to pause and resume.
 - [ ] Test the previous/next buttons and confirm they act on the intended queue item.
 - [ ] Test left/right arrow seeking in both directions; confirm the requested fast-seek interval is applied consistently.
-- [ ] Test P/N shortcuts for previous/next or the documented seek behavior, according to the current UI's intended mapping. Resolve any conflict before sign-off.
+- [ ] Test P/N seek shortcuts: P moves backward 5 seconds and N moves forward 5 seconds; left/right arrows remain 10 seconds. Confirm they do not trigger file navigation.
 - [ ] Test W/E previous/next-file shortcuts.
 - [ ] Test playback speed options, including 0.5x, 1x and the intended faster values; slower and faster controls both work.
 - [ ] Test volume up/down shortcuts and mute.
@@ -181,9 +181,11 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 
 - [ ] Open two or more Files tabs; open different folders in each and switch back/forth. Each tab must retain its folder and scroll position.
 - [ ] Close a background tab and then the selected tab; an adjacent tab should activate without corrupting folder state.
+- [ ] Use Close all Files tabs; confirm exactly one fresh root tab remains. Reopen folders and verify the selected tab/folder workspace restores after navigating to a preview and returning.
 - [ ] Drag a selected file/folder from Grid, List and Details onto another tab. Confirm the drag action (Move or Copy) is honored and the destination is that tab's current folder.
 - [ ] Confirm dropping onto the active tab is rejected and dropping onto an invalid/closed tab does not mutate anything.
 - [ ] Ctrl+C copies selected files/folders; repeated Ctrl+V pastes additional copies. Ctrl+X cuts and Ctrl+V moves once. Confirm files and folders preserve metadata and local copies as appropriate.
+- [ ] Force a cut/move destination failure and confirm the cut clipboard remains available for retry. Start a newer cut while an earlier move is finishing and confirm the earlier completion does not clear the newer clipboard.
 - [ ] Ctrl+N opens New Folder; Delete sends selected items to Trash; F2 renames; Ctrl+A selects all; Backspace navigates to the parent folder; Escape clears selection.
 - [ ] Test keyboard shortcuts when the list has focus and when an editable text field has focus; shortcuts must not steal typing.
 ## 7. Gallery, thumbnails and cache
@@ -239,6 +241,7 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] Zoom buttons work independently of gesture zoom.
 - [ ] Pan works while zoomed; image quality remains original.
 - [ ] Zoom resets appropriately when navigating to another image.
+- [ ] Rotate left/right through 360 degrees, toggle horizontal and vertical mirrors independently, then combine them. Confirm the original source file bytes and metadata remain unchanged.
 - [ ] Android-only pinch behavior is deferred to the later Android pass; do not mark Android parity verified from Windows tests.
 
 ### 8.2 Copy/move/download from viewer
