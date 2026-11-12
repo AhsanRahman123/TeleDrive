@@ -38,6 +38,8 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.galleryGridColumnsForWindow
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
@@ -272,7 +274,8 @@ private fun AlbumGrid(
     onToggleAlbum: (String) -> Unit,
     onStartRange: () -> Unit,
     onRange: (IntRange, Boolean) -> Unit,
-    onEndRange: () -> Unit
+    onEndRange: () -> Unit,
+    shortcuts: CollectionShortcuts
 ) {
     if (albums.isEmpty()) {
         EmptyState(
@@ -294,14 +297,26 @@ private fun AlbumGrid(
             onEnd = onEndRange
         )
         val keyboard = rememberKeyboardCollection(listState)
-        Box(modifier = Modifier.fillMaxSize()) {
+        val commandFocusRequester = rememberCollectionCommandFocusRequester()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .collectionCommandShortcuts(
+                    focusRequester = commandFocusRequester,
+                    onSelectAll = { shortcuts.onSelectAll?.invoke(); true },
+                    onCopy = { if (selectedAlbumIds.isNotEmpty()) { shortcuts.onCopy?.invoke(keyboard.current); true } else false },
+                    onCut = { if (selectedAlbumIds.isNotEmpty()) { shortcuts.onCut?.invoke(keyboard.current); true } else false },
+                    onPaste = shortcuts.onPaste?.let { paste -> { paste(); true } },
+                    onNewFolder = shortcuts.onNewFolder?.let { create -> { create(); true } }
+                )
+        ) {
             LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(end = 10.dp)
                 .then(albumDragSelect)
-                .keyboardCollection(keyboard, albums.size),
+                .keyboardCollection(keyboard, albums.size, shortcuts),
             contentPadding = PaddingValues(
                 start = 12.dp,
                 end = 12.dp,
@@ -353,7 +368,19 @@ private fun AlbumGrid(
             onEnd = onEndRange
         )
         val keyboard = rememberKeyboardCollection(gridState, columns)
-        Box(modifier = Modifier.fillMaxSize()) {
+        val commandFocusRequester = rememberCollectionCommandFocusRequester()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .collectionCommandShortcuts(
+                    focusRequester = commandFocusRequester,
+                    onSelectAll = { shortcuts.onSelectAll?.invoke(); true },
+                    onCopy = { if (selectedAlbumIds.isNotEmpty()) { shortcuts.onCopy?.invoke(keyboard.current); true } else false },
+                    onCut = { if (selectedAlbumIds.isNotEmpty()) { shortcuts.onCut?.invoke(keyboard.current); true } else false },
+                    onPaste = shortcuts.onPaste?.let { paste -> { paste(); true } },
+                    onNewFolder = shortcuts.onNewFolder?.let { create -> { create(); true } }
+                )
+        ) {
             LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(columns),
@@ -361,7 +388,7 @@ private fun AlbumGrid(
                 .fillMaxSize()
                 .padding(end = 10.dp)
                 .then(albumDragSelect)
-                .keyboardCollection(keyboard, albums.size)
+                .keyboardCollection(keyboard, albums.size, shortcuts)
                 .pinchZoom(onZoomIn = onZoomIn, onZoomOut = onZoomOut),
             contentPadding = PaddingValues(
                 start = 12.dp,
@@ -437,6 +464,23 @@ fun GalleryScreen(
     var confirmDeleteLocal by remember { mutableStateOf(false) }
     var advancedFiltersExpanded by remember { mutableStateOf(false) }
 
+    val albumShortcuts = CollectionShortcuts(
+        onToggleSelect = { index ->
+            state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
+        },
+        onSelectAll = viewModel::selectAll,
+        onCopy = { index ->
+            if (!selectionMode) state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
+            viewModel.copyToClipboardSelected()
+        },
+        onCut = { index ->
+            if (!selectionMode) state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
+            viewModel.cutSelected()
+        },
+        onPaste = viewModel::paste,
+        onNewFolder = { showCreateAlbum = true },
+        onClear = if (selectionMode) viewModel::clearSelection else null
+    )
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
     val infoFolderPath by viewModel.infoFolderPath.collectAsStateWithLifecycle()
 
@@ -1108,7 +1152,8 @@ fun GalleryScreen(
                             shouldSelect
                         )
                     },
-                    onEndRange = viewModel::endAlbumRangeSelection
+                    onEndRange = viewModel::endAlbumRangeSelection,
+                    shortcuts = albumShortcuts
                 )
                 return@Column
             }
@@ -1176,7 +1221,19 @@ fun GalleryScreen(
                         description = stringResource(Res.string.gallery_photos_videos_appear_here)
                     )
 
-                    state.viewMode == ViewMode.LIST -> Box(modifier = Modifier.fillMaxSize()) {
+                    state.viewMode == ViewMode.LIST -> {
+                        val commandFocusRequester = rememberCollectionCommandFocusRequester()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .collectionCommandShortcuts(
+                                    focusRequester = commandFocusRequester,
+                                    onSelectAll = { viewModel.selectAll(); true },
+                                    onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
+                                    onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
+                                    onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false }
+                                )
+                        ) {
                         LazyColumn(
                         state = mediaListState,
                         modifier = Modifier
@@ -1255,8 +1312,21 @@ fun GalleryScreen(
                             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                         )
                     }
+                    }
 
-                    else -> Box(modifier = Modifier.fillMaxSize()) {
+                    else -> {
+                        val commandFocusRequester = rememberCollectionCommandFocusRequester()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .collectionCommandShortcuts(
+                                    focusRequester = commandFocusRequester,
+                                    onSelectAll = { viewModel.selectAll(); true },
+                                    onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
+                                    onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
+                                    onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false }
+                                )
+                        ) {
                         LazyVerticalGrid(
                         state = mediaGridState,
                         columns = GridCells.Fixed(mediaGridColumns),
@@ -1344,6 +1414,7 @@ fun GalleryScreen(
                             state = mediaGridState,
                             modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                         )
+                    }
                     }
                 }
             }
