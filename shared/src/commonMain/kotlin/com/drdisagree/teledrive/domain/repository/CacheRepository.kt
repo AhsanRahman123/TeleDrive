@@ -128,6 +128,8 @@ interface CacheRepository {
     ): List<ThumbnailQueueItem> = emptyList()
     suspend fun thumbnailQueueCount(): Int = 0
 
+    /** Active workers that still have a durable queue row; excludes completion-cleanup leftovers. */
+    suspend fun thumbnailQueueActiveFileIds(): Set<String> = emptySet()
 
     suspend fun thumbnailQueueFileIds(offset: Int, limit: Int): List<String> = emptyList()
 
