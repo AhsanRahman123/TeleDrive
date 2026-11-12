@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.desktop.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -79,13 +80,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
+import coil3.compose.rememberAsyncImagePainter
 import coil3.compose.AsyncImagePainter
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
@@ -827,8 +829,17 @@ private fun PreviewPane(
                             title = stringResource(Res.string.preview_image_undecodable)
                         )
                     } else {
-                        AsyncImage(
-                            model = current.model,
+                        // AsyncImage sizes the decoded bitmap to the viewport, which makes
+                        // zooming a low-resolution preview look blurred. The painter intentionally
+                        // requests the original source dimensions for the viewing surface; grid
+                        // thumbnails continue to use the separate bounded thumbnail pipeline.
+                        Image(
+                            painter = rememberAsyncImagePainter(
+                                model = current.model,
+                                onState = { imageState ->
+                                    if (imageState is AsyncImagePainter.State.Error) undecodable = true
+                                }
+                            ),
                             contentDescription = file.name,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -845,9 +856,7 @@ private fun PreviewPane(
                                     }
                                 ),
                             contentScale = ContentScale.Fit,
-                            onState = { state ->
-                                if (state is AsyncImagePainter.State.Error) undecodable = true
-                            }
+                            filterQuality = FilterQuality.High
                         )
                         Row(
                             modifier = Modifier
