@@ -2,12 +2,15 @@ package com.drdisagree.teledrive.presentation.files
 
 import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferAction
@@ -19,17 +22,29 @@ import java.awt.datatransfer.StringSelection
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier =
-    dragAndDropSource { offset ->
-        DragAndDropTransferData(
-            transferable = DragAndDropTransferable(StringSelection(payload())),
-            supportedActions = listOf(
-                DragAndDropTransferAction.Move,
-                DragAndDropTransferAction.Copy
-            ),
-            dragDecorationOffset = offset
+actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier {
+    val windowInfo = LocalWindowInfo.current
+    return dragAndDropSource {
+        // Mouse movement without Shift is reserved for the existing range-selection
+        // gesture. Hold Shift, long-press, then drag to move/copy items between tabs.
+        detectTapGestures(
+            onLongPress = {
+                val transferPayload = payload()
+                if (windowInfo.keyboardModifiers.isShiftPressed && transferPayload.isNotBlank()) {
+                    startTransfer(
+                        DragAndDropTransferData(
+                            transferable = DragAndDropTransferable(StringSelection(transferPayload)),
+                            supportedActions = listOf(
+                                DragAndDropTransferAction.Move,
+                                DragAndDropTransferAction.Copy
+                            )
+                        )
+                    )
+                }
+            }
         )
     }
+}
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
