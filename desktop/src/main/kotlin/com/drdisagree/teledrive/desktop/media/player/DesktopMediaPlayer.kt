@@ -7,8 +7,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -979,6 +979,7 @@ internal fun DesktopMediaPlayer(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun PlayerControlsBar(
     player: MediaPlayer,
     isAudio: Boolean,
@@ -1181,13 +1182,12 @@ private fun PlayerControlsBar(
             onDispose { onControlsKeepVisible(false) }
         }
 
-        Row(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             PlayerAutoHideSlider(
                 icon = if (muted) Icons.AutoMirrored.Filled.VolumeOff
@@ -1341,13 +1341,13 @@ private fun PlayerControlsBar(
             }
         }
 
-        Row(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
-                .horizontalScroll(rememberScrollState()),
+                .heightIn(min = 52.dp)
+                .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
