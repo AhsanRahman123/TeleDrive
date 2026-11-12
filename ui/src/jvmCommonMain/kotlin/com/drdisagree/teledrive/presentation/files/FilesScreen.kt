@@ -103,11 +103,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -356,9 +351,6 @@ fun FilesScreen(
     val working by viewModel.working.collectAsStateWithLifecycle()
     working?.let { BlockingProgressDialog(message = it.resolve()) }
 
-    AppBackHandler(enabled = selectionMode || state.folderId != null || onBack != null) {
-        if (selectionMode) viewModel.clearSelection() else navigateBackOneStep()
-    }
 
     val gridState = rememberLazyGridState()
     val tabPositions by rememberSaveable(
@@ -401,6 +393,10 @@ fun FilesScreen(
         } else {
             onBack?.invoke()
         }
+    }
+
+    AppBackHandler(enabled = selectionMode || state.folderId != null || onBack != null) {
+        if (selectionMode) viewModel.clearSelection() else navigateBackOneStep()
     }
     fun activateTab(tab: FilesTabState) {
         if (tab.id == selectedTabId) return
