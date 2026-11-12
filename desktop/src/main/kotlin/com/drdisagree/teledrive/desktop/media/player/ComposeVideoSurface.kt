@@ -49,12 +49,9 @@ internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoS
             if (byteCount <= 0L || byteCount > Int.MAX_VALUE) return
 
             val source = nativeBuffers.firstOrNull() ?: return
-            val framePixels = ByteArray(byteCount.toInt())
-            val readable = source.duplicate().apply { position(0) }
             // Never publish a partial frame. A truncated copy is exactly the sort of
             // green/black strip that can appear during a resolution or media transition.
-            if (readable.remaining() < framePixels.size) return
-            readable.get(framePixels)
+            val framePixels = copyVideoFramePixels(source, rowBytes, height) ?: return
 
             val info = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
             val bitmap = Bitmap()
@@ -69,6 +66,25 @@ internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoS
         true,
         VideoSurfaceAdapters.getVideoSurfaceAdapter()
     )
+}
+
+/**
+ * Copies one complete VLC plane into storage owned by the published Compose frame.
+ * The returned array is never reused by later frames because Skia retains it.
+ */
+internal fun copyVideoFramePixels(
+    source: ByteBuffer,
+    rowBytes: Int,
+    height: Int
+): ByteArray? {
+    if (rowBytes <= 0 || height <= 0) return null
+    val byteCount = rowBytes.toLong() * height
+    if (byteCount <= 0L || byteCount > Int.MAX_VALUE) return null
+
+    val readable = source.duplicate().apply { position(0) }
+    if (readable.remaining() < byteCount.toInt()) return null
+
+    return ByteArray(byteCount.toInt()).also(readable::get)
 }
 
 private const val BYTES_PER_PIXEL = 4
