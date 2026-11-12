@@ -261,6 +261,14 @@ fun FilesScreen(
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val navigateUp: () -> Unit = {
+        if (state.folderId != null) {
+            val parentId = state.breadcrumbs.dropLast(1).lastOrNull()?.id
+            onOpenCrumb(parentId)
+        } else {
+            onBack?.invoke()
+        }
+    }
 
     var showCreateFolder by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -794,7 +802,7 @@ fun FilesScreen(
                                 onOpenFile = onOpenFile,
                                 onRequestTrash = { confirmTrash = true },
                                 onCreateFolder = { showCreateFolder = true },
-                                onBack = onBack,
+                                onBack = navigateUp,
                                 viewModel = viewModel
                             )
                         }
