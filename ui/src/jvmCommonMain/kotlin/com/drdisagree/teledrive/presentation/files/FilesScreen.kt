@@ -545,7 +545,7 @@ fun FilesScreen(
                                     }
                                     val editableNote = state.capabilities.canEditNote &&
                                             selectedCount == 1 &&
-                                            state.folderSelection.isEmpty()
+                                            selectedFolderIds.isEmpty()
                                     val filesOnly = !state.folderInSelection
 
                                     val selectedItemCount = selectedCount
@@ -1038,7 +1038,7 @@ fun FilesScreen(
             ),
             loadChildren = viewModel::childFolders,
             createFolder = viewModel::createFolderIn,
-            excludedFolderIds = state.folderSelection,
+            excludedFolderIds = selectedFolderIds,
             onConfirm = { target ->
                 showMovePicker = false
                 showCopyPicker = false
