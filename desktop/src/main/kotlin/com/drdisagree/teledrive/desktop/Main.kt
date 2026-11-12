@@ -98,6 +98,7 @@ fun main() {
     application {
         val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
         var previousWindowPlacement by remember { mutableStateOf(windowState.placement) }
+        var f11Pressed by remember { mutableStateOf(false) }
         val fullscreenController = remember {
             FullscreenController(
                 isFullscreen = { windowState.placement == WindowPlacement.Fullscreen },
@@ -127,14 +128,23 @@ fun main() {
             icon = painterResource(Res.drawable.app_icon),
             state = windowState,
             onPreviewKeyEvent = { event ->
-                if (
+                if (event.key != Key.F11) {
+                    false
+                } else if (event.type == KeyEventType.KeyUp) {
+                    // Release must clear the latch even when modifier state has changed.
+                    f11Pressed = false
+                    true
+                } else if (
                     event.type == KeyEventType.KeyDown &&
-                    event.key == Key.F11 &&
                     !event.isCtrlPressed &&
                     !event.isAltPressed &&
                     !event.isShiftPressed
                 ) {
-                    fullscreenController.toggle()
+                    // Ignore OS key-repeat; one physical press produces one toggle.
+                    if (!f11Pressed) {
+                        f11Pressed = true
+                        fullscreenController.toggle()
+                    }
                     true
                 } else {
                     false
