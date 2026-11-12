@@ -9,6 +9,7 @@ class CollectionShortcuts(
     val onCut: ((Int) -> Unit)? = null,
     val onPaste: (() -> Unit)? = null,
     val onNewFolder: (() -> Unit)? = null,
+    val onNewTab: (() -> Unit)? = null,
     val onExpand: ((Int) -> Unit)? = null,
     val onCollapse: ((Int) -> Unit)? = null,
     val onBack: (() -> Unit)? = null,
