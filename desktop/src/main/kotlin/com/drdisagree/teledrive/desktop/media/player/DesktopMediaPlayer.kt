@@ -184,6 +184,8 @@ internal fun DesktopMediaPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionTick by remember { mutableIntStateOf(0) }
     var controlsPinned by remember { mutableStateOf(false) }
+    var seekFeedbackVisible by remember { mutableStateOf(false) }
+    var seekFeedbackTick by remember { mutableIntStateOf(0) }
     var hKeyPressed by remember { mutableStateOf(false) }
     var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
@@ -405,6 +407,25 @@ internal fun DesktopMediaPlayer(
         muted = !muted
         player.submitAudioState(volume, muted)
     }
+    val toggleControlsVisibility: () -> Unit = {
+        val showControls = !(controlsVisible || seekFeedbackVisible)
+        val updated = controlPreferences.copy(showPlayerControls = showControls)
+        controlPreferences = updated
+        controlsPinned = false
+        seekFeedbackVisible = false
+        PlayerControlPreferencesStore.save(updated)
+        controlsVisible = showControls
+        latestOnControlsVisibilityChange.value(showControls)
+        interactionTick++
+        lastVisibilityInteractionTick = interactionTick
+    }
+    val revealControlsForSeek: () -> Unit = {
+        seekFeedbackVisible = true
+        controlsVisible = true
+        latestOnControlsVisibilityChange.value(true)
+        interactionTick++
+        seekFeedbackTick++
+    }
     fun setPlayerVolume(value: Int, unmute: Boolean = true) {
         val nextVolume = value.coerceIn(0, MAX_VOLUME)
         volume = nextVolume
@@ -521,7 +542,8 @@ internal fun DesktopMediaPlayer(
         controlsPinned,
         controlPreferences.autoHidePlayerControls,
         controlPreferences.showPlayerControls,
-        controlPreferences.hideDelayMillis
+        controlPreferences.hideDelayMillis,
+        seekFeedbackVisible
     ) {
         if (!controlPreferences.showPlayerControls) {
             if (controlsVisible) controlsVisible = false
@@ -542,9 +564,24 @@ internal fun DesktopMediaPlayer(
         if (!controlPreferences.autoHidePlayerControls || controlsPinned) {
             return@LaunchedEffect
         }
-        delay(controlPreferences.hideDelayMillis.milliseconds)
+        val hideDelay = if (seekFeedbackVisible) {
+            SEEK_FEEDBACK_DURATION_MS.milliseconds
+        } else {
+            controlPreferences.hideDelayMillis.milliseconds
+        }
+        delay(hideDelay)
         if (!controlsPinned && interactionTick == lastVisibilityInteractionTick) {
             controlsVisible = false
+            latestOnControlsVisibilityChange.value(false)
+        }
+    }
+
+    LaunchedEffect(seekFeedbackTick) {
+        if (seekFeedbackTick == 0) return@LaunchedEffect
+        seekFeedbackVisible = true
+        delay(SEEK_FEEDBACK_DURATION_MS)
+        seekFeedbackVisible = false
+        if (!controlPreferences.showPlayerControls && !controlsVisible) {
             latestOnControlsVisibilityChange.value(false)
         }
     }
@@ -689,12 +726,12 @@ internal fun DesktopMediaPlayer(
                     }
                     key == Key.DirectionLeft && !ctrl && !alt && !shift -> {
                         player.controls().skipTime(-KEY_SEEK_STEP_MS)
-                        interactionTick++
+                        revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionRight && !ctrl && !alt && !shift -> {
                         player.controls().skipTime(KEY_SEEK_STEP_MS)
-                        interactionTick++
+                        revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionLeft || key == Key.DirectionRight -> {
@@ -710,7 +747,7 @@ internal fun DesktopMediaPlayer(
                         } else {
                             val direction = if (key == Key.DirectionRight) 1L else -1L
                             player.controls().skipTime(direction * jumpMs)
-                            interactionTick++
+                            revealControlsForSeek()
                             true
                         }
                     }
@@ -829,10 +866,7 @@ internal fun DesktopMediaPlayer(
             .pointerInput(player, playing, finished, isAudio) {
                 if (!isAudio) {
                     detectTapGestures(
-                        onTap = {
-                            togglePlayback()
-                            interactionTick++
-                        }
+                        onTap = { toggleControlsVisibility() }
                     )
                 }
             }
@@ -886,11 +920,15 @@ internal fun DesktopMediaPlayer(
         }
 
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = controlsVisible || seekFeedbackVisible,
             enter = fadeIn(),
             exit = fadeOut(),
-            // Keep the transport row comfortably above the bottom edge in windowed mode.
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp)
+            // Anchor the complete control surface to the player viewport, independent of
+            // window focus changes, top-bar visibility, and responsive FlowRow wrapping.
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(bottom = 36.dp)
         ) {
             PlayerControlsBar(
                 player = player,
@@ -1740,6 +1778,7 @@ private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
+private const val SEEK_FEEDBACK_DURATION_MS = 1_500L
 private const val VOLUME_STEP = 5
 private const val MAX_VOLUME = 200
 private const val MAX_BRIGHTNESS = 100
