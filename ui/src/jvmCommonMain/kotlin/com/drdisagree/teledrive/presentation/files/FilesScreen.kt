@@ -273,28 +273,9 @@ fun FilesScreen(
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
     val activeFolderId by viewModel.activeFolderId.collectAsStateWithLifecycle()
+    val tabs by viewModel.workspaceTabs.collectAsStateWithLifecycle()
+    val selectedTabId by viewModel.selectedWorkspaceTabId.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var tabs by rememberSaveable(
-        stateSaver = listSaver<List<FilesTabState>, String>(
-            save = { saved ->
-                saved.flatMap { tab ->
-                    listOf(tab.id.toString(), tab.folderId.orEmpty(), tab.label)
-                }
-            },
-            restore = { encoded ->
-                encoded.chunked(3).mapNotNull { fields ->
-                    if (fields.size != 3) null
-                    else FilesTabState(
-                        id = fields[0].toIntOrNull() ?: return@mapNotNull null,
-                        folderId = fields[1].ifEmpty { null },
-                        label = fields[2]
-                    )
-                }.ifEmpty { listOf(FilesTabState(0, null, "Files")) }
-            }
-        )
-    ) { mutableStateOf(listOf(FilesTabState(0, activeFolderId, "Files"))) }
-    var selectedTabId by rememberSaveable { mutableIntStateOf(0) }
-    var nextTabId by rememberSaveable { mutableIntStateOf(1) }
 
     var showCreateFolder by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -410,41 +391,28 @@ fun FilesScreen(
     fun activateTab(tab: FilesTabState) {
         if (tab.id == selectedTabId) return
         saveCurrentTabPosition()
-        selectedTabId = tab.id
-        viewModel.setActiveFolder(tab.folderId)
+        viewModel.activateWorkspaceTab(tab.id)
     }
     fun createTab() {
         saveCurrentTabPosition()
-        val id = nextTabId++
-        tabs = tabs + FilesTabState(id, null, "Files")
-        selectedTabId = id
-        viewModel.setActiveFolder(null)
+        viewModel.createWorkspaceTab()
     }
     fun closeTab(tab: FilesTabState) {
         if (tabs.size <= 1) return
-        val oldIndex = tabs.indexOfFirst { it.id == tab.id }.coerceAtLeast(0)
         tabPositions.keys.removeAll { it.first == tab.id }
-        val nextTabs = tabs.filterNot { it.id == tab.id }
-        tabs = nextTabs
-        if (tab.id == selectedTabId) {
-            val replacement = nextTabs[oldIndex.coerceAtMost(nextTabs.lastIndex)]
-            selectedTabId = replacement.id
-            viewModel.setActiveFolder(replacement.folderId)
-        }
+        viewModel.closeWorkspaceTab(tab.id)
+    }
+    fun closeAllTabs() {
+        tabPositions.clear()
+        viewModel.closeAllWorkspaceTabs()
     }
     val activeFolderLabel = if (activeFolderId == null) {
         stringResource(Res.string.files)
     } else {
         state.breadcrumbs.lastOrNull()?.name?.resolve() ?: "Folder"
     }
-    LaunchedEffect(activeFolderId, activeFolderLabel) {
-        tabs = tabs.map { tab ->
-            if (tab.id == selectedTabId) {
-                tab.copy(folderId = activeFolderId, label = activeFolderLabel)
-            } else {
-                tab
-            }
-        }
+    LaunchedEffect(activeFolderId, activeFolderLabel, selectedTabId) {
+        viewModel.updateSelectedWorkspaceTab(activeFolderId, activeFolderLabel)
     }
     LaunchedEffect(selectedTabId, state.folderId, files.itemCount, files.loadState.refresh) {
         val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
@@ -930,6 +898,17 @@ fun FilesScreen(
                         TooltipIconButton(tooltip = "Open new Files tab", onClick = ::createTab) {
                             Icon(Icons.Filled.Add, contentDescription = "Open new Files tab")
                         }
+                        if (tabs.size > 1) {
+                            TooltipIconButton(
+                                tooltip = "Close all Files tabs",
+                                onClick = ::closeAllTabs
+                            ) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Close all Files tabs"
+                                )
+                            }
+                        }
                     }
                     if (state.breadcrumbs.size > 1) {
                         Breadcrumbs(crumbs = state.breadcrumbs, onOpen = ::navigateToFolder)
@@ -1323,13 +1302,11 @@ private fun FilesContent(
         },
         onEnd = viewModel::endRangeSelection
     )
-    Box(modifier = Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Fixed(columns),
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(end = 10.dp)
+            // Keep file clipboard shortcuts on the collection container so they work
+            // whether focus is on a row, its checkbox, or the grid itself.
             .onPreviewKeyEvent { event ->
                 val command = event.isCtrlPressed || event.isMetaPressed
                 val plainCommand = command && !event.isAltPressed && !event.isShiftPressed
@@ -1337,17 +1314,15 @@ private fun FilesContent(
                     false
                 } else {
                     when {
-                        event.key == Key.C &&
-                            (state.selectionCount > 0 || state.folderSelection.isNotEmpty()) -> {
+                        event.key == Key.C && state.selectionCount > 0 -> {
                             viewModel.copyToClipboardSelected()
                             true
                         }
-                        event.key == Key.X &&
-                            (state.selectionCount > 0 || state.folderSelection.isNotEmpty()) -> {
+                        event.key == Key.X && state.selectionCount > 0 -> {
                             viewModel.cutSelected()
                             true
                         }
-                        event.key == Key.V -> {
+                        event.key == Key.V && viewModel.hasClipboardItems() -> {
                             viewModel.paste()
                             true
                         }
@@ -1355,6 +1330,13 @@ private fun FilesContent(
                     }
                 }
             }
+    ) {
+        LazyVerticalGrid(
+        state = gridState,
+        columns = GridCells.Fixed(columns),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(end = 10.dp)
             .keyboardCollection(
                 keyboard,
                 itemCount,
@@ -1580,8 +1562,6 @@ fun FolderPickerHost(
         onDismiss = onDismiss
     )
 }
-
-private data class FilesTabState(val id: Int, val folderId: String?, val label: String)
 
 private const val ROOT_KEY = "__root__"
 
