@@ -158,6 +158,7 @@ fun CacheManagerScreen(
             thumbnailManagerHasInternalBack = false
             thumbnailManagerBackAction = null
         }
+        if (selectedTool == "CACHE") commandFocusRequester.requestFocus()
     }
     AppBackHandler { navigateBackOneStep() }
     val folderDragSelect = rememberDragSelect(
