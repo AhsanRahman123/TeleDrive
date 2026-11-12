@@ -33,6 +33,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -94,6 +96,7 @@ fun CacheManagerScreen(
     val settingsViewModel = koinViewModel<SettingsViewModel>()
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val commandFocusRequester = rememberCollectionCommandFocusRequester()
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTool by remember { mutableStateOf("CACHE") }
     var thumbnailManagerHasInternalBack by remember { mutableStateOf(false) }
@@ -350,7 +353,32 @@ fun CacheManagerScreen(
                     Column(
                         modifier = Modifier.fillMaxSize()
                             .verticalScroll(scrollState)
-                            .padding(horizontal = 18.dp, vertical = 12.dp),
+                            .padding(horizontal = 18.dp, vertical = 12.dp)
+                            .collectionCommandShortcuts(
+                                focusRequester = commandFocusRequester,
+                                onSelectAll = {
+                                    scope.launch {
+                                        busy = true
+                                        try {
+                                            val paths = repository.cacheEntryPathsMatching(
+                                                folderId, typeFilter, searchQuery
+                                            ).toMutableSet()
+                                            if (folderId == null) {
+                                                folders.forEach { folder ->
+                                                    paths += repository.cacheEntryPathsInFolderTree(
+                                                        folder.id, typeFilter, searchQuery
+                                                    )
+                                                }
+                                            }
+                                            selectedPaths = paths
+                                            selectedFolderIds = folders.map { it.id }.toSet()
+                                        } finally {
+                                            busy = false
+                                        }
+                                    }
+                                    true
+                                }
+                            ),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
