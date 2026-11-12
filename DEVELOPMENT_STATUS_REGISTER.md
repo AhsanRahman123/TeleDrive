@@ -110,14 +110,14 @@ Source changes present on the branch:
 - Player control visibility is preserved across file changes; H hides controls on one press and shows on a second press within 450 ms; a dedicated hide button is present.
 - Preview Back no longer forces fullscreen off. Desktop fullscreen remembers/restores the prior window placement; F11 is handled at the app root.
 - Desktop image preview uses a full-resolution painter with high-quality filtering. Locally generated grid thumbnails are bounded at 768 px with explicit JPEG quality 0.86; Telegram photo-preview selection prefers the largest available size up to 1024 px.
-- Gallery list and compact grid rows expose parent-folder paths; Gallery grid has explicit zoom controls and an expanded 2–8 column range on wide windows.
+- Gallery list and compact grid rows expose parent-folder paths; Gallery grid has explicit zoom controls and an expanded 2–12 column range on wide windows.
 - Files screen has a multi-tab workspace with per-tab folder navigation/scroll-position restoration; Ctrl+C/Ctrl+X/Ctrl+V/Ctrl+N/Delete/F2/Backspace shortcuts are connected; copy clipboard content remains reusable across paste while cut content is consumed.
 - File and folder rows provide in-app drag payloads in Grid/List/Details; tab drop targets dispatch Move or Copy to the destination tab's current folder.
-- Folder selections expand into storage audit; Free up space has a Backed-up local copies inventory listing app and TDLib cache paths, allowing reveal/inspection while relying on repository-level managed-root, remote-verification and Available Offline protections.
+- Folder selections expand into storage audit; Free up space has a Backed-up local copies inventory listing app and TDLib cache paths, allowing reveal/inspection while relying on repository-level managed-root, remote-verification and Available Offline protections. Visible inventory rows automatically inspect TDLib cache state with a four-request concurrency cap; they show path/size or a no-cache state and retain manual refresh.
 - Hover tooltips were added to primary Files, Gallery, Preview/player, Home, Search, Collections, Channels, Trash, Transfers, Settings, Cache Manager and Thumbnail Manager/Queue icon actions.
 - TDLib account-level speed-limit notifications are exposed to Transfers as a diagnostic. This does not bypass a Telegram-side account limit or itself increase download speed.
 
-**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 code head `5d655c13`. GitHub Actions check-suite/workflow-run queries on the latest branch tip `02ebfef532aa3f3813961c6d069b2ef16500991f` returned zero suites/runs at the last audit. Do not promote these items to COMPILED or USER-VERIFIED.
+**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 code head `b3a3e9b2`. GitHub Actions check-suite/workflow-run queries on the latest branch tip `b3a3e9b2d425094dd347b581b243454b384110ae` returned zero workflow runs on the last check. Do not promote these items to COMPILED or USER-VERIFIED.
 
 Immediate Windows acceptance needed on the exact latest head:
 1. Run :shared:desktopTest, :ui:desktopTest, :desktop:test and :desktop:compileKotlin, then package/run through the isolated desktop profile.
