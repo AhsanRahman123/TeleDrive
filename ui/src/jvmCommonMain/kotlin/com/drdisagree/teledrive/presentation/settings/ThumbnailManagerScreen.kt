@@ -710,8 +710,7 @@ fun ThumbnailManagerScreen(
                                 }
                             }
                             true
-                        }
-                        ,
+                        },
                         onCopy = { if (hasFileSelection()) { copySelectedToClipboard(); true } else false },
                         onCut = { if (hasFileSelection()) { cutSelectedToClipboard(); true } else false },
                         onPaste = { if (fileClipboard.peek() != null) { pasteFromClipboard(); true } else false }
