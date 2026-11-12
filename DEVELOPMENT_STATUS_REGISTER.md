@@ -134,9 +134,9 @@ These are deliberately not marked complete. Resolve each by inspecting the curre
 
 | Item | Current evidence / uncertainty | Next proof required |
 |---|---|---|
-| Blank-space right-click Add menu in Files | A prior direct audit of `FilesScreen.kt` found item-level secondary-click handlers but no parent-level handler for unused content space. The existing + menu exists. | Confirm on current branch; if still absent, implement. Verify Grid, List, empty folder, and item right-click does not open Add too. |
+| Blank-space right-click Add menu in Files | Current PR #10 source attaches `onDesktopEmptySpaceContextClick` to the Files content surface, opens the Add menu on blank-space right-click and closes it on blank-space left click. | SOURCE-PRESENT; verify Grid, List, empty folder, and item right-click does not open Add too. |
 | Copy to… / Move to… from the open image/video viewer | Prior source audit said the preview overflow menu did not expose these actions, though shared repository and folder-picker infrastructure exists. Later commits may have changed it. | Inspect current preview screens; test destination creation, bytes/metadata, viewer sequence behavior and remote backup preservation. |
-| Desktop image zoom | Prior audit found desktop Coil AsyncImage without attached zoom state or controls. Android already used Telephoto ZoomableAsyncImage for pinch/double-tap. Later commits may have changed this. | Inspect current desktop and Android preview implementations. Test desktop double-click/buttons/pan and Android pinch/double-tap/buttons as applicable. |
+| Desktop image zoom | PR #10 source uses the original-size image painter, high-quality filtering, the existing desktop zoomable state and explicit zoom buttons. | SOURCE-PRESENT; test desktop double-click/buttons/pan and Android pinch/double-tap/buttons as applicable. |
 | Always-visible selection checkbox and drag-sweep selection | An older NOTES entry says the latest checkbox/drag-sweep changes had not yet been built or runtime-tested. That note predates the current branch. | Inspect exact current source and test Files, Gallery, Collections, Search and Trash; verify normal click, checkbox, right-click preserve-selection, drag edge-scroll and Escape/back clearing. |
 | Details/table view status | Older NOTES and backlog contradict each other: one says Details is missing, while later branch history includes a Details layout. | Inspect current ViewMode and UI; test actual columns, sorting, selection and persistence. Do not copy the stale "missing" claim forward. |
 | ZIP/7z support | Earlier implementation notes mention basic ZIP/7z support, but the exact supported operations and latest state are not established here. | Test listing, extraction, creation if supported, progress, cancellation, large archives and path safety; record exact limits. |
@@ -145,7 +145,7 @@ These are deliberately not marked complete. Resolve each by inspecting the curre
 | Player brightness control across monitor/driver variants | Code contains DDC/CI paths, but the live result depends on the physical monitor and DDC/CI support. | Test the user's monitor at multiple levels, reconnects and media changes; record if the monitor itself or video image changes. |
 | External subtitle file loading | Older notes identify this as a gap. | Inspect current implementation and test local external subtitle selection, encoding, sync and persistence if the feature is expected. |
 
-## 6. Planned, not yet established as implemented
+## 7. Planned, not yet established as implemented
 
 Keep these in the future backlog unless a code audit finds existing work:
 - True folder-tree navigation.
@@ -159,14 +159,14 @@ Keep these in the future backlog unless a code audit finds existing work:
 - Home dashboard with recent files/recently played media and transfer/storage summaries.
 - Deeper integrity scrub/recovery and backup tooling.
 
-## 7. Platform and scope decisions
+## 8. Platform and scope decisions
 
 - **Current priority: Windows desktop.** Finish and acceptance-test the desktop app first.
 - **Android:** SDK is installed, but the Android compile currently has known errors (`AndroidThumbnailStore.kt` missing `retryAt`; `TdLibTelegramClient.kt` visibility access to `evictManagedDownloadCache`). Defer Android compile/APK work until the user asks to resume Android fixes after desktop completion.
 - **Linux:** keep portability in mind, but do not divert the current Windows acceptance work. Validate Linux when the user is ready to switch.
 - **macOS:** out of scope. Do not spend time on macOS support or appearance redesign.
 
-## 8. Consolidated local workspace instructions
+## 9. Consolidated local workspace instructions
 
 Create one clean local clone from the baseline branch; do not reuse or clean out any existing test checkout:
 
@@ -191,7 +191,7 @@ The script sets `TELEDRIVE_DATA_DIR` to `.teledrive-instance` inside the new wor
 
 Do not delete the old checkouts, test downloads, app data, TDLib sessions, Room schema artifacts, or backups until the new workspace is built, run, and all unique evidence/data has been reviewed. In particular, do not run broad `git clean`, `git reset --hard`, or `git stash -u` commands.
 
-## 9. Test-record format
+## 10. Test-record format
 
 For each acceptance item, record:
 - Date/time and exact Git commit SHA.
@@ -205,7 +205,7 @@ For each acceptance item, record:
 Only after the exact consolidated commit passes its relevant acceptance tests should the corresponding row be promoted to USER-VERIFIED.
 
 
-## 10. Consolidated workspace smoke test — 2026-11-12
+## 11. Consolidated workspace smoke test — 2026-11-12
 
 - **Clone:** User created `C:\Users\ahsan\TeleDrive-Desktop-Dev`; HEAD was `1dbb6ba4d2766e941c708f5c182bd63e81eba86b`, the documentation commit on the feature branch. Git working tree was clean in the user's PowerShell output.
 - **Build/test compilation:** User ran `.\gradlew.bat --no-daemon :shared:desktopTest :ui:desktopTest :desktop:test :desktop:compileKotlin`; Gradle reported `BUILD SUCCESSFUL`, 41 actionable tasks executed, in 3m46s. Visible deprecation and safe-call warnings were non-fatal.
