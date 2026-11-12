@@ -181,7 +181,8 @@ fun DesktopPreviewScreen(
     val fullscreenController = LocalFullscreenController.current
 
     fun leavePreview() {
-        fullscreenController?.setFullscreen(false)
+        // Back navigates to the previous screen; fullscreen is a window-level preference
+        // and must not be silently exited as a side effect of navigation.
         onBack()
     }
 
@@ -220,25 +221,9 @@ fun DesktopPreviewScreen(
         }
     }
 
-    var restoreFullscreenAfterNavigation by remember { mutableStateOf(false) }
-
     fun selectQueueFile(fileId: String) {
         val target = state.files.indexOfFirst { it.id == fileId }
-        if (target >= 0 && target != index) {
-            restoreFullscreenAfterNavigation =
-                fullscreenController?.isFullscreen() == true
-            index = target
-        }
-    }
-
-    LaunchedEffect(file?.id) {
-        if (restoreFullscreenAfterNavigation) {
-            // Wait until the replacement VLC surface has attached, then reassert fullscreen
-            // directly. A toggle can accidentally leave the window floating after rapid W/E.
-            delay(100L)
-            fullscreenController?.setFullscreen(true)
-            restoreFullscreenAfterNavigation = false
-        }
+        if (target >= 0 && target != index) index = target
     }
 
     fun previousMedia() {
@@ -491,9 +476,10 @@ fun DesktopPreviewScreen(
                     // VLC players own native resources. Do not keep outgoing and incoming
                     // video players alive together during AnimatedContent transitions.
                     if (mediaCategory != null) {
-                        key(file.id) {
-                            RenderPreviewPane(file)
-                        }
+                        // Keep the media player composable at a stable call site while the
+                        // queue changes its file arguments. DesktopMediaPlayer replaces the
+                        // MRL in the retained VLC instance instead of flashing a new surface.
+                        RenderPreviewPane(file)
                     } else {
                         AnimatedContent(
                             targetState = index to file,
