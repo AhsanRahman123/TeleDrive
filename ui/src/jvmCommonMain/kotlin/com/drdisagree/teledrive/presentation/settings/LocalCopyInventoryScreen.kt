@@ -118,7 +118,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
     }.filter { row ->
         search.isBlank() ||
             row.file.name.contains(search, ignoreCase = true) ||
-            row.path.contains(search, ignoreCase = true)
+            row.path?.contains(search, ignoreCase = true) == true
     }
 
     val selectedRows = rows.filter { it.file.id in selectedIds }
