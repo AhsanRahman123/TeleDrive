@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -44,6 +42,7 @@ import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -183,16 +182,22 @@ internal fun DesktopMediaPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionTick by remember { mutableIntStateOf(0) }
     var controlsPinned by remember { mutableStateOf(false) }
+    var lastHiddenHPressAt by remember { mutableLongStateOf(0L) }
     var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
+    var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
     // a play/resume event cannot reapply the initial 100% / unmuted values.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
     val latestRepeatOne = rememberUpdatedState(repeatOne)
     val latestSleepAtTrackEnd = rememberUpdatedState(sleepAtTrackEnd)
+    val latestOnPlaybackFinished = rememberUpdatedState(onPlaybackFinished)
+    val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
     val playerScope = rememberCoroutineScope()
 
-    val player = remember(mrl, isAudio) {
+    // One native VLC instance is retained for the lifetime of this media viewer. The
+    // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
+    val player = remember(factory, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) videoSurface().set(composeVideoSurface { frame = it })
             events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
@@ -229,7 +234,7 @@ internal fun DesktopMediaPlayer(
                     finished = true
                     playerScope.launch {
                         if (!latestRepeatOne.value || latestSleepAtTrackEnd.value) {
-                            onPlaybackFinished()
+                            latestOnPlaybackFinished.value()
                         }
                     }
                 }
@@ -308,10 +313,21 @@ internal fun DesktopMediaPlayer(
     }
 
     val fullscreenController = LocalFullscreenController.current
-    DisposableEffect(player, mrl) {
+    LaunchedEffect(player, mrl) {
+        // Reuse the video surface and keep the last frame visible until VLC supplies the
+        // replacement frame. Reset only media-specific UI state, not the native player.
+        playing = false
+        finished = false
+        buffering = true
+        timeMs = 0L
+        durationMs = 0L
+        trackTick++
         player.media().play(mrl)
+    }
+
+    DisposableEffect(player) {
         onDispose {
-            // Release VLC off the Compose UI thread so switching files stays responsive.
+            // Release VLC only when leaving the player, not on each queue transition.
             val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
             teardownScope.launch {
                 try {
@@ -497,21 +513,28 @@ internal fun DesktopMediaPlayer(
         controlPreferences.hideDelayMillis
     ) {
         if (!controlPreferences.showPlayerControls) {
-            controlsVisible = false
-            onControlsVisibilityChange(false)
+            if (controlsVisible) controlsVisible = false
+            latestOnControlsVisibilityChange.value(false)
             return@LaunchedEffect
         }
-        controlsVisible = true
-        onControlsVisibilityChange(true)
+        // Media changes restart this timer but do not reveal controls hidden by the user.
+        // Only a real keyboard/pointer interaction may reveal an auto-hidden control bar.
+        if (interactionTick != lastVisibilityInteractionTick) {
+            lastVisibilityInteractionTick = interactionTick
+            if (!controlsVisible) controlsVisible = true
+        }
+        if (!controlsVisible) {
+            latestOnControlsVisibilityChange.value(false)
+            return@LaunchedEffect
+        }
+        latestOnControlsVisibilityChange.value(true)
         if (!controlPreferences.autoHidePlayerControls || controlsPinned) {
             return@LaunchedEffect
         }
-        // Hide the complete player chrome after inactivity even while paused.
-        // Previously the !playing early return left every button permanently visible.
         delay(controlPreferences.hideDelayMillis.milliseconds)
-        if (!controlsPinned) {
+        if (!controlsPinned && interactionTick == lastVisibilityInteractionTick) {
             controlsVisible = false
-            onControlsVisibilityChange(false)
+            latestOnControlsVisibilityChange.value(false)
         }
     }
 
@@ -733,6 +756,32 @@ internal fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.H && !ctrl && !alt && !shift -> {
+                        if (controlPreferences.showPlayerControls) {
+                            val updated = controlPreferences.copy(showPlayerControls = false)
+                            controlPreferences = updated
+                            controlsPinned = false
+                            PlayerControlPreferencesStore.save(updated)
+                            controlsVisible = false
+                            latestOnControlsVisibilityChange.value(false)
+                            lastHiddenHPressAt = 0L
+                        } else {
+                            val now = System.currentTimeMillis()
+                            if (now - lastHiddenHPressAt in 1..H_SHOW_DOUBLE_PRESS_MS) {
+                                val updated = controlPreferences.copy(showPlayerControls = true)
+                                controlPreferences = updated
+                                controlsPinned = true
+                                PlayerControlPreferencesStore.save(updated)
+                                controlsVisible = true
+                                latestOnControlsVisibilityChange.value(true)
+                                lastHiddenHPressAt = 0L
+                            } else {
+                                lastHiddenHPressAt = now
+                            }
+                        }
+                        interactionTick++
+                        true
+                    }
+                    key == Key.H && ctrl && !alt && !shift -> {
                         player.submit {
                             runCatching {
                                 player.subpictures().setDelay(player.subpictures().delay() + SYNC_STEP_US)
@@ -918,6 +967,15 @@ internal fun DesktopMediaPlayer(
                     if (!dragging) brightnessLastInputAt = System.currentTimeMillis()
                 },
                 onControlsKeepVisible = { controlsPinned = it },
+                onToggleControlsVisibility = {
+                    val updated = controlPreferences.copy(showPlayerControls = false)
+                    controlPreferences = updated
+                    controlsPinned = false
+                    PlayerControlPreferencesStore.save(updated)
+                    controlsVisible = false
+                    latestOnControlsVisibilityChange.value(false)
+                    interactionTick++
+                },
                 onRate = ::setPlaybackRate,
                 onToggleRepeat = {
                     repeatOne = !repeatOne
@@ -976,6 +1034,7 @@ private fun PlayerControlsBar(
     onBrightnessChange: (Int) -> Unit,
     onBrightnessDragging: (Boolean) -> Unit,
     onControlsKeepVisible: (Boolean) -> Unit,
+    onToggleControlsVisibility: () -> Unit,
     onRate: (Float) -> Unit,
     onToggleRepeat: () -> Unit,
     onToggleRepeatAll: () -> Unit,
@@ -1456,23 +1515,21 @@ private fun PlayerControlsBar(
                         onDismissRequest = { showQueueMenu = false },
                         modifier = Modifier.heightIn(max = 420.dp)
                     ) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                            queueItems.forEach { item ->
-                                DropdownMenuItem(
-                                    text = { Text(item.name, maxLines = 1) },
-                                    leadingIcon = {
-                                        RadioButton(
-                                            selected = item.id == currentQueueItemId,
-                                            onClick = null
-                                        )
-                                    },
-                                    onClick = {
-                                        showQueueMenu = false
-                                        onSelectQueueItem(item.id)
-                                        onInteraction()
-                                    }
-                                )
-                            }
+                        queueItems.forEach { item ->
+                            DropdownMenuItem(
+                                text = { Text(item.name, maxLines = 1) },
+                                leadingIcon = {
+                                    RadioButton(
+                                        selected = item.id == currentQueueItemId,
+                                        onClick = null
+                                    )
+                                },
+                                onClick = {
+                                    showQueueMenu = false
+                                    onSelectQueueItem(item.id)
+                                    onInteraction()
+                                }
+                            )
                         }
                     }
                 }
@@ -1613,6 +1670,16 @@ private fun PlayerControlsBar(
                         )
                     }
                 }
+                IconButton(
+                    onClick = { onInteraction(); onToggleControlsVisibility() },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.VisibilityOff,
+                        contentDescription = "Hide player controls",
+                        tint = Color.White
+                    )
+                }
                 fullscreen?.let { controller ->
                     IconButton(
                         onClick = { onInteraction(); controller.toggle() },
@@ -1671,6 +1738,7 @@ private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
 }
 
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
+private const val H_SHOW_DOUBLE_PRESS_MS = 450L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
