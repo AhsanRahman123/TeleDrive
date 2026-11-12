@@ -4,7 +4,7 @@ Last audited: 2026-11-13
 Repository: `AhsanRahman123/TeleDrive`
 Development branch: `work/desktop-feature-fixes-20261112`
 Stack base: PR #9 head `36f3da98f960c879c548099b30150c74ee9b33e5`
-Latest code head audited: `302207be314a2dfcf58a89503228324b2d6cc03c`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
+Latest code head audited: `cff8d023ff52cfd95287df51207ea6998d2f3e96`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
 
 This register is the current status source for the consolidated development workspace. Older planning documents remain useful for feature intent, but their status labels may be stale. When this register conflicts with an older note, re-audit the source and tests before changing the status.
 
@@ -283,7 +283,8 @@ Keyboard commands now present in source:
 - **Favorites / Offline / Archived / Hidden:** Ctrl+A selects matching files and folders; Ctrl+C/X copies or cuts selected items; Ctrl+V pastes to the Drive root because these are filtered collections, not destination folders.
 - **Search:** Ctrl+A selects matching file results; Ctrl+C/X copies or cuts selected results. Search has no destination folder, so Ctrl+V is not assigned there.
 - **Thumbnail Manager:** Ctrl+A selects files matching the active thumbnail filters across pages and folders; Ctrl+C/X uses the shared Drive file/folder clipboard; Ctrl+V pastes into the currently browsed Drive folder.
-- **Thumbnail Queue / Cache Manager / Backed-up local-copy inventory / Trash / Transfers:** Ctrl+A selects all applicable matching or visible records (including unloaded matching thumbnail jobs where their all-ID query is available). Ctrl+C/X/V is intentionally not assigned to cache entries, queue jobs, Trash rows, transfer records or local-copy cleanup rows because these are not normal file/folder clipboard destinations.
+- **Backed-up local-copy inventory:** Ctrl+A selects the currently filtered backed-up library files; Ctrl+C/X copies or cuts those Drive file records. There is no current destination folder in this inventory, so Ctrl+V is not assigned there.
+- **Thumbnail Queue / Cache Manager / Trash / Transfers:** Ctrl+A selects all applicable matching or visible records (including unloaded matching thumbnail jobs where their all-ID query is available). Ctrl+C/X/V is intentionally not assigned to cache entries, queue jobs, Trash rows or transfer records because these are not normal file/folder clipboard destinations.
 - The shared collection key handler uses the event-bubble path rather than preview interception; native text-field Ctrl+A/C/X/V should remain available while editing search and other text fields.
 
 Files, Gallery, Thumbnail Manager, Search and virtual collection screens share the same app-level `FileClipboard`. A cut entry is cleared only after all requested move operations succeed; copy remains reusable. Gallery also uses the same success-only cut cleanup.
