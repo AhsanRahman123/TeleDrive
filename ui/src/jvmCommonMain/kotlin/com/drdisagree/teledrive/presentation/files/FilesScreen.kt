@@ -546,7 +546,7 @@ fun FilesScreen(
                                     val editableNote = state.capabilities.canEditNote &&
                                             selectedCount == 1 &&
                                             selectedFolderIds.isEmpty()
-                                    val filesOnly = !state.folderInSelection
+                                    val filesOnly = selectedFolderIds.isEmpty()
 
                                     val selectedItemCount = selectedCount
                                     val actions = buildList {
