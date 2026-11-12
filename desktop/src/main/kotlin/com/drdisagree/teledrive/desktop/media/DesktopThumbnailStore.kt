@@ -221,7 +221,7 @@ class DesktopThumbnailStore(
                 force = true
             )
         )
-        schedulingPaused = false
+        // A refresh must not override a user-paused thumbnail queue.
         jobWakeups.trySend(Unit)
     }
 
