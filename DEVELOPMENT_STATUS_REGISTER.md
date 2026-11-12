@@ -4,7 +4,7 @@ Last audited: 2026-11-12
 Repository: `AhsanRahman123/TeleDrive`
 Development branch: `work/desktop-feature-fixes-20261112`
 Stack base: PR #9 head `36f3da98f960c879c548099b30150c74ee9b33e5`
-Latest code head audited: `5d655c13a09fc3320eae93b5a93698ded84b0f05`; current branch head is `4888f40ff4351c9e3066cb42032d3359b16e2446` (documentation-only commits after the code head).
+Latest code head audited: `5d655c13a09fc3320eae93b5a93698ded84b0f05`. Documentation-only commits follow this code head; fetch the branch tip before building and record its exact SHA.
 
 This register is the current status source for the consolidated development workspace. Older planning documents remain useful for feature intent, but their status labels may be stale. When this register conflicts with an older note, re-audit the source and tests before changing the status.
 
@@ -117,7 +117,7 @@ Source changes present on the branch:
 - Hover tooltips were added to primary Files, Gallery, Preview/player, Home, Search, Collections, Channels, Trash, Transfers, Settings, Cache Manager and Thumbnail Manager/Queue icon actions.
 - TDLib account-level speed-limit notifications are exposed to Transfers as a diagnostic. This does not bypass a Telegram-side account limit or itself increase download speed.
 
-**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 head 380f40a6. GitHub Actions check-suite query returned zero suites/runs for that head at the last audit. Do not promote these items to COMPILED or USER-VERIFIED.
+**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 code head `5d655c13`. GitHub Actions check-suite/workflow-run queries on the latest branch tip `02ebfef532aa3f3813961c6d069b2ef16500991f` returned zero suites/runs at the last audit. Do not promote these items to COMPILED or USER-VERIFIED.
 
 Immediate Windows acceptance needed on the exact latest head:
 1. Run :shared:desktopTest, :ui:desktopTest, :desktop:test and :desktop:compileKotlin, then package/run through the isolated desktop profile.
