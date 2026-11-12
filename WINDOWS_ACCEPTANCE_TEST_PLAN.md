@@ -2,7 +2,7 @@
 
 Last updated: 2026-11-12
 Test target: branch `work/desktop-feature-fixes-20261112`
-Expected starting commit: `36f3da98f960c879c548099b30150c74ee9b33e5`
+Expected starting point: latest head of `work/desktop-feature-fixes-20261112`; fetch the branch and record `git rev-parse HEAD` before testing.
 Companion status register: [DEVELOPMENT_STATUS_REGISTER.md](DEVELOPMENT_STATUS_REGISTER.md)
 
 This is the final Windows-first acceptance plan for the consolidated development workspace. It is intentionally evidence-driven: check an item only after performing it on the exact workspace/commit being recorded. A compile or automated test is not a substitute for the user-facing test.
@@ -72,6 +72,15 @@ If a task does not exist in this branch, record that rather than inventing an al
 - [ ] Test player teardown when switching between gallery/player screens; no two stale VLC instances/audio outputs should remain active.
 
 ### 2.4 Player UI behavior
+### 2.5 PR #10 regressions to verify
+
+- [ ] Open the playback queue/playlist menu; it must not throw an infinite-height Compose layout exception or close TeleDrive.
+- [ ] With controls hidden and video fullscreen, switch repeatedly between local videos and streamed videos. Confirm no full-screen black flash, no stale frame/source, and no second VLC instance/audio stream.
+- [ ] Press H once; controls hide. Press H a second time within 450 ms; controls show. After the configured timeout they should auto-hide again.
+- [ ] Use the dedicated hide-controls button and confirm the overlay show button remains available.
+- [ ] Press F11 from Files, Gallery and other app pages; confirm the whole TeleDrive window enters fullscreen. Press F11 again; restore the exact previous floating/maximized placement.
+- [ ] Open a video fullscreen and press the app Back button; confirm the app remains fullscreen on the previous page.
+- [ ] Exit fullscreen with the video fullscreen control/Escape; confirm the previous window placement is restored rather than forcing a different half-size/floating layout.
 
 - [ ] Volume and brightness sliders appear/auto-hide according to the saved preference.
 - [ ] Auto-hide delay is correct and controls remain usable while pointer/drag interaction is active.
@@ -89,6 +98,7 @@ Use at least three test files with visibly different sizes (for example, small, 
 - [ ] Set worker cap to 3; confirm at most three active transfers where Telegram/network constraints allow it.
 - [ ] Confirm no item stays marked Running forever without byte growth or a meaningful waiting reason.
 - [ ] Compare displayed transferred bytes and speed with the actual growing destination file.
+- [ ] If Telegram emits an account-level speed-limit notification, confirm Transfers identifies it as a Telegram-side restriction; do not interpret this as a TeleDrive bandwidth cap or claim it can be overridden locally.
 - [ ] Confirm progress does not make large fake jumps or reach 100% before the file is complete and finalized.
 - [ ] When Telegram cannot start another transfer (including same data-centre/provider limits), confirm the UI shows a truthful waiting state rather than pretending the item is actively transferring.
 - [ ] Confirm speed returns to zero/idle when paused, completed or waiting.
@@ -141,6 +151,9 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] File without confirmed remote verification: cannot be destructively cleaned up.
 - [ ] Storage locations show an accurate count/size after removal.
 - [ ] Verify the file can still be opened/downloaded from Telegram after cleanup.
+- [ ] In Free up space, open the Local copies tab. Inspect app/database paths and TDLib-reported paths for app-managed, external/original, TDLib-only, missing, and Available Offline cases.
+- [ ] Use Reveal for existing paths; confirm external/original paths are labelled protected and cannot be treated as TeleDrive-owned.
+- [ ] Remove a disposable managed copy only; verify the cloud copy remains and the external/original/Available Offline file is untouched.
 - [ ] Confirm confirmation text accurately explains what will and will not be deleted.
 
 ## 6. Files browser and file management
@@ -161,7 +174,17 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] Test copy/move/rename and folder destination creation; verify bytes, names and metadata.
 - [ ] Test ZIP/7z operations only to the extent the current build exposes them; record supported formats and limits.
 - [ ] Verify keyboard Escape/back clears selection and does not close an unrelated screen.
+- [ ] Hover toolbar and player icons across Home, Files, Gallery, Preview, Transfers, Trash, Channels, Settings, Cache Manager and Thumbnail Manager/Queue; each actionable icon should show a label matching its action.
 
+### 6.1 PR #10 multi-tab and keyboard work
+
+- [ ] Open two or more Files tabs; open different folders in each and switch back/forth. Each tab must retain its folder and scroll position.
+- [ ] Close a background tab and then the selected tab; an adjacent tab should activate without corrupting folder state.
+- [ ] Drag a selected file/folder from Grid, List and Details onto another tab. Confirm the drag action (Move or Copy) is honored and the destination is that tab's current folder.
+- [ ] Confirm dropping onto the active tab is rejected and dropping onto an invalid/closed tab does not mutate anything.
+- [ ] Ctrl+C copies selected files/folders; repeated Ctrl+V pastes additional copies. Ctrl+X cuts and Ctrl+V moves once. Confirm files and folders preserve metadata and local copies as appropriate.
+- [ ] Ctrl+N opens New Folder; Delete sends selected items to Trash; F2 renames; Ctrl+A selects all; Backspace navigates to the parent folder; Escape clears selection.
+- [ ] Test keyboard shortcuts when the list has focus and when an editable text field has focus; shortcuts must not steal typing.
 ## 7. Gallery, thumbnails and cache
 
 ### 7.1 Gallery
@@ -170,6 +193,10 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] Favorites, Offline, Backed up and Not backed up filters return the correct items.
 - [ ] Next/previous in Preview stays within the current filtered result set.
 - [ ] Grid/List toggle works for media and albums.
+- [ ] Use visible zoom in/out controls and verify the extra thumbnail-size steps; on wide desktop windows the grid may reach eight columns.
+- [ ] Confirm list and compact grid rows show the containing folder path, including nested albums.
+- [ ] Open a large remote-only image and a downloaded local image. Confirm viewer dimensions/zoom use the original source, not the grid thumbnail.
+- [ ] Confirm grid thumbnail cache stays separate and bounded: larger previews improve sharpness without rewriting or compressing source files.
 - [ ] Album sort by name, item count and latest activity works.
 - [ ] Empty folder albums appear as intended; document-only folders are not incorrectly treated as photo albums.
 - [ ] Create an album and confirm it is a regular folder visible from Files.
