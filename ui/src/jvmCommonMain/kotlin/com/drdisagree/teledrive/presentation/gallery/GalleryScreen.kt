@@ -95,7 +95,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
@@ -617,7 +617,7 @@ fun GalleryScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = viewModel::clearSelection) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_clear_selection), onClick = viewModel::clearSelection) {
                             Icon(
                                 Icons.Filled.Close,
                                 contentDescription = stringResource(Res.string.common_clear_selection)
@@ -625,7 +625,8 @@ fun GalleryScreen(
                         }
                     },
                     actions = {
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (allSelected) Res.string.common_deselect_all else Res.string.common_select_all),
                             onClick = {
                                 if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
                             }
@@ -645,7 +646,7 @@ fun GalleryScreen(
                         }
                         if (state.selectionCount > 0) {
                             Box {
-                                IconButton(onClick = { showSelectionOverflow = true }) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = stringResource(Res.string.common_actions)
@@ -796,7 +797,7 @@ fun GalleryScreen(
                     title = { Text(state.albumTitle ?: stringResource(Res.string.gallery_title)) },
                     navigationIcon = {
                         onBack?.let {
-                            IconButton(onClick = it) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = it) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = stringResource(Res.string.common_back)
@@ -806,26 +807,27 @@ fun GalleryScreen(
                     },
                     actions = {
                         if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
-                            IconButton(onClick = { showCreateAlbum = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.gallery_new_album), onClick = { showCreateAlbum = true }) {
                                 Icon(
                                     Icons.Filled.CreateNewFolder,
                                     contentDescription = stringResource(Res.string.gallery_new_album)
                                 )
                             }
                         }
-                        IconButton(onClick = viewModel::startSelectionMode) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                             Icon(
                                 Icons.Filled.CheckBoxOutlineBlank,
                                 contentDescription = stringResource(Res.string.common_select)
                             )
                         }
-                        IconButton(onClick = onViewThumbnailQueue) {
+                        TooltipIconButton(tooltip = "View thumbnail queue", onClick = onViewThumbnailQueue) {
                             Icon(
                                 Icons.Filled.CloudQueue,
                                 contentDescription = "View thumbnail queue"
                             )
                         }
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (state.viewMode == ViewMode.GRID) Res.string.gallery_view_list else Res.string.gallery_view_grid),
                             onClick = {
                                 viewModel.setViewMode(
                                     if (state.viewMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
@@ -848,7 +850,8 @@ fun GalleryScreen(
                             )
                         }
                         if (state.viewMode == ViewMode.GRID) {
-                            IconButton(
+                            TooltipIconButton(
+                                tooltip = "Increase gallery thumbnail size",
                                 onClick = {
                                     if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
                                         viewModel.zoomAlbumsIn()
@@ -862,7 +865,8 @@ fun GalleryScreen(
                                     contentDescription = "Increase gallery thumbnail size"
                                 )
                             }
-                            IconButton(
+                            TooltipIconButton(
+                                tooltip = "Decrease gallery thumbnail size",
                                 onClick = {
                                     if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
                                         viewModel.zoomAlbumsOut()
@@ -877,7 +881,7 @@ fun GalleryScreen(
                                 )
                             }
                         }
-                        IconButton(onClick = { showSortMenu = true }) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.files_sort), onClick = { showSortMenu = true }) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Sort,
                                 contentDescription = stringResource(Res.string.files_sort)
@@ -963,7 +967,7 @@ fun GalleryScreen(
                 },
                 trailingIcon = if (state.filters.searchQuery.isNotEmpty()) {
                     {
-                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.gallery_clear_search), onClick = { viewModel.setSearchQuery("") }) {
                             Icon(
                                 Icons.Filled.Close,
                                 contentDescription = stringResource(Res.string.gallery_clear_search)
