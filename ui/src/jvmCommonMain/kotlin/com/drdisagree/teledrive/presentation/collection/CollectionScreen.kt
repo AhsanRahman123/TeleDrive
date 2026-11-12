@@ -53,6 +53,8 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.common.isInitialLoad
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
@@ -334,10 +336,30 @@ fun CollectionScreen(
                 if (!selectionMode) toggleAt(index)
                 confirmTrash = true
             },
+            onCopy = { index ->
+                if (!selectionMode) toggleAt(index)
+                viewModel.copyToClipboardSelected()
+            },
+            onCut = { index ->
+                if (!selectionMode) toggleAt(index)
+                viewModel.cutSelected()
+            },
+            onPaste = viewModel::paste,
             onBack = onBack,
             onClear = if (selectionMode) viewModel::clearSelection else null
         )
-        Box(modifier = Modifier.fillMaxSize()) {
+        val commandFocusRequester = rememberCollectionCommandFocusRequester()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .collectionCommandShortcuts(
+                    focusRequester = commandFocusRequester,
+                    onSelectAll = { viewModel.selectAll(); true },
+                    onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
+                    onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
+                    onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false }
+                )
+        ) {
                 LazyColumn(
             state = listState,
             modifier = Modifier
