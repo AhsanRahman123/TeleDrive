@@ -1,26 +1,16 @@
 package com.drdisagree.teledrive.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.isAltPressed
-import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.isShiftPressed
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
@@ -60,6 +50,9 @@ import com.drdisagree.teledrive.presentation.theme.systemDarkTheme
 import com.drdisagree.teledrive.resources.Res as SharedRes
 import com.drdisagree.teledrive.resources.app_name
 import java.awt.Dimension
+import java.awt.KeyboardFocusManager
+import java.awt.event.KeyEvent
+import javax.swing.SwingUtilities
 import javax.swing.JOptionPane
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
@@ -154,23 +147,39 @@ fun main() {
                 AppTheme.SYSTEM -> systemDark
             }
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
-            val windowShortcutFocus = remember { FocusRequester() }
-            LaunchedEffect(Unit) { windowShortcutFocus.requestFocus() }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .focusRequester(windowShortcutFocus)
-                    .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown &&
-                            event.key == Key.F11 &&
-                            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
-                        ) {
-                            fullscreenController.toggle()
-                            true
-                        } else false
+            DisposableEffect(window, fullscreenController) {
+                var f11Pressed = false
+                val dispatcher = java.awt.KeyEventDispatcher { event ->
+                    val belongsToThisWindow = SwingUtilities.getWindowAncestor(event.component) === window
+                    if (!belongsToThisWindow || event.keyCode != KeyEvent.VK_F11) {
+                        false
+                    } else {
+                        when (event.id) {
+                            KeyEvent.KEY_PRESSED -> {
+                                if (event.modifiersEx != 0) {
+                                    false
+                                } else {
+                                    if (!f11Pressed) {
+                                        f11Pressed = true
+                                        fullscreenController.toggle()
+                                    }
+                                    true
+                                }
+                            }
+                            KeyEvent.KEY_RELEASED -> {
+                                val wasPressed = f11Pressed
+                                f11Pressed = false
+                                wasPressed
+                            }
+                            else -> false
+                        }
                     }
-                    .focusable()
-            ) {
+                }
+                val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                focusManager.addKeyEventDispatcher(dispatcher)
+                onDispose { focusManager.removeKeyEventDispatcher(dispatcher) }
+            }
+            Box(modifier = Modifier.fillMaxSize()) {
                 CompositionLocalProvider(LocalFullscreenController provides fullscreenController) {
                     ProvideDesktopPlatformActions {
                         TeleDriveApp(
