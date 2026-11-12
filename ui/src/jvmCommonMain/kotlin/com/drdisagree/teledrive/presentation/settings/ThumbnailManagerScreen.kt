@@ -598,8 +598,21 @@ fun ThumbnailManagerScreen(
                     .collectionCommandShortcuts(
                         focusRequester = commandFocusRequester,
                         onSelectAll = {
-                            selectedFolderIds = selectedFolderIds + folders.map { it.id }
-                            selectedIds = selectedIds + files.map { it.fileId }
+                            scope.launch {
+                                selectingAll = true
+                                try {
+                                    selectedIds = cacheRepository.thumbnailFileIdsMatching(
+                                        folderId = folderId,
+                                        cacheFilter = cacheFilter.name,
+                                        policyFilter = policyFilter.name,
+                                        effectivePolicyFilter = effectivePolicyFilter.name,
+                                        searchQuery = searchQuery
+                                    ).toSet()
+                                    selectedFolderIds = folders.map { it.id }.toSet()
+                                } finally {
+                                    selectingAll = false
+                                }
+                            }
                             true
                         }
                     )
