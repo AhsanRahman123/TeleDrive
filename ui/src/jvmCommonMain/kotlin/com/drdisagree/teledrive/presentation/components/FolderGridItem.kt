@@ -43,7 +43,8 @@ fun FolderGridItem(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     showSelectionCheckbox: Boolean = true,
-    onToggleSelection: (() -> Unit)? = null
+    onToggleSelection: (() -> Unit)? = null,
+    prominentSelectionCheckbox: Boolean = false
 ) {
     Column(
         modifier = modifier
@@ -75,6 +76,7 @@ fun FolderGridItem(
                 SelectionCheckbox(
                     checked = selected,
                     onClick = onToggleSelection ?: onClick,
+                    highContrast = prominentSelectionCheckbox,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(2.dp)
