@@ -148,15 +148,26 @@ fun main() {
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
             DisposableEffect(window, fullscreenController) {
                 var f11Pressed = false
+                val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
                 val dispatcher = java.awt.KeyEventDispatcher { event ->
-                    val belongsToThisWindow =
-                        KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow === window
-                    if (!belongsToThisWindow || event.keyCode != KeyEvent.VK_F11) {
+                    if (event.keyCode != KeyEvent.VK_F11) {
                         false
                     } else {
                         when (event.id) {
+                            // Always clear the press latch on key-up, even if entering/exiting
+                            // fullscreen changed the focused window between key-down and key-up.
+                            // Otherwise the release can be ignored and every later F11 press
+                            // will look like auto-repeat and be swallowed.
+                            KeyEvent.KEY_RELEASED -> {
+                                val wasPressed = f11Pressed
+                                f11Pressed = false
+                                wasPressed
+                            }
                             KeyEvent.KEY_PRESSED -> {
-                                if (event.modifiersEx != 0) {
+                                val belongsToThisWindow = focusManager.focusedWindow === window
+                                val disallowedModifiers =
+                                    KeyEvent.CTRL_DOWN_MASK or KeyEvent.ALT_DOWN_MASK or KeyEvent.SHIFT_DOWN_MASK
+                                if (!belongsToThisWindow || event.modifiersEx and disallowedModifiers != 0) {
                                     false
                                 } else {
                                     if (!f11Pressed) {
@@ -166,16 +177,10 @@ fun main() {
                                     true
                                 }
                             }
-                            KeyEvent.KEY_RELEASED -> {
-                                val wasPressed = f11Pressed
-                                f11Pressed = false
-                                wasPressed
-                            }
                             else -> false
                         }
                     }
                 }
-                val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
                 focusManager.addKeyEventDispatcher(dispatcher)
                 onDispose { focusManager.removeKeyEventDispatcher(dispatcher) }
             }
