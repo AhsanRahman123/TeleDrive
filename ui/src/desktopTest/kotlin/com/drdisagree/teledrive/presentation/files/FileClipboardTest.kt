@@ -24,7 +24,7 @@ class FileClipboardTest {
     @Test
     fun `a newer cut of the same IDs survives an older move completion`() {
         val clipboard = FileClipboard()
-        clipboard.cut(CutItems(fileIds = listOf("file-1")))
+        clipboard.cut(CutItems(fileIds = listOf("file-1"), folderIds = emptyList()))
 
         val earlierPaste = requireNotNull(clipboard.peek())
         clipboard.cut(CutItems(fileIds = listOf("file-1")))
@@ -36,7 +36,7 @@ class FileClipboardTest {
     @Test
     fun `copy payload is not consumed by cut cleanup`() {
         val clipboard = FileClipboard()
-        clipboard.copy(CutItems(fileIds = listOf("file-1"), isCut = false))
+        clipboard.copy(CutItems(fileIds = listOf("file-1"), folderIds = emptyList(), isCut = false))
 
         val copied = requireNotNull(clipboard.peek())
         assertFalse(clipboard.clearIfMatches(copied))
