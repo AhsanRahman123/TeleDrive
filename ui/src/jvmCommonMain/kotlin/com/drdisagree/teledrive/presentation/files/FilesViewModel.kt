@@ -139,7 +139,7 @@ class FilesViewModel(
     fun addTab() {
         val tabId = "files-tab-${nextTabNumber++}"
         val folderId = _activeFolderId.value
-        val title = uiState.value.folderName.resolve().ifBlank { "Files" }
+        val title = "Files"
         _tabs.update { it + FilesTab(tabId, folderId, title) }
         _activeTabId.value = tabId
         clearSelection()
