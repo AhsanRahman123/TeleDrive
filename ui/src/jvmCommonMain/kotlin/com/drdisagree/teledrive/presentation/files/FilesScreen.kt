@@ -1323,11 +1323,11 @@ private fun FilesContent(
                     false
                 } else {
                     when {
-                        event.key == Key.C && selectedCount > 0 -> {
+                        event.key == Key.C && (selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) -> {
                             viewModel.copyToClipboardSelected()
                             true
                         }
-                        event.key == Key.X && selectedCount > 0 -> {
+                        event.key == Key.X && (selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) -> {
                             viewModel.cutSelected()
                             true
                         }
