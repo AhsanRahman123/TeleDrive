@@ -58,6 +58,8 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.ActionMenu
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
@@ -144,6 +146,14 @@ fun SearchScreen(
     val shortcuts = CollectionShortcuts(
         onToggleSelect = { index -> fileIdAt(index)?.let(viewModel::toggleSelection) },
         onSelectAll = viewModel::selectAll,
+        onCopy = { index ->
+            if (!selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
+            viewModel.copyToClipboardSelected()
+        },
+        onCut = { index ->
+            if (!selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
+            viewModel.cutSelected()
+        },
         onDelete = { index ->
             if (!selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
             viewModel.trashSelected()
@@ -248,7 +258,18 @@ fun SearchScreen(
                     )
                 }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            val commandFocusRequester = rememberCollectionCommandFocusRequester()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .collectionCommandShortcuts(
+                        focusRequester = commandFocusRequester,
+                        onSelectAll = { viewModel.selectAll(); true },
+                        onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
+                        onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false }
+                    )
+            ) {
                 when {
                 state.searching -> LoadingState()
                 !state.searched -> EmptyState(
