@@ -96,6 +96,8 @@ fun CacheManagerScreen(
     val scrollState = rememberScrollState()
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTool by remember { mutableStateOf("CACHE") }
+    var thumbnailManagerHasInternalBack by remember { mutableStateOf(false) }
+    var thumbnailManagerBackAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var confirmClearAllCache by remember { mutableStateOf(false) }
     var confirmClearThumbnailCache by remember { mutableStateOf(false) }
 
@@ -134,6 +136,9 @@ fun CacheManagerScreen(
     fun navigateBackOneStep() {
         when {
             selectedTool == "QUEUE" -> selectedTool = "THUMBNAILS"
+            selectedTool == "THUMBNAILS" && thumbnailManagerHasInternalBack -> {
+                thumbnailManagerBackAction?.invoke()
+            }
             selectedTool != "CACHE" -> selectedTool = "CACHE"
             folderPath.isNotEmpty() -> {
                 folderPath = folderPath.dropLast(1)
@@ -145,6 +150,12 @@ fun CacheManagerScreen(
         }
     }
 
+    LaunchedEffect(selectedTool) {
+        if (selectedTool != "THUMBNAILS") {
+            thumbnailManagerHasInternalBack = false
+            thumbnailManagerBackAction = null
+        }
+    }
     AppBackHandler { navigateBackOneStep() }
     val folderDragSelect = rememberDragSelect(
         listState = folderListState,
@@ -325,7 +336,11 @@ fun CacheManagerScreen(
                 )
                 "THUMBNAILS" -> ThumbnailManagerScreen(
                     onBack = { selectedTool = "CACHE" },
-                    modifier = Modifier.weight(1f).fillMaxWidth()
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onInternalBackStateChange = { canGoBack, action ->
+                        thumbnailManagerHasInternalBack = canGoBack
+                        thumbnailManagerBackAction = action.takeIf { canGoBack }
+                    }
                 )
                 "QUEUE" -> ThumbnailQueueScreen(
                     onBack = { selectedTool = "THUMBNAILS" },
