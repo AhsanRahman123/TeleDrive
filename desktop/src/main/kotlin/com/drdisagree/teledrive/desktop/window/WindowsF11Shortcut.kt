@@ -149,7 +149,7 @@ internal class WindowsF11Shortcut(
         if (EventQueue.isDispatchThread()) {
             action()
         } else {
-            EventQueue.invokeLater(action)
+            EventQueue.invokeLater { action() }
         }
     }
 
