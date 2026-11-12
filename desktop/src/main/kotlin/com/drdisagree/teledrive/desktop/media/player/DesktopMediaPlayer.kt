@@ -75,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -379,7 +380,16 @@ internal fun DesktopMediaPlayer(
 
     val trackWord = stringResource(Res.string.player_track)
     val playerFocusRequester = remember { FocusRequester() }
+    val windowInfo = LocalWindowInfo.current
     LaunchedEffect(mrl) { playerFocusRequester.requestFocus() }
+    LaunchedEffect(windowInfo.isWindowFocused) {
+        if (!windowInfo.isWindowFocused) {
+            // A key release may be delivered to another application during Alt+Tab.
+            hKeyPressed = false
+        } else {
+            playerFocusRequester.requestFocus()
+        }
+    }
 
     val togglePlayback: () -> Unit = {
         when {
