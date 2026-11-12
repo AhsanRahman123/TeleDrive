@@ -87,6 +87,8 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -423,7 +425,7 @@ fun GalleryScreen(
     // Fit more media previews on wide windows while keeping phone grids unchanged.
     val isWideWindow = currentWindowAdaptiveInfoV2().windowSizeClass
         .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
-    val mediaGridColumns = if (isWideWindow) (state.gridSize + 2).coerceAtMost(6)
+    val mediaGridColumns = if (isWideWindow) (state.gridSize + 2).coerceAtMost(8)
         else state.gridSize
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     var confirmTrash by remember { mutableStateOf(false) }
@@ -844,6 +846,36 @@ fun GalleryScreen(
                                     }
                                 )
                             )
+                        }
+                        if (state.viewMode == ViewMode.GRID) {
+                            IconButton(
+                                onClick = {
+                                    if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                                        viewModel.zoomAlbumsIn()
+                                    } else {
+                                        viewModel.zoomIn()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.ZoomIn,
+                                    contentDescription = "Increase gallery thumbnail size"
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                                        viewModel.zoomAlbumsOut()
+                                    } else {
+                                        viewModel.zoomOut()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.ZoomOut,
+                                    contentDescription = "Decrease gallery thumbnail size"
+                                )
+                            }
                         }
                         IconButton(onClick = { showSortMenu = true }) {
                             Icon(
