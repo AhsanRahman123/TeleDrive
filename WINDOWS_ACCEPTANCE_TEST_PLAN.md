@@ -1,6 +1,6 @@
 # TeleDrive — Windows Consolidated Acceptance Test Plan
 
-Last updated: 2026-11-12
+Last updated: 2026-11-13
 Test target: branch `work/desktop-feature-fixes-20261112`
 Expected starting point: latest head of `work/desktop-feature-fixes-20261112`; fetch the branch and record `git rev-parse HEAD` before testing.
 Companion status register: [DEVELOPMENT_STATUS_REGISTER.md](DEVELOPMENT_STATUS_REGISTER.md)
@@ -8,6 +8,16 @@ Companion status register: [DEVELOPMENT_STATUS_REGISTER.md](DEVELOPMENT_STATUS_R
 This is the final Windows-first acceptance plan for the consolidated development workspace. It is intentionally evidence-driven: check an item only after performing it on the exact workspace/commit being recorded. A compile or automated test is not a substitute for the user-facing test.
 
 ## 0. Test environment and safety gate
+
+For the isolated Windows launch, use PowerShell from the clone root:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+.\scripts\run-isolated-desktop.ps1
+```
+
+The execution-policy bypass is process-scoped; it applies only to this PowerShell session and does not permanently change Windows policy.
+
 
 - [ ] New clone exists at `C:\Users\ahsan\TeleDrive-Desktop-Dev`.
 - [ ] `git status --short` reviewed; no unknown user files are being overwritten.
@@ -185,6 +195,8 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] Drag a selected file/folder from Grid, List and Details onto another tab. Confirm the drag action (Move or Copy) is honored and the destination is that tab's current folder.
 - [ ] Confirm dropping onto the active tab is rejected and dropping onto an invalid/closed tab does not mutate anything.
 - [ ] Ctrl+C copies selected files/folders; repeated Ctrl+V pastes additional copies. Ctrl+X cuts and Ctrl+V moves once. Confirm files and folders preserve metadata and local copies as appropriate.
+- [ ] In Files Grid/List/Details, selecting a file or folder shows a clearly visible filled primary badge with a contrasting checkmark; deselecting restores the neutral outline. Confirm this stronger selection treatment is Files-only and Gallery's visuals remain unchanged.
+- [ ] Trigger Ctrl+C/X/V after selecting with the mouse or checkbox, including when the destination folder is empty. Copy should leave the source and allow repeated paste; cut should move once and clear only after success.
 - [ ] Force a cut/move destination failure and confirm the cut clipboard remains available for retry. Start a newer cut while an earlier move is finishing and confirm the earlier completion does not clear the newer clipboard.
 - [ ] Ctrl+N opens New Folder; Delete sends selected items to Trash; F2 renames; Ctrl+A selects all; Backspace navigates to the parent folder; Escape clears selection.
 - [ ] Test keyboard shortcuts when the list has focus and when an editable text field has focus; shortcuts must not steal typing.
