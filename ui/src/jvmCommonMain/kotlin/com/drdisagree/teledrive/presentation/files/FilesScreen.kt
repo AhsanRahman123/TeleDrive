@@ -868,30 +868,44 @@ fun FilesScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             tabs.forEach { tab ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    TextButton(
-                                        onClick = { activateTab(tab) },
-                                        colors = ButtonDefaults.textButtonColors(
-                                            containerColor = if (tab.id == selectedTabId) {
-                                                MaterialTheme.colorScheme.secondaryContainer
-                                            } else {
-                                                Color.Transparent
+                                FileTabDropTarget(
+                                    modifier = Modifier,
+                                    onDrop = { payload, copy ->
+                                        tab.id != selectedTabId &&
+                                            viewModel.handleTabDrop(payload, tab.folderId, copy)
+                                    }
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(
+                                            onClick = { activateTab(tab) },
+                                            modifier = Modifier.fileTabDragSource {
+                                                // A tab can also be dragged as a destination shortcut;
+                                                // the payload itself remains item-only, so an empty
+                                                // selection never creates an accidental file operation.
+                                                ""
                                             },
-                                            contentColor = if (tab.id == selectedTabId) {
-                                                MaterialTheme.colorScheme.onSecondaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            colors = ButtonDefaults.textButtonColors(
+                                                containerColor = if (tab.id == selectedTabId) {
+                                                    MaterialTheme.colorScheme.secondaryContainer
+                                                } else {
+                                                    Color.Transparent
+                                                },
+                                                contentColor = if (tab.id == selectedTabId) {
+                                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                }
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                        ) { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                        if (tabs.size > 1) {
+                                            TooltipIconButton(tooltip = "Close ${tab.label} tab", onClick = { closeTab(tab) }, modifier = Modifier.size(28.dp)) {
+                                                Icon(
+                                                    Icons.Filled.Close,
+                                                    contentDescription = "Close ${tab.label} tab",
+                                                    modifier = Modifier.size(14.dp)
+                                                )
                                             }
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                    ) { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                                    if (tabs.size > 1) {
-                                        TooltipIconButton(tooltip = "Close ${tab.label} tab", onClick = { closeTab(tab) }, modifier = Modifier.size(28.dp)) {
-                                            Icon(
-                                                Icons.Filled.Close,
-                                                contentDescription = "Close ${tab.label} tab",
-                                                modifier = Modifier.size(14.dp)
-                                            )
                                         }
                                     }
                                 }
@@ -1341,6 +1355,7 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
+                        .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
                             viewModel.selectFolderForContext(folder.id)
                             onShowContextMenu()
@@ -1396,6 +1411,7 @@ private fun FilesContent(
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .animateItem()
                         .focusHighlight(highlighted)
+                        .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
                             viewModel.selectFileForContext(file.id)
                             onShowContextMenu()
