@@ -85,6 +85,9 @@ class DesktopTelegramClient(
     override val connectionState: StateFlow<TelegramConnectionState> =
         _connectionState.asStateFlow()
 
+    private val _speedLimitNotifications = MutableSharedFlow<Boolean>(replay = 1, extraBufferCapacity = 8)
+    override val speedLimitNotifications: Flow<Boolean> = _speedLimitNotifications
+
     private val updates = MutableSharedFlow<TdApi.Object>(
         extraBufferCapacity = 4096,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -979,6 +982,7 @@ class DesktopTelegramClient(
             updates.onSubscription { subscribed.complete(Unit) }
                 .onEach { update ->
                     if (update is TdApi.UpdateSpeedLimitNotification) {
+                        _speedLimitNotifications.tryEmit(update.isUpload)
                         SafeLog.w(
                             "TransferDiagnostics",
                             "TELEGRAM_SPEED_LIMIT direction=${if (update.isUpload) "UPLOAD" else "DOWNLOAD"}"
