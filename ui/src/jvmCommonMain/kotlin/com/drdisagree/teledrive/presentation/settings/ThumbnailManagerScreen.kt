@@ -78,6 +78,8 @@ import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -588,7 +590,20 @@ fun ThumbnailManagerScreen(
                 }
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            val commandFocusRequester = rememberCollectionCommandFocusRequester()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .collectionCommandShortcuts(
+                        focusRequester = commandFocusRequester,
+                        onSelectAll = {
+                            selectedFolderIds = selectedFolderIds + folders.map { it.id }
+                            selectedIds = selectedIds + files.map { it.fileId }
+                            true
+                        }
+                    )
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
