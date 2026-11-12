@@ -194,7 +194,7 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] Favorites, Offline, Backed up and Not backed up filters return the correct items.
 - [ ] Next/previous in Preview stays within the current filtered result set.
 - [ ] Grid/List toggle works for media and albums.
-- [ ] Use visible zoom in/out controls and verify the expanded 2–12 column range, including the denser 9–12 column options on wide windows.
+- [ ] Use visible zoom in/out controls and verify the expanded 2–12 column range, including the denser 9–12 column options. On wide windows, Gallery adds two columns but must still stop at 12.
 - [ ] Confirm list and compact grid rows show the containing folder path, including nested albums.
 - [ ] Open a large remote-only image and a downloaded local image. Confirm viewer dimensions/zoom use original file bytes, not the grid thumbnail. For remote-only images above the auto-preview limit, explicitly download from the viewer and confirm it transitions to the full local original after transfer completion.
 - [ ] Confirm grid thumbnail cache stays separate and bounded: larger previews improve sharpness without rewriting or compressing source files.
