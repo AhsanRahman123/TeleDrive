@@ -111,7 +111,15 @@ class FilesViewModel(
     private val telegramClient: TelegramClient
 ) : ViewModel() {
 
-    private val folderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
+    private val initialFolderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
+    private val _activeFolderId = MutableStateFlow(initialFolderId)
+    val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
+
+    fun setActiveFolder(folderId: String?) {
+        if (_activeFolderId.value == folderId) return
+        clearSelection()
+        _activeFolderId.value = folderId
+    }
 
     val listPosition = ListPosition(savedStateHandle)
 
@@ -180,12 +188,19 @@ class FilesViewModel(
         }
     }
 
-    private val currentFolder: Flow<DriveFolder?> = folderFlow()
+    private val currentFolderState: Flow<Pair<String?, DriveFolder?>> =
+        _activeFolderId.flatMapLatest { activeId ->
+            if (activeId == null) {
+                flowOf(activeId to null)
+            } else {
+                fileRepository.observeFolder(activeId).map { folder -> activeId to folder }
+            }
+        }
 
     private val querySpec: Flow<FileQuerySpec> =
-        combine(settingsRepository.preferences, currentFolder) { prefs, folder ->
+        combine(settingsRepository.preferences, currentFolderState) { prefs, (activeId, folder) ->
             FileQuerySpec(
-                folderId = folderId,
+                folderId = activeId,
                 filterByFolder = true,
                 showHidden = folder?.isHidden == true,
                 showArchived = folder?.isArchived == true,
@@ -193,6 +208,21 @@ class FilesViewModel(
                 sortDirection = prefs.sortDirection
             )
         }.distinctUntilChanged()
+
+    private val currentFolders = combine(
+        settingsRepository.preferences,
+        currentFolderState
+    ) { prefs, (activeId, folder) ->
+        prefs to (activeId to folder)
+    }.flatMapLatest { (prefs, context) ->
+        fileRepository.observeFolders(
+            parentId = context.first,
+            showHidden = context.second?.isHidden == true,
+            showArchived = context.second?.isArchived == true,
+            sortField = prefs.sortField,
+            sortDirection = prefs.sortDirection
+        )
+    }
 
     val pagedFiles: Flow<PagingData<DriveFile>> = querySpec
         .flatMapLatest { fileRepository.pagedFiles(it) }
@@ -221,22 +251,13 @@ class FilesViewModel(
         settingsRepository.preferences,
         selectionCapabilities,
         folderSelection,
-        currentFolder,
-        combine(settingsRepository.preferences, currentFolder) { prefs, folder ->
-            prefs to folder
-        }.flatMapLatest { (prefs, folder) ->
-            fileRepository.observeFolders(
-                parentId = folderId,
-                showHidden = folder?.isHidden == true,
-                showArchived = folder?.isArchived == true,
-                sortField = prefs.sortField,
-                sortDirection = prefs.sortDirection
-            )
-        }
-    ) { prefs: UserPreferences, selectionState, selectedFolders, folder, folders ->
+        currentFolderState,
+        currentFolders
+    ) { prefs: UserPreferences, selectionState, selectedFolders, folderState, folders ->
+        val (activeId, folder) = folderState
         val (selected, capabilities) = selectionState
         FilesUiState(
-            folderId = folderId,
+            folderId = activeId,
             folderName = folder?.name?.let(UiText::Plain)
                 ?: UiText.Resource(Res.string.files_root_name),
             breadcrumbs = breadcrumbsFor(folder),
@@ -252,10 +273,6 @@ class FilesViewModel(
             capabilities = capabilities
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FilesUiState())
-
-    private fun folderFlow(): Flow<DriveFolder?> =
-        folderId?.let { fileRepository.observeFolder(it) }
-            ?: MutableStateFlow<DriveFolder?>(null)
 
     private suspend fun breadcrumbsFor(folder: DriveFolder?): List<FolderCrumb> {
         val trail = ArrayDeque<FolderCrumb>()
@@ -366,7 +383,7 @@ class FilesViewModel(
 
     fun createFolder(name: String) {
         viewModelScope.launch {
-            when (val result = fileRepository.createFolder(folderId, name)) {
+            when (val result = fileRepository.createFolder(_activeFolderId.value, name)) {
                 is AppResult.Success -> Unit
                 is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
             }
@@ -586,9 +603,9 @@ class FilesViewModel(
         val items = clipboard.peek() ?: return
         if (items.isCut) {
             val consumed = clipboard.take() ?: return
-            move(consumed.fileIds, consumed.folderIds, folderId)
+            move(consumed.fileIds, consumed.folderIds, _activeFolderId.value)
         } else {
-            copyItems(items.fileIds, items.folderIds, folderId)
+            copyItems(items.fileIds, items.folderIds, _activeFolderId.value)
         }
     }
 
@@ -932,7 +949,7 @@ class FilesViewModel(
     private val _folderConflict = MutableStateFlow<FolderConflict?>(null)
     val folderConflict: StateFlow<FolderConflict?> = _folderConflict.asStateFlow()
 
-    fun importAndUpload(uris: List<String>, target: String? = folderId) {
+    fun importAndUpload(uris: List<String>, target: String? = _activeFolderId.value) {
         if (uris.isEmpty()) return
         importScope.launch {
             // Capture before expanding or showing the folder-conflict dialog. Cancel all
