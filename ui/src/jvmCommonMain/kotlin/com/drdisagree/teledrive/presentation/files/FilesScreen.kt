@@ -70,7 +70,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -509,7 +509,7 @@ fun FilesScreen(
                                 )
                             },
                             navigationIcon = {
-                                IconButton(onClick = viewModel::clearSelection) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.common_clear_selection), onClick = viewModel::clearSelection) {
                                     Icon(
                                         Icons.Filled.Close,
                                         contentDescription = stringResource(Res.string.common_clear_selection)
@@ -517,7 +517,8 @@ fun FilesScreen(
                                 }
                             },
                             actions = {
-                                IconButton(
+                                TooltipIconButton(
+                                    tooltip = stringResource(if (allSelected) Res.string.common_deselect_all else Res.string.common_select_all),
                                     onClick = {
                                         if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
                                     }
@@ -536,14 +537,14 @@ fun FilesScreen(
                                     )
                                 }
                                 if (state.selectionCount > 0) {
-                                    IconButton(onClick = { showMovePicker = true }) {
+                                    TooltipIconButton(tooltip = stringResource(Res.string.files_move), onClick = { showMovePicker = true }) {
                                         Icon(
                                             Icons.AutoMirrored.Filled.DriveFileMove,
                                             contentDescription = stringResource(Res.string.files_move)
                                         )
                                     }
                                     Box {
-                                        IconButton(onClick = { showSelectionOverflow = true }) {
+                                        TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                         Icon(
                                             Icons.Filled.MoreVert,
                                             contentDescription = stringResource(Res.string.common_actions)
@@ -685,7 +686,7 @@ fun FilesScreen(
                             title = { Text(stringResource(Res.string.files)) },
                             navigationIcon = {
                                 onBack?.let {
-                                    IconButton(onClick = it) {
+                                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = it) {
                                         Icon(
                                             Icons.AutoMirrored.Filled.ArrowBack,
                                             contentDescription = stringResource(Res.string.common_back)
@@ -694,13 +695,13 @@ fun FilesScreen(
                                 }
                             },
                             actions = {
-                                IconButton(onClick = viewModel::startSelectionMode) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                                     Icon(
                                         Icons.Filled.CheckBoxOutlineBlank,
                                         contentDescription = stringResource(Res.string.common_select)
                                     )
                                 }
-                                IconButton(onClick = onViewThumbnailQueue) {
+                                TooltipIconButton(tooltip = "View thumbnail queue", onClick = onViewThumbnailQueue) {
                                     Icon(
                                         Icons.Filled.CloudQueue,
                                         contentDescription = "View thumbnail queue"
@@ -710,20 +711,20 @@ fun FilesScreen(
                                     refreshing = refreshing,
                                     onRefresh = viewModel::refresh
                                 )
-                                IconButton(onClick = onOpenSearch) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.files_search), onClick = onOpenSearch) {
                                     Icon(
                                         Icons.Filled.Search,
                                         contentDescription = stringResource(Res.string.files_search)
                                     )
                                 }
-                                IconButton(onClick = { showCreateFolder = true }) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.files_new_folder), onClick = { showCreateFolder = true }) {
                                     Icon(
                                         Icons.Filled.CreateNewFolder,
                                         contentDescription = stringResource(Res.string.files_new_folder)
                                     )
                                 }
                                 Box {
-                                    IconButton(onClick = { showViewMenu = true }) {
+                                    TooltipIconButton(tooltip = stringResource(Res.string.files_change_view), onClick = { showViewMenu = true }) {
                                         Icon(
                                             Icons.Filled.ViewList,
                                             contentDescription = stringResource(Res.string.files_change_view)
@@ -756,7 +757,7 @@ fun FilesScreen(
                                         )
                                     }
                                 }
-                                IconButton(onClick = { showSortMenu = true }) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.files_sort), onClick = { showSortMenu = true }) {
                                     Icon(
                                         Icons.AutoMirrored.Filled.Sort,
                                         contentDescription = stringResource(Res.string.files_sort)
@@ -885,7 +886,7 @@ fun FilesScreen(
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                     ) { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                                     if (tabs.size > 1) {
-                                        IconButton(onClick = { closeTab(tab) }, modifier = Modifier.size(28.dp)) {
+                                        TooltipIconButton(tooltip = "Close ${tab.label} tab", onClick = { closeTab(tab) }, modifier = Modifier.size(28.dp)) {
                                             Icon(
                                                 Icons.Filled.Close,
                                                 contentDescription = "Close ${tab.label} tab",
@@ -896,7 +897,7 @@ fun FilesScreen(
                                 }
                             }
                         }
-                        IconButton(onClick = ::createTab) {
+                        TooltipIconButton(tooltip = "Open new Files tab", onClick = ::createTab) {
                             Icon(Icons.Filled.Add, contentDescription = "Open new Files tab")
                         }
                     }
