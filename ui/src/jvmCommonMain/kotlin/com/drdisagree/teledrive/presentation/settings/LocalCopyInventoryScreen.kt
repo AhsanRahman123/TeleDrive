@@ -49,6 +49,8 @@ import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.koin.compose.koinInject
 import java.io.File
 import java.nio.file.Paths
@@ -70,6 +72,8 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
     val fileRevealer = LocalFileRevealer.current
+    // Scrolling through a large inventory must not flood TDLib with concurrent GetRemoteFile calls.
+    val tdlibInspectionSemaphore = remember { Semaphore(4) }
 
     val preferences by settingsRepository.preferences.collectAsStateWithLifecycle(
         initialValue = UserPreferences()
@@ -195,7 +199,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
             }
             Card(modifier = Modifier.weight(1f)) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("Existing file size", style = MaterialTheme.typography.labelMedium)
+                    Text("Existing app-copy size", style = MaterialTheme.typography.labelMedium)
                     Text(Formatters.bytes(visibleBytes), style = MaterialTheme.typography.headlineSmall)
                 }
             }
@@ -259,10 +263,12 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                         tdlibInspecting = true
                         tdlibError = null
                         try {
-                            val resolved = telegramClient.resolveFile(remoteFileId)
-                            tdlibPath = resolved.localPath
-                            tdlibCanBeDeleted = resolved.canBeDeleted
-                            tdlibInspected = true
+                            tdlibInspectionSemaphore.withPermit {
+                                val resolved = telegramClient.resolveFile(remoteFileId)
+                                tdlibPath = resolved.localPath
+                                tdlibCanBeDeleted = resolved.canBeDeleted
+                                tdlibInspected = true
+                            }
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (error: Exception) {
@@ -367,10 +373,12 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                                                 tdlibInspecting = true
                                                 tdlibError = null
                                                 try {
-                                                    val resolved = telegramClient.resolveFile(row.file.remoteFileId)
-                                                    tdlibPath = resolved.localPath
-                                                    tdlibCanBeDeleted = resolved.canBeDeleted
-                                                    tdlibInspected = true
+                                                    tdlibInspectionSemaphore.withPermit {
+                                                        val resolved = telegramClient.resolveFile(row.file.remoteFileId)
+                                                        tdlibPath = resolved.localPath
+                                                        tdlibCanBeDeleted = resolved.canBeDeleted
+                                                        tdlibInspected = true
+                                                    }
                                                 } catch (cancelled: CancellationException) {
                                                     throw cancelled
                                                 } catch (error: Exception) {
