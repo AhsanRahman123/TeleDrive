@@ -103,6 +103,15 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -1321,6 +1330,31 @@ private fun FilesContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(end = 10.dp)
+            .onPreviewKeyEvent { event ->
+                val command = event.isCtrlPressed || event.isMetaPressed
+                val plainCommand = command && !event.isAltPressed && !event.isShiftPressed
+                if (event.type != KeyEventType.KeyDown || !plainCommand) {
+                    false
+                } else {
+                    when {
+                        event.key == Key.C &&
+                            (state.selectionCount > 0 || state.folderSelection.isNotEmpty()) -> {
+                            viewModel.copyToClipboardSelected()
+                            true
+                        }
+                        event.key == Key.X &&
+                            (state.selectionCount > 0 || state.folderSelection.isNotEmpty()) -> {
+                            viewModel.cutSelected()
+                            true
+                        }
+                        event.key == Key.V -> {
+                            viewModel.paste()
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
             .keyboardCollection(
                 keyboard,
                 itemCount,
