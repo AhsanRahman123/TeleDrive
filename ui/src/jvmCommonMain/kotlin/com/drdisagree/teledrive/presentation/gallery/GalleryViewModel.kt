@@ -652,8 +652,35 @@ class GalleryViewModel(
         }
     }
 
+    fun copyToClipboardSelected() {
+        val (ids, folders) = takeSelection()
+        val total = ids.size + folders.size
+        if (total == 0) return
+        clipboard.copy(CutItems(ids, folders, isCut = false))
+        _messages.tryEmit(UiText.Plain("Copied $total item(s). Navigate to a Gallery album and press Ctrl+V."))
+    }
+
+    fun paste() {
+        val items = clipboard.peek() ?: return
+        if (items.isCut) {
+            val consumed = clipboard.take() ?: return
+            viewModelScope.launch {
+                if (consumed.fileIds.isNotEmpty()) {
+                    fileRepository.moveFiles(consumed.fileIds, albumFolderId).reportFailure()
+                }
+                consumed.folderIds.forEach { fileRepository.moveFolder(it, albumFolderId).reportFailure() }
+            }
+        } else {
+            copyItems(items.fileIds, items.folderIds, albumFolderId)
+        }
+    }
+
     fun copySelected(targetFolderId: String?) {
         val (ids, folders) = takeSelection()
+        copyItems(ids, folders, targetFolderId)
+    }
+
+    private fun copyItems(ids: List<String>, folders: List<String>, targetFolderId: String?) {
         if (ids.isEmpty() && folders.isEmpty()) return
         viewModelScope.launch {
             if (ids.isNotEmpty()) {
