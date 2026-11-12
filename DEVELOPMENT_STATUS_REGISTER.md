@@ -4,7 +4,7 @@ Last audited: 2026-11-12
 Repository: `AhsanRahman123/TeleDrive`
 Development branch: `work/desktop-feature-fixes-20261112`
 Stack base: PR #9 head `36f3da98f960c879c548099b30150c74ee9b33e5`
-Latest PR #10 head audited: `8291ce7f7307ad1874de8e97afe34c67010a1e06`
+Latest code head audited: `5d655c13a09fc3320eae93b5a93698ded84b0f05`; current branch head is `4888f40ff4351c9e3066cb42032d3359b16e2446` (documentation-only commits after the code head).
 
 This register is the current status source for the consolidated development workspace. Older planning documents remain useful for feature intent, but their status labels may be stale. When this register conflicts with an older note, re-audit the source and tests before changing the status.
 
@@ -102,7 +102,7 @@ The branch includes work on:
 
 ## 5. New Windows feature batch — PR #10
 
-**Latest audited source:** 8291ce7f7307ad1874de8e97afe34c67010a1e06 (2026-11-12). PR #10 is draft and has not been merged.
+**Latest audited source:** 5d655c13a09fc3320eae93b5a93698ded84b0f05 (2026-11-12). PR #10 is draft and has not been merged.
 
 Source changes present on the branch:
 - Playlist menu no longer nests an independently vertically scrolling Column inside the Compose DropdownMenu; the queue menu relies on its own bounded scrolling.
