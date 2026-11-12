@@ -4,7 +4,7 @@ Last audited: 2026-11-12
 Repository: `AhsanRahman123/TeleDrive`
 Development branch: `work/desktop-feature-fixes-20261112`
 Stack base: PR #9 head `36f3da98f960c879c548099b30150c74ee9b33e5`
-Latest code head audited: `5d655c13a09fc3320eae93b5a93698ded84b0f05`. Documentation-only commits follow this code head; fetch the branch tip before building and record its exact SHA.
+Latest code head audited: `c4f15ba1dd1c4ae1836f3ea74d1e40b982cd97f9`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
 
 This register is the current status source for the consolidated development workspace. Older planning documents remain useful for feature intent, but their status labels may be stale. When this register conflicts with an older note, re-audit the source and tests before changing the status.
 
@@ -102,7 +102,7 @@ The branch includes work on:
 
 ## 5. New Windows feature batch — PR #10
 
-**Latest audited source:** e6c089aca0864ed91b109aa24035e2ac9a4a19bd (2026-11-12). PR #10 is draft and has not been merged.
+**Latest audited source:** c4f15ba1dd1c4ae1836f3ea74d1e40b982cd97f9 (2026-11-12). PR #10 is draft and has not been merged.
 
 Source changes present on the branch:
 - Playlist menu no longer nests an independently vertically scrolling Column inside the Compose DropdownMenu; the queue menu relies on its own bounded scrolling.
@@ -110,14 +110,14 @@ Source changes present on the branch:
 - Player control visibility is preserved across file changes; H hides controls on one press and shows on a second press within 450 ms; a dedicated hide button is present.
 - Preview Back no longer forces fullscreen off. Desktop fullscreen remembers/restores the prior window placement; F11 is handled at the app root.
 - Desktop image preview uses a full-resolution painter with high-quality filtering. Locally generated grid thumbnails are bounded at 768 px with explicit JPEG quality 0.86; Telegram photo-preview selection prefers the largest available size up to 1024 px. After a successful original image/video download, an existing cached thumbnail is queued for replacement from the local original only when the effective policy is Automatic; the worker's force flag now bypasses the cached-entry skip and replaces the same cache entry rather than adding another copy. A desktop unit test (`ThumbnailRefreshQueueRuleTest`) covers normal cached-job skipping, forced replacement, automatic-policy enforcement and explicit force behavior.
-- Gallery list and compact grid rows expose parent-folder paths; Gallery grid has explicit zoom controls and an expanded 2–12 column range on wide windows.
+- Gallery list and compact grid rows expose parent-folder paths; Gallery grid has explicit zoom controls and an expanded 2–12 column range. Wide-window layout adds two columns but shares the 12-column ceiling; UI tests cover wide and narrow layout calculations.
 - Files screen has a multi-tab workspace with per-tab folder navigation/scroll-position restoration; Ctrl+C/Ctrl+X/Ctrl+V/Ctrl+N/Delete/F2/Backspace shortcuts are connected; copy clipboard content remains reusable across paste while cut content is consumed.
 - File and folder rows provide in-app drag payloads in Grid/List/Details; tab drop targets dispatch Move or Copy to the destination tab's current folder.
 - Folder selections expand into storage audit; Free up space has a Backed-up local copies inventory listing app and TDLib cache paths, allowing reveal/inspection while relying on repository-level managed-root, remote-verification and Available Offline protections. Visible inventory rows automatically inspect TDLib cache state with a four-request concurrency cap; they show path/size or a no-cache state and retain manual refresh.
 - Hover tooltips were added to primary Files, Gallery, Preview/player, Home, Search, Collections, Channels, Trash, Transfers, Settings, Cache Manager and Thumbnail Manager/Queue icon actions.
 - TDLib account-level speed-limit notifications are exposed to Transfers as a diagnostic. This does not bypass a Telegram-side account limit or itself increase download speed.
 
-**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 code head `e6c089ac`. GitHub Actions workflow-run query for `e6c089aca0864ed91b109aa24035e2ac9a4a19bd` returned zero runs at the last check. Do not promote these items to COMPILED or USER-VERIFIED.
+**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 code head `c4f15ba1`. GitHub Actions workflow-run query for `c4f15ba1dd1c4ae1836f3ea74d1e40b982cd97f9` returned zero runs at the last check. Do not promote these items to COMPILED or USER-VERIFIED.
 
 Immediate Windows acceptance needed on the exact latest head:
 1. Run :shared:desktopTest, :ui:desktopTest, :desktop:test and :desktop:compileKotlin, then package/run through the isolated desktop profile.
