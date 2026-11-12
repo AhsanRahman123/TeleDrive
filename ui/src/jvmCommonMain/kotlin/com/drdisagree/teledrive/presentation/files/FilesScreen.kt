@@ -793,6 +793,7 @@ fun FilesScreen(
                                 onOpenFolder = onOpenFolder,
                                 onOpenFile = onOpenFile,
                                 onRequestTrash = { confirmTrash = true },
+                                onCreateFolder = { showCreateFolder = true },
                                 onBack = onBack,
                                 viewModel = viewModel
                             )
@@ -1075,6 +1076,7 @@ private fun FilesContent(
     onOpenFolder: (String) -> Unit,
     onOpenFile: (String, PreviewSequence) -> Unit,
     onRequestTrash: () -> Unit,
+    onCreateFolder: () -> Unit,
     onBack: (() -> Unit)?,
     viewModel: FilesViewModel
 ) {
@@ -1103,11 +1105,16 @@ private fun FilesContent(
                 files.peek(index - state.folders.size)?.let { viewModel.requestRename(it.id, null) }
             }
         },
+        onCopy = { index ->
+            selectIfNone(index)
+            viewModel.copyToClipboardSelected()
+        },
         onCut = { index ->
             selectIfNone(index)
             viewModel.cutSelected()
         },
         onPaste = viewModel::paste,
+        onNewFolder = onCreateFolder,
         onBack = onBack,
         onClear = if (selectionMode) viewModel::clearSelection else null
     )
