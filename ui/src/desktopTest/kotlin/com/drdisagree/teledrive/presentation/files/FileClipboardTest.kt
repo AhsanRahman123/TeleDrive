@@ -27,7 +27,7 @@ class FileClipboardTest {
         clipboard.cut(CutItems(fileIds = listOf("file-1"), folderIds = emptyList()))
 
         val earlierPaste = requireNotNull(clipboard.peek())
-        clipboard.cut(CutItems(fileIds = listOf("file-1")))
+        clipboard.cut(CutItems(fileIds = listOf("file-1"), folderIds = emptyList()))
 
         assertFalse(clipboard.clearIfMatches(earlierPaste))
         assertTrue(requireNotNull(clipboard.peek()).isCut)
