@@ -599,6 +599,42 @@ class FilesViewModel(
         _messages.tryEmit(UiText.Plain("Copied $total item(s). Navigate to a destination and press Ctrl+V."))
     }
 
+    fun dragPayloadForFile(fileId: String): String {
+        val selectedFiles = selection.value
+        val selectedFolders = folderSelection.value
+        val includeSelection = fileId in selectedFiles || selectedFolders.isNotEmpty()
+        return FileTabDragData(
+            fileIds = if (includeSelection && fileId in selectedFiles) selectedFiles.toList() else listOf(fileId),
+            folderIds = if (includeSelection) selectedFolders.toList() else emptyList()
+        ).encode()
+    }
+
+    fun dragPayloadForFolder(folderId: String): String {
+        val selectedFiles = selection.value
+        val selectedFolders = folderSelection.value
+        val includeSelection = folderId in selectedFolders || selectedFiles.isNotEmpty()
+        return FileTabDragData(
+            fileIds = if (includeSelection) selectedFiles.toList() else emptyList(),
+            folderIds = if (includeSelection && folderId in selectedFolders) {
+                selectedFolders.toList()
+            } else {
+                listOf(folderId)
+            }
+        ).encode()
+    }
+
+    fun handleTabDrop(payload: String, targetFolderId: String?, copy: Boolean): Boolean {
+        val items = FileTabDragData.decode(payload) ?: return false
+        if (items.fileIds.isEmpty() && items.folderIds.isEmpty()) return false
+        clearSelection()
+        if (copy) {
+            copyItems(items.fileIds, items.folderIds, targetFolderId)
+        } else {
+            move(items.fileIds, items.folderIds, targetFolderId)
+        }
+        return true
+    }
+
     fun paste() {
         val items = clipboard.peek() ?: return
         if (items.isCut) {
