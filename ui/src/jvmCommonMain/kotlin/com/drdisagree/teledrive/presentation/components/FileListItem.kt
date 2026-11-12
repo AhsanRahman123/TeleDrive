@@ -51,7 +51,8 @@ fun FileListItem(
     status: (@Composable () -> Unit)? = null,
     location: String? = null,
     onToggleSelection: (() -> Unit)? = null,
-    showSelectionCheckbox: Boolean = true
+    showSelectionCheckbox: Boolean = true,
+    prominentSelectionCheckbox: Boolean = false
 ) {
     val compact = LocalCompactLayout.current
     val background = if (selected) {
@@ -79,6 +80,7 @@ fun FileListItem(
             SelectionCheckbox(
                 checked = selected,
                 onClick = onToggleSelection ?: onClick,
+                highContrast = prominentSelectionCheckbox,
                 modifier = Modifier.padding(end = 4.dp)
             )
         }
