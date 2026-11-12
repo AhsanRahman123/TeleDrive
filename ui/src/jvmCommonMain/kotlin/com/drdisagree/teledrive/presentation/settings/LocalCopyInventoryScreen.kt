@@ -56,6 +56,7 @@ private data class LocalCopyRow(
     val file: DriveFile,
     val path: String?,
     val exists: Boolean,
+    val actualBytes: Long,
     val managedByTeleDrive: Boolean
 )
 
@@ -96,23 +97,32 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
         ?.takeIf { it.isNotBlank() }
         ?.let(::File)
         ?: File(System.getProperty("user.home").orEmpty(), "Downloads")
-    val managedRoots = listOf(
-        storagePaths.filesDir,
-        File(downloadBase, "TeleDrive")
-    ).map { it.absoluteFile.toPath().normalize() }
+    // Match FileRepositoryImpl.managedLocalCopyRoots() exactly. The whole profile
+    // directory is not automatically owned by TeleDrive and must not be marked deletable.
+    val managedRoots = buildList {
+        add(File(storagePaths.filesDir, "local-copies"))
+        add(File(storagePaths.filesDir, "imports"))
+        add(File(storagePaths.filesDir, "notes"))
+        add(File(File(storagePaths.filesDir, "tdlib"), "files"))
+        add(File(downloadBase, "TeleDrive"))
+        storagePaths.externalStorageRoot?.let { add(File(it, "Download/TeleDrive")) }
+    }.mapNotNull { root -> runCatching { root.canonicalFile.toPath() }.getOrNull() }
 
     fun isManaged(path: String): Boolean = runCatching {
-        val candidate = File(path).absoluteFile.toPath().normalize()
+        val candidate = File(path).canonicalFile.toPath()
         managedRoots.any { root -> candidate.startsWith(root) }
     }.getOrDefault(false)
 
     val rows = backedUpFiles.mapNotNull { file ->
         val path = file.localPath
         if (path == null && file.remoteFileId == null) return@mapNotNull null
+        val localFile = path?.let(::File)
+        val exists = localFile?.let { runCatching { it.isFile }.getOrDefault(false) } ?: false
         LocalCopyRow(
             file = file,
             path = path,
-            exists = path?.let { runCatching { File(it).isFile }.getOrDefault(false) } ?: false,
+            exists = exists,
+            actualBytes = if (exists) runCatching { localFile?.length() ?: 0L }.getOrDefault(0L) else 0L,
             managedByTeleDrive = path?.let(::isManaged) == true
         )
     }.filter { row ->
@@ -122,7 +132,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
     }
 
     val selectedRows = rows.filter { it.file.id in selectedIds }
-    val visibleBytes = rows.filter { it.exists }.sumOf { it.file.sizeBytes.coerceAtLeast(0L) }
+    val visibleBytes = rows.sumOf { it.actualBytes }
     // The repository makes the final deletion decision using verified remote state and
     // managed-path checks. Allow selecting TDLib-only rows too; external paths remain protected.
     val removableSelection = selectedRows.isNotEmpty()
@@ -178,7 +188,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Card(modifier = Modifier.weight(1f)) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("Visible local copies", style = MaterialTheme.typography.labelMedium)
+                    Text("Visible backed-up items", style = MaterialTheme.typography.labelMedium)
                     Text(rows.size.toString(), style = MaterialTheme.typography.headlineSmall)
                 }
             }
@@ -265,7 +275,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    "${Formatters.bytes(row.file.sizeBytes)} · " +
+                                    "${Formatters.bytes(if (row.exists) row.actualBytes else row.file.sizeBytes)} · " +
                                         if (row.file.isAvailableOffline) "Available Offline"
                                         else if (row.exists && row.managedByTeleDrive) "TeleDrive-managed app copy"
                                         else if (row.exists) "External/original file (protected)"
