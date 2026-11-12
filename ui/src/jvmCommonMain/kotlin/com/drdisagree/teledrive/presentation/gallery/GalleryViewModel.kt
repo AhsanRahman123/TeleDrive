@@ -538,6 +538,8 @@ class GalleryViewModel(
 
     fun hasSelection(): Boolean = selection.value.isNotEmpty() || albumSelection.value.isNotEmpty()
 
+    fun hasClipboardItems(): Boolean = clipboard.peek() != null
+
     private fun takeSelection(): Pair<List<String>, List<String>> {
         val fileIds = selection.value.toList()
         val folderIds = albumSelection.value.toList()
@@ -663,12 +665,27 @@ class GalleryViewModel(
     fun paste() {
         val items = clipboard.peek() ?: return
         if (items.isCut) {
-            val consumed = clipboard.take() ?: return
             viewModelScope.launch {
-                if (consumed.fileIds.isNotEmpty()) {
-                    fileRepository.moveFiles(consumed.fileIds, albumFolderId).reportFailure()
+                var succeeded = true
+                if (items.fileIds.isNotEmpty()) {
+                    when (val result = fileRepository.moveFiles(items.fileIds, albumFolderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            report(result.error)
+                        }
+                    }
                 }
-                consumed.folderIds.forEach { fileRepository.moveFolder(it, albumFolderId).reportFailure() }
+                items.folderIds.forEach { folderId ->
+                    when (val result = fileRepository.moveFolder(folderId, albumFolderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            report(result.error)
+                        }
+                    }
+                }
+                if (succeeded) clipboard.clearIfMatches(items)
             }
         } else {
             copyItems(items.fileIds, items.folderIds, albumFolderId)
