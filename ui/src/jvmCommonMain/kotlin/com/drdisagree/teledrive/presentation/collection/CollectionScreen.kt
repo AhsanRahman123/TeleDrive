@@ -31,7 +31,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -148,7 +148,8 @@ fun CollectionScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = if (selectionMode) stringResource(Res.string.common_clear_selection) else stringResource(Res.string.common_back),
                         onClick = { if (selectionMode) viewModel.clearSelection() else onBack() }
                     ) {
                         Icon(
@@ -169,7 +170,7 @@ fun CollectionScreen(
                         enter = fadeIn() + scaleIn(),
                         exit = fadeOut() + scaleOut()
                     ) {
-                        IconButton(onClick = viewModel::downloadMissing) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.collection_offline_download_missing), onClick = viewModel::downloadMissing) {
                             Icon(
                                 Icons.Filled.CloudDownload,
                                 contentDescription = stringResource(
@@ -179,14 +180,15 @@ fun CollectionScreen(
                         }
                     }
                     if (!selectionMode) {
-                        IconButton(onClick = viewModel::startSelectionMode) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                             Icon(
                                 Icons.Filled.CheckBoxOutlineBlank,
                                 contentDescription = stringResource(Res.string.common_select)
                             )
                         }
                     } else {
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (allSelected) Res.string.common_deselect_all else Res.string.common_select_all),
                             onClick = {
                                 if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
                             }
@@ -205,7 +207,7 @@ fun CollectionScreen(
                             )
                         }
                         if (selectionCount > 0) {
-                            IconButton(onClick = viewModel::removeFromCollection) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.collection_remove_from, stringResource(viewModel.type.titleRes)), onClick = viewModel::removeFromCollection) {
                                 Icon(
                                     Icons.Filled.RemoveCircleOutline,
                                     contentDescription = stringResource(
@@ -214,14 +216,14 @@ fun CollectionScreen(
                                     )
                                 )
                             }
-                            IconButton(onClick = { confirmTrash = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_move_trash), onClick = { confirmTrash = true }) {
                                 Icon(
                                     Icons.Filled.Delete,
                                     contentDescription = stringResource(Res.string.common_move_trash)
                                 )
                             }
                             Box {
-                                IconButton(onClick = { showSelectionOverflow = true }) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                     Icon(
                                         Icons.Filled.MoreVert,
                                         contentDescription = stringResource(Res.string.common_actions)
