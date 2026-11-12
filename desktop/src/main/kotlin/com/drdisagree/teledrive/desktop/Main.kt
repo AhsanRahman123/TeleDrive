@@ -52,7 +52,6 @@ import com.drdisagree.teledrive.resources.app_name
 import java.awt.Dimension
 import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
-import javax.swing.SwingUtilities
 import javax.swing.JOptionPane
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
@@ -150,7 +149,8 @@ fun main() {
             DisposableEffect(window, fullscreenController) {
                 var f11Pressed = false
                 val dispatcher = java.awt.KeyEventDispatcher { event ->
-                    val belongsToThisWindow = SwingUtilities.getWindowAncestor(event.component) === window
+                    val belongsToThisWindow =
+                        KeyboardFocusManager.getCurrentKeyboardFocusManager().focusedWindow === window
                     if (!belongsToThisWindow || event.keyCode != KeyEvent.VK_F11) {
                         false
                     } else {
