@@ -49,6 +49,8 @@ import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -262,12 +264,27 @@ fun ThumbnailQueueScreen(
                 )
             }
 
+            val commandFocusRequester = rememberCollectionCommandFocusRequester()
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(scrollState)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .collectionCommandShortcuts(
+                            focusRequester = commandFocusRequester,
+                            onSelectAll = {
+                                scope.launch {
+                                    selectingAll = true
+                                    try {
+                                        selectedIds = repository.thumbnailQueueAllFileIds().toSet()
+                                    } finally {
+                                        selectingAll = false
+                                    }
+                                }
+                                true
+                            }
+                        ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                 if (queuePaused) {
