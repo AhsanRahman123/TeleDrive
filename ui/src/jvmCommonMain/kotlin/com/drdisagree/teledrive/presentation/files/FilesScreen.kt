@@ -1368,6 +1368,7 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
+                        .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
                             viewModel.selectFolderForContext(folder.id)
                             onShowContextMenu()
@@ -1435,6 +1436,7 @@ private fun FilesContent(
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .animateItem()
                         .focusHighlight(highlighted)
+                        .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
                             viewModel.selectFileForContext(file.id)
                             onShowContextMenu()
@@ -1463,6 +1465,7 @@ private fun FilesContent(
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .animateItem()
                         .focusHighlight(highlighted)
+                        .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
                             viewModel.selectFileForContext(file.id)
                             onShowContextMenu()
