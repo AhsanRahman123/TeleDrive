@@ -1482,6 +1482,8 @@ fun FolderPickerHost(
     )
 }
 
+private data class FilesTabState(val id: Int, val folderId: String?, val label: String)
+
 private const val ROOT_KEY = "__root__"
 
 private const val FAB_SCROLL_THRESHOLD = 6f
