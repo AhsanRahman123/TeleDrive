@@ -63,7 +63,13 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.drdisagree.teledrive.core.media.ThumbnailModel
 import com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier
+import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
+import com.drdisagree.teledrive.domain.repository.FileRepository
+import com.drdisagree.teledrive.presentation.common.load
+import com.drdisagree.teledrive.presentation.common.toUiText
+import com.drdisagree.teledrive.presentation.files.CutItems
+import com.drdisagree.teledrive.presentation.files.FileClipboard
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailFileUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailFolderUsage
@@ -104,6 +110,8 @@ fun ThumbnailManagerScreen(
     onInternalBackStateChange: (Boolean, () -> Unit) -> Unit = { _, _ -> }
 ) {
     val cacheRepository = koinInject<CacheRepository>()
+    val fileRepository = koinInject<FileRepository>()
+    val fileClipboard = koinInject<FileClipboard>()
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
@@ -141,6 +149,94 @@ fun ThumbnailManagerScreen(
     val folderListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
+
+    fun hasFileSelection(): Boolean =
+        selectedIds.isNotEmpty() || selectedFolderIds.isNotEmpty()
+
+    fun copySelectedToClipboard() {
+        val items = CutItems(
+            fileIds = selectedIds.toList(),
+            folderIds = selectedFolderIds.toList(),
+            isCut = false
+        )
+        if (items.fileIds.isEmpty() && items.folderIds.isEmpty()) return
+        fileClipboard.copy(items)
+        selectedIds = emptySet()
+        selectedFolderIds = emptySet()
+        generationMessage =
+            "Copied ${items.fileIds.size + items.folderIds.size} item(s). Navigate to a Drive folder and press Ctrl+V."
+    }
+
+    fun cutSelectedToClipboard() {
+        val items = CutItems(
+            fileIds = selectedIds.toList(),
+            folderIds = selectedFolderIds.toList()
+        )
+        if (items.fileIds.isEmpty() && items.folderIds.isEmpty()) return
+        fileClipboard.cut(items)
+        selectedIds = emptySet()
+        selectedFolderIds = emptySet()
+        generationMessage =
+            "Cut ${items.fileIds.size + items.folderIds.size} item(s). Navigate to a Drive folder and press Ctrl+V."
+    }
+
+    fun pasteFromClipboard() {
+        val items = fileClipboard.peek() ?: return
+        scope.launch {
+            var succeeded = true
+            var failureMessage: String? = null
+            if (items.isCut) {
+                if (items.fileIds.isNotEmpty()) {
+                    when (val result = fileRepository.moveFiles(items.fileIds, folderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            failureMessage = result.error.toUiText().load()
+                        }
+                    }
+                }
+                items.folderIds.forEach { id ->
+                    when (val result = fileRepository.moveFolder(id, folderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            failureMessage = result.error.toUiText().load()
+                        }
+                    }
+                }
+            } else {
+                if (items.fileIds.isNotEmpty()) {
+                    when (val result = fileRepository.copyFiles(items.fileIds, folderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            failureMessage = result.error.toUiText().load()
+                        }
+                    }
+                }
+                items.folderIds.forEach { id ->
+                    when (val result = fileRepository.copyFolder(id, folderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            failureMessage = result.error.toUiText().load()
+                        }
+                    }
+                }
+            }
+            if (succeeded) {
+                if (items.isCut) fileClipboard.clearIfMatches(items)
+                generationMessage = if (items.isCut) {
+                    "Moved ${items.fileIds.size + items.folderIds.size} item(s) into this folder."
+                } else {
+                    "Pasted ${items.fileIds.size + items.folderIds.size} copied item(s) into this folder."
+                }
+                refreshKey++
+            } else {
+                generationMessage = failureMessage ?: "Paste did not complete. The clipboard was retained."
+            }
+        }
+    }
 
     fun navigateBackOneStep() {
         when {
@@ -615,6 +711,10 @@ fun ThumbnailManagerScreen(
                             }
                             true
                         }
+                        ,
+                        onCopy = { if (hasFileSelection()) { copySelectedToClipboard(); true } else false },
+                        onCut = { if (hasFileSelection()) { cutSelectedToClipboard(); true } else false },
+                        onPaste = { if (fileClipboard.peek() != null) { pasteFromClipboard(); true } else false }
                     )
             ) {
                 Column(
