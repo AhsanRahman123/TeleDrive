@@ -56,7 +56,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -380,7 +380,7 @@ fun DesktopPreviewScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = ::leavePreview) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = ::leavePreview) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -389,14 +389,14 @@ fun DesktopPreviewScreen(
                 },
                 actions = {
                     file?.let { currentFile ->
-                        IconButton(onClick = { viewModel.showInfo(currentFile) }) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.preview_file_info), onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
                                 Icons.Filled.Info,
                                 contentDescription = stringResource(Res.string.preview_file_info)
                             )
                         }
                         Box {
-                            IconButton(onClick = { showOverflow = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showOverflow = true }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = stringResource(Res.string.common_actions)
