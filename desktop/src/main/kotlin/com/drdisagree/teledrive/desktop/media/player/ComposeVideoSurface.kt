@@ -15,19 +15,16 @@ import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormatCall
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.RenderCallback
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.format.RV32BufferFormat
 
-/** Frames arrive as BGRA, matching Skia's layout, so each frame is one buffer copy. */
+/**
+ * VLC invokes [RenderCallback.display] on a native render thread. Every ImageBitmap must own
+ * immutable pixel storage: Skia retains the byte array passed to installPixels for the lifetime
+ * of the bitmap. Reusing one mutable byte array between frames lets VLC overwrite pixels that
+ * Compose is still drawing, which can show partial/green frames when media dimensions change.
+ */
 internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoSurface {
-    var width = 0
-    var height = 0
-    var pixels = ByteArray(0)
-
     val bufferFormat = object : BufferFormatCallbackAdapter() {
-        override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat {
-            width = sourceWidth
-            height = sourceHeight
-            pixels = ByteArray(sourceWidth * sourceHeight * 4)
-            return RV32BufferFormat(sourceWidth, sourceHeight)
-        }
+        override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat =
+            RV32BufferFormat(sourceWidth, sourceHeight)
     }
 
     val render = object : RenderCallback {
@@ -42,14 +39,26 @@ internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoS
             displayWidth: Int,
             displayHeight: Int
         ) {
-            if (width == 0 || height == 0) return
-            val source = nativeBuffers[0]
-            source.rewind()
-            source.get(pixels, 0, minOf(pixels.size, source.remaining()))
-            val bitmap = Bitmap()
+            val width = bufferFormat.width
+            val height = bufferFormat.height
+            if (width <= 0 || height <= 0) return
+
+            val rowBytes = bufferFormat.pitches.firstOrNull() ?: (width * BYTES_PER_PIXEL)
+            if (rowBytes < width * BYTES_PER_PIXEL) return
+            val byteCount = rowBytes.toLong() * height
+            if (byteCount <= 0L || byteCount > Int.MAX_VALUE) return
+
+            val source = nativeBuffers.firstOrNull() ?: return
+            val framePixels = ByteArray(byteCount.toInt())
+            val readable = source.duplicate().apply { position(0) }
+            // Never publish a partial frame. A truncated copy is exactly the sort of
+            // green/black strip that can appear during a resolution or media transition.
+            if (readable.remaining() < framePixels.size) return
+            readable.get(framePixels)
+
             val info = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
-            bitmap.allocPixels(info)
-            bitmap.installPixels(info, pixels, width * 4)
+            val bitmap = Bitmap()
+            if (!bitmap.installPixels(info, framePixels, rowBytes)) return
             onFrame(bitmap.asComposeImageBitmap())
         }
     }
@@ -61,3 +70,5 @@ internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoS
         VideoSurfaceAdapters.getVideoSurfaceAdapter()
     )
 }
+
+private const val BYTES_PER_PIXEL = 4
