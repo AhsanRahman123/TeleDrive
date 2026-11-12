@@ -47,6 +47,7 @@ import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.FileThumbnail
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import java.io.File
@@ -248,7 +249,30 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                     var tdlibPath by remember(row.file.id) { mutableStateOf<String?>(null) }
                     var tdlibCanBeDeleted by remember(row.file.id) { mutableStateOf<Boolean?>(null) }
                     var tdlibInspecting by remember(row.file.id) { mutableStateOf(false) }
+                    var tdlibInspected by remember(row.file.id) { mutableStateOf(false) }
                     var tdlibError by remember(row.file.id) { mutableStateOf<String?>(null) }
+
+                    // Inspect only rows composed by the lazy list. This makes the inventory useful
+                    // immediately without issuing one TDLib request for every backed-up file at once.
+                    LaunchedEffect(row.file.remoteFileId) {
+                        val remoteFileId = row.file.remoteFileId ?: return@LaunchedEffect
+                        tdlibInspecting = true
+                        tdlibError = null
+                        try {
+                            val resolved = telegramClient.resolveFile(remoteFileId)
+                            tdlibPath = resolved.localPath
+                            tdlibCanBeDeleted = resolved.canBeDeleted
+                            tdlibInspected = true
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            tdlibError = error.message ?: "Could not inspect TDLib cache"
+                            tdlibInspected = true
+                        } finally {
+                            tdlibInspecting = false
+                        }
+                    }
+
                     Card {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(10.dp),
@@ -294,9 +318,26 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
-                                tdlibPath?.let { path ->
+                                if (tdlibInspected && tdlibPath == null && tdlibError == null) {
                                     Text(
-                                        "TDLib cache path: $path",
+                                        "TDLib: no local cache copy currently present",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                tdlibPath?.let { path ->
+                                    val tdlibFile = remember(path) { File(path) }
+                                    val tdlibExists = remember(path) { runCatching { tdlibFile.isFile }.getOrDefault(false) }
+                                    val tdlibBytes = remember(path, tdlibExists) {
+                                        if (tdlibExists) runCatching { tdlibFile.length() }.getOrDefault(0L) else 0L
+                                    }
+                                    Text(
+                                        "TDLib cache: ${if (tdlibExists) Formatters.bytes(tdlibBytes) else "path missing"}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        "TDLib path: $path",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 2,
@@ -322,22 +363,26 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                                         enabled = !tdlibInspecting,
                                         onClick = {
                                             scope.launch {
+                                                if (tdlibInspecting) return@launch
                                                 tdlibInspecting = true
                                                 tdlibError = null
-                                                val info = runCatching {
-                                                    telegramClient.resolveFile(row.file.remoteFileId)
-                                                }
-                                                info.onSuccess { resolved ->
+                                                try {
+                                                    val resolved = telegramClient.resolveFile(row.file.remoteFileId)
                                                     tdlibPath = resolved.localPath
                                                     tdlibCanBeDeleted = resolved.canBeDeleted
-                                                }.onFailure { error ->
+                                                    tdlibInspected = true
+                                                } catch (cancelled: CancellationException) {
+                                                    throw cancelled
+                                                } catch (error: Exception) {
                                                     tdlibError = error.message ?: "Could not inspect TDLib cache"
+                                                    tdlibInspected = true
+                                                } finally {
+                                                    tdlibInspecting = false
                                                 }
-                                                tdlibInspecting = false
                                             }
                                         }
                                     ) {
-                                        Text(if (tdlibInspecting) "Inspecting…" else "Inspect TDLib")
+                                        Text(if (tdlibInspecting) "Inspecting…" else if (tdlibInspected) "Refresh TDLib" else "Inspect TDLib")
                                     }
                                 }
                                 if (fileRevealer != null && row.exists && row.path != null) {
