@@ -296,8 +296,16 @@ fun CacheManagerScreen(
                     onClick = { selectedTool = "QUEUE" },
                     label = { Text("View queue") }
                 )
+                FilterChip(
+                    selected = selectedTool == "LOCAL_COPIES",
+                    onClick = { selectedTool = "LOCAL_COPIES" },
+                    label = { Text("Local copies") }
+                )
             }
             when (selectedTool) {
+                "LOCAL_COPIES" -> LocalCopyInventoryScreen(
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
                 "THUMBNAILS" -> ThumbnailManagerScreen(
                     onBack = { selectedTool = "CACHE" },
                     modifier = Modifier.weight(1f).fillMaxWidth()
