@@ -52,6 +52,7 @@ internal class WindowsBorderlessFullscreenController(
                 WinUser.SWP_FRAMECHANGED or WinUser.SWP_NOZORDER or
                     WinUser.SWP_NOACTIVATE or WinUser.SWP_SHOWWINDOW
             )
+            refreshAwtLayout()
             saved = snapshot
 
             // Compose applies WindowState changes asynchronously. Re-assert the final
@@ -65,6 +66,7 @@ internal class WindowsBorderlessFullscreenController(
                             WinUser.SWP_NOZORDER or WinUser.SWP_NOACTIVATE or
                                 WinUser.SWP_SHOWWINDOW
                         )
+                        refreshAwtLayout()
                     }
                 }
             }
@@ -74,6 +76,7 @@ internal class WindowsBorderlessFullscreenController(
                 frameChanged(hwnd)
                 writePlacement(hwnd, placement)
                 windowState.placement = placement.composePlacement
+                refreshAwtLayout()
             }
             throw failure
         }
@@ -87,6 +90,7 @@ internal class WindowsBorderlessFullscreenController(
             frameChanged(hwnd)
             writePlacement(hwnd, snapshot.placement)
             windowState.placement = snapshot.placement.composePlacement
+            refreshAwtLayout()
             saved = null
         } catch (failure: Throwable) {
             // Keep the borderless state and the snapshot so F11 can retry.
@@ -98,9 +102,18 @@ internal class WindowsBorderlessFullscreenController(
                         WinUser.SWP_NOACTIVATE or WinUser.SWP_SHOWWINDOW
                 )
                 windowState.placement = WindowPlacement.Floating
+                refreshAwtLayout()
             }
             throw failure
         }
+    }
+
+    private fun refreshAwtLayout() {
+        // A native frame-style transition also changes the drawable client area.
+        // Revalidate the AWT hierarchy after the peer receives the frame/bounds update.
+        window.invalidate()
+        window.validate()
+        window.repaint()
     }
 
     private fun hwnd(): WinDef.HWND {
