@@ -102,14 +102,14 @@ The branch includes work on:
 
 ## 5. New Windows feature batch — PR #10
 
-**Latest audited source:** 5d655c13a09fc3320eae93b5a93698ded84b0f05 (2026-11-12). PR #10 is draft and has not been merged.
+**Latest audited source:** 766461191551948b4cdabeef9340a18d1375fed7 (2026-11-12). PR #10 is draft and has not been merged.
 
 Source changes present on the branch:
 - Playlist menu no longer nests an independently vertically scrolling Column inside the Compose DropdownMenu; the queue menu relies on its own bounded scrolling.
 - Preview navigation retains one VLC player for same-media-type queue transitions, keeps the prior local/streamed media and matching file identity during the next preview's Loading state, and no longer keys the native player composable by every file ID.
 - Player control visibility is preserved across file changes; H hides controls on one press and shows on a second press within 450 ms; a dedicated hide button is present.
 - Preview Back no longer forces fullscreen off. Desktop fullscreen remembers/restores the prior window placement; F11 is handled at the app root.
-- Desktop image preview uses a full-resolution painter with high-quality filtering. Locally generated grid thumbnails are bounded at 768 px with explicit JPEG quality 0.86; Telegram photo-preview selection prefers the largest available size up to 1024 px.
+- Desktop image preview uses a full-resolution painter with high-quality filtering. Locally generated grid thumbnails are bounded at 768 px with explicit JPEG quality 0.86; Telegram photo-preview selection prefers the largest available size up to 1024 px. After a successful original image/video download, an existing cached thumbnail is queued for replacement from the local original only when the effective policy is Automatic; the worker's force flag now bypasses the cached-entry skip and replaces the same cache entry rather than adding another copy.
 - Gallery list and compact grid rows expose parent-folder paths; Gallery grid has explicit zoom controls and an expanded 2–12 column range on wide windows.
 - Files screen has a multi-tab workspace with per-tab folder navigation/scroll-position restoration; Ctrl+C/Ctrl+X/Ctrl+V/Ctrl+N/Delete/F2/Backspace shortcuts are connected; copy clipboard content remains reusable across paste while cut content is consumed.
 - File and folder rows provide in-app drag payloads in Grid/List/Details; tab drop targets dispatch Move or Copy to the destination tab's current folder.
@@ -117,7 +117,7 @@ Source changes present on the branch:
 - Hover tooltips were added to primary Files, Gallery, Preview/player, Home, Search, Collections, Channels, Trash, Transfers, Settings, Cache Manager and Thumbnail Manager/Queue icon actions.
 - TDLib account-level speed-limit notifications are exposed to Transfers as a diagnostic. This does not bypass a Telegram-side account limit or itself increase download speed.
 
-**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 code head `b3a3e9b2`. GitHub Actions check-suite/workflow-run queries on the latest branch tip `b3a3e9b2d425094dd347b581b243454b384110ae` returned zero workflow runs on the last check. Do not promote these items to COMPILED or USER-VERIFIED.
+**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 code head `76646119`. GitHub Actions workflow-run query for `766461191551948b4cdabeef9340a18d1375fed7` returned zero runs at the last check. Do not promote these items to COMPILED or USER-VERIFIED.
 
 Immediate Windows acceptance needed on the exact latest head:
 1. Run :shared:desktopTest, :ui:desktopTest, :desktop:test and :desktop:compileKotlin, then package/run through the isolated desktop profile.
