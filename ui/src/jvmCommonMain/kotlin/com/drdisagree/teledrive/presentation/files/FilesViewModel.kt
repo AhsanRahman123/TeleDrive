@@ -747,14 +747,22 @@ class FilesViewModel(
     fun paste() {
         val items = clipboard.peek() ?: return
         if (items.isCut) {
-            val consumed = clipboard.take() ?: return
-            move(consumed.fileIds, consumed.folderIds, _activeFolderId.value)
+            // Keep the cut payload until every requested move succeeds. If a destination
+            // conflict or repository failure occurs, the user can retry without reselecting.
+            move(items.fileIds, items.folderIds, _activeFolderId.value) {
+                clipboard.clearIfMatches(items)
+            }
         } else {
             copyItems(items.fileIds, items.folderIds, _activeFolderId.value)
         }
     }
 
-    private fun move(ids: List<String>, folderIds: List<String>, targetFolderId: String?) {
+    private fun move(
+        ids: List<String>,
+        folderIds: List<String>,
+        targetFolderId: String?,
+        onSuccess: (() -> Unit)? = null
+    ) {
         viewModelScope.launch {
             var failures = 0
             if (ids.isNotEmpty()) {
@@ -771,12 +779,15 @@ class FilesViewModel(
                     _messages.tryEmit(result.error.toUiText())
                 }
             }
-            if (failures == 0) _messages.tryEmit(
-                UiText.Resource(
-                    Res.string.message_moved_count,
-                    ids.size + folderIds.size
+            if (failures == 0) {
+                _messages.tryEmit(
+                    UiText.Resource(
+                        Res.string.message_moved_count,
+                        ids.size + folderIds.size
+                    )
                 )
-            )
+                onSuccess?.invoke()
+            }
         }
     }
 
