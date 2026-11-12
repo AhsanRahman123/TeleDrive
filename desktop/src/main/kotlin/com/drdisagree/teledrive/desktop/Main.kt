@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,6 +52,7 @@ import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.desktop.ui.ProvideDesktopPlatformActions
 import com.drdisagree.teledrive.desktop.window.WindowsTitleBar
 import com.drdisagree.teledrive.desktop.window.WindowsBorderlessFullscreenController
+import com.drdisagree.teledrive.desktop.window.WindowsF11Shortcut
 import com.drdisagree.teledrive.domain.model.AppTheme
 import com.drdisagree.teledrive.core.logging.DebugLogController
 import com.drdisagree.teledrive.data.repository.FolderOwnershipRepair
@@ -173,42 +175,56 @@ fun main() {
                 AppTheme.SYSTEM -> systemDark
             }
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
-            val windowShortcutFocus = remember { FocusRequester() }
-            val windowInfo = LocalWindowInfo.current
-            var f11Pressed by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) {
-                windowShortcutFocus.requestFocus()
-            }
-            LaunchedEffect(windowInfo.isWindowFocused) {
-                if (!windowInfo.isWindowFocused) {
-                    // A KeyUp can be lost when Alt+Tab changes focus. Clear the latch
-                    // on focus loss so F11 never stays logically held.
-                    f11Pressed = false
+            // Windows uses an AWT-level dispatcher, so F11 is independent of whichever
+            // Compose child currently owns focus. Other desktop platforms retain the
+            // Compose window shortcut path.
+            val windowsF11Shortcut = remember(window, fullscreenController) {
+                if (Platform.isWindows()) {
+                    WindowsF11Shortcut(window) { fullscreenController.toggle() }
+                } else {
+                    null
                 }
             }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
+            DisposableEffect(windowsF11Shortcut) {
+                windowsF11Shortcut?.install()
+                onDispose { windowsF11Shortcut?.dispose() }
+            }
+
+            val windowShortcutFocus = remember { FocusRequester() }
+            val windowInfo = LocalWindowInfo.current
+            var fallbackF11Pressed by remember { mutableStateOf(false) }
+            LaunchedEffect(windowsF11Shortcut) {
+                if (windowsF11Shortcut == null) windowShortcutFocus.requestFocus()
+            }
+            LaunchedEffect(windowInfo.isWindowFocused) {
+                if (!windowInfo.isWindowFocused) fallbackF11Pressed = false
+            }
+            val keyboardShortcutModifier = if (windowsF11Shortcut == null) {
+                Modifier
                     .focusRequester(windowShortcutFocus)
                     .onPreviewKeyEvent { event ->
                         if (event.key == Key.F11 && event.type == KeyEventType.KeyUp) {
-                            f11Pressed = false
+                            fallbackF11Pressed = false
                             true
                         } else if (
                             event.type == KeyEventType.KeyDown &&
                             event.key == Key.F11 &&
                             !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
                         ) {
-                            if (!f11Pressed) {
-                                f11Pressed = true
+                            if (!fallbackF11Pressed) {
+                                fallbackF11Pressed = true
                                 runCatching { fullscreenController.toggle() }
                                     .onFailure { SafeLog.w("DesktopWindow", "F11 toggle failed", it) }
                             }
-                            // Consume key-repeat events, but toggle only once per physical press.
                             true
                         } else false
                     }
                     .focusable()
+            } else {
+                Modifier
+            }
+            Box(
+                modifier = Modifier.fillMaxSize().then(keyboardShortcutModifier)
             ) {
                 CompositionLocalProvider(LocalFullscreenController provides fullscreenController) {
                     ProvideDesktopPlatformActions {
