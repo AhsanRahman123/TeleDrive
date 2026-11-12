@@ -583,9 +583,10 @@ class FilesViewModel(
     }
 
     fun paste() {
-        val items = clipboard.take() ?: return
+        val items = clipboard.peek() ?: return
         if (items.isCut) {
-            move(items.fileIds, items.folderIds, folderId)
+            val consumed = clipboard.take() ?: return
+            move(consumed.fileIds, consumed.folderIds, folderId)
         } else {
             copyItems(items.fileIds, items.folderIds, folderId)
         }
