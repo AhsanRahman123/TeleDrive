@@ -724,6 +724,17 @@ internal fun DesktopMediaPlayer(
                         setPlaybackRate(1f)
                         true
                     }
+                    // Short, dedicated seek shortcuts requested for keyboard users.
+                    key == Key.P && !ctrl && !alt && !shift -> {
+                        player.controls().skipTime(-SHORT_KEY_SEEK_STEP_MS)
+                        revealControlsForSeek()
+                        true
+                    }
+                    key == Key.N && !ctrl && !alt && !shift -> {
+                        player.controls().skipTime(SHORT_KEY_SEEK_STEP_MS)
+                        revealControlsForSeek()
+                        true
+                    }
                     key == Key.DirectionLeft && !ctrl && !alt && !shift -> {
                         player.controls().skipTime(-KEY_SEEK_STEP_MS)
                         revealControlsForSeek()
@@ -1776,6 +1787,7 @@ private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
+private const val SHORT_KEY_SEEK_STEP_MS = 5_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
 private const val SEEK_FEEDBACK_DURATION_MS = 1_500L
 private const val VOLUME_STEP = 5
