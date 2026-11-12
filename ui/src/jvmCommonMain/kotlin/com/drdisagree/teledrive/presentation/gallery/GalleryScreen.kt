@@ -1293,10 +1293,17 @@ fun GalleryScreen(
 
                                 is GalleryListItem.Media -> {
                                     val file = item.file
+                                    var folderLocation by remember(file.id) {
+                                        mutableStateOf<String?>(null)
+                                    }
+                                    LaunchedEffect(file.folderId) {
+                                        folderLocation = viewModel.folderPathLabel(file.folderId)
+                                    }
                                     FileGridItem(
                                         file = file,
                                         selected = file.id in state.selection,
                                         compact = true,
+                                        location = folderLocation,
                                         onToggleSelection = { viewModel.toggleSelection(file.id) },
                                         onClick = {
                                             if (selectionMode) {
