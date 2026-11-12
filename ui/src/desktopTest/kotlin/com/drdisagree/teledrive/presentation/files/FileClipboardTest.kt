@@ -13,8 +13,8 @@ class FileClipboardTest {
         val clipboard = FileClipboard()
         clipboard.cut(CutItems(fileIds = listOf("file-1"), folderIds = listOf("folder-1")))
 
-        val pasted = clipboard.peek()
-        assertTrue(requireNotNull(pasted).isCut)
+        val pasted = requireNotNull(clipboard.peek())
+        assertTrue(pasted.isCut)
         assertSame(pasted, clipboard.peek())
 
         assertTrue(clipboard.clearIfMatches(pasted))
