@@ -573,9 +573,22 @@ class FilesViewModel(
         _messages.tryEmit(UiText.Resource(Res.string.files_cut_count, total))
     }
 
+    fun copyToClipboardSelected() {
+        val items = CutItems(selection.value.toList(), folderSelection.value.toList(), isCut = false)
+        val total = items.fileIds.size + items.folderIds.size
+        if (total == 0) return
+        clearSelection()
+        clipboard.copy(items)
+        _messages.tryEmit(UiText.Plain("Copied $total item(s). Navigate to a destination and press Ctrl+V."))
+    }
+
     fun paste() {
         val items = clipboard.take() ?: return
-        move(items.fileIds, items.folderIds, folderId)
+        if (items.isCut) {
+            move(items.fileIds, items.folderIds, folderId)
+        } else {
+            copyItems(items.fileIds, items.folderIds, folderId)
+        }
     }
 
     private fun move(ids: List<String>, folderIds: List<String>, targetFolderId: String?) {
@@ -608,6 +621,11 @@ class FilesViewModel(
         val ids = selection.value.toList()
         val folderIds = folderSelection.value.toList()
         clearSelection()
+        copyItems(ids, folderIds, targetFolderId)
+    }
+
+    private fun copyItems(ids: List<String>, folderIds: List<String>, targetFolderId: String?) {
+        if (ids.isEmpty() && folderIds.isEmpty()) return
         _copying.update { true }
         viewModelScope.launch {
             try {
@@ -621,8 +639,8 @@ class FilesViewModel(
                     }
                 }
 
-                folderIds.forEach { folderId ->
-                    when (val result = fileRepository.copyFolder(folderId, targetFolderId)) {
+                folderIds.forEach { sourceFolderId ->
+                    when (val result = fileRepository.copyFolder(sourceFolderId, targetFolderId)) {
                         is AppResult.Success -> {
                             copiedItems += result.value.copiedItems
                             totalItems += result.value.totalItems
