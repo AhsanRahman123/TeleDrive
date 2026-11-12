@@ -365,7 +365,8 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                                 }
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                if (row.file.remoteFileId != null) {
+                                val remoteFileId = row.file.remoteFileId
+                                if (remoteFileId != null) {
                                     TextButton(
                                         enabled = !tdlibInspecting,
                                         onClick = {
@@ -375,7 +376,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                                                 tdlibError = null
                                                 try {
                                                     tdlibInspectionSemaphore.withPermit {
-                                                        val resolved = telegramClient.resolveFile(row.file.remoteFileId)
+                                                        val resolved = telegramClient.resolveFile(remoteFileId)
                                                         tdlibPath = resolved.localPath
                                                         tdlibCanBeDeleted = resolved.canBeDeleted
                                                         tdlibInspected = true
