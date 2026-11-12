@@ -52,7 +52,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -891,7 +891,8 @@ internal fun DesktopMediaPlayer(
         // Leave one small reveal affordance when the user permanently hides player chrome.
         // Keyboard shortcut C remains available as well.
         if (!controlPreferences.showPlayerControls) {
-            IconButton(
+            TooltipIconButton(
+                tooltip = "Show player controls",
                 onClick = {
                     val updated = controlPreferences.copy(showPlayerControls = true)
                     controlPreferences = updated
@@ -1252,7 +1253,8 @@ private fun PlayerControlsBar(
             }
 
             Box {
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Player slider settings",
                     onClick = {
                         onInteraction()
                         showSliderSettings = true
@@ -1370,7 +1372,8 @@ private fun PlayerControlsBar(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Previous video",
                     onClick = { onInteraction(); onPrevious() },
                     enabled = hasPrevious,
                     modifier = Modifier.size(38.dp)
@@ -1381,7 +1384,8 @@ private fun PlayerControlsBar(
                         tint = if (hasPrevious) Color.White else Color.White.copy(alpha = 0.35f)
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Rewind 10 seconds",
                     onClick = {
                         onInteraction()
                         onSeekTo((timeMs - SKIP_MS).coerceAtLeast(0))
@@ -1394,7 +1398,8 @@ private fun PlayerControlsBar(
                         tint = Color.White
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = stringResource(if (finished) Res.string.player_replay else if (playing) Res.string.player_pause else Res.string.player_play),
                     onClick = { onInteraction(); onPlayPause() },
                     modifier = Modifier.size(44.dp)
                 ) {
@@ -1415,7 +1420,8 @@ private fun PlayerControlsBar(
                         modifier = Modifier.size(28.dp)
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Forward 10 seconds",
                     onClick = {
                         onInteraction()
                         onSeekTo((timeMs + SKIP_MS).coerceAtMost(durationMs))
@@ -1428,7 +1434,8 @@ private fun PlayerControlsBar(
                         tint = Color.White
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Next video",
                     onClick = { onInteraction(); onNext() },
                     enabled = hasNext,
                     modifier = Modifier.size(38.dp)
@@ -1467,7 +1474,8 @@ private fun PlayerControlsBar(
                         }
                     }
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = stringResource(if (repeatOne) Res.string.player_repeat_one else Res.string.player_repeat_off),
                     onClick = { onInteraction(); onToggleRepeat() },
                     modifier = Modifier.size(38.dp)
                 ) {
@@ -1479,7 +1487,8 @@ private fun PlayerControlsBar(
                         tint = if (repeatOne) MaterialTheme.colorScheme.primary else Color.White
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Repeat all videos",
                     onClick = { onInteraction(); onToggleRepeatAll() },
                     modifier = Modifier.size(38.dp)
                 ) {
@@ -1489,7 +1498,8 @@ private fun PlayerControlsBar(
                         tint = if (repeatAll) MaterialTheme.colorScheme.primary else Color.White
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Shuffle playback queue",
                     onClick = { onInteraction(); onToggleShuffle() },
                     modifier = Modifier.size(38.dp)
                 ) {
@@ -1500,7 +1510,8 @@ private fun PlayerControlsBar(
                     )
                 }
                 Box {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = "Open playback queue (${queueItems.size} items)",
                         onClick = { onInteraction(); showQueueMenu = true },
                         enabled = queueItems.isNotEmpty(),
                         modifier = Modifier.size(38.dp)
@@ -1588,7 +1599,8 @@ private fun PlayerControlsBar(
                 }
                 if (!isAudio) {
                     Box {
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (subtitlesOn) Res.string.player_hide_subtitles else Res.string.player_show_subtitles),
                             onClick = { onInteraction(); showSubtitleMenu = true },
                             enabled = textTracks.isNotEmpty(),
                             modifier = Modifier.size(38.dp)
@@ -1628,7 +1640,8 @@ private fun PlayerControlsBar(
                     }
                 }
                 Box {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = stringResource(Res.string.player_audio_track),
                         onClick = { onInteraction(); showAudioMenu = true },
                         enabled = audioTracks.isNotEmpty(),
                         modifier = Modifier.size(38.dp)
@@ -1656,7 +1669,8 @@ private fun PlayerControlsBar(
                     }
                 }
                 if (!isAudio) {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = stringResource(Res.string.player_scaling),
                         onClick = { onInteraction(); onScaling(scaling.next()) },
                         modifier = Modifier.size(38.dp)
                     ) {
@@ -1671,7 +1685,8 @@ private fun PlayerControlsBar(
                         )
                     }
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Hide player controls",
                     onClick = { onToggleControlsVisibility() },
                     modifier = Modifier.size(38.dp)
                 ) {
@@ -1682,7 +1697,8 @@ private fun PlayerControlsBar(
                     )
                 }
                 fullscreen?.let { controller ->
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = stringResource(if (controller.isFullscreen()) Res.string.player_exit_full_screen else Res.string.player_full_screen),
                         onClick = { onInteraction(); controller.toggle() },
                         modifier = Modifier.size(38.dp)
                     ) {
