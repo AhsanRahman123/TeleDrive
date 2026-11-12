@@ -763,14 +763,14 @@ internal fun DesktopMediaPlayer(
                             PlayerControlPreferencesStore.save(updated)
                             controlsVisible = false
                             latestOnControlsVisibilityChange.value(false)
-                            lastHiddenHPressAt = 0L
+                            lastHiddenHPressAt = System.currentTimeMillis()
                             lastVisibilityInteractionTick = interactionTick
                         } else {
                             val now = System.currentTimeMillis()
                             if (now - lastHiddenHPressAt in 1..H_SHOW_DOUBLE_PRESS_MS) {
                                 val updated = controlPreferences.copy(showPlayerControls = true)
                                 controlPreferences = updated
-                                controlsPinned = true
+                                controlsPinned = false
                                 PlayerControlPreferencesStore.save(updated)
                                 controlsVisible = true
                                 latestOnControlsVisibilityChange.value(true)
