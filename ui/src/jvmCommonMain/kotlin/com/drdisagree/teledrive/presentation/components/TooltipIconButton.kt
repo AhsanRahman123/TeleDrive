@@ -46,7 +46,7 @@ fun TooltipIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    content: @Composable RowScope.() -> Unit
+    content: @Composable () -> Unit
 ) {
     TooltipAnchor(tooltip = tooltip, modifier = modifier) {
         IconButton(
