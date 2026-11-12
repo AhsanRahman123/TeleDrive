@@ -38,6 +38,11 @@ internal class WindowsBorderlessFullscreenController(
         val snapshot = Snapshot(style, placement, monitor)
 
         try {
+            // Let Compose leave its prior Maximized placement before applying native
+            // monitor bounds. Its WindowState update can otherwise re-apply stale
+            // position/size after the HWND has already been sized.
+            windowState.placement = WindowPlacement.Floating
+
             // Restore first so a previously maximized window can cover the full monitor,
             // including the taskbar, without using the OS exclusive-fullscreen API.
             User32.INSTANCE.ShowWindow(hwnd, WinUser.SW_RESTORE)
@@ -47,8 +52,22 @@ internal class WindowsBorderlessFullscreenController(
                 WinUser.SWP_FRAMECHANGED or WinUser.SWP_NOZORDER or
                     WinUser.SWP_NOACTIVATE or WinUser.SWP_SHOWWINDOW
             )
-            windowState.placement = WindowPlacement.Floating
             saved = snapshot
+
+            // Compose applies WindowState changes asynchronously. Re-assert the final
+            // borderless bounds after that update so the client content starts at the
+            // actual monitor top-left instead of inheriting stale decorated-window bounds.
+            EventQueue.invokeLater {
+                EventQueue.invokeLater {
+                    if (saved === snapshot) {
+                        setBounds(
+                            hwnd, monitor,
+                            WinUser.SWP_NOZORDER or WinUser.SWP_NOACTIVATE or
+                                WinUser.SWP_SHOWWINDOW
+                        )
+                    }
+                }
+            }
         } catch (failure: Throwable) {
             runCatching {
                 setStyle(hwnd, style)
