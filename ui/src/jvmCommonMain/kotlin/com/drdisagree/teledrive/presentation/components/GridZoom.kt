@@ -12,6 +12,9 @@ import com.drdisagree.teledrive.domain.model.ViewMode
 const val MIN_GRID_COLUMNS = 2
 const val MAX_GRID_COLUMNS = 12
 
+fun galleryGridColumnsForWindow(gridSize: Int, wideWindow: Boolean): Int =
+    (gridSize + if (wideWindow) 2 else 0).coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
+
 fun GridZoomLevel.zoomedIn(): GridZoomLevel = when {
     viewMode == ViewMode.LIST || viewMode == ViewMode.DETAILS ->
         GridZoomLevel(ViewMode.GRID, MAX_GRID_COLUMNS)
