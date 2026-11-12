@@ -1,5 +1,450 @@
 package com.drdisagree.teledrive.core.transfer
 
+import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.crypto.CryptoKeys
+import com.drdisagree.teledrive.core.crypto.KeyUnavailableException
+import com.drdisagree.teledrive.core.crypto.StreamCrypto
+import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
+import com.drdisagree.teledrive.core.files.AppStoragePaths
+import com.drdisagree.teledrive.core.files.DownloadWriter
+import com.drdisagree.teledrive.core.files.FileImporter
+import com.drdisagree.teledrive.core.files.DiscardingOutputStream
+import com.drdisagree.teledrive.core.files.HashAccumulator
+import com.drdisagree.teledrive.core.files.Hashing
+import com.drdisagree.teledrive.core.files.LocalCopyDeleter
+import com.drdisagree.teledrive.core.files.PartialDownload
+import com.drdisagree.teledrive.core.media.ThumbnailStore
+import com.drdisagree.teledrive.core.telegram.TelegramClient
+import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
+import com.drdisagree.teledrive.core.telegram.TelegramException
+import com.drdisagree.teledrive.core.telegram.TelegramLimits
+import com.drdisagree.teledrive.core.telegram.TelegramUploadEvent
+import com.drdisagree.teledrive.data.local.dao.BackupDao
+import com.drdisagree.teledrive.data.local.dao.FileDao
+import com.drdisagree.teledrive.data.local.dao.FilePartDao
+import com.drdisagree.teledrive.data.local.dao.TransferDao
+import com.drdisagree.teledrive.data.local.entity.BackupRecordEntity
+import com.drdisagree.teledrive.data.local.entity.FileEntity
+import com.drdisagree.teledrive.data.local.entity.TransferEntity
+import com.drdisagree.teledrive.data.remote.telegram.ManifestCodec
+import com.drdisagree.teledrive.data.remote.telegram.RemoteFileManifest
+import com.drdisagree.teledrive.data.repository.FileBase
+import com.drdisagree.teledrive.data.repository.FolderPathResolver
+import com.drdisagree.teledrive.domain.model.BackupState
+import com.drdisagree.teledrive.domain.model.FileCategory
+import com.drdisagree.teledrive.domain.model.TransferStage
+import com.drdisagree.teledrive.domain.model.TransferState
+import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.domain.repository.SettingsRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
+import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
+
+/**
+ * Pause and cancel are cooperative: the row is checked on each progress event and TDLib is stopped
+ * by aborting collection.
+ */
+class TransferExecutor(
+    private val messages: TransferErrorMessages,
+    private val storagePaths: AppStoragePaths,
+    private val telegramClient: TelegramClient,
+    private val transferDao: TransferDao,
+    private val fileDao: FileDao,
+    private val backupDao: BackupDao,
+    private val manifestCodec: ManifestCodec,
+    private val folderPathResolver: FolderPathResolver,
+    private val thumbnailStore: ThumbnailStore,
+    private val streamCrypto: StreamCrypto,
+    private val wrappedKeyRepository: WrappedKeyRepository,
+    private val downloadWriter: DownloadWriter,
+    private val fileImporter: FileImporter,
+    private val settingsRepository: SettingsRepository,
+    private val filePartDao: FilePartDao,
+    private val partUploader: PartUploader,
+    private val partDownloader: PartDownloader,
+    private val apkIconUploader: ApkIconUploader,
+    private val localCopyDeleter: LocalCopyDeleter
+) {
+
+    /**
+     * A dead connection stops emitting without an error, which would leave the row RUNNING forever.
+     */
+    private fun <T> Flow<T>.failWhenIdle(
+        transferId: String,
+        message: String,
+        progressState: (T) -> Pair<Boolean, Boolean> = { true to true }
+    ): Flow<T> = channelFlow {
+        val relay = Channel<T>(Channel.BUFFERED)
+        val producer = launch {
+            try {
+                collect { relay.send(it) }
+                relay.close()
+            } catch (e: Throwable) {
+                relay.close(e)
+            }
+        }
+        var lastProgressAt = System.currentTimeMillis()
+        var monitorForStall = true
+        try {
+            while (true) {
+                // Pause/cancel/resume must release a worker even when TDLib has stopped
+                // emitting progress. Poll independently of network progress instead of
+                // waiting for the long network-idle timeout.
+                checkControl(transferId)
+                val received = withTimeoutOrNull(CONTROL_POLL_MS.milliseconds) {
+                    relay.receiveCatching()
+                }
+                if (received == null) {
+                    if (
+                        monitorForStall &&
+                        System.currentTimeMillis() - lastProgressAt >= STALL_TIMEOUT_MS
+                    ) {
+                        throw TelegramException(STALL_CODE, message)
+                    }
+                    continue
+                }
+                received.exceptionOrNull()?.let { throw it }
+                if (received.isClosed) break
+
+                val value = received.getOrThrow()
+                val (shouldMonitor, madeProgress) = progressState(value)
+                monitorForStall = shouldMonitor
+                if (madeProgress) lastProgressAt = System.currentTimeMillis()
+                send(value)
+            }
+        } finally {
+            // The parent drain can itself be cancelled by Pause All. Keep cleanup non-cancellable
+            // so the TDLib flow's awaitClose handler finishes before this worker slot is released.
+            withContext(NonCancellable) {
+                producer.cancelAndJoin()
+            }
+        }
+    }
+
+    /**
+     * A dead connection stops emitting without an error, which would leave the row RUNNING forever.
+     * This overload intentionally matches upstream for downloads: it only observes TDLib events
+     * and uses the same native event cadence and stall timeout as the original implementation.
+     */
+    private fun <T> Flow<T>.failWhenIdle(message: String): Flow<T> = channelFlow {
+        val relay = Channel<T>(Channel.BUFFERED)
+        launch {
+            try {
+                collect { relay.send(it) }
+                relay.close()
+            } catch (e: Throwable) {
+                relay.close(e)
+            }
+        }
+        while (true) {
+            val received =
+                withTimeoutOrNull(STALL_TIMEOUT_MS.milliseconds) { relay.receiveCatching() }
+                    ?: throw TelegramException(STALL_CODE, message)
+            received.exceptionOrNull()?.let { throw it }
+            if (received.isClosed) break
+            send(received.getOrThrow())
+        }
+    }
+
+    suspend fun execute(transfer: TransferEntity): TransferOutcome = try {
+        when (transfer.type) {
+            TransferType.UPLOAD, TransferType.BACKUP -> executeUpload(transfer)
+            TransferType.DOWNLOAD, TransferType.RESTORE -> executeDownload(transfer)
+        }
+    } catch (_: KeyUnavailableException) {
+        TransferOutcome.Failed(messages.keyMissing)
+    }
+
+    private suspend fun cacheOrQueueUploadedThumbnail(
+        file: FileEntity,
+        temporaryPreviewPath: String?
+    ) {
+        if (!supportsThumbnail(file)) return
+        val cached = try {
+            temporaryPreviewPath?.let {
+                thumbnailStore.cacheUploadedThumbnail(file.id, it)
+            } ?: false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+        if (!cached) {
+            try {
+                thumbnailStore.enqueueAfterUpload(file.id)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A cache/queue failure must not turn an already completed Telegram upload into
+                // a failed transfer. The file remains available and can be prepared manually.
+            }
+        }
+    }
+
+    private fun supportsThumbnail(file: FileEntity): Boolean =
+        file.category == FileCategory.IMAGE ||
+            file.category == FileCategory.VIDEO ||
+            file.mimeType.startsWith("text/", ignoreCase = true) ||
+            file.mimeType.equals("application/vnd.android.package-archive", ignoreCase = true)
+
+    private suspend fun executeUpload(transfer: TransferEntity): TransferOutcome {
+        val fileId = transfer.fileId
+            ?: return TransferOutcome.Failed(messages.noFileReference)
+        val entity = fileDao.byId(fileId)
+            ?: return TransferOutcome.Failed(messages.fileRecordMissing)
+        val localPath = entity.localPath
+            ?: return TransferOutcome.Failed(messages.noLocalCopy)
+        val sourceFile = File(localPath)
+        if (!sourceFile.exists()) return TransferOutcome.Failed(messages.localFileGone)
+
+        val prefs = settingsRepository.preferences.first()
+        val chatId = transfer.chatId
+            ?: entity.chatId
+            ?: telegramClient.ensureStorageChat(prefs.storageChatId).also { resolved ->
+                if (resolved != prefs.storageChatId) {
+                    settingsRepository.update { it.copy(storageChatId = resolved) }
+                }
+            }
+
+        val encrypt = prefs.encryptFiles && prefs.keyBackupCreated
+        val uploadSize = sourceFile.length()
+        val sizeChanged = entity.sizeBytes != uploadSize
+        val hashUpFront = uploadSize <= EAGER_HASH_LIMIT ||
+                !splitsIntoParts(entity, sourceFile, encrypt)
+        val contentHash = when {
+            !hashUpFront -> entity.contentHash
+            sizeChanged -> Hashing.sha256(sourceFile)
+            else -> entity.contentHash ?: Hashing.sha256(sourceFile)
+        }
+        if (sizeChanged || (contentHash != null && contentHash != entity.contentHash)) {
+            fileDao.upsert(entity.copy(sizeBytes = uploadSize, contentHash = contentHash))
+        }
+        val supersededMessageId = entity.messageId
+            ?.takeIf { entity.chatId == chatId && filePartDao.countOf(entity.id) == 0 }
+
+        val rawIconPath = thumbnailStore.uploadThumbnailFile(entity.id)?.absolutePath
+        val iconFileId = apkIconUploader.uploadIconIfApk(entity, chatId, encrypt)
+        val previewPath = if (encrypt) null else rawIconPath
+
+        val manifest = RemoteFileManifest(
+            fileId = entity.id,
+            name = entity.name,
+            folderPath = folderPathResolver.pathOf(entity.folderId),
+            folderId = entity.folderId,
+            mimeType = entity.mimeType,
+            sizeBytes = uploadSize,
+            contentHash = contentHash,
+            hidden = entity.isHidden,
+            archived = entity.isArchived,
+            encrypted = encrypt,
+            createdAt = entity.createdAt,
+            modifiedAt = entity.modifiedAt,
+            width = entity.width,
+            height = entity.height,
+            durationMs = entity.durationMs,
+            iconFileId = iconFileId
+        )
+        val caption = manifestCodec.encode(manifest, encrypt)
+
+        fileDao.setBackupState(entity.id, BackupState.UPLOADING)
+
+        if (splitsIntoParts(entity, sourceFile, encrypt)) {
+            try {
+                val result = uploadInParts(
+                    transfer = transfer,
+                    entity = entity,
+                    sourceFile = sourceFile,
+                    localPath = localPath,
+                    chatId = chatId,
+                    manifest = manifest,
+                    encrypt = encrypt,
+                    contentHash = contentHash,
+                    supersededMessageId = supersededMessageId,
+                    previewPath = previewPath
+                )
+                if (result == TransferOutcome.Completed) {
+                    cacheOrQueueUploadedThumbnail(entity, rawIconPath)
+                }
+                return result
+            } finally {
+                rawIconPath?.let { File(it).delete() }
+            }
+        }
+
+        var stagingFile: File? = null
+        val (uploadPath, uploadName) = if (encrypt) {
+            val staging = File(stagingDir(), "${entity.id}.tde")
+            val key = wrappedKeyRepository.getOrCreate(CryptoKeys.CONTENT)
+            sourceFile.inputStream().use { input ->
+                staging.outputStream().buffered().use { output ->
+                    streamCrypto.encryptStream(key, input, output)
+                }
+            }
+            stagingFile = staging
+            staging.absolutePath to "${entity.id}.tde"
+        } else {
+            sourceFile.absolutePath to entity.name
+        }
+
+        val ticker = ProgressTicker()
+        var tickerStarted = false
+
+        return try {
+            var outcome: TransferOutcome =
+                TransferOutcome.Failed(messages.uploadEnded)
+            telegramClient.uploadDocument(
+                chatId = chatId,
+                localPath = uploadPath,
+                fileName = uploadName,
+                mimeType = if (encrypt) "application/octet-stream" else entity.mimeType,
+                caption = caption,
+                thumbnailPath = previewPath
+            ).failWhenIdle(transfer.id, messages.uploadStalled).collect { event ->
+                currentCoroutineContext().ensureActive()
+                when (event) {
+                    is TelegramUploadEvent.Started -> Unit
+                    is TelegramUploadEvent.Progress -> {
+                        val now = System.currentTimeMillis()
+                        if (!tickerStarted) {
+                            ticker.start(event.transferredBytes, now)
+                            tickerStarted = true
+                            transferDao.updateProgress(
+                                transfer.id, event.transferredBytes, 0L, now
+                            )
+                        } else {
+                            ticker.tick(event.transferredBytes, now)?.let { speed ->
+                                transferDao.updateProgress(
+                                    transfer.id, event.transferredBytes, speed, now
+                                )
+                            }
+                        }
+                        checkControl(transfer.id)
+                    }
+
+                    is TelegramUploadEvent.Completed -> {
+                        val document = event.document
+                        fileDao.setRemoteMapping(
+                            id = entity.id,
+                            chatId = document.chatId,
+                            messageId = document.messageId,
+                            remoteFileId = document.remoteFileId,
+                            remoteUniqueId = document.uniqueFileId,
+                            state = BackupState.BACKED_UP,
+                            iconFileId = iconFileId
+                        )
+                        fileDao.setRemoteBase(entity.id, FileBase.of(manifest).toText())
+                        if (transfer.type == TransferType.BACKUP) {
+                            backupDao.upsertRecord(
+                                BackupRecordEntity(
+                                    id = UUID.randomUUID().toString(),
+                                    sourcePath = localPath,
+                                    fileId = entity.id,
+                                    sizeBytes = uploadSize,
+                                    modifiedAt = sourceFile.lastModified(),
+                                    contentHash = contentHash,
+                                    backedUpAt = System.currentTimeMillis(),
+                                    chatId = document.chatId
+                                )
+                            )
+                        }
+                        supersededMessageId
+                            ?.takeIf { it != document.messageId }
+                            ?.let { stale ->
+                                runCatching {
+                                    telegramClient.deleteMessages(chatId, listOf(stale))
+                                }
+                            }
+                        releaseLocalCopy(transfer.type, entity, localPath, contentHash)
+                        transferDao.setCompleted(transfer.id, System.currentTimeMillis())
+                        outcome = TransferOutcome.Completed
+                    }
+                }
+            }
+            if (outcome == TransferOutcome.Completed) {
+                cacheOrQueueUploadedThumbnail(entity, rawIconPath)
+            }
+            outcome
+        } catch (e: TransferControlException) {
+            fileDao.setBackupStateIfLocalOnly(
+                entity.id,
+                if (e.paused) BackupState.QUEUED else BackupState.NONE
+            )
+            if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
+        } catch (e: TelegramException) {
+            fileDao.setBackupStateIfLocalOnly(entity.id, BackupState.FAILED)
+            TransferOutcome.Failed(e.message, e.retryAfterSeconds)
+        } finally {
+            stagingFile?.delete()
+            rawIconPath?.let { File(it).delete() }
+        }
+    }
+
+    /**
+     * A file already split stays split; the limit is checked against the sealed size, which grows
+     * by a frame header per megabyte.
+     */
+    private suspend fun splitsIntoParts(
+        entity: FileEntity,
+        source: File,
+        encrypt: Boolean
+    ): Boolean {
+        if (filePartDao.countOf(entity.id) > 0) return true
+        val limit = runCatching { telegramClient.getLimits() }
+            .getOrDefault(TelegramLimits.REGULAR)
+            .maxFileBytes
+        val plainSize = source.length()
+        val uploadSize = if (encrypt) streamCrypto.storedSize(plainSize) else plainSize
+        return FileParts.splits(uploadSize, limit)
+    }
+
+    private suspend fun uploadInParts(
+        transfer: TransferEntity,
+        entity: FileEntity,
+        sourceFile: File,
+        localPath: String,
+        chatId: Long,
+        manifest: RemoteFileManifest,
+        encrypt: Boolean,
+        contentHash: String?,
+        supersededMessageId: Long?,
+        previewPath: String?
+    ): TransferOutcome {
+        val ticker = ProgressTicker()
+        var tickerStarted = false
+        var outcome: TransferOutcome =
+            TransferOutcome.Failed(messages.uploadEnded)
+
+        return try {
+            partUploader.upload(entity, sourceFile, chatId, manifest, encrypt, previewPath)
+                .collect { event ->
+                    currentCoroutineContext().ensureActive()
+                    when (event) {
+                        is PartUploadEvent.Progress -> {
+                            val now = System.currentTimeMillis()
+                            if (!tickerStarted) {
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
+                                transferDao.updateProgress(
+                                    transfer.id, event.transferredBytes, 0L, now
+                                )
+                            } else {
+                                ticker.tick(event.transferredBytes, now)?.let { speed ->
+package com.drdisagree.teledrive.core.transfer
+
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.KeyUnavailableException
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
@@ -443,6 +888,16 @@ class TransferExecutor(
                                 ticker.tick(event.transferredBytes, now)?.let { speed ->
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
+                                    )
+                                    SafeLog.d(
+                                        "TransferDiagnostics",
+                                        "PART_DOWNLOAD_SAMPLE transferId=${transfer.id} bytes=${event.transferredBytes} " +
+                                            "total=${entity.sizeBytes} bytesPerSecond=$speed"
+                                    )
+                                    SafeLog.d(
+                                        "TransferDiagnostics",
+                                        "DOWNLOAD_SAMPLE transferId=${transfer.id} bytes=${event.transferredBytes} " +
+                                            "total=${event.totalBytes ?: entity.sizeBytes} bytesPerSecond=$speed"
                                     )
                                 }
                             }
