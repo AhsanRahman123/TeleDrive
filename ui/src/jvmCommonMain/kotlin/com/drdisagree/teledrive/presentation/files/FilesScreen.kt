@@ -488,7 +488,19 @@ fun FilesScreen(
     val fabLift by animateDpAsState(targetValue = snackbarHeight, label = "fabLift")
 
     FileDropArea(onDropped = { references -> viewModel.importAndUpload(references) }) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .collectionCommandShortcuts(
+                    focusRequester = filesCommandFocusRequester,
+                    onSelectAll = { viewModel.selectAll(); true },
+                    onCopy = { if (selectedCount > 0) { viewModel.copyToClipboardSelected(); true } else false },
+                    onCut = { if (selectedCount > 0) { viewModel.cutSelected(); true } else false },
+                    onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
+                    onNewFolder = { showCreateFolder = true; true },
+                    onNewTab = { createTab(); true }
+                )
+        ) {
             Scaffold(
                 snackbarHost = {},
                 topBar = {
@@ -927,15 +939,6 @@ fun FilesScreen(
                         onRefresh = viewModel::refresh,
                         modifier = Modifier
                             .fillMaxSize()
-                            .collectionCommandShortcuts(
-                                focusRequester = filesCommandFocusRequester,
-                                onSelectAll = { viewModel.selectAll(); true },
-                                onCopy = { if (selectedCount > 0) { viewModel.copyToClipboardSelected(); true } else false },
-                                onCut = { if (selectedCount > 0) { viewModel.cutSelected(); true } else false },
-                                onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
-                                onNewFolder = { showCreateFolder = true; true },
-                                onNewTab = { createTab(); true }
-                            )
                             .onDesktopEmptySpaceContextClick(
                                 onContextClick = {
                                     if (!selectionMode) showAddMenu = true
