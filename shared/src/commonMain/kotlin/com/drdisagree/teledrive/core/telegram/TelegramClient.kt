@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.core.telegram
 import com.drdisagree.teledrive.domain.model.Country
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** No TDLib types cross this boundary. */
@@ -10,6 +11,12 @@ interface TelegramClient {
 
     val authState: StateFlow<TelegramAuthState>
     val connectionState: StateFlow<TelegramConnectionState>
+
+    /**
+     * Emits whether Telegram has signalled an account-level speed restriction.
+     * true = upload, false = download. Platforms without TDLib speed diagnostics emit nothing.
+     */
+    val speedLimitNotifications: Flow<Boolean> get() = emptyFlow()
 
     /** Safe to call repeatedly. */
     suspend fun start(credentials: TelegramCredentials)
