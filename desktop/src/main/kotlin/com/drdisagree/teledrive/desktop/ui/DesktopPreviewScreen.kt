@@ -55,6 +55,10 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Rotate90DegreesCcw
+import androidx.compose.material.icons.filled.Rotate90DegreesCw
+import androidx.compose.material.icons.filled.Flip
+import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -90,6 +94,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -205,6 +210,9 @@ fun DesktopPreviewScreen(
         mutableStateOf(state.initialIndex.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
+    var imageRotationDegrees by remember(file?.id) { mutableIntStateOf(0) }
+    var mirrorImageHorizontally by remember(file?.id) { mutableStateOf(false) }
+    var mirrorImageVertically by remember(file?.id) { mutableStateOf(false) }
     val mediaCategory = file?.category?.takeIf {
         it == FileCategory.AUDIO || it == FileCategory.VIDEO
     }
@@ -398,6 +406,52 @@ fun DesktopPreviewScreen(
                 },
                 actions = {
                     file?.let { currentFile ->
+                        if (currentFile.category == FileCategory.IMAGE) {
+                            TooltipIconButton(
+                                tooltip = "Rotate counter-clockwise",
+                                onClick = {
+                                    imageRotationDegrees = (imageRotationDegrees + 270) % 360
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Rotate90DegreesCcw,
+                                    contentDescription = "Rotate counter-clockwise"
+                                )
+                            }
+                            TooltipIconButton(
+                                tooltip = "Rotate clockwise",
+                                onClick = {
+                                    imageRotationDegrees = (imageRotationDegrees + 90) % 360
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Rotate90DegreesCw,
+                                    contentDescription = "Rotate clockwise"
+                                )
+                            }
+                            TooltipIconButton(
+                                tooltip = "Mirror horizontally",
+                                onClick = { mirrorImageHorizontally = !mirrorImageHorizontally }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Flip,
+                                    contentDescription = "Mirror horizontally",
+                                    tint = if (mirrorImageHorizontally) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            TooltipIconButton(
+                                tooltip = "Mirror vertically",
+                                onClick = { mirrorImageVertically = !mirrorImageVertically }
+                            ) {
+                                Icon(
+                                    Icons.Filled.FlipCameraAndroid,
+                                    contentDescription = "Mirror vertically",
+                                    tint = if (mirrorImageVertically) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
                         TooltipIconButton(tooltip = stringResource(Res.string.preview_file_info), onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
                                 Icons.Filled.Info,
@@ -435,6 +489,9 @@ fun DesktopPreviewScreen(
                 viewModel = viewModel,
                 file = pageFile,
                 snackbarHostState = snackbarHostState,
+                imageRotationDegrees = imageRotationDegrees,
+                mirrorImageHorizontally = mirrorImageHorizontally,
+                mirrorImageVertically = mirrorImageVertically,
                 hasPrevious = if (mediaCategory != null) {
                     queueIndex > 0 || (repeatAll && queueFiles.size > 1) ||
                         (shuffle && shuffleCursor > 0)
@@ -844,6 +901,9 @@ private fun PreviewPane(
     viewModel: PreviewViewModel,
     file: DriveFile,
     snackbarHostState: SnackbarHostState,
+    imageRotationDegrees: Int,
+    mirrorImageHorizontally: Boolean,
+    mirrorImageVertically: Boolean,
     hasPrevious: Boolean,
     hasNext: Boolean,
     onPrevious: () -> Unit,
@@ -956,14 +1016,15 @@ private fun PreviewPane(
                         // zooming a low-resolution preview look blurred. The painter intentionally
                         // requests the original source dimensions for the viewing surface; grid
                         // thumbnails continue to use the separate bounded thumbnail pipeline.
+                        val imagePainter = rememberAsyncImagePainter(
+                            model = current.model,
+                            onState = { imageState ->
+                                if (imageState is AsyncImagePainter.State.Error) undecodable = true
+                            },
+                            filterQuality = FilterQuality.High
+                        )
                         Image(
-                            painter = rememberAsyncImagePainter(
-                                model = current.model,
-                                onState = { imageState ->
-                                    if (imageState is AsyncImagePainter.State.Error) undecodable = true
-                                },
-                                filterQuality = FilterQuality.High
-                            ),
+                            painter = imagePainter,
                             contentDescription = file.name,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -978,7 +1039,40 @@ private fun PreviewPane(
                                             }
                                         }
                                     }
-                                ),
+                                )
+                                .graphicsLayer {
+                                    val intrinsic = imagePainter.intrinsicSize
+                                    val intrinsicIsUsable = intrinsic.width.isFinite() &&
+                                        intrinsic.height.isFinite() &&
+                                        intrinsic.width > 0f && intrinsic.height > 0f
+                                    val sourceAspect = if (intrinsicIsUsable) {
+                                        intrinsic.width / intrinsic.height
+                                    } else {
+                                        size.width / size.height.coerceAtLeast(1f)
+                                    }
+                                    val isQuarterTurn = imageRotationDegrees % 180 != 0
+                                    val fitScale = if (isQuarterTurn && sourceAspect > 0f) {
+                                        val fittedWidth: Float
+                                        val fittedHeight: Float
+                                        val viewportAspect = size.width / size.height.coerceAtLeast(1f)
+                                        if (sourceAspect > viewportAspect) {
+                                            fittedWidth = size.width
+                                            fittedHeight = size.width / sourceAspect
+                                        } else {
+                                            fittedHeight = size.height
+                                            fittedWidth = size.height * sourceAspect
+                                        }
+                                        minOf(
+                                            size.width / fittedHeight.coerceAtLeast(1f),
+                                            size.height / fittedWidth.coerceAtLeast(1f)
+                                        )
+                                    } else {
+                                        1f
+                                    }
+                                    rotationZ = imageRotationDegrees.toFloat()
+                                    scaleX = fitScale * if (mirrorImageHorizontally) -1f else 1f
+                                    scaleY = fitScale * if (mirrorImageVertically) -1f else 1f
+                                },
                             contentScale = ContentScale.Fit
                         )
                         VerticalZoomSlider(
