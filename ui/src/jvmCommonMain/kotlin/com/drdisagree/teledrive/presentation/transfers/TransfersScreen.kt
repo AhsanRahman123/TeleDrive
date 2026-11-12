@@ -977,7 +977,7 @@ private fun TransferRow(
                     )
                 }
                 if (primaryIcon != null && onPrimary != null) {
-                    TooltipIconButton(tooltip = primaryLabel, onClick = onPrimary, modifier = actions) {
+                    TooltipIconButton(tooltip = primaryLabel.orEmpty(), onClick = onPrimary, modifier = actions) {
                         Icon(primaryIcon, contentDescription = primaryLabel)
                     }
                 }
