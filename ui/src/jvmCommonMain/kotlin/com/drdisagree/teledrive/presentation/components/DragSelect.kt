@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationExceptio
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -125,7 +126,7 @@ private fun dragSelect(
                 null
             }
             if (anchor >= 0 && current != null) {
-                currentOnRange(minOf(anchor, current)..maxOf(anchor, current), activeShouldSelect)
+                currentOnRange(dragSelectionRange(anchor, current), activeShouldSelect)
             }
         }
     }
@@ -168,7 +169,7 @@ private fun dragSelect(
                     activeShouldSelect = !currentIsSelected(selectionAnchor)
                     val current = initialIndex ?: selectionAnchor
                     currentOnRange(
-                        minOf(selectionAnchor, current)..maxOf(selectionAnchor, current),
+                        dragSelectionRange(selectionAnchor, current),
                         activeShouldSelect
                     )
                 } else {
@@ -189,7 +190,7 @@ private fun dragSelect(
                             activeAnchor = it
                             activeShouldSelect = !currentIsSelected(it)
                         }
-                        currentOnRange(minOf(start, current)..maxOf(start, current), activeShouldSelect)
+                        currentOnRange(dragSelectionRange(start, current), activeShouldSelect)
                     }
                     autoScroll = edgeScroll(change.position.y, size.height, edgePx, maxScrollPx)
                 }
@@ -214,6 +215,10 @@ private suspend fun AwaitPointerEventScope.awaitMouseDragStart(
 ): PointerInputChange? {
     while (true) {
         val event = awaitPointerEvent(PointerEventPass.Initial)
+        // Shift is reserved for deliberate file-to-tab transfers. Unmodified
+        // primary-button drags belong to the shared range-selection gesture.
+        if (event.keyboardModifiers.isShiftPressed) return null
+        if (!event.buttons.isPrimaryPressed) return null
         val change = event.changes.fastFirstOrNull { it.id == down.id } ?: return null
         if (!change.pressed) return null
         if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
@@ -251,6 +256,13 @@ private fun edgeScroll(y: Float, viewportHeight: Int, edgePx: Float, maxScrollPx
 
         else -> 0f
     }
+
+/**
+ * Inclusive range between an anchor and the current pointer item. min/max makes
+ * upward and downward sweeps produce the same range.
+ */
+internal fun dragSelectionRange(anchorIndex: Int, currentIndex: Int): IntRange =
+    minOf(anchorIndex, currentIndex)..maxOf(anchorIndex, currentIndex)
 
 private val EDGE_SIZE = 88.dp
 private val SCROLL_PER_FRAME = 10.dp
