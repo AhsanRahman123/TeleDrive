@@ -39,7 +39,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -453,7 +453,8 @@ fun ThumbnailManagerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (folderPath.isNotEmpty()) {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = "Back to parent folder",
                         onClick = {
                             folderPath = folderPath.dropLast(1)
                             pageOffset = 0
@@ -475,17 +476,17 @@ fun ThumbnailManagerScreen(
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     modifier = Modifier.height(38.dp)
                 ) { Text("View queue") }
-                IconButton(onClick = {
+                TooltipIconButton(tooltip = "Scroll to top", onClick = {
                     scope.launch { scrollState.animateScrollTo(0) }
                 }) {
                     Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Scroll to top")
                 }
-                IconButton(onClick = {
+                TooltipIconButton(tooltip = "Scroll to bottom", onClick = {
                     scope.launch { scrollState.animateScrollTo(scrollState.maxValue) }
                 }) {
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to bottom")
                 }
-                IconButton(onClick = { refreshKey++ }) {
+                TooltipIconButton(tooltip = "Refresh thumbnail inventory", onClick = { refreshKey++ }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
@@ -806,7 +807,7 @@ fun ThumbnailManagerScreen(
                             }
                         }
                     ) { Text("Generate all missing") }
-                    IconButton(onClick = { confirmClearFolderId = folderId }) {
+                    TooltipIconButton(tooltip = "Clear folder thumbnails", onClick = { confirmClearFolderId = folderId }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Clear folder thumbnails")
                     }
                 }
@@ -1101,7 +1102,7 @@ private fun ThumbnailFolderRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(checked = selected, onCheckedChange = onSelectionChange)
-        IconButton(onClick = onOpen) {
+        TooltipIconButton(tooltip = "Open folder", onClick = onOpen) {
             Icon(Icons.Filled.Folder, contentDescription = "Open folder", tint = MaterialTheme.colorScheme.primary)
         }
         Column(modifier = Modifier.weight(1f).clickable(onClick = onOpen)) {
@@ -1132,10 +1133,10 @@ private fun ThumbnailFolderRow(
                 )
             }
         }
-        IconButton(onClick = onGenerate) {
+        TooltipIconButton(tooltip = "Generate folder thumbnails", onClick = onGenerate) {
             Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate folder thumbnails")
         }
-        IconButton(onClick = onRemove) {
+        TooltipIconButton(tooltip = "Delete folder thumbnails", onClick = onRemove) {
             Icon(Icons.Filled.Delete, contentDescription = "Delete folder thumbnails")
         }
         ThumbnailPolicyMenu(currentPolicy, allowInherit = true, onSelect = onPolicy)
@@ -1221,11 +1222,11 @@ private fun ThumbnailFileRow(
         }
         ThumbnailPolicyMenu(file.policy, allowInherit = true, onSelect = onPolicy)
         if (file.isCached) {
-            IconButton(onClick = onRemove) {
+            TooltipIconButton(tooltip = "Remove thumbnail", onClick = onRemove) {
                 Icon(Icons.Filled.Delete, contentDescription = "Remove thumbnail")
             }
         } else {
-            IconButton(onClick = onGenerate) {
+            TooltipIconButton(tooltip = "Generate thumbnail", onClick = onGenerate) {
                 Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate thumbnail")
             }
         }
@@ -1434,7 +1435,7 @@ private fun ThumbnailPolicyMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) {
+        TooltipIconButton(tooltip = "Thumbnail generation policy", onClick = { expanded = true }) {
             Icon(Icons.Filled.Tune, contentDescription = "Thumbnail policy")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
