@@ -68,6 +68,8 @@ import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.resolve
 import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileThumbnail
@@ -304,7 +306,15 @@ fun TrashScreen(
             )
             return@Scaffold
         }
-        Box(modifier = Modifier.fillMaxSize()) {
+        val commandFocusRequester = rememberCollectionCommandFocusRequester()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .collectionCommandShortcuts(
+                    focusRequester = commandFocusRequester,
+                    onSelectAll = { viewModel.selectAll(); true }
+                )
+        ) {
                 LazyColumn(
             state = listState,
             modifier = Modifier
