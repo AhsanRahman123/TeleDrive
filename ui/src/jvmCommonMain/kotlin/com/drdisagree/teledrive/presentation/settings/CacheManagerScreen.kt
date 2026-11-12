@@ -60,6 +60,7 @@ import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -129,6 +130,22 @@ fun CacheManagerScreen(
     )
 
     val folderId = folderPath.lastOrNull()?.id
+
+    fun navigateBackOneStep() {
+        when {
+            selectedTool == "QUEUE" -> selectedTool = "THUMBNAILS"
+            selectedTool != "CACHE" -> selectedTool = "CACHE"
+            folderPath.isNotEmpty() -> {
+                folderPath = folderPath.dropLast(1)
+                pageOffset = 0
+                selectedPaths = emptySet()
+                selectedFolderIds = emptySet()
+            }
+            else -> onBack()
+        }
+    }
+
+    AppBackHandler { navigateBackOneStep() }
     val folderDragSelect = rememberDragSelect(
         listState = folderListState,
         onStart = { folderRangeSelectionBase = selectedFolderIds },
@@ -256,7 +273,7 @@ fun CacheManagerScreen(
             TopAppBar(
                 title = { Text("Free up space") },
                 navigationIcon = {
-                    TooltipIconButton(tooltip = "Back", onClick = onBack) {
+                    TooltipIconButton(tooltip = "Back", onClick = ::navigateBackOneStep) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
