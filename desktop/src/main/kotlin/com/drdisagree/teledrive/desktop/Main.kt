@@ -176,10 +176,11 @@ fun main() {
             val windowShortcutFocus = remember { FocusRequester() }
             val windowInfo = LocalWindowInfo.current
             var f11Pressed by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) {
+                windowShortcutFocus.requestFocus()
+            }
             LaunchedEffect(windowInfo.isWindowFocused) {
-                if (windowInfo.isWindowFocused) {
-                    windowShortcutFocus.requestFocus()
-                } else {
+                if (!windowInfo.isWindowFocused) {
                     // A KeyUp can be lost when Alt+Tab changes focus. Clear the latch
                     // on focus loss so F11 never stays logically held.
                     f11Pressed = false
@@ -202,7 +203,6 @@ fun main() {
                                 f11Pressed = true
                                 runCatching { fullscreenController.toggle() }
                                     .onFailure { SafeLog.w("DesktopWindow", "F11 toggle failed", it) }
-                                windowShortcutFocus.requestFocus()
                             }
                             // Consume key-repeat events, but toggle only once per physical press.
                             true
