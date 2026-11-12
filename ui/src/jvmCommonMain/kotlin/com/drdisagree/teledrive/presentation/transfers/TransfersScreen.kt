@@ -81,6 +81,8 @@ import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.core.telegram.TelegramClient
+import kotlinx.coroutines.flow.map
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
@@ -129,6 +131,7 @@ import com.drdisagree.teledrive.resources.transfers_section_paused
 import com.drdisagree.teledrive.resources.transfers_uploads_downloads_appear_here
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import kotlin.math.abs
 
@@ -142,6 +145,10 @@ fun TransfersScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val transferConcurrency by viewModel.transferConcurrency.collectAsStateWithLifecycle()
     val fileRevealer = LocalFileRevealer.current
+    val telegramClient = koinInject<TelegramClient>()
+    val speedLimitDirection by telegramClient.speedLimitNotifications
+        .map { isUpload -> if (isUpload) 1 else 0 }
+        .collectAsStateWithLifecycle(initialValue = -1)
     var concurrencyDraft by remember { mutableIntStateOf(transferConcurrency) }
     var confirmClearFinished by remember { mutableStateOf(false) }
     var confirmCancelAll by remember { mutableStateOf(false) }
@@ -501,6 +508,20 @@ fun TransfersScreen(
 ) {
             item(key = "transfer-toolbar") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (speedLimitDirection >= 0) {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = if (speedLimitDirection == 0) {
+                                    "Telegram has signalled an account-level download speed limit. TeleDrive cannot remove this server-side restriction. Check Telegram Premium eligibility; TDLib exposes a premium download speed-up option."
+                                } else {
+                                    "Telegram has signalled an account-level upload speed limit. This is applied by Telegram, not by TeleDrive."
+                                },
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
