@@ -25,7 +25,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -191,7 +191,7 @@ fun ThumbnailQueueScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
+                TooltipIconButton(tooltip = "Back", onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
                 Column(modifier = Modifier.weight(1f)) {
@@ -223,15 +223,15 @@ fun ThumbnailQueueScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = { scope.launch { scrollState.animateScrollTo(0) } }) {
+                TooltipIconButton(tooltip = "Scroll to top", onClick = { scope.launch { scrollState.animateScrollTo(0) } }) {
                     Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Scroll to top")
                 }
-                IconButton(onClick = {
+                TooltipIconButton(tooltip = "Scroll to bottom", onClick = {
                     scope.launch { scrollState.animateScrollTo(scrollState.maxValue) }
                 }) {
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to bottom")
                 }
-                IconButton(onClick = {
+                TooltipIconButton(tooltip = "Refresh queue", onClick = {
                     scope.launch {
                         items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
                         pendingCount = repository.thumbnailQueueCount()
