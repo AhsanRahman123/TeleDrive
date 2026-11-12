@@ -94,7 +94,16 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.time.Duration.Companion.milliseconds
 
-internal data class FilesTabState(
+internal data class FilesSelectionSnapshot(
+    val fileIds: Set<String> = emptySet(),
+    val folderIds: Set<String> = emptySet(),
+    val selectionModeEnabled: Boolean = false,
+    val allSelected: Boolean = false
+) {
+    val count: Int get() = fileIds.size + folderIds.size
+}
+
+data class FilesTabState(
     val id: Int,
     val folderId: String?,
     val label: String
@@ -238,6 +247,18 @@ class FilesViewModel(
     private var rangeBase: Pair<Set<String>, Set<String>>? = null
     private val _allSelected = MutableStateFlow(false)
     val allSelected: StateFlow<Boolean> = _allSelected.asStateFlow()
+
+    private val _selectionSnapshot = MutableStateFlow(FilesSelectionSnapshot())
+    val selectionSnapshot: StateFlow<FilesSelectionSnapshot> = _selectionSnapshot.asStateFlow()
+
+    private fun publishSelectionSnapshot() {
+        _selectionSnapshot.value = FilesSelectionSnapshot(
+            fileIds = selection.value,
+            folderIds = folderSelection.value,
+            selectionModeEnabled = _selectionModeEnabled.value,
+            allSelected = _allSelected.value
+        )
+    }
 
     private val _messages = MutableSharedFlow<UiText>(extraBufferCapacity = 8)
     val messages = _messages.asSharedFlow()
@@ -392,6 +413,7 @@ class FilesViewModel(
 
     fun startSelectionMode() {
         _selectionModeEnabled.update { true }
+        publishSelectionSnapshot()
     }
 
     fun selectFileForContext(fileId: String) {
@@ -401,6 +423,7 @@ class FilesViewModel(
             selection.update { setOf(fileId) }
             folderSelection.update { emptySet() }
         }
+        publishSelectionSnapshot()
     }
 
     fun selectFolderForContext(folderId: String) {
@@ -410,6 +433,7 @@ class FilesViewModel(
             selection.update { emptySet() }
             folderSelection.update { setOf(folderId) }
         }
+        publishSelectionSnapshot()
     }
 
     fun toggleSelection(fileId: String) {
@@ -419,6 +443,7 @@ class FilesViewModel(
         }
         _selectionModeEnabled.value =
             selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        publishSelectionSnapshot()
     }
 
     fun toggleFolderSelection(folderId: String) {
@@ -428,6 +453,7 @@ class FilesViewModel(
         }
         _selectionModeEnabled.value =
             selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        publishSelectionSnapshot()
     }
 
     fun clearSelection() {
@@ -435,6 +461,7 @@ class FilesViewModel(
         _allSelected.update { false }
         selection.update { emptySet() }
         folderSelection.update { emptySet() }
+        publishSelectionSnapshot()
     }
 
     fun selectAll() {
@@ -444,6 +471,7 @@ class FilesViewModel(
             selection.update { ids.toSet() }
             _selectionModeEnabled.update { ids.isNotEmpty() || folderSelection.value.isNotEmpty() }
             _allSelected.update { true }
+            publishSelectionSnapshot()
         }
     }
 
@@ -462,6 +490,7 @@ class FilesViewModel(
         folderSelection.update { if (shouldSelect) base.second + folderIds else base.second - folderIds.toSet() }
         _selectionModeEnabled.value =
             selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        publishSelectionSnapshot()
     }
 
     fun endRangeSelection() {
