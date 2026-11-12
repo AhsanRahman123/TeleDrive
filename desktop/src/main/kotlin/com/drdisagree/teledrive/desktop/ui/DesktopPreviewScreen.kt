@@ -337,7 +337,8 @@ fun DesktopPreviewScreen(
     var playerChromeVisible by remember { mutableStateOf(true) }
     val viewerFocusRequester = remember { FocusRequester() }
     LaunchedEffect(file?.id) {
-        playerChromeVisible = true
+        // Do not reveal the preview chrome on every queue item change. The player owns
+        // the user's hidden/visible preference and reports it through the callback below.
         viewerFocusRequester.requestFocus()
     }
 
