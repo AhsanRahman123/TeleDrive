@@ -40,6 +40,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -97,7 +98,8 @@ private const val THUMBNAIL_PAGE_SIZE = 60
 @Composable
 fun ThumbnailManagerScreen(
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onInternalBackStateChange: (Boolean, () -> Unit) -> Unit = { _, _ -> }
 ) {
     val cacheRepository = koinInject<CacheRepository>()
     val scope = rememberCoroutineScope()
@@ -137,6 +139,33 @@ fun ThumbnailManagerScreen(
     val folderListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
+
+    fun navigateBackOneStep() {
+        when {
+            showQueue -> showQueue = false
+            folderPath.isNotEmpty() -> {
+                folderPath = folderPath.dropLast(1)
+                pageOffset = 0
+            }
+            else -> onBack()
+        }
+    }
+
+    LaunchedEffect(showQueue, folderPath) {
+        val hasInternalBack = showQueue || folderPath.isNotEmpty()
+        onInternalBackStateChange(hasInternalBack) {
+            when {
+                showQueue -> showQueue = false
+                folderPath.isNotEmpty() -> {
+                    folderPath = folderPath.dropLast(1)
+                    pageOffset = 0
+                }
+            }
+        }
+    }
+    AppBackHandler(enabled = showQueue || folderPath.isNotEmpty()) {
+        navigateBackOneStep()
+    }
     val folderDragSelect = rememberDragSelect(
         listState = folderListState,
         onStart = { folderRangeSelectionBase = selectedFolderIds },
