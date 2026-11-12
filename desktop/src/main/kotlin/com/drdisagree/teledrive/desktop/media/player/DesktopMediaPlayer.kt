@@ -1349,11 +1349,7 @@ private fun PlayerControlsBar(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TooltipIconButton(
+            TooltipIconButton(
                     tooltip = "Previous video",
                     onClick = { onInteraction(); onPrevious() },
                     enabled = hasPrevious,
@@ -1427,12 +1423,7 @@ private fun PlayerControlsBar(
                         tint = if (hasNext) Color.White else Color.White.copy(alpha = 0.35f)
                     )
                 }
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box {
+            Box {
                     TextButton(onClick = {
                         onInteraction()
                         showRateMenu = true
