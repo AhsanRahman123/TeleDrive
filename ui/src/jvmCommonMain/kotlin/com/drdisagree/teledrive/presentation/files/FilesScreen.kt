@@ -878,12 +878,6 @@ fun FilesScreen(
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         TextButton(
                                             onClick = { activateTab(tab) },
-                                            modifier = Modifier.fileTabDragSource {
-                                                // A tab can also be dragged as a destination shortcut;
-                                                // the payload itself remains item-only, so an empty
-                                                // selection never creates an accidental file operation.
-                                                ""
-                                            },
                                             colors = ButtonDefaults.textButtonColors(
                                                 containerColor = if (tab.id == selectedTabId) {
                                                     MaterialTheme.colorScheme.secondaryContainer
