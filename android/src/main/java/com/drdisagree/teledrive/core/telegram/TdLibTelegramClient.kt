@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onSubscription
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -968,44 +969,71 @@ class TdLibTelegramClient(
     }
 
     @OptIn(DelicateCoroutinesApi::class)
-    override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> =
-        callbackFlow<TelegramDownloadEvent> {
-            val subscribed = CompletableDeferred<Unit>()
-            val downloadedFileId = CompletableDeferred<Int>()
+    override fun downloadDocument(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?,
+        queuePriority: Int
+    ): Flow<TelegramDownloadEvent> = callbackFlow<TelegramDownloadEvent> {
+        val useManagedQueue = chatId != null && messageId != null
+        val subscribed = CompletableDeferred<Unit>()
+        val downloadedFileId = CompletableDeferred<Int>()
 
-            val job = launch {
-                updates.onSubscription { subscribed.complete(Unit) }
-                    .filterIsInstance<TdApi.UpdateFile>()
-                    .filter { it.file.id == downloadedFileId.await() }
-                    .collect { update ->
-                        val local = update.file.local
-                        val readyPath = update.file.readyPath()
-                        if (readyPath != null) {
-                            trySend(TelegramDownloadEvent.Completed(readyPath, update.file.size))
-                            close()
-                        } else {
-                            trySend(
-                                TelegramDownloadEvent.Progress(
-                                    local?.downloadedSize ?: 0,
-                                    update.file.size.takeIf { it > 0 }
-                                        ?: update.file.expectedSize
-                                )
-                            )
-                        }
+        val job = launch {
+            updates.onSubscription { subscribed.complete(Unit) }
+                .onEach { update ->
+                    if (update is TdApi.UpdateSpeedLimitNotification) {
+                        SafeLog.w(
+                            "TransferDiagnostics",
+                            "TELEGRAM_SPEED_LIMIT direction=${if (update.isUpload) "UPLOAD" else "DOWNLOAD"}"
+                        )
                     }
-            }
+                }
+                .filterIsInstance<TdApi.UpdateFile>()
+                .filter { it.file.id == downloadedFileId.await() }
+                .collect { update ->
+                    val local = update.file.local
+                    val readyPath = update.file.readyPath()
+                    if (readyPath != null) {
+                        trySend(TelegramDownloadEvent.Completed(readyPath, update.file.size))
+                        close()
+                    } else {
+                        trySend(
+                            TelegramDownloadEvent.Progress(
+                                local?.downloadedSize ?: 0,
+                                update.file.size.takeIf { it > 0 }
+                                    ?: update.file.expectedSize
+                            )
+                        )
+                    }
+                }
+        }
 
-            subscribed.await()
-            val file: TdApi.File = remoteFile(remoteFileId)
-            val fileId = file.id
-            downloadedFileId.complete(fileId)
+        subscribed.await()
+        val file: TdApi.File = remoteFile(remoteFileId)
+        val fileId = file.id
+        downloadedFileId.complete(fileId)
 
-            file.readyPath()?.let { path ->
-                trySend(TelegramDownloadEvent.Completed(path, file.size))
-                close()
-            }
+        file.readyPath()?.let { path ->
+            trySend(TelegramDownloadEvent.Completed(path, file.size))
+            close()
+        }
 
-            if (!isClosedForSend) {
+        var resumer: kotlinx.coroutines.Job? = null
+        if (!isClosedForSend) {
+            if (useManagedQueue) {
+                if (file.local?.isDownloadingCompleted == true) {
+                    runCatching {
+                        send<TdApi.Ok>(TdApi.RemoveFileFromDownloads(fileId, true))
+                    }
+                }
+                ensureManagedDownload(fileId, chatId!!, messageId!!, queuePriority)
+                val current = send<TdApi.File>(TdApi.GetFile(fileId))
+                current.readyPath()?.let { path ->
+                    trySend(TelegramDownloadEvent.Completed(path, current.size))
+                    close()
+                }
+            } else {
                 if (file.local?.isDownloadingCompleted == true) {
                     send<TdApi.Ok>(TdApi.DeleteFile(fileId))
                 }
@@ -1015,30 +1043,51 @@ class TdLibTelegramClient(
                     trySend(TelegramDownloadEvent.Completed(path, started.size))
                     close()
                 }
-            }
 
-            val resumer = launch {
-                while (true) {
-                    delay(DOWNLOAD_RESUME_INTERVAL_MS)
-                    val current = runCatching { send<TdApi.File>(TdApi.GetFile(fileId)) }.getOrNull()
-                        ?: continue
-                    if (current.local?.isDownloadingCompleted == true) break
-                    if (current.local?.isDownloadingActive != true) {
-                        runCatching {
-                            send<TdApi.File>(
-                                TdApi.DownloadFile(fileId, DOWNLOAD_PRIORITY, 0, 0, false)
-                            )
+                resumer = launch {
+                    while (true) {
+                        delay(DOWNLOAD_RESUME_INTERVAL_MS)
+                        val current = runCatching {
+                            send<TdApi.File>(TdApi.GetFile(fileId))
+                        }.getOrNull() ?: continue
+                        if (current.local?.isDownloadingCompleted == true) break
+                        if (current.local?.isDownloadingActive != true) {
+                            runCatching {
+                                send<TdApi.File>(
+                                    TdApi.DownloadFile(fileId, DOWNLOAD_PRIORITY, 0, 0, false)
+                                )
+                            }
                         }
                     }
                 }
             }
+        }
 
-            awaitClose {
-                resumer.cancel()
-                job.cancel()
+        awaitClose {
+            resumer?.cancel()
+            job.cancel()
+            if (!useManagedQueue) {
                 client?.send(TdApi.CancelDownloadFile(fileId, true)) { }
             }
-        }.buffer(capacity = 64)
+        }
+    }.buffer(capacity = 64)
+
+    /**
+     * TDLib reorders an already-listed file when AddFileToDownloads is called again. Its
+     * implementation removes the old queue entry without deleting cache data, then re-adds it
+     * with the supplied priority. This refreshes ordering after restart/resume while retaining
+     * downloaded bytes.
+     */
+    private suspend fun ensureManagedDownload(
+        fileId: Int,
+        chatId: Long,
+        messageId: Long,
+        priority: Int
+    ) {
+        send<TdApi.File>(
+            TdApi.AddFileToDownloads(fileId, chatId, messageId, priority.coerceIn(1, 32))
+        )
+    }
 
     override suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray? {
         val message = runCatching { send(TdApi.GetMessage(chatId, messageId)) }.getOrNull()
@@ -1082,6 +1131,42 @@ class TdLibTelegramClient(
 
     override suspend fun cancelFileDownload(fileId: Int) {
         send(TdApi.CancelDownloadFile(fileId, false))
+    }
+
+    override suspend fun updateManagedDownloadPriority(
+        remoteFileId: String,
+        chatId: Long,
+        messageId: Long,
+        priority: Int
+    ) {
+        val file = remoteFile(remoteFileId)
+        send<TdApi.File>(
+            TdApi.AddFileToDownloads(file.id, chatId, messageId, priority.coerceIn(1, 32))
+        )
+    }
+
+    override suspend fun pauseManagedDownload(remoteFileId: String) {
+        val file = remoteFile(remoteFileId)
+        send<TdApi.Ok>(TdApi.ToggleDownloadIsPaused(file.id, true))
+    }
+
+    override suspend fun removeManagedDownload(remoteFileId: String) {
+        val file = remoteFile(remoteFileId)
+        evictManagedDownloadCache(
+            removeFromDownloadList = {
+                send<TdApi.Ok>(TdApi.RemoveFileFromDownloads(file.id, true))
+            },
+            // Always issue DeleteFile as well: legacy DownloadFile caches may have no managed
+            // download-list entry, in which case RemoveFileFromDownloads can be a no-op.
+            deleteFromCache = {
+                send<TdApi.Ok>(TdApi.DeleteFile(file.id))
+            },
+            cacheStillPresent = {
+                val remaining = send<TdApi.File>(TdApi.GetFile(file.id))
+                val path = remaining.local?.path
+                !path.isNullOrEmpty() && File(path).isFile
+            }
+        )
     }
 
     override suspend fun clearDownloadedFiles() {
@@ -1252,6 +1337,7 @@ class TdLibTelegramClient(
         localPath = local?.path?.takeIf { it.isNotEmpty() },
         isDownloadingCompleted = local?.isDownloadingCompleted == true,
         isDownloadingActive = local?.isDownloadingActive == true,
+        canBeDeleted = local?.canBeDeleted == true,
         downloadOffset = local?.downloadOffset ?: 0,
         downloadedPrefixSize = local?.downloadedPrefixSize ?: 0
     )
@@ -1393,5 +1479,12 @@ private fun TdApi.File.readyPath(): String? {
     if (!local.isDownloadingCompleted) return null
     val path = local.path
     if (path.isNullOrEmpty()) return null
-    return path.takeIf { File(it).exists() }
+
+    val candidate = File(path)
+    if (!candidate.isFile) return null
+
+    val expectedBytes = size.takeIf { it > 0 } ?: expectedSize
+    if (expectedBytes > 0 && candidate.length() != expectedBytes) return null
+
+    return path
 }

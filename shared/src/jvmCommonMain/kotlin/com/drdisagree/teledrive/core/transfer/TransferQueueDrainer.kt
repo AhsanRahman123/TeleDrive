@@ -130,25 +130,21 @@ class TransferQueueDrainer(
 
     private suspend fun nextClaimable(
         includeBackups: Boolean,
-        skip: Set<String> = emptySet(),
-        includeUploads: Boolean = true
+        skip: Set<String> = emptySet()
     ): TransferEntity? {
         val types = TransferType.entries.filter { type ->
-            (includeBackups || type != TransferType.BACKUP) &&
-                (includeUploads || type.isIncoming)
+            includeBackups || type != TransferType.BACKUP
         }
         if (types.isEmpty()) return null
         return transferDao.nextQueuedOf(types, skip.size + 1).firstOrNull { it.id !in skip }
     }
 
     private suspend fun claimNextQueued(includeBackups: Boolean): String? = claimLock.withLock {
-        // Keep uploads serialized as before; the three worker slots are available for
-        // incoming downloads/restores and do not silently increase upload concurrency.
-        val uploading = executing.values.any { !it.isIncoming }
+        // The user's concurrency setting applies to uploads, backups and downloads alike.
+        // TDLib handles per-file network scheduling; the app only limits active transfer jobs.
         val next = nextClaimable(
             includeBackups = includeBackups,
-            skip = executing.keys,
-            includeUploads = !uploading
+            skip = executing.keys
         ) ?: return@withLock null
         transferDao.setState(next.id, TransferState.RUNNING, System.currentTimeMillis())
         executing[next.id] = next.type

@@ -101,8 +101,30 @@ interface TelegramClient {
         caption: String
     ): RemoteDocument
 
-    /** Cancelling the collection cancels the download. */
-    fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent>
+    /**
+     * Downloads a Telegram message through TDLib's persistent download queue when the source
+     * message identifiers are available. Null identifiers use the legacy single-file path.
+     */
+    fun downloadDocument(
+        remoteFileId: String,
+        chatId: Long? = null,
+        messageId: Long? = null,
+        queuePriority: Int = 16
+    ): Flow<TelegramDownloadEvent>
+
+    /** Re-applies the native queue priority without deleting the downloaded cache bytes. */
+    suspend fun updateManagedDownloadPriority(
+        remoteFileId: String,
+        chatId: Long,
+        messageId: Long,
+        priority: Int
+    )
+
+    /** Pauses a file already submitted to TDLib's persistent download queue. */
+    suspend fun pauseManagedDownload(remoteFileId: String)
+
+    /** Removes a file from TDLib's persistent download queue and deletes its TDLib cache copy. */
+    suspend fun removeManagedDownload(remoteFileId: String)
 
     /** Telegram's own generated preview, for files with no local copy; null when there is none. */
     suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray?

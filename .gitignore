@@ -9,3 +9,5 @@ build/
 .cxx
 local.properties
 .kotlin
+# Per-checkout desktop TeleDrive data created by run-isolated-desktop.ps1
+/.teledrive-instance/

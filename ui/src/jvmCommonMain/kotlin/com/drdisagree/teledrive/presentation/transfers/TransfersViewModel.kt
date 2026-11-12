@@ -79,6 +79,12 @@ class TransfersViewModel(
     fun setPriority(id: String, priority: Int) =
         launch { transferRepository.setPriority(id, priority) }
 
+    fun reorderDownloads(orderedIds: List<String>) =
+        launch { transferRepository.reorderDownloads(orderedIds) }
+
+    fun moveDownloadToTop(id: String) =
+        launch { transferRepository.moveDownloadToTop(id) }
+
     fun pauseSelected(ids: List<String>) = launch {
         ids.forEach { transferRepository.pause(it) }
     }

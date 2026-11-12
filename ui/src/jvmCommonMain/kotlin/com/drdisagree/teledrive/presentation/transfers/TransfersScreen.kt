@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.transfers
 
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -23,6 +25,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -65,7 +68,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -125,6 +130,7 @@ import com.drdisagree.teledrive.resources.transfers_uploads_downloads_appear_her
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,12 +149,14 @@ fun TransfersScreen(
     var showTransferSettings by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var typeFilter by remember { mutableStateOf("ALL") }
-    var sortOrder by remember { mutableStateOf("STATUS") }
+    var sortOrder by remember { mutableStateOf("PRIORITY") }
     var showFilterMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
     var detailsTransfer by remember { mutableStateOf<TransferTask?>(null) }
     var speedClock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var draggedTransferId by remember { mutableStateOf<String?>(null) }
+    var draggedOffsetY by remember { mutableStateOf(0f) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -175,7 +183,7 @@ fun TransfersScreen(
                         steps = 4
                     )
                     Text(
-                        "This controls how many queued transfers may run at once. Raising it can use more bandwidth and disk activity.",
+                        "Applies to uploads, backups and downloads. Telegram still manages its own network limits; higher values can use more bandwidth and disk activity.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -357,11 +365,15 @@ fun TransfersScreen(
                 transfer
             }
         }
+        // Count recent TDLib progress updates as active even when the one-second speed
+        // sampler has not produced a new rate yet.
         val runningCount = visibleActive.count {
-            it.state == TransferState.RUNNING && it.speedBytesPerSecond > 0L
+            it.state == TransferState.RUNNING &&
+                speedClock - it.updatedAt <= SPEED_STALE_AFTER_MS
         }
         val waitingCount = visibleActive.count {
-            it.state == TransferState.RUNNING && it.speedBytesPerSecond <= 0L
+            it.state == TransferState.RUNNING &&
+                speedClock - it.updatedAt > SPEED_STALE_AFTER_MS
         }
         val queuedCount = visibleActive.count { it.state == TransferState.QUEUED }
         val visiblePaused = filterAndSort(state.paused)
@@ -403,6 +415,76 @@ fun TransfersScreen(
         )
         val itemModifier: (TransferTask) -> Modifier = { transfer ->
             Modifier.keyboardCollectionItem(keyboard, rows.indexOf(transfer))
+        }
+        val activeIncomingIds = visibleActive
+            .filter { it.type.isIncoming }
+            .map { it.id }
+        val dragModifier: (TransferTask) -> Modifier = { transfer ->
+            val canDrag = transfer.type.isIncoming &&
+                (transfer.state == TransferState.RUNNING || transfer.state == TransferState.QUEUED)
+            if (canDrag) {
+                Modifier
+                    .graphicsLayer {
+                        translationY = if (draggedTransferId == transfer.id) draggedOffsetY else 0f
+                    }
+                    .pointerInput(transfer.id, activeIncomingIds) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                draggedTransferId = transfer.id
+                                draggedOffsetY = 0f
+                            },
+                            onDragEnd = {
+                                val items = listState.layoutInfo.visibleItemsInfo
+                                val draggedInfo = items.firstOrNull {
+                                    it.key == "active-${transfer.id}"
+                                }
+                                val draggedCenter = draggedInfo?.let {
+                                    it.offset + it.size / 2 + draggedOffsetY
+                                }
+                                val targetId = if (draggedCenter != null) {
+                                    items.asSequence()
+                                        .filter { info ->
+                                            val key = info.key.toString()
+                                            key.startsWith("active-") &&
+                                                key.removePrefix("active-") in activeIncomingIds
+                                        }
+                                        .minByOrNull { info ->
+                                            abs(draggedCenter - (info.offset + info.size / 2))
+                                        }
+                                        ?.key
+                                        ?.toString()
+                                        ?.removePrefix("active-")
+                                } else {
+                                    null
+                                }
+                                val reordered = activeIncomingIds.toMutableList()
+                                val fromIndex = reordered.indexOf(transfer.id)
+                                val toIndex = targetId?.let(reordered::indexOf) ?: -1
+                                if (fromIndex >= 0 && toIndex >= 0 && fromIndex != toIndex) {
+                                    val moved = reordered.removeAt(fromIndex)
+                                    reordered.add(toIndex, moved)
+                                    // Manual order becomes the active sort order after a drop.
+                                    sortOrder = "PRIORITY"
+                                    viewModel.reorderDownloads(reordered)
+                                }
+                                draggedTransferId = null
+                                draggedOffsetY = 0f
+                            },
+                            onDragCancel = {
+                                draggedTransferId = null
+                                draggedOffsetY = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                if (draggedTransferId == transfer.id) {
+                                    draggedOffsetY += dragAmount.y
+                                }
+                            }
+                        )
+                    }
+            } else {
+                Modifier
+            }
         }
         val actionsFocusable: (TransferTask) -> Boolean = { transfer ->
             keyboard.current == rows.indexOf(transfer)
@@ -573,6 +655,10 @@ fun TransfersScreen(
                     onPrimary = { viewModel.pause(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
                     onPriorityChange = { viewModel.setPriority(transfer.id, it) },
+                    onMoveToTop = if (transfer.type.isIncoming) {
+                        { viewModel.moveDownloadToTop(transfer.id) }
+                    } else null,
+                    dragEnabled = transfer.type.isIncoming,
                     selected = transfer.id in selectedTransferIds,
                     onSelect = { checked ->
                         selectedTransferIds = if (checked) selectedTransferIds + transfer.id
@@ -580,7 +666,7 @@ fun TransfersScreen(
                     },
                     onDetails = { detailsTransfer = transfer },
                     actionsFocusable = actionsFocusable(transfer),
-                    modifier = itemModifier(transfer)
+                    modifier = itemModifier(transfer).then(dragModifier(transfer))
                 )
             }
             section("paused", pausedTitle, visiblePaused, pausedTotal) { transfer ->
@@ -591,6 +677,9 @@ fun TransfersScreen(
                     onPrimary = { viewModel.resume(transfer.id) },
                     onCancel = { viewModel.cancel(transfer.id) },
                     onPriorityChange = { viewModel.setPriority(transfer.id, it) },
+                    onMoveToTop = if (transfer.type.isIncoming) {
+                        { viewModel.moveDownloadToTop(transfer.id) }
+                    } else null,
                     selected = transfer.id in selectedTransferIds,
                     onSelect = { checked ->
                         selectedTransferIds = if (checked) selectedTransferIds + transfer.id
@@ -748,7 +837,7 @@ private fun failedSectionTitle(failed: List<TransferTask>): String {
     }
 }
 
-private const val SPEED_STALE_AFTER_MS = 1_500L
+private const val SPEED_STALE_AFTER_MS = 5_000L
 
 @Composable
 private fun transferRate(transfer: TransferTask): String {
@@ -776,6 +865,8 @@ private fun TransferRow(
     onPrimary: (() -> Unit)? = null,
     onCancel: (() -> Unit)? = null,
     onPriorityChange: ((Int) -> Unit)? = null,
+    onMoveToTop: (() -> Unit)? = null,
+    dragEnabled: Boolean = false,
     onOpenInApp: (() -> Unit)? = null,
     onShowInFolder: (() -> Unit)? = null,
     selected: Boolean = false,
@@ -804,6 +895,15 @@ private fun TransferRow(
                         modifier = actions
                     )
                 }
+                if (dragEnabled) {
+                    Icon(
+                        Icons.Filled.DragHandle,
+                        contentDescription = "Drag to reorder downloads",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
                 TransferThumbnail(transfer = transfer)
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -831,9 +931,8 @@ private fun TransferRow(
                                     transfer.state == TransferState.QUEUED -> "Queued"
                                     transfer.state == TransferState.RUNNING &&
                                         transfer.stage == null &&
-                                        (transfer.speedBytesPerSecond <= 0L ||
-                                            System.currentTimeMillis() - transfer.updatedAt > SPEED_STALE_AFTER_MS) ->
-                                        "Waiting for Telegram"
+                                        System.currentTimeMillis() - transfer.updatedAt > SPEED_STALE_AFTER_MS ->
+                                        "No recent progress"
                                     transfer.state == TransferState.RUNNING -> "Running"
                                     transfer.state == TransferState.PAUSED -> "Paused"
                                     transfer.state == TransferState.FAILED -> "Failed"
@@ -901,23 +1000,33 @@ private fun TransferRow(
                                     }
                                 )
                             }
+                            onMoveToTop?.let { move ->
+                                DropdownMenuItem(
+                                    text = { Text("Move to top") },
+                                    leadingIcon = { Icon(Icons.Filled.ArrowUpward, contentDescription = null) },
+                                    onClick = {
+                                        showRowMenu = false
+                                        move()
+                                    }
+                                )
+                            }
                             if (onPriorityChange != null) {
                                 DropdownMenuItem(
                                     text = { Text("Increase priority") },
                                     leadingIcon = { Icon(Icons.Filled.ArrowUpward, contentDescription = null) },
-                                    enabled = transfer.priority < 10,
+                                    enabled = transfer.priority < Int.MAX_VALUE,
                                     onClick = {
                                         showRowMenu = false
-                                        onPriorityChange((transfer.priority + 1).coerceAtMost(10))
+                                        onPriorityChange(transfer.priority + 1)
                                     }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Lower priority") },
                                     leadingIcon = { Icon(Icons.Filled.ArrowDownward, contentDescription = null) },
-                                    enabled = transfer.priority > -10,
+                                    enabled = transfer.priority > Int.MIN_VALUE,
                                     onClick = {
                                         showRowMenu = false
-                                        onPriorityChange((transfer.priority - 1).coerceAtLeast(-10))
+                                        onPriorityChange(transfer.priority - 1)
                                     }
                                 )
                             }

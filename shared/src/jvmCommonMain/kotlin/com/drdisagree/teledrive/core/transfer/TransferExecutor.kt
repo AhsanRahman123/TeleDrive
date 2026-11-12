@@ -560,24 +560,56 @@ class TransferExecutor(
 
         val remoteFileId = entity.remoteFileId
             ?: return TransferOutcome.Failed(messages.noRemoteCopy)
+        val sourceChatId = entity.chatId ?: transfer.chatId
+        val sourceMessageId = entity.messageId ?: transfer.messageId
+        val managedDownload = sourceChatId != null && sourceMessageId != null
 
-        val startedAt = System.currentTimeMillis()
-        val ticker = ProgressTicker().apply { start(0, startedAt) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
 
         return try {
             var outcome: TransferOutcome =
                 TransferOutcome.Failed(messages.downloadEnded)
-            telegramClient.downloadDocument(remoteFileId)
-                .failWhenIdle(messages.downloadStalled)
+            telegramClient.downloadDocument(
+                remoteFileId = remoteFileId,
+                chatId = sourceChatId,
+                messageId = sourceMessageId,
+                queuePriority = if (managedDownload) {
+                    managedDownloadQueuePriority(transfer)
+                } else {
+                    DEFAULT_TDLIB_DOWNLOAD_PRIORITY
+                }
+            )
+                // Poll transfer state as well as TDLib events so Pause/Cancel can update the
+                // persistent TDLib queue even while Telegram is temporarily not emitting bytes.
+                .failWhenIdle(transfer.id, messages.downloadStalled)
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
                         is TelegramDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
-                                transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                            if (!tickerStarted) {
+                                // TDLib may immediately report bytes already cached before this
+                                // worker attached. Seed the meter from that value so reattaching
+                                // cannot turn the whole saved file into a fake one-second speed burst.
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
+                                transferDao.updateTransferredBytes(
+                                    transfer.id, event.transferredBytes, now
                                 )
+                            } else {
+                                val speed = ticker.tick(event.transferredBytes, now)
+                                if (speed != null) {
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                } else {
+                                    // Keep progress timestamps fresh for every TDLib update;
+                                    // the speed sample itself is only refreshed once per second.
+                                    transferDao.updateTransferredBytes(
+                                        transfer.id, event.transferredBytes, now
+                                    )
+                                }
                             }
                             checkControl(transfer.id)
                         }
@@ -585,17 +617,56 @@ class TransferExecutor(
                         is TelegramDownloadEvent.Completed -> {
                             outcome = finalizeDownload(transfer, entity.id, event.localPath)
                             if (outcome == TransferOutcome.Completed) {
-                                runCatching { telegramClient.deleteLocalCopy(remoteFileId) }
+                                runCatching {
+                                    if (managedDownload) {
+                                        telegramClient.removeManagedDownload(remoteFileId)
+                                    } else {
+                                        telegramClient.deleteLocalCopy(remoteFileId)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             outcome
         } catch (e: TransferControlException) {
+            if (managedDownload) {
+                // The repository pauses TDLib before stopping the worker. There is one startup
+                // race, however: this flow may add its native queue entry just after that pause.
+                // Reconcile the native queue after collection has stopped so the new entry cannot
+                // continue in the background. Only pause it while the app row is still PAUSED or
+                // QUEUED (the latter is a preempted job); if a new worker already owns RUNNING,
+                // leave its native request alone.
+                withContext(NonCancellable) {
+                    val currentState = transferDao.byId(transfer.id)?.state
+                    when {
+                        e.paused && currentState in setOf(
+                            TransferState.PAUSED,
+                            TransferState.QUEUED
+                        ) -> runCatching {
+                            telegramClient.pauseManagedDownload(remoteFileId)
+                        }
+                        !e.paused -> runCatching {
+                            telegramClient.removeManagedDownload(remoteFileId)
+                        }
+                    }
+                }
+            }
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
         } catch (e: TelegramException) {
             TransferOutcome.Failed(e.message, e.retryAfterSeconds)
         }
+    }
+
+    /**
+     * TDLib breaks equal-priority ties in favour of the most recently added file. Give each
+     * currently running incoming transfer a distinct native priority in TeleDrive queue order,
+     * so a restart or re-attachment cannot reverse the app's order.
+     */
+    private suspend fun managedDownloadQueuePriority(transfer: TransferEntity): Int {
+        val active = transferDao.runningIncomingTransfers()
+        val position = active.indexOfFirst { it.id == transfer.id }.coerceAtLeast(0)
+        return (MAX_TDLIB_DOWNLOAD_PRIORITY - position).coerceAtLeast(1)
     }
 
     private suspend fun downloadInParts(
@@ -621,24 +692,39 @@ class TransferExecutor(
             return TransferOutcome.Failed(messages.cacheFull(cacheNeeded))
         }
 
-        val startedAt = System.currentTimeMillis()
-        val ticker = ProgressTicker().apply { start(0, startedAt) }
+        val ticker = ProgressTicker()
+        var tickerStarted = false
         var outcome: TransferOutcome =
             TransferOutcome.Failed(messages.downloadEnded)
 
         return try {
             partDownloader.download(entity.id, entity.isEncrypted, target)
-                .failWhenIdle(messages.downloadStalled)
+                .failWhenIdle(transfer.id, messages.downloadStalled)
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {
                         is PartDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
                             transferDao.setStage(transfer.id, null, now)
-                            ticker.tick(event.transferredBytes, now)?.let { speed ->
-                                transferDao.updateProgress(
-                                    transfer.id, event.transferredBytes, speed, now
+                            if (!tickerStarted) {
+                                // The first progress event includes any complete parts already
+                                // present in the resumable target. Seed the rate meter from it.
+                                ticker.start(event.transferredBytes, now)
+                                tickerStarted = true
+                                transferDao.updateTransferredBytes(
+                                    transfer.id, event.transferredBytes, now
                                 )
+                            } else {
+                                val speed = ticker.tick(event.transferredBytes, now)
+                                if (speed != null) {
+                                    transferDao.updateProgress(
+                                        transfer.id, event.transferredBytes, speed, now
+                                    )
+                                } else {
+                                    transferDao.updateTransferredBytes(
+                                        transfer.id, event.transferredBytes, now
+                                    )
+                                }
                             }
                             checkControl(transfer.id)
                         }
@@ -814,6 +900,8 @@ class TransferExecutor(
         File(storagePaths.cacheDir, "staging").apply { mkdirs() }
 
     companion object {
+        private const val DEFAULT_TDLIB_DOWNLOAD_PRIORITY = 16
+        private const val MAX_TDLIB_DOWNLOAD_PRIORITY = 32
         private const val EAGER_HASH_LIMIT = 512L * 1024 * 1024
         private const val SPACE_MARGIN_BYTES = 256L * 1024 * 1024
         private const val CONTROL_POLL_MS = 250L

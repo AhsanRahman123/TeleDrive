@@ -77,5 +77,6 @@ internal class SyncHarness : AutoCloseable {
         dbFile.delete()
         telegram.cleanUp()
         storagePaths.cacheDir.deleteRecursively()
+        storagePaths.filesDir.deleteRecursively()
     }
 }

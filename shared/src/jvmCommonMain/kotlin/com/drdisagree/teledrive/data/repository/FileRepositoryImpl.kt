@@ -9,6 +9,7 @@ import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
+import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.FileImporter
 import com.drdisagree.teledrive.core.files.FileNameUtils
 import com.drdisagree.teledrive.core.files.Hashing
@@ -44,6 +45,7 @@ import com.drdisagree.teledrive.domain.model.StorageSlice
 import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.usecase.FolderCycleCheck
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -67,7 +69,8 @@ class FileRepositoryImpl(
     private val streamCrypto: StreamCrypto,
     private val wrappedKeyRepository: WrappedKeyRepository,
     private val settingsRepository: SettingsRepository,
-    private val fileImporter: FileImporter
+    private val fileImporter: FileImporter,
+    private val storagePaths: AppStoragePaths
 ) : FileRepository {
 
     override suspend fun resolveImportFolder(relativePath: String, parentId: String?): String? =
@@ -801,24 +804,136 @@ class FileRepositoryImpl(
         val candidates = fileDao.byIds(ids - kept).filter { entity ->
             entity.localPath != null &&
                     entity.messageId != null &&
+                    entity.remoteFileId != null &&
                     entity.backupState == BackupState.BACKED_UP
         }
         if (candidates.isEmpty()) {
             return AppResult.Success(LocalCleanup(0, keptOffline = kept.size))
         }
 
-        val cleanup = localCopyDeleter.delete(candidates.mapNotNull { it.localPath })
-        if (cleanup.consentRequest != null) return AppResult.Success(cleanup)
+        val managedRoots = managedLocalCopyRoots()
+        // Keep track of whether TDLib's own cache is safe to remove separately from
+        // the database-managed copy. Those two paths do not have to share a storage root.
+        val safeCandidates = mutableListOf<Pair<FileEntity, Boolean>>()
+        var keptUnmanaged = 0
+        var unverifiedCount = 0
+        var failedCount = 0
+
+        // The database copy and TDLib cache can be stored in different locations.
+        // The app copy is deletable only when its own path is managed. A separate
+        // TDLib path outside managed roots must be preserved, not used to block deletion
+        // of the safe app copy.
+        for (entity in candidates) {
+            val localPath = entity.localPath ?: continue
+            val remoteFileId = entity.remoteFileId ?: continue
+            if (!isWithinManagedRoots(localPath, managedRoots)) {
+                keptUnmanaged++
+                continue
+            }
+            val nativeFile = try {
+                telegramClient.resolveFile(remoteFileId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (nativeFile == null) {
+                unverifiedCount++
+                continue
+            }
+
+            val nativePath = nativeFile.localPath
+            val removeTdlibCache = nativePath.isNullOrBlank() ||
+                    isWithinManagedRoots(nativePath, managedRoots)
+            if (!removeTdlibCache) {
+                keptUnmanaged++
+            }
+            safeCandidates += entity to removeTdlibCache
+        }
+
+        if (safeCandidates.isEmpty()) {
+            return AppResult.Success(
+                LocalCleanup(
+                    0,
+                    keptOffline = kept.size,
+                    keptUnmanaged = keptUnmanaged,
+                    unverifiedCount = unverifiedCount
+                )
+            )
+        }
+
+        val cleanup = localCopyDeleter.delete(safeCandidates.mapNotNull { it.first.localPath })
+        if (cleanup.consentRequest != null) {
+            return AppResult.Success(
+                cleanup.copy(
+                    keptOffline = kept.size,
+                    keptUnmanaged = keptUnmanaged,
+                    unverifiedCount = unverifiedCount
+                )
+            )
+        }
 
         var cleared = 0
-        for (entity in candidates) {
+        for ((entity, removeTdlibCache) in safeCandidates) {
             val path = entity.localPath ?: continue
             if (localCopyDeleter.isGone(path)) {
+                if (removeTdlibCache) {
+                    val remoteFileId = entity.remoteFileId ?: continue
+                    val cacheReleased = try {
+                        telegramClient.removeManagedDownload(remoteFileId)
+                        true
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!cacheReleased) {
+                        failedCount++
+                        continue
+                    }
+                }
+
+                // The registered app copy is gone. Clear its database path even when a
+                // separate external TDLib path was deliberately left untouched.
                 fileDao.setLocalPath(entity.id, null)
                 cleared++
+            } else {
+                failedCount++
             }
         }
-        return AppResult.Success(LocalCleanup(cleared, keptOffline = kept.size))
+        return AppResult.Success(
+            LocalCleanup(
+                cleared,
+                keptOffline = kept.size,
+                keptUnmanaged = keptUnmanaged,
+                unverifiedCount = unverifiedCount,
+                failedCount = failedCount
+            )
+        )
+    }
+
+    private suspend fun managedLocalCopyRoots(): List<File> {
+        val preferences = settingsRepository.preferences.first()
+        val defaultDownloads = File(System.getProperty("user.home").orEmpty(), "Downloads")
+        val configuredDownloads = preferences.downloadDirectory?.let(::File) ?: defaultDownloads
+        return buildList {
+            add(File(storagePaths.filesDir, "local-copies"))
+            add(File(storagePaths.filesDir, "imports")) // legacy staged import directory
+            add(File(storagePaths.filesDir, "notes"))
+            add(File(File(storagePaths.filesDir, "tdlib"), "files"))
+            add(File(configuredDownloads, "TeleDrive"))
+            storagePaths.externalStorageRoot?.let { add(File(it, "Download/TeleDrive")) }
+        }
+    }
+
+    private fun isWithinManagedRoots(path: String, roots: List<File>): Boolean {
+        val candidate = runCatching { File(path).canonicalFile.toPath() }.getOrNull()
+            ?: return false
+        return roots.any { root ->
+            val normalizedRoot = runCatching { root.canonicalFile.toPath() }.getOrNull()
+                ?: return@any false
+            candidate.startsWith(normalizedRoot)
+        }
     }
 
     companion object {

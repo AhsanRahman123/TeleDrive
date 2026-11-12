@@ -17,12 +17,19 @@ class DesktopFileRevealer : FileRevealer {
         if (!target.exists()) return false
         if (Platform.isWindows()) {
             return runCatching {
-                ProcessBuilder("explorer.exe", "/select,", target.absolutePath).start()
-            }.isSuccess
+                val command = if (target.isDirectory) {
+                    listOf("explorer.exe", target.absolutePath)
+                } else {
+                    listOf("explorer.exe", "/select,", target.absolutePath)
+                }
+                ProcessBuilder(command).start()
+            }.onFailure { SafeLog.w(TAG, "Reveal failed for $path", it) }.isSuccess
         }
         return runCatching {
             val desktop = Desktop.getDesktop()
-            if (desktop.isSupported(Desktop.Action.BROWSE_FILE_DIR)) {
+            if (target.isDirectory) {
+                desktop.open(target)
+            } else if (desktop.isSupported(Desktop.Action.BROWSE_FILE_DIR)) {
                 desktop.browseFileDirectory(target)
             } else {
                 desktop.open(target.parentFile)

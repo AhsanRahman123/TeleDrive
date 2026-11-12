@@ -6,6 +6,7 @@ import com.drdisagree.teledrive.core.telegram.RemoteDocumentPage
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.core.telegram.TelegramUploadEvent
+import com.drdisagree.teledrive.core.telegram.TelegramFileInfo
 import com.drdisagree.teledrive.data.remote.telegram.IndexSnapshotFile
 import com.drdisagree.teledrive.data.remote.telegram.RemoteFolderState
 import com.drdisagree.teledrive.testing.unused
@@ -20,7 +21,10 @@ internal class FakeTelegram : TelegramClient by unused() {
     val editedCaptions = mutableMapOf<Long, String>()
     val uploads = mutableListOf<Pair<String, String>>()
     val deletedMessages = mutableListOf<Long>()
+    val managedDownloadRemovalRequests = mutableListOf<String>()
+    var failManagedDownloadRemoval = false
     var failDownloads = false
+    val resolvedLocalPaths = mutableMapOf<String, String?>()
     val changes = MutableSharedFlow<MessageChange>(extraBufferCapacity = 1_000)
     var openedChats = 0
     var closedChats = 0
@@ -148,12 +152,38 @@ internal class FakeTelegram : TelegramClient by unused() {
         closedChats++
     }
 
-    override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> {
+    override fun downloadDocument(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?,
+        queuePriority: Int
+    ): Flow<TelegramDownloadEvent> {
         if (failDownloads) return flowOf()
         val file = storedFiles.entries.firstOrNull { it.key.remoteFileId == remoteFileId }?.value
             ?: folderStateFile
             ?: return flowOf()
         return flowOf(TelegramDownloadEvent.Completed(file.absolutePath, file.length()))
+    }
+
+    override suspend fun pauseManagedDownload(remoteFileId: String) = Unit
+
+    override suspend fun resolveFile(remoteFileId: String): TelegramFileInfo =
+        TelegramFileInfo(
+            fileId = 1,
+            sizeBytes = 4L,
+            localPath = resolvedLocalPaths[remoteFileId],
+            isDownloadingCompleted = false,
+            isDownloadingActive = false,
+            downloadOffset = 0L,
+            downloadedPrefixSize = 0L
+        )
+
+    override suspend fun removeManagedDownload(remoteFileId: String) {
+        managedDownloadRemovalRequests += remoteFileId
+        if (failManagedDownloadRemoval) {
+            error("simulated TDLib cache cleanup failure")
+        }
+        resolvedLocalPaths.remove(remoteFileId)
     }
 
     var onEditCaption: suspend (messageId: Long) -> Unit = {}

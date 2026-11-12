@@ -128,7 +128,12 @@ class PartDownloaderTest {
         val freed = mutableListOf<String>()
         val corruptParts = mutableSetOf<Int>()
 
-        override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> {
+        override fun downloadDocument(
+            remoteFileId: String,
+            chatId: Long?,
+            messageId: Long?,
+            queuePriority: Int
+        ): Flow<TelegramDownloadEvent> {
             downloaded += remoteFileId
             val index = remoteFileId.removePrefix("r").toInt()
             val bytes = contents[index].copyOf()

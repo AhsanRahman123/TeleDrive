@@ -214,7 +214,12 @@ class LargeDownloadTest {
         val settings = FakeSettings(UserPreferences())
         val codec = ManifestCodec(StreamCrypto(), unused())
         val telegram = object : TelegramClient by unused() {
-            override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> {
+            override fun downloadDocument(
+                remoteFileId: String,
+                chatId: Long?,
+                messageId: Long?,
+                queuePriority: Int
+            ): Flow<TelegramDownloadEvent> {
                 downloaded += remoteFileId
                 val bytes = if (remoteFileId == "single") {
                     whole.copyOf()

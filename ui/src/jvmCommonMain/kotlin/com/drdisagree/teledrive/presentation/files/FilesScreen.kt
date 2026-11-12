@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
@@ -155,6 +156,7 @@ import com.drdisagree.teledrive.presentation.navigation.FabBottomBarInset
 import com.drdisagree.teledrive.presentation.navigation.LocalBottomBarInset
 import com.drdisagree.teledrive.presentation.platform.FileDropArea
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
+import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalFolderPicker
 import com.drdisagree.teledrive.presentation.platform.LocalMultiFilePicker
@@ -171,6 +173,7 @@ import com.drdisagree.teledrive.resources.common_confirm_trash_count_title
 import com.drdisagree.teledrive.resources.common_create
 import com.drdisagree.teledrive.resources.common_deselect_all
 import com.drdisagree.teledrive.resources.common_download
+import com.drdisagree.teledrive.resources.common_free_space
 import com.drdisagree.teledrive.resources.common_make_available_offline
 import com.drdisagree.teledrive.resources.common_move_trash
 import com.drdisagree.teledrive.resources.common_remove_from_offline
@@ -254,12 +257,12 @@ fun FilesScreen(
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val files = viewModel.pagedFiles.collectAsLazyPagingItems()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
+    val storageAudit by viewModel.storageAudit.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showCreateFolder by remember { mutableStateOf(false) }
-    var confirmDeleteLocal by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var showViewMenu by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -462,6 +465,14 @@ fun FilesScreen(
                                                     label = stringResource(Res.string.common_download),
                                                     icon = Icons.Filled.Download
                                                 ) { viewModel.downloadSelected() }
+                                            )
+                                        }
+                                        if (filesOnly) {
+                                            add(
+                                                MenuAction(
+                                                    label = "Storage locations / Free up space",
+                                                    icon = Icons.Filled.CleaningServices
+                                                ) { viewModel.inspectSelectedStorage() }
                                             )
                                         }
                                         if (selectedItemCount == 1) {
@@ -913,17 +924,15 @@ fun FilesScreen(
             onDismiss = { confirmTrash = false }
         )
     }
-    if (confirmDeleteLocal) {
-        ConfirmDialog(
-            title = stringResource(Res.string.files_delete_local_copies),
-            message = stringResource(Res.string.files_only_files_verified_telegram),
-            confirmLabel = stringResource(Res.string.files_delete_local),
-            destructive = true,
-            onConfirm = {
-                confirmDeleteLocal = false
-                viewModel.deleteLocalCopies()
-            },
-            onDismiss = { confirmDeleteLocal = false }
+    val fileRevealer = LocalFileRevealer.current
+    storageAudit?.let { snapshot ->
+        StorageAuditDialog(
+            snapshot = snapshot,
+            onRefresh = viewModel::refreshStorageAudit,
+            onDismiss = viewModel::dismissStorageAudit,
+            canReveal = fileRevealer != null,
+            onReveal = { path -> fileRevealer?.reveal(path) ?: false },
+            onDeleteManagedCopies = viewModel::deleteAuditedLocalCopies
         )
     }
     LaunchedEffect(Unit) {

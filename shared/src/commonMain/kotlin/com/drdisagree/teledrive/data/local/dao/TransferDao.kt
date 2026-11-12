@@ -96,6 +96,32 @@ interface TransferDao {
     )
     suspend fun nextQueuedOf(types: List<TransferType>, limit: Int): List<TransferEntity>
 
+    /** Active incoming transfers in the same order used by TeleDrive's worker queue. */
+    @Query(
+        """SELECT * FROM transfers
+           WHERE type IN ('DOWNLOAD', 'RESTORE') AND state = 'RUNNING'
+           ORDER BY priority DESC, createdAt ASC"""
+    )
+    suspend fun runningIncomingTransfers(): List<TransferEntity>
+
+    @Query("SELECT COUNT(*) FROM transfers WHERE state = 'RUNNING'")
+    suspend fun runningTransferCount(): Int
+
+    /** All unfinished incoming jobs in the persistent app queue's priority/FIFO order. */
+    @Query(
+        """SELECT * FROM transfers
+           WHERE type IN ('DOWNLOAD', 'RESTORE') AND state IN ('QUEUED', 'RUNNING', 'PAUSED')
+           ORDER BY priority DESC, createdAt ASC"""
+    )
+    suspend fun incomingQueueOrder(): List<TransferEntity>
+
+    /** Incoming jobs that may still own a native TDLib download, including recovered rows. */
+    @Query(
+        """SELECT * FROM transfers
+           WHERE type IN ('DOWNLOAD', 'RESTORE') AND state IN ('QUEUED', 'RUNNING')"""
+    )
+    suspend fun activeIncomingTransfersForPause(): List<TransferEntity>
+
     @Query("SELECT EXISTS(SELECT 1 FROM transfers WHERE state = 'QUEUED' AND type = :type)")
     suspend fun hasQueued(type: TransferType): Boolean
 
@@ -122,6 +148,13 @@ interface TransferDao {
            updatedAt = :updatedAt WHERE id = :id AND state = 'RUNNING'"""
     )
     suspend fun updateProgress(id: String, transferred: Long, speed: Long, updatedAt: Long)
+
+    /** Refresh byte progress on every TDLib update without resetting the last valid speed sample. */
+    @Query(
+        """UPDATE transfers SET transferredBytes = :transferred, updatedAt = :updatedAt
+           WHERE id = :id AND state = 'RUNNING'"""
+    )
+    suspend fun updateTransferredBytes(id: String, transferred: Long, updatedAt: Long)
 
     @Query(
         """UPDATE transfers SET state = :state,

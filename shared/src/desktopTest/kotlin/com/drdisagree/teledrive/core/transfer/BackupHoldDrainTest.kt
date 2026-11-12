@@ -105,6 +105,81 @@ class BackupHoldDrainTest {
         assertEquals(TransferState.QUEUED, transfers.byId("backup")!!.state)
     }
 
+    @Test
+    fun `pause selection includes queued and running incoming jobs only`() = runBlocking {
+        queue("download-queued", TransferType.DOWNLOAD)
+        queue("restore-queued", TransferType.RESTORE)
+        queue("download-running", TransferType.DOWNLOAD)
+        queue("restore-paused", TransferType.RESTORE)
+        queue("upload-running", TransferType.UPLOAD)
+
+        transfers.setState("download-running", TransferState.RUNNING, 2)
+        transfers.setState("restore-paused", TransferState.PAUSED, 3)
+        transfers.setState("upload-running", TransferState.RUNNING, 4)
+
+        assertEquals(
+            setOf("download-queued", "restore-queued", "download-running"),
+            transfers.activeIncomingTransfersForPause().map { it.id }.toSet()
+        )
+    }
+
+    @Test
+    fun `incoming persistent queue order includes paused and queued files`() = runBlocking {
+        queue("old-first", TransferType.DOWNLOAD)
+        queue("new-second", TransferType.DOWNLOAD)
+        queue("top-paused", TransferType.RESTORE)
+        transfers.setState("top-paused", TransferState.PAUSED, 2)
+        transfers.setPriority("old-first", 10, 3)
+        transfers.setPriority("new-second", 20, 4)
+        transfers.setPriority("top-paused", 30, 5)
+
+        assertEquals(
+            listOf("top-paused", "new-second", "old-first"),
+            transfers.incomingQueueOrder().map { it.id }
+        )
+    }
+
+    @Test
+    fun `running incoming transfers keep priority then FIFO order`() = runBlocking {
+        fun row(
+            id: String,
+            type: TransferType,
+            state: TransferState,
+            priority: Int,
+            createdAt: Long
+        ) = TransferEntity(
+            id = id,
+            type = type,
+            fileId = id,
+            displayName = id,
+            localPath = null,
+            chatId = 1,
+            messageId = createdAt,
+            remoteFileId = id,
+            sizeBytes = 1,
+            state = state,
+            priority = priority,
+            createdAt = createdAt,
+            updatedAt = createdAt
+        )
+
+        transfers.upsertAll(
+            listOf(
+                row("older", TransferType.DOWNLOAD, TransferState.RUNNING, 0, 100),
+                row("newer", TransferType.DOWNLOAD, TransferState.RUNNING, 0, 200),
+                row("high-priority", TransferType.RESTORE, TransferState.RUNNING, 5, 300),
+                row("queued", TransferType.DOWNLOAD, TransferState.QUEUED, 10, 50),
+                row("paused", TransferType.DOWNLOAD, TransferState.PAUSED, 20, 40),
+                row("upload", TransferType.UPLOAD, TransferState.RUNNING, 10, 30)
+            )
+        )
+
+        assertEquals(
+            listOf("high-priority", "older", "newer"),
+            transfers.runningIncomingTransfers().map { it.id }
+        )
+    }
+
     private suspend fun queue(id: String, type: TransferType) {
         transfers.upsert(
             TransferEntity(
