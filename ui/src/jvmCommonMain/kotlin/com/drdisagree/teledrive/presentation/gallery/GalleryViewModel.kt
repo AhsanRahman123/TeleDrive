@@ -150,9 +150,18 @@ class GalleryViewModel(
     val infoTarget: StateFlow<DriveFile?> = _infoTarget.asStateFlow()
     private val _infoFolderPath = MutableStateFlow<String?>(null)
     val infoFolderPath: StateFlow<String?> = _infoFolderPath.asStateFlow()
+    private val folderPathCache = mutableMapOf<String, String>()
+
+    suspend fun folderPathLabel(folderId: String?): String {
+        if (folderId == null) return "Drive root"
+        folderPathCache[folderId]?.let { return it }
+        return folderPathFor(folderId).orEmpty().ifBlank { "Unknown folder" }
+            .also { folderPathCache[folderId] = it }
+    }
 
     private suspend fun folderPathFor(folderId: String?): String? {
         if (folderId == null) return "Drive root"
+        folderPathCache[folderId]?.let { return it }
         var currentId = folderId
         val visited = mutableSetOf<String>()
         val segments = mutableListOf<String>()
@@ -162,6 +171,7 @@ class GalleryViewModel(
             currentId = folder.parentId
         }
         return segments.asReversed().joinToString(" / ").takeIf { it.isNotBlank() }
+            ?.also { folderPathCache[folderId] = it }
     }
 
     private fun report(error: AppError) {
