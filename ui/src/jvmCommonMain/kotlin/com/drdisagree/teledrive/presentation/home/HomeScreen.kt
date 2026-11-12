@@ -45,7 +45,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialShapes
@@ -250,7 +250,7 @@ fun HomeScreen(
                 },
                 actions = {
                     if (state.appLockEnabled) {
-                        IconButton(onClick = viewModel::lockNow) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.home_lock_app), onClick = viewModel::lockNow) {
                             Icon(
                                 Icons.Filled.Lock,
                                 contentDescription = stringResource(Res.string.home_lock_app)
@@ -259,7 +259,8 @@ fun HomeScreen(
                     }
                     state.activeChannel?.let { channel ->
                         val driveCount by viewModel.driveCount.collectAsStateWithLifecycle()
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(Res.string.nav_channels),
                             onClick = onOpenChannels,
                             modifier = Modifier.padding(end = 8.dp)
                         ) {
