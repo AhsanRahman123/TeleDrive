@@ -10,7 +10,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import com.drdisagree.teledrive.domain.model.ViewMode
 
 const val MIN_GRID_COLUMNS = 2
-const val MAX_GRID_COLUMNS = 6
+const val MAX_GRID_COLUMNS = 8
 
 fun GridZoomLevel.zoomedIn(): GridZoomLevel = when {
     viewMode == ViewMode.LIST || viewMode == ViewMode.DETAILS ->
