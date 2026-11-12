@@ -410,9 +410,9 @@ class DesktopThumbnailStore(
         val cachedEntry = thumbnailDao.byFileId(currentJob.fileId)
         val cachedFile = cachedEntry?.let { File(it.path) }
         val cached = cachedFile?.let { it.isFile && it.length() > 0L } == true
-        if ((cached && !currentJob.force) || (!currentJob.force &&
-                effectivePolicy(currentJob.fileId) != ThumbnailPolicy.AUTOMATIC)
-        ) {
+        val automaticPolicy = currentJob.force ||
+                effectivePolicy(currentJob.fileId) == ThumbnailPolicy.AUTOMATIC
+        if (shouldSkipThumbnailJob(cached, currentJob.force, automaticPolicy)) {
             thumbnailJobDao.delete(currentJob.fileId)
             return
         }
@@ -808,3 +808,11 @@ class DesktopThumbnailStore(
         const val IMAGE_SCALE_MODE = Image.SCALE_SMOOTH
     }
 }
+
+
+/** A forced/manual job is allowed to replace an existing cache entry and bypass automatic policy. */
+internal fun shouldSkipThumbnailJob(
+    cached: Boolean,
+    force: Boolean,
+    automaticPolicy: Boolean
+): Boolean = (cached && !force) || (!force && !automaticPolicy)
