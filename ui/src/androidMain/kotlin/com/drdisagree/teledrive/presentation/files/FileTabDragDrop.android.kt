@@ -17,6 +17,7 @@ import androidx.compose.ui.draganddrop.DragAndDropTransferData
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 
 @OptIn(ExperimentalComposeUiApi::class)
+@Composable
 actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier =
     dragAndDropSource { offset ->
         DragAndDropTransferData(
