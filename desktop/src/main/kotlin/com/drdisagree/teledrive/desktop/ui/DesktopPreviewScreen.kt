@@ -765,30 +765,19 @@ private fun PreviewPane(
     // Keep the old local media source mounted while the next queued video resolves. This
     // preserves the single VLC surface across the transient Loading state and prevents the
     // black flash that otherwise occurs between adjacent local videos.
-    var lastReadyLocalMedia by remember { mutableStateOf<PreviewContent.LocalMedia?>(null) }
-    var lastReadyStreamedMedia by remember { mutableStateOf<PreviewContent.StreamedMedia?>(null) }
-    LaunchedEffect(content) {
+    var lastReadyMedia by remember { mutableStateOf<Pair<DriveFile, PreviewContent>?>(null) }
+    LaunchedEffect(file.id, content) {
         when (val resolved = content) {
-            is PreviewContent.LocalMedia -> {
-                lastReadyLocalMedia = resolved
-                lastReadyStreamedMedia = null
-            }
-            is PreviewContent.StreamedMedia -> {
-                lastReadyLocalMedia = null
-                lastReadyStreamedMedia = resolved
-            }
+            is PreviewContent.LocalMedia,
+            is PreviewContent.StreamedMedia -> lastReadyMedia = file to resolved
             is PreviewContent.Loading -> Unit
-            else -> {
-                lastReadyLocalMedia = null
-                lastReadyStreamedMedia = null
-            }
+            else -> lastReadyMedia = null
         }
     }
-    val retainedMedia: PreviewContent? = lastReadyLocalMedia ?: lastReadyStreamedMedia
-    val displayedContent = if (
-        file.category in setOf(FileCategory.AUDIO, FileCategory.VIDEO) &&
-        content is PreviewContent.Loading && retainedMedia != null
-    ) retainedMedia else content
+    val retainPreviousMedia = file.category in setOf(FileCategory.AUDIO, FileCategory.VIDEO) &&
+            content is PreviewContent.Loading && lastReadyMedia != null
+    val displayedFile = if (retainPreviousMedia) lastReadyMedia!!.first else file
+    val displayedContent = if (retainPreviousMedia) lastReadyMedia!!.second else content
     val urlOpener = LocalUrlOpener.current
     val preferredAudioLanguage by viewModel.preferredAudioLanguage.collectAsState()
     val preferredSubtitleLanguage by viewModel.preferredSubtitleLanguage.collectAsState()
@@ -974,7 +963,7 @@ private fun PreviewPane(
 
             is PreviewContent.StreamedMedia -> if (VlcPlayback.available) {
                 InlineStreamPlayer(
-                    file = file,
+                    file = displayedFile,
                     content = current,
                     preferredAudioLanguage = preferredAudioLanguage,
                     preferredSubtitleLanguage = preferredSubtitleLanguage,
