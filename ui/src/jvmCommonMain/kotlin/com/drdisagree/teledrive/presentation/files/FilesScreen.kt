@@ -87,6 +87,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -263,9 +265,27 @@ fun FilesScreen(
     val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
     val activeFolderId by viewModel.activeFolderId.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var tabs by remember { mutableStateOf(listOf(FilesTabState(0, activeFolderId, "Files"))) }
-    var selectedTabId by remember { mutableIntStateOf(0) }
-    var nextTabId by remember { mutableIntStateOf(1) }
+    var tabs by rememberSaveable(
+        stateSaver = listSaver<List<FilesTabState>, String>(
+            save = { saved ->
+                saved.flatMap { tab ->
+                    listOf(tab.id.toString(), tab.folderId.orEmpty(), tab.label)
+                }
+            },
+            restore = { encoded ->
+                encoded.chunked(3).mapNotNull { fields ->
+                    if (fields.size != 3) null
+                    else FilesTabState(
+                        id = fields[0].toIntOrNull() ?: return@mapNotNull null,
+                        folderId = fields[1].ifEmpty { null },
+                        label = fields[2]
+                    )
+                }.ifEmpty { listOf(FilesTabState(0, null, "Files")) }
+            }
+        )
+    ) { mutableStateOf(listOf(FilesTabState(0, activeFolderId, "Files"))) }
+    var selectedTabId by rememberSaveable { mutableIntStateOf(0) }
+    var nextTabId by rememberSaveable { mutableIntStateOf(1) }
 
     var showCreateFolder by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -334,7 +354,31 @@ fun FilesScreen(
     AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     val gridState = rememberLazyGridState()
-    val tabPositions = remember { mutableMapOf<Pair<Int, String?>, Pair<Int, Int>>() }
+    val tabPositions by rememberSaveable(
+        stateSaver = listSaver<MutableMap<Pair<Int, String?>, Pair<Int, Int>>, String>(
+            save = { positions ->
+                positions.flatMap { (key, value) ->
+                    listOf(
+                        key.first.toString(),
+                        key.second.orEmpty(),
+                        value.first.toString(),
+                        value.second.toString()
+                    )
+                }
+            },
+            restore = { encoded ->
+                encoded.chunked(4).mapNotNull { fields ->
+                    if (fields.size != 4) null
+                    else {
+                        val tabId = fields[0].toIntOrNull() ?: return@mapNotNull null
+                        val itemIndex = fields[2].toIntOrNull() ?: return@mapNotNull null
+                        val scrollOffset = fields[3].toIntOrNull() ?: return@mapNotNull null
+                        (tabId to fields[1].ifEmpty { null }) to (itemIndex to scrollOffset)
+                    }
+                }.toMap().toMutableMap()
+            }
+        )
+    ) { mutableStateOf(mutableMapOf()) }
     fun saveCurrentTabPosition() {
         tabPositions[selectedTabId to state.folderId] =
             gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
