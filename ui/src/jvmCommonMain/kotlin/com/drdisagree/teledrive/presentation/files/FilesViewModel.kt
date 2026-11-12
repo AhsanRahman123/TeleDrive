@@ -663,8 +663,16 @@ class FilesViewModel(
     private var pendingLocalCopyIds: List<String> = emptyList()
 
     fun inspectSelectedStorage() {
-        storageAuditFileIds = selection.value.toList()
-        loadStorageAudit(storageAuditFileIds)
+        val fileIds = selection.value.toList()
+        val folderIds = folderSelection.value.toList()
+        viewModelScope.launch {
+            // A folder audit expands to all library files beneath that folder so the user
+            // can inspect each managed copy and TDLib path before choosing what to keep.
+            storageAuditFileIds = (fileIds + folderIds.flatMap { folderId ->
+                fileRepository.fileIdsInTree(folderId)
+            }).distinct()
+            loadStorageAudit(storageAuditFileIds)
+        }
     }
 
     fun refreshStorageAudit() {
