@@ -249,7 +249,7 @@ class FilesViewModel(
     val allSelected: StateFlow<Boolean> = _allSelected.asStateFlow()
 
     private val _selectionSnapshot = MutableStateFlow(FilesSelectionSnapshot())
-    val selectionSnapshot: StateFlow<FilesSelectionSnapshot> = _selectionSnapshot.asStateFlow()
+    internal val selectionSnapshot: StateFlow<FilesSelectionSnapshot> = _selectionSnapshot.asStateFlow()
 
     private fun publishSelectionSnapshot() {
         _selectionSnapshot.value = FilesSelectionSnapshot(
