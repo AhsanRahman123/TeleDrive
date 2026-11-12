@@ -3,7 +3,8 @@
 Last audited: 2026-11-12
 Repository: `AhsanRahman123/TeleDrive`
 Development branch: `work/desktop-feature-fixes-20261112`
-Baseline commit: `36f3da98f960c879c548099b30150c74ee9b33e5`
+Stack base: PR #9 head `36f3da98f960c879c548099b30150c74ee9b33e5`
+Latest PR #10 head audited: `380f40a6b9b51285eb1d5ff22a0b7f02c997112a`
 
 This register is the current status source for the consolidated development workspace. Older planning documents remain useful for feature intent, but their status labels may be stale. When this register conflicts with an older note, re-audit the source and tests before changing the status.
 
@@ -22,12 +23,13 @@ Every feature should move through these labels independently. Never promote a fe
 
 ## 2. Consolidated source of truth
 
-The current working baseline is branch `work/desktop-feature-fixes-20261112` at `36f3da98`. It contains the sequential feature history represented by draft PRs #6, #7, #8, and #9.
+The current working branch is `work/desktop-feature-fixes-20261112`. It is stacked on PR #9 head `36f3da98` and contains the sequential feature history represented by draft PRs #6–#9 plus the new Windows feature batch in draft PR #10. The latest audited PR #10 head is `380f40a6` (2026-11-12); it must be freshly built and runtime-tested before promotion.
 
 - PR #6: https://github.com/AhsanRahman123/TeleDrive/pull/6
 - PR #7: https://github.com/AhsanRahman123/TeleDrive/pull/7
 - PR #8: https://github.com/AhsanRahman123/TeleDrive/pull/8
 - PR #9: https://github.com/AhsanRahman123/TeleDrive/pull/9
+- PR #10: https://github.com/AhsanRahman123/TeleDrive/pull/10 (draft; current Windows feature batch, not merged)
 - Current branch: https://github.com/AhsanRahman123/TeleDrive/tree/work/desktop-feature-fixes-20261112
 
 The old `codex/windows-ddcci-player-controls` line (PR #5) is closed and superseded by PR #6. It has 23 commits that diverged from the accepted line. Do not merge or copy that whole branch into this baseline. The restored physical-monitor brightness and volume work is already represented in the newer PR #6+ history, with subsequent player fixes on top.
@@ -98,7 +100,35 @@ The branch includes work on:
 
 **Status: SOURCE-PRESENT; earlier user testing exists for parts of Gallery and viewer; latest consolidated runtime pass is still required.** Test every action that affects actual files, especially moving the currently open item, deleting/restoring, download/stream playback, cache-size accounting, and queue cancellation. Do not assume a previous Gallery test covers later queue/storage changes.
 
-## 5. Suspected, conflicting or last-audit gaps — keep these visible
+## 5. New Windows feature batch — PR #10
+
+**Latest audited source:** 380f40a6b9b51285eb1d5ff22a0b7f02c997112a (2026-11-12). PR #10 is draft and has not been merged.
+
+Source changes present on the branch:
+- Playlist menu no longer nests an independently vertically scrolling Column inside the Compose DropdownMenu; the queue menu relies on its own bounded scrolling.
+- Preview navigation retains one VLC player for same-media-type queue transitions, keeps the prior local/streamed media and matching file identity during the next preview's Loading state, and no longer keys the native player composable by every file ID.
+- Player control visibility is preserved across file changes; H hides controls on one press and shows on a second press within 450 ms; a dedicated hide button is present.
+- Preview Back no longer forces fullscreen off. Desktop fullscreen remembers/restores the prior window placement; F11 is handled at the app root.
+- Desktop image preview uses a full-resolution painter with high-quality filtering. Locally generated grid thumbnails are bounded at 768 px with explicit JPEG quality 0.86; Telegram photo-preview selection prefers the largest available size up to 1024 px.
+- Gallery list and compact grid rows expose parent-folder paths; Gallery grid has explicit zoom controls and an expanded 2–8 column range on wide windows.
+- Files screen has a multi-tab workspace with per-tab folder navigation/scroll-position restoration; Ctrl+C/Ctrl+X/Ctrl+V/Ctrl+N/Delete/F2/Backspace shortcuts are connected; copy clipboard content remains reusable across paste while cut content is consumed.
+- File and folder rows provide in-app drag payloads in Grid/List/Details; tab drop targets dispatch Move or Copy to the destination tab's current folder.
+- Folder selections expand into storage audit; Free up space has a Backed-up local copies inventory listing app and TDLib cache paths, allowing reveal/inspection while relying on repository-level managed-root, remote-verification and Available Offline protections.
+- Hover tooltips were added to primary Files, Gallery, Preview/player, Home, Search, Collections, Channels, Trash, Transfers, Settings, Cache Manager and Thumbnail Manager/Queue icon actions.
+- TDLib account-level speed-limit notifications are exposed to Transfers as a diagnostic. This does not bypass a Telegram-side account limit or itself increase download speed.
+
+**Status: SOURCE-PRESENT.** The previous 1dbb6ba4 Windows smoke build/launch recorded in section 10 predates PR #10's changes. No Windows build/test or live user acceptance has yet been confirmed on PR #10 head 380f40a6. GitHub Actions check-suite query returned zero suites/runs for that head at the last audit. Do not promote these items to COMPILED or USER-VERIFIED.
+
+Immediate Windows acceptance needed on the exact latest head:
+1. Run :shared:desktopTest, :ui:desktopTest, :desktop:test and :desktop:compileKotlin, then package/run through the isolated desktop profile.
+2. Re-test playlist opening, same-codec video switching without a flash, local and streamed media, fullscreen/back/exit, H one/two press, hide button, and physical DDC/CI brightness/volume.
+3. Test Files tab switching, tab close, per-tab navigation/scroll restore, Grid/List/Details drag payloads, same-tab drop rejection, cross-tab Move/Copy, Ctrl+C/X/V/N/Delete/F2/Backspace and blank-space right-click.
+4. Inspect the Local copies screen with app-managed, external/original, TDLib-only, Available Offline and remote-unverified test files before deleting anything.
+5. Test Gallery path visibility and added thumbnail-size controls; verify original source dimensions and zoom.
+6. Measure real download bytes/second against a fresh disposable file. A TDLib speed-limit notification is evidence of Telegram-side throttling, not an app speed fix. If no notification appears, preserve transfer diagnostic logs and investigate the network/DC path separately.
+
+---
+## 6. Suspected, conflicting or last-audit gaps — keep these visible
 
 These are deliberately not marked complete. Resolve each by inspecting the current source, running a focused test, and recording the result.
 
