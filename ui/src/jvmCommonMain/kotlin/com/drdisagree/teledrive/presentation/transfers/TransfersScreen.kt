@@ -44,7 +44,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -254,7 +254,7 @@ fun TransfersScreen(
                 colors = liftedTopAppBarColors(lifted),
                 title = { Text(stringResource(Res.string.transfers)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -262,14 +262,14 @@ fun TransfersScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
+                    TooltipIconButton(tooltip = "Transfer settings", onClick = {
                         concurrencyDraft = transferConcurrency
                         showTransferSettings = true
                     }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Transfer settings")
                     }
                     if (state.active.any { it.state == TransferState.RUNNING }) {
-                        IconButton(onClick = viewModel::pauseAll) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.transfers_pause), onClick = viewModel::pauseAll) {
                             Icon(
                                 Icons.Filled.Pause,
                                 contentDescription = stringResource(Res.string.transfers_pause)
@@ -279,14 +279,14 @@ fun TransfersScreen(
                         state.active.any { it.state == TransferState.QUEUED } ||
                         state.paused.isNotEmpty()
                     ) {
-                        IconButton(onClick = viewModel::resumeAll) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.transfers_resume), onClick = viewModel::resumeAll) {
                             Icon(
                                 Icons.Filled.PlayArrow,
                                 contentDescription = stringResource(Res.string.transfers_resume)
                             )
                         }
                     }
-                    IconButton(onClick = { showMenu = true }) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showMenu = true }) {
                         Icon(
                             Icons.Filled.MoreVert,
                             contentDescription = stringResource(Res.string.common_actions)
@@ -977,7 +977,7 @@ private fun TransferRow(
                     )
                 }
                 if (primaryIcon != null && onPrimary != null) {
-                    IconButton(onClick = onPrimary, modifier = actions) {
+                    TooltipIconButton(tooltip = primaryLabel, onClick = onPrimary, modifier = actions) {
                         Icon(primaryIcon, contentDescription = primaryLabel)
                     }
                 }
@@ -985,7 +985,7 @@ private fun TransferRow(
                     onOpenInApp != null || onShowInFolder != null || onDetails != null
                 ) {
                     Box {
-                        IconButton(onClick = { showRowMenu = true }, modifier = actions) {
+                        TooltipIconButton(tooltip = "Transfer actions", onClick = { showRowMenu = true }, modifier = actions) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "Transfer actions")
                         }
                         DropdownMenu(
