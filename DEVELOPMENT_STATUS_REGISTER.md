@@ -1,10 +1,10 @@
 # TeleDrive Development Status Register
 
-Last audited: 2026-11-12
+Last audited: 2026-11-13
 Repository: `AhsanRahman123/TeleDrive`
 Development branch: `work/desktop-feature-fixes-20261112`
 Stack base: PR #9 head `36f3da98f960c879c548099b30150c74ee9b33e5`
-Latest code head audited: `c4f15ba1dd1c4ae1836f3ea74d1e40b982cd97f9`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
+Latest code head audited: `7c78b84789f26b8ad52fa6fcb681c851c46ea3fc`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
 
 This register is the current status source for the consolidated development workspace. Older planning documents remain useful for feature intent, but their status labels may be stale. When this register conflicts with an older note, re-audit the source and tests before changing the status.
 
@@ -241,3 +241,22 @@ Source correction pushed in commit `ffeab6f12fe17f7519d26cd7693a7cfbfcd8bb29`:
 - Make `workspaceTabs` internal to match the internal visibility of `FilesTabState`.
 
 **Status: FIX COMMITTED; NOT YET REBUILT.** Fetch the new branch head, then rerun `:ui:desktopTest` first. Only continue to `:desktop:test` and `:desktop:compileKotlin` after the UI task succeeds. Leave the untracked Room schema `shared/schemas/com.drdisagree.teledrive.data.local.database.TeleDriveDatabase/19.json` untouched.
+
+
+### Windows runtime feedback and Files follow-up — November 13, 2026
+
+The user launched the isolated Windows build after the SavedStateHandle correction and reported the following manual results on the pre-Files-follow-up build:
+
+- Files workspace tabs: **PASS** (tab close/restore behavior reported working).
+- Video-to-video switching: **PASS** (the earlier green flicker/frozen-frame issue was not reproduced).
+- Player seek shortcuts: **PASS** (P/N 5-second behavior worked; existing arrow seek behavior retained).
+- Files selection checkmarks: **FAIL** (the selected folders/files still did not show a visible checkmark).
+- Files Ctrl+C / Ctrl+X / Ctrl+V: **FAIL** (the shortcuts still did not work).
+
+Follow-up source changes committed after that user test:
+
+- Commit `ff751347` plus the item-component wiring commits make checked Files items use a high-contrast, primary-filled selection badge with a contrasting check glyph. The new visual mode is opt-in and is only enabled by `FilesScreen`; other consumers such as Gallery retain the default checkbox styling.
+- Commit `7c78b847` moves Ctrl+C/X/V handling out of the non-empty Files collection and onto the outer Files screen container. The container now requests keyboard focus and is focusable, so the shortcuts are not dependent on a focused file row and Ctrl+V can be handled when the destination folder is empty.
+- Existing clipboard lifecycle protections and `FileClipboardTest` remain in place; this follow-up does not change Gallery.
+
+**Status: SOURCE-PRESENT; NOT YET REBUILT OR RETESTED on Windows.** The user's PASS results for tabs, video switching and seeking apply to the prior tested build. The Files selection and clipboard fixes must not be marked verified until the exact latest branch head builds and the two failed scenarios pass manually. No Gallery changes were included.
