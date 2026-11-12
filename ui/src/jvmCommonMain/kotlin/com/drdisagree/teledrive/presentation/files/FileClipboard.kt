@@ -15,5 +15,12 @@ class FileClipboard {
         content.value = items.copy(isCut = false)
     }
 
+    /** Copy clipboard content survives paste; cut content is consumed exactly once. */
+    fun peek(): CutItems? = content.value
+
+    fun clear() {
+        content.value = null
+    }
+
     fun take(): CutItems? = content.getAndUpdate { null }
 }
