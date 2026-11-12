@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.presentation.components
 
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
@@ -45,7 +46,7 @@ fun TooltipIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    content: @Composable () -> Unit
+    content: @Composable RowScope.() -> Unit
 ) {
     TooltipAnchor(tooltip = tooltip, modifier = modifier) {
         IconButton(
