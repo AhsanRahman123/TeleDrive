@@ -56,6 +56,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import com.drdisagree.teledrive.presentation.components.TooltipAnchor
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -718,17 +719,19 @@ private fun PreviewPagerButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    FilledIconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.size(48.dp),
-        colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.3f)
-        )
-    ) {
-        Icon(imageVector = icon, contentDescription = contentDescription)
+    TooltipAnchor(tooltip = contentDescription) {
+        FilledIconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier.size(48.dp),
+            colors = IconButtonDefaults.filledIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.3f)
+            )
+        ) {
+            Icon(imageVector = icon, contentDescription = contentDescription)
+        }
     }
 }
 
@@ -892,29 +895,33 @@ private fun PreviewPane(
                                 .padding(16.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            FilledIconButton(
-                                onClick = {
-                                    zoomScope.launch {
-                                        zoomableState.zoomBy(zoomFactor = 1.2f)
+                            TooltipAnchor(tooltip = stringResource(Res.string.preview_zoom_in)) {
+                                FilledIconButton(
+                                    onClick = {
+                                        zoomScope.launch {
+                                            zoomableState.zoomBy(zoomFactor = 1.2f)
+                                        }
                                     }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ZoomIn,
+                                        contentDescription = stringResource(Res.string.preview_zoom_in)
+                                    )
                                 }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ZoomIn,
-                                    contentDescription = stringResource(Res.string.preview_zoom_in)
-                                )
                             }
-                            FilledIconButton(
-                                onClick = {
-                                    zoomScope.launch {
-                                        zoomableState.zoomBy(zoomFactor = 1f / 1.2f)
+                            TooltipAnchor(tooltip = stringResource(Res.string.preview_zoom_out)) {
+                                FilledIconButton(
+                                    onClick = {
+                                        zoomScope.launch {
+                                            zoomableState.zoomBy(zoomFactor = 1f / 1.2f)
+                                        }
                                     }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ZoomOut,
+                                        contentDescription = stringResource(Res.string.preview_zoom_out)
+                                    )
                                 }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ZoomOut,
-                                    contentDescription = stringResource(Res.string.preview_zoom_out)
-                                )
                             }
                         }
                     }
