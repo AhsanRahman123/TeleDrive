@@ -1300,10 +1300,8 @@ class FilesViewModel(
     companion object {
         private const val MIN_REFRESH_VISIBLE_MS = 700L
         private const val MAX_BREADCRUMB_DEPTH = 64
-    }
-    private companion object {
-        const val KEY_WORKSPACE_TABS = "files_workspace_tabs"
-        const val KEY_SELECTED_WORKSPACE_TAB_ID = "files_workspace_selected_tab_id"
-        const val KEY_NEXT_WORKSPACE_TAB_ID = "files_workspace_next_tab_id"
+        private const val KEY_WORKSPACE_TABS = "files_workspace_tabs"
+        private const val KEY_SELECTED_WORKSPACE_TAB_ID = "files_workspace_selected_tab_id"
+        private const val KEY_NEXT_WORKSPACE_TAB_ID = "files_workspace_next_tab_id"
     }
 }
