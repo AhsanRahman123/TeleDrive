@@ -5,6 +5,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
@@ -85,22 +100,26 @@ fun main() {
     }
     application {
         val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
+        var previousWindowPlacement by remember { mutableStateOf(windowState.placement) }
         val fullscreenController = remember {
             FullscreenController(
                 isFullscreen = { windowState.placement == WindowPlacement.Fullscreen },
                 toggle = {
-                    windowState.placement =
-                        if (windowState.placement == WindowPlacement.Fullscreen) {
-                            WindowPlacement.Floating
-                        } else {
-                            WindowPlacement.Fullscreen
-                        }
+                    if (windowState.placement == WindowPlacement.Fullscreen) {
+                        windowState.placement = previousWindowPlacement
+                    } else {
+                        previousWindowPlacement = windowState.placement
+                        windowState.placement = WindowPlacement.Fullscreen
+                    }
                 },
                 setFullscreen = { fullscreen ->
-                    windowState.placement = if (fullscreen) {
-                        WindowPlacement.Fullscreen
-                    } else {
-                        WindowPlacement.Floating
+                    if (fullscreen) {
+                        if (windowState.placement != WindowPlacement.Fullscreen) {
+                            previousWindowPlacement = windowState.placement
+                            windowState.placement = WindowPlacement.Fullscreen
+                        }
+                    } else if (windowState.placement == WindowPlacement.Fullscreen) {
+                        windowState.placement = previousWindowPlacement
                     }
                 }
             )
@@ -134,13 +153,28 @@ fun main() {
                 AppTheme.SYSTEM -> systemDark
             }
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
-            CompositionLocalProvider(LocalFullscreenController provides fullscreenController) {
-                ProvideDesktopPlatformActions {
-                    TeleDriveApp(
-                        pendingShare = getKoin().get<PendingShare>(),
-                        notificationDestination = null,
-                        onDestinationHandled = {}
-                    )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown &&
+                            event.key == Key.F11 &&
+                            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                        ) {
+                            fullscreenController.toggle()
+                            true
+                        } else false
+                    }
+                    .focusable()
+            ) {
+                CompositionLocalProvider(LocalFullscreenController provides fullscreenController) {
+                    ProvideDesktopPlatformActions {
+                        TeleDriveApp(
+                            pendingShare = getKoin().get<PendingShare>(),
+                            notificationDestination = null,
+                            onDestinationHandled = {}
+                        )
+                    }
                 }
             }
         }
