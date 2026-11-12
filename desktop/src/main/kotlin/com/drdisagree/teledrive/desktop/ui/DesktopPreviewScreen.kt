@@ -811,6 +811,7 @@ private fun VerticalZoomSlider(
     }
 }
 
+@Composable
 private fun PreviewPagerButton(
     icon: ImageVector,
     contentDescription: String,
