@@ -198,6 +198,8 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] Confirm list and compact grid rows show the containing folder path, including nested albums.
 - [ ] Open a large remote-only image and a downloaded local image. Confirm viewer dimensions/zoom use original file bytes, not the grid thumbnail. For remote-only images above the auto-preview limit, explicitly download from the viewer and confirm it transitions to the full local original after transfer completion.
 - [ ] Confirm grid thumbnail cache stays separate and bounded: larger previews improve sharpness without rewriting or compressing source files.
+- [ ] Begin with a remote-only item that has a Telegram thumbnail, then download its original image/video. Confirm an existing thumbnail is replaced from the downloaded original only when the effective thumbnail policy is Automatic; manual-only files/folders remain untouched.
+- [ ] Confirm thumbnail refresh reuses the existing cache entry (no duplicate thumbnail copies) and the original file size/hash remains unchanged.
 - [ ] Album sort by name, item count and latest activity works.
 - [ ] Empty folder albums appear as intended; document-only folders are not incorrectly treated as photo albums.
 - [ ] Create an album and confirm it is a regular folder visible from Files.
