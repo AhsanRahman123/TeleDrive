@@ -467,7 +467,7 @@ fun FilesScreen(
                                                 ) { viewModel.downloadSelected() }
                                             )
                                         }
-                                        if (filesOnly) {
+                                        if (selectedItemCount > 0) {
                                             add(
                                                 MenuAction(
                                                     label = "Storage locations / Free up space",
