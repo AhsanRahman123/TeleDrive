@@ -351,6 +351,7 @@ fun FilesScreen(
 
 
     val gridState = rememberLazyGridState()
+    val filesCommandFocusRequester = rememberCollectionCommandFocusRequester()
     val tabPositions by rememberSaveable(
         stateSaver = listSaver<MutableMap<Pair<Int, String?>, Pair<Int, Int>>, String>(
             save = { positions ->
@@ -926,6 +927,15 @@ fun FilesScreen(
                         onRefresh = viewModel::refresh,
                         modifier = Modifier
                             .fillMaxSize()
+                            .collectionCommandShortcuts(
+                                focusRequester = filesCommandFocusRequester,
+                                onSelectAll = { viewModel.selectAll(); true },
+                                onCopy = { if (selectedCount > 0) { viewModel.copyToClipboardSelected(); true } else false },
+                                onCut = { if (selectedCount > 0) { viewModel.cutSelected(); true } else false },
+                                onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
+                                onNewFolder = { showCreateFolder = true; true },
+                                onNewTab = { createTab(); true }
+                            )
                             .onDesktopEmptySpaceContextClick(
                                 onContextClick = {
                                     if (!selectionMode) showAddMenu = true
@@ -1317,20 +1327,7 @@ private fun FilesContent(
         },
         onEnd = viewModel::endRangeSelection
     )
-    val collectionFocusRequester = rememberCollectionCommandFocusRequester()
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .collectionCommandShortcuts(
-                focusRequester = collectionFocusRequester,
-                onSelectAll = { viewModel.selectAll(); true },
-                onCopy = { if (selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) { viewModel.copyToClipboardSelected(); true } else false },
-                onCut = { if (selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) { viewModel.cutSelected(); true } else false },
-                onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
-                onNewFolder = { onCreateFolder(); true },
-                onNewTab = { onCreateTab(); true }
-            )
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(columns),
