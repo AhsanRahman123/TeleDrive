@@ -976,6 +976,7 @@ internal fun DesktopMediaPlayer(
                     PlayerControlPreferencesStore.save(updated)
                     controlsVisible = false
                     latestOnControlsVisibilityChange.value(false)
+                    lastHiddenHPressAt = 0L
                     lastVisibilityInteractionTick = interactionTick
                 },
                 onRate = ::setPlaybackRate,
