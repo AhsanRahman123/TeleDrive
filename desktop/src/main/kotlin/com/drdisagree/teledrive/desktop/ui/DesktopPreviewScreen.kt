@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.focusable
@@ -82,6 +84,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -716,7 +719,6 @@ private fun PreviewOverflowMenu(
 }
 
 @Composable
-@Composable
 private fun VerticalZoomSlider(
     zoomFraction: Float,
     onZoomFractionChange: (Float) -> Unit,
@@ -726,6 +728,7 @@ private fun VerticalZoomSlider(
     val latestOnChange = rememberUpdatedState(onZoomFractionChange)
     val thumbColor = MaterialTheme.colorScheme.primary
     val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    val surfaceColor = MaterialTheme.colorScheme.surface
 
     Box(
         modifier = modifier
@@ -792,7 +795,7 @@ private fun VerticalZoomSlider(
                 cap = StrokeCap.Round
             )
             drawCircle(
-                color = MaterialTheme.colorScheme.surface,
+                color = surfaceColor,
                 radius = 9.dp.toPx(),
                 center = androidx.compose.ui.geometry.Offset(horizontalCenter, thumbY)
             )
