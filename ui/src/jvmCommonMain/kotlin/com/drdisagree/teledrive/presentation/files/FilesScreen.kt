@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -98,6 +99,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -483,8 +486,41 @@ fun FilesScreen(
     var snackbarHeight by remember { mutableStateOf(0.dp) }
     val fabLift by animateDpAsState(targetValue = snackbarHeight, label = "fabLift")
 
+    val clipboardShortcutFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(clipboardShortcutFocusRequester) {
+        clipboardShortcutFocusRequester.requestFocus()
+    }
+
     FileDropArea(onDropped = { references -> viewModel.importAndUpload(references) }) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .focusRequester(clipboardShortcutFocusRequester)
+                .onPreviewKeyEvent { event ->
+                    val command = event.isCtrlPressed || event.isMetaPressed
+                    val plainCommand = command && !event.isAltPressed && !event.isShiftPressed
+                    if (event.type != KeyEventType.KeyDown || !plainCommand) {
+                        false
+                    } else {
+                        when {
+                            event.key == Key.C && selectedCount > 0 -> {
+                                viewModel.copyToClipboardSelected()
+                                true
+                            }
+                            event.key == Key.X && selectedCount > 0 -> {
+                                viewModel.cutSelected()
+                                true
+                            }
+                            event.key == Key.V && viewModel.hasClipboardItems() -> {
+                                viewModel.paste()
+                                true
+                            }
+                            else -> false
+                        }
+                    }
+                }
+                .focusable()
+        ) {
             Scaffold(
                 snackbarHost = {},
                 topBar = {
@@ -1311,35 +1347,7 @@ private fun FilesContent(
         },
         onEnd = viewModel::endRangeSelection
     )
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            // Keep file clipboard shortcuts on the collection container so they work
-            // whether focus is on a row, its checkbox, or the grid itself.
-            .onPreviewKeyEvent { event ->
-                val command = event.isCtrlPressed || event.isMetaPressed
-                val plainCommand = command && !event.isAltPressed && !event.isShiftPressed
-                if (event.type != KeyEventType.KeyDown || !plainCommand) {
-                    false
-                } else {
-                    when {
-                        event.key == Key.C && (selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) -> {
-                            viewModel.copyToClipboardSelected()
-                            true
-                        }
-                        event.key == Key.X && (selectedFileIds.isNotEmpty() || selectedFolderIds.isNotEmpty()) -> {
-                            viewModel.cutSelected()
-                            true
-                        }
-                        event.key == Key.V && viewModel.hasClipboardItems() -> {
-                            viewModel.paste()
-                            true
-                        }
-                        else -> false
-                    }
-                }
-            }
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(columns),
@@ -1372,6 +1380,7 @@ private fun FilesContent(
                 FolderGridItem(
                     folder = folder,
                     selected = folderSelected,
+                    prominentSelectionCheckbox = true,
                     onClick = {
                         if (selectionMode) viewModel.toggleFolderSelection(folder.id)
                         else onOpenFolder(folder.id)
@@ -1391,6 +1400,7 @@ private fun FilesContent(
                 FolderRow(
                     folder = folder,
                     selected = folderSelected,
+                    prominentSelectionCheckbox = true,
                     onClick = {
                         if (selectionMode) viewModel.toggleFolderSelection(folder.id)
                         else onOpenFolder(folder.id)
@@ -1420,6 +1430,7 @@ private fun FilesContent(
                 FileGridItem(
                     file = file,
                     selected = selected,
+                    prominentSelectionCheckbox = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
                         if (selectionMode) viewModel.toggleSelection(file.id)
@@ -1448,6 +1459,7 @@ private fun FilesContent(
                 FileListItem(
                     file = file,
                     selected = selected,
+                    prominentSelectionCheckbox = true,
                     selectionMode = selectionMode,
                     prominent = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
@@ -1478,6 +1490,7 @@ private fun FilesContent(
                 FileDetailsItem(
                     file = file,
                     selected = selected,
+                    prominentSelectionCheckbox = true,
                     selectionMode = selectionMode,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
