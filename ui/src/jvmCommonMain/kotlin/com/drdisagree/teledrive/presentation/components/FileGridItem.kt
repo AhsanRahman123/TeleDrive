@@ -47,7 +47,8 @@ fun FileGridItem(
     compact: Boolean = false,
     location: String? = null,
     showSelectionCheckbox: Boolean = true,
-    onToggleSelection: (() -> Unit)? = null
+    onToggleSelection: (() -> Unit)? = null,
+    prominentSelectionCheckbox: Boolean = false
 ) {
     Column(
         modifier = modifier
@@ -75,6 +76,7 @@ fun FileGridItem(
                 SelectionCheckbox(
                     checked = selected,
                     onClick = onToggleSelection ?: onClick,
+                    highContrast = prominentSelectionCheckbox,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(2.dp)
