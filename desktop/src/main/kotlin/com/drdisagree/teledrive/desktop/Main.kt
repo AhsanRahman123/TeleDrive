@@ -11,6 +11,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import com.sun.jna.Platform
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
@@ -48,6 +49,7 @@ import com.drdisagree.teledrive.desktop.ui.FullscreenController
 import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.desktop.ui.ProvideDesktopPlatformActions
 import com.drdisagree.teledrive.desktop.window.WindowsTitleBar
+import com.drdisagree.teledrive.desktop.window.WindowsBorderlessFullscreenController
 import com.drdisagree.teledrive.domain.model.AppTheme
 import com.drdisagree.teledrive.core.logging.DebugLogController
 import com.drdisagree.teledrive.data.repository.FolderOwnershipRepair
@@ -102,29 +104,6 @@ fun main() {
     application {
         val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
         var previousWindowPlacement by remember { mutableStateOf(windowState.placement) }
-        val fullscreenController = remember {
-            FullscreenController(
-                isFullscreen = { windowState.placement == WindowPlacement.Fullscreen },
-                toggle = {
-                    if (windowState.placement == WindowPlacement.Fullscreen) {
-                        windowState.placement = previousWindowPlacement
-                    } else {
-                        previousWindowPlacement = windowState.placement
-                        windowState.placement = WindowPlacement.Fullscreen
-                    }
-                },
-                setFullscreen = { fullscreen ->
-                    if (fullscreen) {
-                        if (windowState.placement != WindowPlacement.Fullscreen) {
-                            previousWindowPlacement = windowState.placement
-                            windowState.placement = WindowPlacement.Fullscreen
-                        }
-                    } else if (windowState.placement == WindowPlacement.Fullscreen) {
-                        windowState.placement = previousWindowPlacement
-                    }
-                }
-            )
-        }
         Window(
             onCloseRequest = ::exitApplication,
             title = stringResource(SharedRes.string.app_name),
@@ -132,6 +111,45 @@ fun main() {
             state = windowState
         ) {
             window.minimumSize = Dimension(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+            // Windows must use borderless windowed fullscreen. WindowPlacement.Fullscreen
+            // delegates to Skiko's exclusive fullscreen path and blocks normal Alt+Tab switching.
+            val windowsFullscreen = remember(window) {
+                if (Platform.isWindows()) {
+                    WindowsBorderlessFullscreenController(window, windowState)
+                } else {
+                    null
+                }
+            }
+            val fullscreenController = remember(windowsFullscreen, windowState) {
+                FullscreenController(
+                    isFullscreen = {
+                        windowsFullscreen?.isFullscreen
+                            ?: (windowState.placement == WindowPlacement.Fullscreen)
+                    },
+                    toggle = {
+                        if (windowsFullscreen != null) {
+                            windowsFullscreen.toggle()
+                        } else if (windowState.placement == WindowPlacement.Fullscreen) {
+                            windowState.placement = previousWindowPlacement
+                        } else {
+                            previousWindowPlacement = windowState.placement
+                            windowState.placement = WindowPlacement.Fullscreen
+                        }
+                    },
+                    setFullscreen = { fullscreen ->
+                        if (windowsFullscreen != null) {
+                            windowsFullscreen.setFullscreen(fullscreen)
+                        } else if (fullscreen) {
+                            if (windowState.placement != WindowPlacement.Fullscreen) {
+                                previousWindowPlacement = windowState.placement
+                                windowState.placement = WindowPlacement.Fullscreen
+                            }
+                        } else if (windowState.placement == WindowPlacement.Fullscreen) {
+                            windowState.placement = previousWindowPlacement
+                        }
+                    }
+                )
+            }
             setSingletonImageLoaderFactory { context ->
                 ImageLoader.Builder(context)
                     .components {
