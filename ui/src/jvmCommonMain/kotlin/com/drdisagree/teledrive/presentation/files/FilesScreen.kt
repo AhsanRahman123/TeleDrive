@@ -358,24 +358,28 @@ fun FilesScreen(
     }
     fun closeTab(tab: FilesTabState) {
         if (tabs.size <= 1) return
+        val oldIndex = tabs.indexOfFirst { it.id == tab.id }.coerceAtLeast(0)
+        tabPositions.keys.removeAll { it.first == tab.id }
         val nextTabs = tabs.filterNot { it.id == tab.id }
         tabs = nextTabs
         if (tab.id == selectedTabId) {
-            val replacement = nextTabs.getOrNull((nextTabs.indexOfFirst { it.id == tab.id }).coerceAtLeast(0))
-                ?: nextTabs.last()
+            val replacement = nextTabs[oldIndex.coerceAtMost(nextTabs.lastIndex)]
             selectedTabId = replacement.id
             viewModel.setActiveFolder(replacement.folderId)
         }
     }
-    LaunchedEffect(activeFolderId, state.breadcrumbs) {
-        val label = if (activeFolderId == null) {
-            stringResource(Res.string.files)
-        } else {
-            state.breadcrumbs.lastOrNull()?.name?.resolve() ?: "Folder"
-        }
+    val activeFolderLabel = if (activeFolderId == null) {
+        stringResource(Res.string.files)
+    } else {
+        state.breadcrumbs.lastOrNull()?.name?.resolve() ?: "Folder"
+    }
+    LaunchedEffect(activeFolderId, activeFolderLabel) {
         tabs = tabs.map { tab ->
-            if (tab.id == selectedTabId) tab.copy(folderId = activeFolderId, label = label)
-            else tab
+            if (tab.id == selectedTabId) {
+                tab.copy(folderId = activeFolderId, label = activeFolderLabel)
+            } else {
+                tab
+            }
         }
     }
     LaunchedEffect(selectedTabId, state.folderId, files.itemCount, files.loadState.refresh) {
