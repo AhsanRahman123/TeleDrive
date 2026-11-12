@@ -116,8 +116,8 @@ class FilesViewModel(
     val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
 
     fun setActiveFolder(folderId: String?) {
-        if (_activeFolderId.value == folderId) return
         clearSelection()
+        if (_activeFolderId.value == folderId) return
         _activeFolderId.value = folderId
     }
 
