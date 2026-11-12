@@ -260,7 +260,7 @@ fun HomeScreen(
                     state.activeChannel?.let { channel ->
                         val driveCount by viewModel.driveCount.collectAsStateWithLifecycle()
                         TooltipIconButton(
-                            tooltip = stringResource(Res.string.nav_channels),
+                            tooltip = stringResource(Res.string.home_open_drives),
                             onClick = onOpenChannels,
                             modifier = Modifier.padding(end = 8.dp)
                         ) {
