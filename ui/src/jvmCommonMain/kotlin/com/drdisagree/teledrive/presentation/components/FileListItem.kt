@@ -49,6 +49,7 @@ fun FileListItem(
     showAvailableOffline: Boolean = true,
     prominent: Boolean = false,
     status: (@Composable () -> Unit)? = null,
+    location: String? = null,
     onToggleSelection: (() -> Unit)? = null,
     showSelectionCheckbox: Boolean = true
 ) {
@@ -118,6 +119,15 @@ fun FileListItem(
                     style = if (prominent) MaterialTheme.typography.bodyMedium
                     else MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            location?.takeIf { it.isNotBlank() }?.let { path ->
+                Text(
+                    text = "Location: $path",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
