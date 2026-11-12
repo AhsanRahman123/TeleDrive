@@ -11,6 +11,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -119,7 +121,6 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.isInitialLoad
-import com.drdisagree.teledrive.presentation.common.rememberPosition
 import com.drdisagree.teledrive.presentation.common.resolve
 import com.drdisagree.teledrive.presentation.components.ActionMenu
 import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
@@ -260,15 +261,11 @@ fun FilesScreen(
     val storageAudit by viewModel.storageAudit.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
+    val activeFolderId by viewModel.activeFolderId.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val navigateUp: () -> Unit = {
-        if (state.folderId != null) {
-            val parentId = state.breadcrumbs.dropLast(1).lastOrNull()?.id
-            onOpenCrumb(parentId)
-        } else {
-            onBack?.invoke()
-        }
-    }
+    var tabs by remember { mutableStateOf(listOf(FilesTabState(0, activeFolderId, "Files"))) }
+    var selectedTabId by remember { mutableIntStateOf(0) }
+    var nextTabId by remember { mutableIntStateOf(1) }
 
     var showCreateFolder by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
@@ -337,7 +334,59 @@ fun FilesScreen(
     AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     val gridState = rememberLazyGridState()
-    gridState.rememberPosition(viewModel.listPosition, state.folders.size + files.itemCount)
+    val tabPositions = remember { mutableMapOf<Pair<Int, String?>, Pair<Int, Int>>() }
+    fun saveCurrentTabPosition() {
+        tabPositions[selectedTabId to state.folderId] =
+            gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+    }
+    fun navigateToFolder(folderId: String?) {
+        saveCurrentTabPosition()
+        viewModel.setActiveFolder(folderId)
+    }
+    fun activateTab(tab: FilesTabState) {
+        if (tab.id == selectedTabId) return
+        saveCurrentTabPosition()
+        selectedTabId = tab.id
+        viewModel.setActiveFolder(tab.folderId)
+    }
+    fun createTab() {
+        saveCurrentTabPosition()
+        val id = nextTabId++
+        tabs = tabs + FilesTabState(id, null, "Files")
+        selectedTabId = id
+        viewModel.setActiveFolder(null)
+    }
+    fun closeTab(tab: FilesTabState) {
+        if (tabs.size <= 1) return
+        val nextTabs = tabs.filterNot { it.id == tab.id }
+        tabs = nextTabs
+        if (tab.id == selectedTabId) {
+            val replacement = nextTabs.getOrNull((nextTabs.indexOfFirst { it.id == tab.id }).coerceAtLeast(0))
+                ?: nextTabs.last()
+            selectedTabId = replacement.id
+            viewModel.setActiveFolder(replacement.folderId)
+        }
+    }
+    LaunchedEffect(activeFolderId, state.breadcrumbs) {
+        val label = if (activeFolderId == null) {
+            stringResource(Res.string.files)
+        } else {
+            state.breadcrumbs.lastOrNull()?.name?.resolve() ?: "Folder"
+        }
+        tabs = tabs.map { tab ->
+            if (tab.id == selectedTabId) tab.copy(folderId = activeFolderId, label = label)
+            else tab
+        }
+    }
+    LaunchedEffect(selectedTabId, state.folderId, files.itemCount, files.loadState.refresh) {
+        val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
+        if (currentTab.folderId != state.folderId || files.loadState.refresh is LoadState.Loading) {
+            return@LaunchedEffect
+        }
+        val target = tabPositions[selectedTabId to state.folderId] ?: (0 to 0)
+        val count = state.folders.size + files.itemCount
+        if (count > 0) gridState.scrollToItem(target.first.coerceIn(0, count - 1), target.second)
+    }
     var fabVisible by remember { mutableStateOf(true) }
     val listScrolls by remember {
         derivedStateOf { gridState.canScrollForward || gridState.canScrollBackward }
@@ -761,8 +810,50 @@ fun FilesScreen(
                         .padding(top = padding.calculateTopPadding())
                         .nestedScroll(fabScrollConnection)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            tabs.forEach { tab ->
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(
+                                        onClick = { activateTab(tab) },
+                                        colors = ButtonDefaults.textButtonColors(
+                                            containerColor = if (tab.id == selectedTabId) {
+                                                MaterialTheme.colorScheme.secondaryContainer
+                                            } else {
+                                                Color.Transparent
+                                            },
+                                            contentColor = if (tab.id == selectedTabId) {
+                                                MaterialTheme.colorScheme.onSecondaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                    ) { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                    if (tabs.size > 1) {
+                                        IconButton(onClick = { closeTab(tab) }, modifier = Modifier.size(28.dp)) {
+                                            Icon(
+                                                Icons.Filled.Close,
+                                                contentDescription = "Close ${tab.label} tab",
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        IconButton(onClick = ::createTab) {
+                            Icon(Icons.Filled.Add, contentDescription = "Open new Files tab")
+                        }
+                    }
                     if (state.breadcrumbs.size > 1) {
-                        Breadcrumbs(crumbs = state.breadcrumbs, onOpen = onOpenCrumb)
+                        Breadcrumbs(crumbs = state.breadcrumbs, onOpen = ::navigateToFolder)
                     }
                     RefreshableContent(
                         isRefreshing = refreshing,
@@ -798,11 +889,17 @@ fun FilesScreen(
                                     bottom = padding.calculateBottomPadding() +
                                             LocalBottomBarInset.current
                                 ),
-                                onOpenFolder = onOpenFolder,
+                                onOpenFolder = ::navigateToFolder,
                                 onOpenFile = onOpenFile,
                                 onRequestTrash = { confirmTrash = true },
                                 onCreateFolder = { showCreateFolder = true },
-                                onBack = navigateUp,
+                                onBack = {
+                                    if (state.folderId != null) {
+                                        navigateToFolder(state.breadcrumbs.dropLast(1).lastOrNull()?.id)
+                                    } else {
+                                        onBack?.invoke()
+                                    }
+                                },
                                 viewModel = viewModel
                             )
                         }
