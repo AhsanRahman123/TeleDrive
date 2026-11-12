@@ -94,6 +94,12 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.time.Duration.Companion.milliseconds
 
+internal data class FilesTabState(
+    val id: Int,
+    val folderId: String?,
+    val label: String
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class FilesViewModel(
     savedStateHandle: SavedStateHandle,
@@ -114,6 +120,96 @@ class FilesViewModel(
     private val initialFolderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
     private val _activeFolderId = MutableStateFlow(initialFolderId)
     val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
+
+    private fun restoreWorkspaceTabs(): List<FilesTabState> {
+        val encoded = savedStateHandle.get<ArrayList<String>>(KEY_WORKSPACE_TABS).orEmpty()
+        return encoded.chunked(3).mapNotNull { fields ->
+            if (fields.size != 3) return@mapNotNull null
+            val id = fields[0].toIntOrNull() ?: return@mapNotNull null
+            FilesTabState(id, fields[1].ifEmpty { null }, fields[2])
+        }.distinctBy { it.id }
+    }
+
+    private val _workspaceTabs = MutableStateFlow(
+        restoreWorkspaceTabs().ifEmpty {
+            listOf(FilesTabState(0, initialFolderId, "Files"))
+        }
+    )
+    val workspaceTabs: StateFlow<List<FilesTabState>> = _workspaceTabs.asStateFlow()
+
+    private val _selectedWorkspaceTabId = MutableStateFlow(
+        savedStateHandle.get<Int>(KEY_SELECTED_WORKSPACE_TAB_ID)
+            ?.takeIf { id -> _workspaceTabs.value.any { it.id == id } }
+            ?: _workspaceTabs.value.first().id
+    )
+    val selectedWorkspaceTabId: StateFlow<Int> = _selectedWorkspaceTabId.asStateFlow()
+
+    private var nextWorkspaceTabId = maxOf(
+        savedStateHandle.get<Int>(KEY_NEXT_WORKSPACE_TAB_ID) ?: 1,
+        (_workspaceTabs.value.maxOfOrNull { it.id } ?: 0) + 1
+    )
+
+    private fun persistWorkspaceTabs() {
+        savedStateHandle[KEY_WORKSPACE_TABS] = ArrayList(
+            _workspaceTabs.value.flatMap { tab ->
+                listOf(tab.id.toString(), tab.folderId.orEmpty(), tab.label)
+            }
+        )
+        savedStateHandle[KEY_SELECTED_WORKSPACE_TAB_ID] = _selectedWorkspaceTabId.value
+        savedStateHandle[KEY_NEXT_WORKSPACE_TAB_ID] = nextWorkspaceTabId
+    }
+
+    fun updateSelectedWorkspaceTab(folderId: String?, label: String) {
+        val selectedId = _selectedWorkspaceTabId.value
+        val current = _workspaceTabs.value
+        val updated = current.map { tab ->
+            if (tab.id == selectedId) tab.copy(folderId = folderId, label = label) else tab
+        }
+        if (updated != current) {
+            _workspaceTabs.value = updated
+            persistWorkspaceTabs()
+        }
+    }
+
+    fun createWorkspaceTab() {
+        val newTab = FilesTabState(nextWorkspaceTabId++, null, "Files")
+        _workspaceTabs.value = _workspaceTabs.value + newTab
+        _selectedWorkspaceTabId.value = newTab.id
+        persistWorkspaceTabs()
+        setActiveFolder(null)
+    }
+
+    fun activateWorkspaceTab(tabId: Int) {
+        val tab = _workspaceTabs.value.firstOrNull { it.id == tabId } ?: return
+        if (_selectedWorkspaceTabId.value == tabId) return
+        _selectedWorkspaceTabId.value = tabId
+        persistWorkspaceTabs()
+        setActiveFolder(tab.folderId)
+    }
+
+    fun closeWorkspaceTab(tabId: Int) {
+        val current = _workspaceTabs.value
+        if (current.size <= 1) return
+        val oldIndex = current.indexOfFirst { it.id == tabId }
+        if (oldIndex < 0) return
+        val nextTabs = current.filterNot { it.id == tabId }
+        _workspaceTabs.value = nextTabs
+        if (_selectedWorkspaceTabId.value == tabId) {
+            val replacement = nextTabs[oldIndex.coerceAtMost(nextTabs.lastIndex)]
+            _selectedWorkspaceTabId.value = replacement.id
+            setActiveFolder(replacement.folderId)
+        }
+        persistWorkspaceTabs()
+    }
+
+    /** Close every open Files tab and leave one fresh root tab ready to use. */
+    fun closeAllWorkspaceTabs() {
+        val freshTab = FilesTabState(nextWorkspaceTabId++, null, "Files")
+        _workspaceTabs.value = listOf(freshTab)
+        _selectedWorkspaceTabId.value = freshTab.id
+        persistWorkspaceTabs()
+        setActiveFolder(null)
+    }
 
     fun setActiveFolder(folderId: String?) {
         clearSelection()
@@ -630,6 +726,8 @@ class FilesViewModel(
         }
         return true
     }
+
+    fun hasClipboardItems(): Boolean = clipboard.peek() != null
 
     fun paste() {
         val items = clipboard.peek() ?: return
@@ -1202,5 +1300,10 @@ class FilesViewModel(
     companion object {
         private const val MIN_REFRESH_VISIBLE_MS = 700L
         private const val MAX_BREADCRUMB_DEPTH = 64
+    }
+    private companion object {
+        const val KEY_WORKSPACE_TABS = "files_workspace_tabs"
+        const val KEY_SELECTED_WORKSPACE_TAB_ID = "files_workspace_selected_tab_id"
+        const val KEY_NEXT_WORKSPACE_TAB_ID = "files_workspace_next_tab_id"
     }
 }
