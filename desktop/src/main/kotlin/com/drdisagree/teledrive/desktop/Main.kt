@@ -11,6 +11,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
 import com.sun.jna.Platform
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -173,17 +174,37 @@ fun main() {
             }
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
             val windowShortcutFocus = remember { FocusRequester() }
-            LaunchedEffect(Unit) { windowShortcutFocus.requestFocus() }
+            val windowInfo = LocalWindowInfo.current
+            var f11Pressed by remember { mutableStateOf(false) }
+            LaunchedEffect(windowInfo.isWindowFocused) {
+                if (windowInfo.isWindowFocused) {
+                    windowShortcutFocus.requestFocus()
+                } else {
+                    // A KeyUp can be lost when Alt+Tab changes focus. Clear the latch
+                    // on focus loss so F11 never stays logically held.
+                    f11Pressed = false
+                }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .focusRequester(windowShortcutFocus)
                     .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown &&
+                        if (event.key == Key.F11 && event.type == KeyEventType.KeyUp) {
+                            f11Pressed = false
+                            true
+                        } else if (
+                            event.type == KeyEventType.KeyDown &&
                             event.key == Key.F11 &&
                             !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
                         ) {
-                            fullscreenController.toggle()
+                            if (!f11Pressed) {
+                                f11Pressed = true
+                                runCatching { fullscreenController.toggle() }
+                                    .onFailure { SafeLog.w("DesktopWindow", "F11 toggle failed", it) }
+                                windowShortcutFocus.requestFocus()
+                            }
+                            // Consume key-repeat events, but toggle only once per physical press.
                             true
                         } else false
                     }
