@@ -8,6 +8,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.isShiftPressed
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.DragAndDropTransferAction
@@ -19,17 +21,31 @@ import java.awt.datatransfer.StringSelection
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier =
-    dragAndDropSource { offset ->
-        DragAndDropTransferData(
-            transferable = DragAndDropTransferable(StringSelection(payload())),
-            supportedActions = listOf(
-                DragAndDropTransferAction.Move,
-                DragAndDropTransferAction.Copy
-            ),
-            dragDecorationOffset = offset
-        )
+actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier {
+    val windowInfo = LocalWindowInfo.current
+    val latestPayload = rememberUpdatedState(payload)
+    return dragAndDropSource { offset ->
+        // Keep ordinary left-drag available for range selection. Hold Shift
+        // to start the separate native file-to-tab transfer gesture.
+        if (!windowInfo.keyboardModifiers.isShiftPressed) {
+            null
+        } else {
+            val encodedPayload = latestPayload.value()
+            if (encodedPayload.isBlank()) {
+                null
+            } else {
+                DragAndDropTransferData(
+                    transferable = DragAndDropTransferable(StringSelection(encodedPayload)),
+                    supportedActions = listOf(
+                        DragAndDropTransferAction.Move,
+                        DragAndDropTransferAction.Copy
+                    ),
+                    dragDecorationOffset = offset
+                )
+            }
+        }
     }
+}
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
