@@ -1491,7 +1491,7 @@ class DesktopTelegramClient(
         private const val HISTORY_RETRIES = 3
         private const val HISTORY_RETRY_MS = 400L
         private const val PHOTO_PRIORITY = 16
-        private const val MAX_THUMBNAIL_DIMENSION = 512
+        private const val MAX_THUMBNAIL_DIMENSION = 1024
         private const val MAX_LABEL_LENGTH = 48
         private const val STORAGE_CHAT_TITLE = "TeleDrive"
         private const val WRONG_DATABASE_KEY_CODE = 401
