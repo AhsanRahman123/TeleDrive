@@ -758,11 +758,26 @@ private fun PreviewPane(
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val content by viewModel.contentFor(file).collectAsState()
+    // Keep the old local media source mounted while the next queued video resolves. This
+    // preserves the single VLC surface across the transient Loading state and prevents the
+    // black flash that otherwise occurs between adjacent local videos.
+    var lastReadyLocalMedia by remember { mutableStateOf<PreviewContent.LocalMedia?>(null) }
+    LaunchedEffect(content) {
+        when (val resolved = content) {
+            is PreviewContent.LocalMedia -> lastReadyLocalMedia = resolved
+            is PreviewContent.Loading -> Unit
+            else -> lastReadyLocalMedia = null
+        }
+    }
+    val displayedContent = if (
+        file.category in setOf(FileCategory.AUDIO, FileCategory.VIDEO) &&
+        content is PreviewContent.Loading && lastReadyLocalMedia != null
+    ) lastReadyLocalMedia!! else content
     val urlOpener = LocalUrlOpener.current
     val preferredAudioLanguage by viewModel.preferredAudioLanguage.collectAsState()
     val preferredSubtitleLanguage by viewModel.preferredSubtitleLanguage.collectAsState()
 
-    val edgeToEdge = when (content) {
+    val edgeToEdge = when (displayedContent) {
         is PreviewContent.Image,
         is PreviewContent.LocalMedia,
         is PreviewContent.StreamedMedia -> true
@@ -774,7 +789,7 @@ private fun PreviewPane(
             .fillMaxSize()
             .padding(top = if (edgeToEdge) 0.dp else TOP_BAR_INSET)
     ) {
-        when (val current = content) {
+        when (val current = displayedContent) {
             is PreviewContent.Loading -> LoadingState()
 
             is PreviewContent.DownloadProgress -> Column(
