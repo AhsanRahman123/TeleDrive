@@ -858,7 +858,8 @@ private fun PreviewPane(
                                 model = current.model,
                                 onState = { imageState ->
                                     if (imageState is AsyncImagePainter.State.Error) undecodable = true
-                                }
+                                },
+                                filterQuality = FilterQuality.High
                             ),
                             contentDescription = file.name,
                             modifier = Modifier
@@ -875,8 +876,7 @@ private fun PreviewPane(
                                         }
                                     }
                                 ),
-                            contentScale = ContentScale.Fit,
-                            filterQuality = FilterQuality.High
+                            contentScale = ContentScale.Fit
                         )
                         Row(
                             modifier = Modifier
