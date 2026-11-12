@@ -115,6 +115,7 @@ class KeyboardCollectionState internal constructor(
             plain && event.key == Key.Escape -> shortcuts.onClear.fire()
             command && !alt && event.key == Key.A -> shortcuts.onSelectAll.fire()
             command && !alt && event.key == Key.N -> shortcuts.onNewFolder.fire()
+            command && !alt && event.key == Key.T -> shortcuts.onNewTab.fire()
             command && !alt && focusOnItem && event.key == Key.C ->
                 shortcuts.onCopy.fire(index).also { restorePending = it }
             command && !alt && focusOnItem && event.key == Key.X ->
