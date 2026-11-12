@@ -766,13 +766,16 @@ internal fun DesktopMediaPlayer(
                     }
                     key == Key.H && !ctrl && !alt && !shift && !hKeyPressed -> {
                         hKeyPressed = true
-                        val showControls = !controlPreferences.showPlayerControls
+                        // Toggle the actual visibility, not only the saved preference:
+                        // controls can also be hidden by the auto-hide timer.
+                        val showControls = !controlsVisible
                         val updated = controlPreferences.copy(showPlayerControls = showControls)
                         controlPreferences = updated
                         controlsPinned = false
                         PlayerControlPreferencesStore.save(updated)
                         controlsVisible = showControls
                         latestOnControlsVisibilityChange.value(showControls)
+                        interactionTick++
                         lastVisibilityInteractionTick = interactionTick
                         true
                     }
