@@ -4,7 +4,7 @@ Last audited: 2026-11-13
 Repository: `AhsanRahman123/TeleDrive`
 Development branch: `work/desktop-feature-fixes-20261112`
 Stack base: PR #9 head `36f3da98f960c879c548099b30150c74ee9b33e5`
-Latest code head audited: `7c78b84789f26b8ad52fa6fcb681c851c46ea3fc`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
+Latest code head audited: `302207be314a2dfcf58a89503228324b2d6cc03c`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
 
 This register is the current status source for the consolidated development workspace. Older planning documents remain useful for feature intent, but their status labels may be stale. When this register conflicts with an older note, re-audit the source and tests before changing the status.
 
@@ -260,3 +260,31 @@ Follow-up source changes committed after that user test:
 - Existing clipboard lifecycle protections and `FileClipboardTest` remain in place; this follow-up does not change Gallery.
 
 **Status: SOURCE-PRESENT; NOT YET REBUILT OR RETESTED on Windows.** The user's PASS results for tabs, video switching and seeking apply to the prior tested build. The Files selection and clipboard fixes must not be marked verified until the exact latest branch head builds and the two failed scenarios pass manually. No Gallery changes were included.
+
+
+### Selection consistency and cross-section keyboard commands — November 13, 2026
+
+The user supplied a screen recording showing a Files selection-state mismatch:
+
+- After Clear selection, the Files toolbar returned to its normal "Files" title while some previously selected folder rows still showed blue selected backgrounds and checkmarks.
+- A subsequent selection showed a toolbar count of 5 while more than five rows appeared selected.
+
+Source correction committed on the development branch:
+
+- Added an internal `FilesSelectionSnapshot` that carries selected file IDs, selected folder IDs, selection-mode state and Select-all state as one UI value.
+- `FilesViewModel` republishes that snapshot after context selection, file/folder toggles, Clear selection, Select all, drag-range updates and navigation (which clears selection).
+- `FilesScreen` now derives toolbar selection mode/count and visible Files row checkmarks from that same snapshot instead of separate collectors that could update at different times.
+- Moved Files keyboard command handling to the outer Files workspace, including the tab strip and toolbar, so Ctrl+T/Ctrl+N are not limited to a focused row or non-empty list.
+
+Keyboard commands now present in source:
+
+- **Files:** Ctrl+T creates a new Files workspace tab; Ctrl+N opens New Folder; Ctrl+A selects files and folders in the active folder; Ctrl+C/X/V copies, cuts and pastes in the active folder.
+- **Gallery:** Ctrl+A selects the active Albums or media collection; Ctrl+C/X/V uses the shared file clipboard; Ctrl+N opens New Album in the Albums root.
+- **Favorites / Offline / Archived / Hidden:** Ctrl+A selects matching files and folders; Ctrl+C/X copies or cuts selected items; Ctrl+V pastes to the Drive root because these are filtered collections, not destination folders.
+- **Search:** Ctrl+A selects matching file results; Ctrl+C/X copies or cuts selected results. Search has no destination folder, so Ctrl+V is not assigned there.
+- **Thumbnail Manager / Thumbnail Queue / Cache Manager / Backed-up local-copy inventory / Trash / Transfers:** Ctrl+A selects all applicable matching or visible records (including unloaded matching thumbnail files and queue jobs where their all-ID query is available). Ctrl+C/X/V is intentionally not assigned to cache entries, queue jobs, Trash rows, transfer records or local-copy cleanup rows because these are not normal file/folder clipboard destinations.
+- The shared collection key handler uses the event-bubble path rather than preview interception; native text-field Ctrl+A/C/X/V should remain available while editing search and other text fields.
+
+Files, Gallery, Search and virtual collection screens share the same app-level `FileClipboard`. A cut entry is cleared only after all requested move operations succeed; copy remains reusable. Gallery also uses the same success-only cut cleanup.
+
+**Status: SOURCE-PRESENT; NOT YET COMPILED OR RUNTIME-VERIFIED on Windows.** The user previously reported Ctrl+C/X/V working in Files, and earlier reported Files workspace tabs, video switching and P/N seek behavior passing on the prior build. The recording-specific selection consistency fix and the newly expanded cross-section shortcut routes still require a fresh build and manual acceptance on the exact current head. Do not claim that the latest head has built or that every target has been runtime-verified.
