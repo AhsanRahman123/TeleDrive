@@ -1341,15 +1341,20 @@ private fun PlayerControlsBar(
             }
         }
 
-        FlowRow(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 52.dp)
                 .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            TooltipIconButton(
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TooltipIconButton(
                     tooltip = "Previous video",
                     onClick = { onInteraction(); onPrevious() },
                     enabled = hasPrevious,
@@ -1423,7 +1428,13 @@ private fun PlayerControlsBar(
                         tint = if (hasNext) Color.White else Color.White.copy(alpha = 0.35f)
                     )
                 }
-            Box {
+            }
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box {
                     TextButton(onClick = {
                         onInteraction()
                         showRateMenu = true
@@ -1687,6 +1698,7 @@ private fun PlayerControlsBar(
                         )
                     }
                 }
+            }
         }
     }
 }
