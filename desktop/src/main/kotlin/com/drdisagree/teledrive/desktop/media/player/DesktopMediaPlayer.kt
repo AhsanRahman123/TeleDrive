@@ -891,7 +891,8 @@ internal fun DesktopMediaPlayer(
             visible = controlsVisible,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
+            // Keep the transport row comfortably above the bottom edge in windowed mode.
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
         ) {
             PlayerControlsBar(
                 player = player,
