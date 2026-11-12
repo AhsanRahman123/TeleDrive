@@ -86,6 +86,8 @@ import kotlinx.coroutines.flow.map
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
@@ -412,7 +414,9 @@ fun TransfersScreen(
             }
         }
         val keyboard = rememberKeyboardCollection(listState) { rows.getOrNull(it) != null }
+        val commandFocusRequester = rememberCollectionCommandFocusRequester()
         val shortcuts = CollectionShortcuts(
+            onSelectAll = { selectedTransferIds = selectedTransferIds + visibleIds },
             onDelete = { index ->
                 rows.getOrNull(index)
                     ?.takeIf { it !in state.completed }
@@ -502,6 +506,10 @@ fun TransfersScreen(
             modifier = Modifier
                 .fillMaxSize()
                         .padding(end = 10.dp)
+                .collectionCommandShortcuts(
+                    focusRequester = commandFocusRequester,
+                    onSelectAll = { selectedTransferIds = selectedTransferIds + visibleIds; true }
+                )
                 .keyboardCollection(keyboard, rows.count { it != null }, shortcuts),
             contentPadding = padding.add(horizontal = 16.dp, top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
