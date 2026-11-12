@@ -1,6 +1,9 @@
 package com.drdisagree.teledrive.desktop.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -30,6 +33,9 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -47,8 +53,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -81,13 +85,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.SnapSpec
 import coil3.compose.rememberAsyncImagePainter
 import coil3.compose.AsyncImagePainter
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
@@ -145,8 +152,6 @@ import com.drdisagree.teledrive.resources.preview_confirm_trash_file_message
 import com.drdisagree.teledrive.resources.preview_download_view
 import com.drdisagree.teledrive.resources.preview_file_info
 import com.drdisagree.teledrive.resources.preview_image_undecodable
-import com.drdisagree.teledrive.resources.preview_zoom_in
-import com.drdisagree.teledrive.resources.preview_zoom_out
 import com.drdisagree.teledrive.resources.preview_move_to_trash
 import com.drdisagree.teledrive.resources.preview_next
 import com.drdisagree.teledrive.resources.preview_no_preview
@@ -174,7 +179,7 @@ import com.drdisagree.teledrive.desktop.resources.Res as DesktopRes
  * Media never plays in the window; anything the shared resolver cannot render inline opens in the
  * system viewer.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalComposeUiApi::class)
 @Composable
 fun DesktopPreviewScreen(
     onBack: () -> Unit,
@@ -351,8 +356,7 @@ fun DesktopPreviewScreen(
             .focusRequester(viewerFocusRequester)
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown ||
-                    event.isCtrlPressed || event.isAltPressed || event.isShiftPressed ||
-                    mediaCategory != null
+                    event.isCtrlPressed || event.isAltPressed || event.isShiftPressed
                 ) {
                     return@onPreviewKeyEvent false
                 }
@@ -712,6 +716,95 @@ private fun PreviewOverflowMenu(
 }
 
 @Composable
+@Composable
+private fun VerticalZoomSlider(
+    zoomFraction: Float,
+    onZoomFractionChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val latestFraction = rememberUpdatedState(zoomFraction.coerceIn(0f, 1f))
+    val latestOnChange = rememberUpdatedState(onZoomFractionChange)
+    val thumbColor = MaterialTheme.colorScheme.primary
+    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+
+    Box(
+        modifier = modifier
+            .width(38.dp)
+            .height(196.dp)
+            .pointerInput(Unit) {
+                detectTapGestures { position ->
+                    val range = (size.height - 20.dp.toPx()).coerceAtLeast(1f)
+                    val value = (1f - ((position.y - 10.dp.toPx()) / range)).coerceIn(0f, 1f)
+                    latestOnChange.value(value)
+                }
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { position ->
+                        val range = (size.height - 20.dp.toPx()).coerceAtLeast(1f)
+                        val value = (1f - ((position.y - 10.dp.toPx()) / range)).coerceIn(0f, 1f)
+                        latestOnChange.value(value)
+                    }
+                ) { change, _ ->
+                    change.consume()
+                    val range = (size.height - 20.dp.toPx()).coerceAtLeast(1f)
+                    val value = (1f - ((change.position.y - 10.dp.toPx()) / range)).coerceIn(0f, 1f)
+                    latestOnChange.value(value)
+                }
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.type == PointerEventType.Scroll) {
+                            val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                            if (delta != 0f) {
+                                // Desktop wheel-up is a negative Y delta: move toward maximum zoom.
+                                latestOnChange.value(
+                                    (latestFraction.value - delta * 0.08f).coerceIn(0f, 1f)
+                                )
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val horizontalCenter = size.width / 2f
+            val top = 10.dp.toPx()
+            val bottom = size.height - top
+            val fraction = zoomFraction.coerceIn(0f, 1f)
+            val thumbY = bottom - fraction * (bottom - top)
+            drawLine(
+                color = trackColor,
+                start = androidx.compose.ui.geometry.Offset(horizontalCenter, top),
+                end = androidx.compose.ui.geometry.Offset(horizontalCenter, bottom),
+                strokeWidth = 4.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = thumbColor,
+                start = androidx.compose.ui.geometry.Offset(horizontalCenter, thumbY),
+                end = androidx.compose.ui.geometry.Offset(horizontalCenter, bottom),
+                strokeWidth = 4.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawCircle(
+                color = MaterialTheme.colorScheme.surface,
+                radius = 9.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(horizontalCenter, thumbY)
+            )
+            drawCircle(
+                color = thumbColor,
+                radius = 7.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(horizontalCenter, thumbY)
+            )
+        }
+    }
+}
+
 private fun PreviewPagerButton(
     icon: ImageVector,
     contentDescription: String,
@@ -719,18 +812,21 @@ private fun PreviewPagerButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    TooltipAnchor(tooltip = contentDescription) {
-        FilledIconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = modifier.size(48.dp),
-            colors = IconButtonDefaults.filledIconButtonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
-                contentColor = MaterialTheme.colorScheme.onSurface,
-                disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.3f)
-            )
-        ) {
-            Icon(imageVector = icon, contentDescription = contentDescription)
+    // Alignment belongs on the outer layout surface, not inside TooltipAnchor's wrapper.
+    Box(modifier = modifier.size(48.dp)) {
+        TooltipAnchor(tooltip = contentDescription) {
+            FilledIconButton(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier.fillMaxSize(),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.3f)
+                )
+            ) {
+                Icon(imageVector = icon, contentDescription = contentDescription)
+            }
         }
     }
 }
@@ -878,41 +974,24 @@ private fun PreviewPane(
                                 ),
                             contentScale = ContentScale.Fit
                         )
-                        Row(
+                        VerticalZoomSlider(
+                            zoomFraction = zoomableState.zoomFraction ?: 0f,
+                            onZoomFractionChange = { fraction ->
+                                zoomScope.launch {
+                                    if (fraction <= 0.001f) {
+                                        zoomableState.resetZoom(animationSpec = SnapSpec())
+                                    } else {
+                                        zoomableState.zoomTo(
+                                            zoomFactor = 1f + 3f * fraction,
+                                            animationSpec = SnapSpec()
+                                        )
+                                    }
+                                }
+                            },
                             modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            TooltipAnchor(tooltip = stringResource(Res.string.preview_zoom_in)) {
-                                FilledIconButton(
-                                    onClick = {
-                                        zoomScope.launch {
-                                            zoomableState.zoomBy(zoomFactor = 1.2f)
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.ZoomIn,
-                                        contentDescription = stringResource(Res.string.preview_zoom_in)
-                                    )
-                                }
-                            }
-                            TooltipAnchor(tooltip = stringResource(Res.string.preview_zoom_out)) {
-                                FilledIconButton(
-                                    onClick = {
-                                        zoomScope.launch {
-                                            zoomableState.zoomBy(zoomFactor = 1f / 1.2f)
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.ZoomOut,
-                                        contentDescription = stringResource(Res.string.preview_zoom_out)
-                                    )
-                                }
-                            }
-                        }
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 14.dp)
+                        )
                     }
                 }
             }
