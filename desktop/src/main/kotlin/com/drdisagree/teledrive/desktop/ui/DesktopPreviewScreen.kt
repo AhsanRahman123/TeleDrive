@@ -718,6 +718,7 @@ private fun PreviewOverflowMenu(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun VerticalZoomSlider(
     zoomFraction: Float,
@@ -763,8 +764,9 @@ private fun VerticalZoomSlider(
                             val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
                             if (delta != 0f) {
                                 // Desktop wheel-up is a negative Y delta: move toward maximum zoom.
+                                val step = if (delta < 0f) 0.08f else -0.08f
                                 latestOnChange.value(
-                                    (latestFraction.value - delta * 0.08f).coerceIn(0f, 1f)
+                                    (latestFraction.value + step).coerceIn(0f, 1f)
                                 )
                                 event.changes.forEach { it.consume() }
                             }
