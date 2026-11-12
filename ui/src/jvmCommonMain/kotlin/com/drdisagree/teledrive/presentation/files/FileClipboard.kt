@@ -4,32 +4,39 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 
 class FileClipboard {
-    private val content = MutableStateFlow<CutItems?>(null)
+    private data class Entry(
+        val revision: Long,
+        val items: CutItems
+    )
+
+    private val content = MutableStateFlow<Entry?>(null)
+    private var revision = 0L
 
     @Synchronized
     fun cut(items: CutItems) {
-        content.value = items.copy(isCut = true)
+        content.value = Entry(++revision, items.copy(isCut = true))
     }
 
     @Synchronized
     fun copy(items: CutItems) {
-        content.value = items.copy(isCut = false)
+        content.value = Entry(++revision, items.copy(isCut = false))
     }
 
     /** Copy clipboard content survives paste; cut content is consumed after a successful move. */
-    fun peek(): CutItems? = content.value
+    fun peek(): CutItems? = content.value?.items
 
     /**
-     * Clear only the exact cut payload that was pasted. Identity matters here: a newer cut of
-     * the same IDs must survive if an older asynchronous move finishes after it.
+     * Clear only the exact cut payload that was pasted. The revision keeps equal consecutive
+     * clipboard values distinct, so a newer cut of the same IDs survives an older move.
      */
     @Synchronized
     fun clearIfMatches(items: CutItems): Boolean {
-        if (content.value !== items || !items.isCut) return false
+        val current = content.value ?: return false
+        if (current.items !== items || !current.items.isCut) return false
         content.value = null
         return true
     }
 
     @Synchronized
-    fun take(): CutItems? = content.getAndUpdate { null }
+    fun take(): CutItems? = content.getAndUpdate { null }?.items
 }
