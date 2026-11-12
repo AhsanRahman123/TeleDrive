@@ -102,7 +102,7 @@ internal data class FilesTabState(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FilesViewModel(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val fileRepository: FileRepository,
     private val cacheRepository: CacheRepository,
     private val trashRepository: TrashRepository,
@@ -133,7 +133,7 @@ class FilesViewModel(
             listOf(FilesTabState(0, initialFolderId, "Files"))
         }
     )
-    val workspaceTabs: StateFlow<List<FilesTabState>> = _workspaceTabs.asStateFlow()
+    internal val workspaceTabs: StateFlow<List<FilesTabState>> = _workspaceTabs.asStateFlow()
 
     private val _selectedWorkspaceTabId = MutableStateFlow(
         savedStateHandle.get<Int>(KEY_SELECTED_WORKSPACE_TAB_ID)
