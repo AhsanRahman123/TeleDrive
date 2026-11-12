@@ -1687,7 +1687,6 @@ private fun PlayerControlsBar(
                         )
                     }
                 }
-            }
         }
     }
 }
