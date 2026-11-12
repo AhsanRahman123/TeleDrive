@@ -118,8 +118,6 @@ class FilesViewModel(
 ) : ViewModel() {
 
     private val initialFolderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
-    private val _activeFolderId = MutableStateFlow(initialFolderId)
-    val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
 
     private fun restoreWorkspaceTabs(): List<FilesTabState> {
         val encoded = savedStateHandle.get<ArrayList<String>>(KEY_WORKSPACE_TABS).orEmpty()
@@ -143,6 +141,14 @@ class FilesViewModel(
             ?: _workspaceTabs.value.first().id
     )
     val selectedWorkspaceTabId: StateFlow<Int> = _selectedWorkspaceTabId.asStateFlow()
+
+    // On process recreation, resume the selected workspace tab rather than the route's
+    // original folder. The tab strip and the active folder must describe the same tab.
+    private val _activeFolderId = MutableStateFlow(
+        _workspaceTabs.value.firstOrNull { it.id == _selectedWorkspaceTabId.value }?.folderId
+            ?: initialFolderId
+    )
+    val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
 
     private var nextWorkspaceTabId = maxOf(
         savedStateHandle.get<Int>(KEY_NEXT_WORKSPACE_TAB_ID) ?: 1,
