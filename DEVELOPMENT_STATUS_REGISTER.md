@@ -226,3 +226,18 @@ Latest follow-up source changes on `work/desktop-feature-fixes-20261112`:
 - Expanded `WINDOWS_ACCEPTANCE_TEST_PLAN.md` with explicit checks for P/N seek mapping, failed cut/paste retry, newer clipboard replacement, Close all Files tabs, workspace restoration, and image rotate/mirror transformations.
 
 **Status: SOURCE-PRESENT; NOT YET COMPILED OR RUNTIME-VERIFIED on Windows.** The feature branch's PR #10 remains draft. The repository workflow does not run a push build for this custom feature branch; use the documented local Windows acceptance sequence and keep PR #10 draft until the exact current head passes the relevant tests and user-facing checks.
+
+### Windows compile feedback — November 13, 2026
+
+The user fetched and fast-forwarded the development clone to `a29a95547e217f10c50dac68d2525d57e477c869`. On that exact head:
+
+- `:shared:desktopTest` — **BUILD SUCCESSFUL**.
+- `:ui:desktopTest` — **FAILED at `:ui:compileKotlinDesktop`**.
+- The first relevant errors were `savedStateHandle` unresolved from `FilesViewModel.restoreWorkspaceTabs()` / `persistWorkspaceTabs()`, followed by type-inference errors cascading from that unresolved reference.
+- The compiler also reported that the public `workspaceTabs` property exposed internal `FilesTabState`.
+
+Source correction pushed in commit `ffeab6f12fe17f7519d26cd7693a7cfbfcd8bb29`:
+- Retain the constructor-injected handle as `private val savedStateHandle`, so class member methods can access it.
+- Make `workspaceTabs` internal to match the internal visibility of `FilesTabState`.
+
+**Status: FIX COMMITTED; NOT YET REBUILT.** Fetch the new branch head, then rerun `:ui:desktopTest` first. Only continue to `:desktop:test` and `:desktop:compileKotlin` after the UI task succeeds. Leave the untracked Room schema `shared/schemas/com.drdisagree.teledrive.data.local.database.TeleDriveDatabase/19.json` untouched.
