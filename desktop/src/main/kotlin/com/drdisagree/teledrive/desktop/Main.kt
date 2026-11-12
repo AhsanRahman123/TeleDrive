@@ -1,7 +1,6 @@
 package com.drdisagree.teledrive.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -11,6 +10,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
@@ -50,8 +56,6 @@ import com.drdisagree.teledrive.presentation.theme.systemDarkTheme
 import com.drdisagree.teledrive.resources.Res as SharedRes
 import com.drdisagree.teledrive.resources.app_name
 import java.awt.Dimension
-import java.awt.KeyboardFocusManager
-import java.awt.event.KeyEvent
 import javax.swing.JOptionPane
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CoroutineScope
@@ -121,7 +125,21 @@ fun main() {
             onCloseRequest = ::exitApplication,
             title = stringResource(SharedRes.string.app_name),
             icon = painterResource(Res.drawable.app_icon),
-            state = windowState
+            state = windowState,
+            onPreviewKeyEvent = { event ->
+                if (
+                    event.type == KeyEventType.KeyDown &&
+                    event.key == Key.F11 &&
+                    !event.isCtrlPressed &&
+                    !event.isAltPressed &&
+                    !event.isShiftPressed
+                ) {
+                    fullscreenController.toggle()
+                    true
+                } else {
+                    false
+                }
+            }
         ) {
             window.minimumSize = Dimension(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
             setSingletonImageLoaderFactory { context ->
@@ -146,44 +164,6 @@ fun main() {
                 AppTheme.SYSTEM -> systemDark
             }
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
-            DisposableEffect(window, fullscreenController) {
-                var f11Pressed = false
-                val focusManager = KeyboardFocusManager.getCurrentKeyboardFocusManager()
-                val dispatcher = java.awt.KeyEventDispatcher { event ->
-                    if (event.keyCode != KeyEvent.VK_F11) {
-                        false
-                    } else {
-                        when (event.id) {
-                            // Always clear the press latch on key-up, even if entering/exiting
-                            // fullscreen changed the focused window between key-down and key-up.
-                            // Otherwise the release can be ignored and every later F11 press
-                            // will look like auto-repeat and be swallowed.
-                            KeyEvent.KEY_RELEASED -> {
-                                val wasPressed = f11Pressed
-                                f11Pressed = false
-                                wasPressed
-                            }
-                            KeyEvent.KEY_PRESSED -> {
-                                val belongsToThisWindow = focusManager.focusedWindow === window
-                                val disallowedModifiers =
-                                    KeyEvent.CTRL_DOWN_MASK or KeyEvent.ALT_DOWN_MASK or KeyEvent.SHIFT_DOWN_MASK
-                                if (!belongsToThisWindow || (event.modifiersEx and disallowedModifiers) != 0) {
-                                    false
-                                } else {
-                                    if (!f11Pressed) {
-                                        f11Pressed = true
-                                        fullscreenController.toggle()
-                                    }
-                                    true
-                                }
-                            }
-                            else -> false
-                        }
-                    }
-                }
-                focusManager.addKeyEventDispatcher(dispatcher)
-                onDispose { focusManager.removeKeyEventDispatcher(dispatcher) }
-            }
             Box(modifier = Modifier.fillMaxSize()) {
                 CompositionLocalProvider(LocalFullscreenController provides fullscreenController) {
                     ProvideDesktopPlatformActions {
