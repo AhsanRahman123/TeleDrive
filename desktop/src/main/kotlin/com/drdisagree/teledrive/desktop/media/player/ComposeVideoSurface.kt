@@ -84,7 +84,7 @@ internal fun copyVideoFramePixels(
     val readable = source.duplicate().apply { position(0) }
     if (readable.remaining() < byteCount.toInt()) return null
 
-    return ByteArray(byteCount.toInt()).also(readable::get)
+    return ByteArray(byteCount.toInt()).also { readable.get(it) }
 }
 
 private const val BYTES_PER_PIXEL = 4
