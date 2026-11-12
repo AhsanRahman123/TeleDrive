@@ -46,6 +46,8 @@ import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.FileThumbnail
+import com.drdisagree.teledrive.presentation.files.CutItems
+import com.drdisagree.teledrive.presentation.files.FileClipboard
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
@@ -72,6 +74,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
     val settingsRepository = koinInject<SettingsRepository>()
     val storagePaths = koinInject<AppStoragePaths>()
     val telegramClient = koinInject<TelegramClient>()
+    val fileClipboard = koinInject<FileClipboard>()
     val scope = rememberCoroutineScope()
     val deleteConsentLauncher = LocalDeleteConsentLauncher.current
     val fileRevealer = LocalFileRevealer.current
@@ -258,6 +261,30 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                         onSelectAll = {
                             selectedIds = rows.map { it.file.id }.toSet()
                             true
+                        },
+                        onCopy = {
+                            val ids = selectedIds.toList()
+                            if (ids.isEmpty()) {
+                                false
+                            } else {
+                                fileClipboard.copy(
+                                    CutItems(fileIds = ids, folderIds = emptyList(), isCut = false)
+                                )
+                                selectedIds = emptySet()
+                                message = "Copied ${ids.size} item(s). Paste into a Drive folder with Ctrl+V."
+                                true
+                            }
+                        },
+                        onCut = {
+                            val ids = selectedIds.toList()
+                            if (ids.isEmpty()) {
+                                false
+                            } else {
+                                fileClipboard.cut(CutItems(fileIds = ids, folderIds = emptyList()))
+                                selectedIds = emptySet()
+                                message = "Cut ${ids.size} item(s). Paste into a Drive folder with Ctrl+V."
+                                true
+                            }
                         }
                     ),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
