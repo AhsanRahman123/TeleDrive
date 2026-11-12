@@ -115,70 +115,10 @@ class FilesViewModel(
     private val _activeFolderId = MutableStateFlow(initialFolderId)
     val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
 
-    private val initialTabId = "files-tab-1"
-    private var nextTabNumber = 2
-    private val _tabs = MutableStateFlow(
-        listOf(FilesTab(initialTabId, initialFolderId, "Files"))
-    )
-    val tabs: StateFlow<List<FilesTab>> = _tabs.asStateFlow()
-    private val _activeTabId = MutableStateFlow(initialTabId)
-    val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
-
     fun setActiveFolder(folderId: String?) {
         if (_activeFolderId.value == folderId) return
+        clearSelection()
         _activeFolderId.value = folderId
-        _tabs.update { current ->
-            current.map { tab ->
-                if (tab.id == _activeTabId.value) tab.copy(folderId = folderId) else tab
-            }
-        }
-        clearSelection()
-        viewModelScope.launch { refreshActiveTabTitle(folderId) }
-    }
-
-    fun addTab() {
-        val tabId = "files-tab-${nextTabNumber++}"
-        val folderId = _activeFolderId.value
-        val title = "Files"
-        _tabs.update { it + FilesTab(tabId, folderId, title) }
-        _activeTabId.value = tabId
-        clearSelection()
-        viewModelScope.launch { refreshActiveTabTitle(folderId) }
-    }
-
-    fun switchTab(tabId: String) {
-        val tab = _tabs.value.firstOrNull { it.id == tabId } ?: return
-        if (_activeTabId.value == tabId) return
-        _activeTabId.value = tabId
-        _activeFolderId.value = tab.folderId
-        clearSelection()
-    }
-
-    fun closeTab(tabId: String) {
-        val current = _tabs.value
-        if (current.size <= 1) return
-        val closingIndex = current.indexOfFirst { it.id == tabId }
-        if (closingIndex < 0) return
-        val wasActive = _activeTabId.value == tabId
-        val remaining = current.filterNot { it.id == tabId }
-        _tabs.value = remaining
-        if (wasActive) {
-            val replacement = remaining[(closingIndex - 1).coerceIn(0, remaining.lastIndex)]
-            _activeTabId.value = replacement.id
-            _activeFolderId.value = replacement.folderId
-            clearSelection()
-        }
-    }
-
-    private suspend fun refreshActiveTabTitle(folderId: String?) {
-        val title = folderId?.let { fileRepository.getFolder(it)?.name } ?: "Files"
-        _tabs.update { current ->
-            current.map { tab ->
-                if (tab.id == _activeTabId.value && tab.folderId == folderId) {
-                    tab.copy(title = title.ifBlank { "Files" })
-                } else tab
-            }
-        }
     }
 
     val listPosition = ListPosition(savedStateHandle)
