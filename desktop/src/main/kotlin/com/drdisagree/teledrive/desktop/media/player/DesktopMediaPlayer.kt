@@ -41,7 +41,6 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.AlertDialog
@@ -886,28 +885,6 @@ internal fun DesktopMediaPlayer(
 
         if (buffering && !finished) {
             CircularWavyProgressIndicator(modifier = Modifier.size(56.dp))
-        }
-
-        // Leave one small reveal affordance when the user permanently hides player chrome.
-        // Keyboard shortcut C remains available as well.
-        if (!controlPreferences.showPlayerControls) {
-            TooltipIconButton(
-                tooltip = "Show player controls",
-                onClick = {
-                    val updated = controlPreferences.copy(showPlayerControls = true)
-                    controlPreferences = updated
-                    controlsPinned = true
-                    PlayerControlPreferencesStore.save(updated)
-                    interactionTick++
-                },
-                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Visibility,
-                    contentDescription = "Show player controls",
-                    tint = Color.White
-                )
-            }
         }
 
         AnimatedVisibility(
