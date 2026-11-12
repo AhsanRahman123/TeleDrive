@@ -1150,10 +1150,15 @@ fun GalleryScreen(
                     if (viewModel.hasSelection()) confirmTrash = true
                 },
                 onRename = { index -> mediaIdAt(index)?.let(viewModel::requestRename) },
+                onCopy = { index ->
+                    selectIfNone(index)
+                    viewModel.copyToClipboardSelected()
+                },
                 onCut = { index ->
                     selectIfNone(index)
                     viewModel.cutSelected()
                 },
+                onPaste = viewModel::paste,
                 onBack = onBack,
                 onClear = if (selectionMode) viewModel::clearSelection else null
             )
