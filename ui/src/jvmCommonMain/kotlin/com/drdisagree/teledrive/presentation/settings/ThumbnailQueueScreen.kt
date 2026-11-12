@@ -34,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -77,7 +76,7 @@ fun ThumbnailQueueScreen(
     val repository = koinInject<CacheRepository>()
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
-    val activeJobs by repository.observeThumbnailActiveJobs().collectAsState(initial = emptySet())
+    var activeQueueIds by remember { mutableStateOf(emptySet<String>()) }
     var items by remember { mutableStateOf(emptyList<ThumbnailQueueItem>()) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var failedQueueIds by remember { mutableStateOf(emptySet<String>()) }
@@ -115,6 +114,7 @@ fun ThumbnailQueueScreen(
             pendingCount = repository.thumbnailQueueCount()
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
+            activeQueueIds = repository.thumbnailQueueActiveFileIds()
             val remainingWork = (pendingCount - failedQueueIds.size).coerceAtLeast(0)
 
             val sampleAt = System.currentTimeMillis()
@@ -197,8 +197,8 @@ fun ThumbnailQueueScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Thumbnail queue", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "${(pendingCount - activeJobs.size).coerceAtLeast(0)} waiting · " +
-                            activeJobs.size + " generating · " + pendingCount + " total" +
+                        "${(pendingCount - activeQueueIds.size).coerceAtLeast(0)} waiting · " +
+                            activeQueueIds.size + " generating · " + pendingCount + " total" +
                             if (queuePaused) " · Paused" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -235,6 +235,8 @@ fun ThumbnailQueueScreen(
                     scope.launch {
                         items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
                         pendingCount = repository.thumbnailQueueCount()
+                        activeQueueIds = repository.thumbnailQueueActiveFileIds()
+                        failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
                         queuePaused = repository.thumbnailQueuePaused()
                     }
                 }) {
@@ -274,10 +276,10 @@ fun ThumbnailQueueScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
-                } else if (activeJobs.isNotEmpty()) {
+                } else if (activeQueueIds.isNotEmpty()) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     Text(
-                        "Working on " + activeJobs.size +
+                        "Working on " + activeQueueIds.size +
                             " item(s) in parallel. Jobs remain queued across app restarts.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -419,7 +421,7 @@ fun ThumbnailQueueScreen(
                                 ThumbnailQueueRow(
                                     item = item,
                                     selected = item.fileId in selectedIds,
-                                    active = item.fileId in activeJobs,
+                                    active = item.fileId in activeQueueIds,
                                     globallyPaused = queuePaused,
                                     onSelect = { checked ->
                                         selectedIds = if (checked) selectedIds + item.fileId
