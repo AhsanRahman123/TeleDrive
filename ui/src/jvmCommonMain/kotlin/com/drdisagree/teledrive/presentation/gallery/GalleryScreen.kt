@@ -38,6 +38,7 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.galleryGridColumnsForWindow
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
@@ -425,8 +426,7 @@ fun GalleryScreen(
     // Fit more media previews on wide windows while keeping phone grids unchanged.
     val isWideWindow = currentWindowAdaptiveInfoV2().windowSizeClass
         .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
-    val mediaGridColumns = if (isWideWindow) (state.gridSize + 2).coerceAtMost(8)
-        else state.gridSize
+    val mediaGridColumns = galleryGridColumnsForWindow(state.gridSize, isWideWindow)
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     var confirmTrash by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
