@@ -7,6 +7,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -181,7 +183,7 @@ internal fun DesktopMediaPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionTick by remember { mutableIntStateOf(0) }
     var controlsPinned by remember { mutableStateOf(false) }
-    var lastHiddenHPressAt by remember { mutableLongStateOf(0L) }
+    var hKeyPressed by remember { mutableStateOf(false) }
     var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
@@ -552,6 +554,13 @@ internal fun DesktopMediaPlayer(
             .background(Color.Black)
             .focusRequester(playerFocusRequester)
             .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp) {
+                    if (event.key == Key.H) {
+                        hKeyPressed = false
+                        return@onPreviewKeyEvent true
+                    }
+                    return@onPreviewKeyEvent false
+                }
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val key = event.key
                 val ctrl = event.isCtrlPressed
@@ -631,17 +640,8 @@ internal fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    // W/E are reserved for media navigation; Left/Right remain seek keys.
-                    key == Key.W && !ctrl && !alt && !shift -> {
-                        if (hasPrevious) onPrevious()
-                        interactionTick++
-                        true
-                    }
-                    key == Key.E && !ctrl && !alt && !shift -> {
-                        if (hasNext) onNext()
-                        interactionTick++
-                        true
-                    }
+                    // W/E are handled by the preview screen so mixed image/video folders
+                    // are navigated as one sequence. Player transport buttons stay queue-scoped.
                     !alt && !shift && key == Key.DirectionUp -> {
                         adjustPlayerVolume(VOLUME_STEP)
                         interactionTick++
@@ -754,31 +754,16 @@ internal fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.H && !ctrl && !alt && !shift -> {
-                        if (controlPreferences.showPlayerControls) {
-                            val updated = controlPreferences.copy(showPlayerControls = false)
-                            controlPreferences = updated
-                            controlsPinned = false
-                            PlayerControlPreferencesStore.save(updated)
-                            controlsVisible = false
-                            latestOnControlsVisibilityChange.value(false)
-                            lastHiddenHPressAt = System.currentTimeMillis()
-                            lastVisibilityInteractionTick = interactionTick
-                        } else {
-                            val now = System.currentTimeMillis()
-                            if (now - lastHiddenHPressAt in 1..H_SHOW_DOUBLE_PRESS_MS) {
-                                val updated = controlPreferences.copy(showPlayerControls = true)
-                                controlPreferences = updated
-                                controlsPinned = false
-                                PlayerControlPreferencesStore.save(updated)
-                                controlsVisible = true
-                                latestOnControlsVisibilityChange.value(true)
-                                lastVisibilityInteractionTick = interactionTick
-                                lastHiddenHPressAt = 0L
-                            } else {
-                                lastHiddenHPressAt = now
-                            }
-                        }
+                    key == Key.H && !ctrl && !alt && !shift && !hKeyPressed -> {
+                        hKeyPressed = true
+                        val showControls = !controlPreferences.showPlayerControls
+                        val updated = controlPreferences.copy(showPlayerControls = showControls)
+                        controlPreferences = updated
+                        controlsPinned = false
+                        PlayerControlPreferencesStore.save(updated)
+                        controlsVisible = showControls
+                        latestOnControlsVisibilityChange.value(showControls)
+                        lastVisibilityInteractionTick = interactionTick
                         true
                     }
                     key == Key.H && ctrl && !alt && !shift -> {
@@ -892,7 +877,7 @@ internal fun DesktopMediaPlayer(
             enter = fadeIn(),
             exit = fadeOut(),
             // Keep the transport row comfortably above the bottom edge in windowed mode.
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp)
         ) {
             PlayerControlsBar(
                 player = player,
@@ -954,7 +939,6 @@ internal fun DesktopMediaPlayer(
                     PlayerControlPreferencesStore.save(updated)
                     controlsVisible = false
                     latestOnControlsVisibilityChange.value(false)
-                    lastHiddenHPressAt = 0L
                     lastVisibilityInteractionTick = interactionTick
                 },
                 onRate = ::setPlaybackRate,
@@ -1341,13 +1325,15 @@ private fun PlayerControlsBar(
             }
         }
 
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                modifier = Modifier.align(Alignment.Center),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1428,7 +1414,6 @@ private fun PlayerControlsBar(
             }
 
             Row(
-                modifier = Modifier.align(Alignment.CenterEnd),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box {
@@ -1734,7 +1719,6 @@ private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
 }
 
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
-private const val H_SHOW_DOUBLE_PRESS_MS = 450L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
