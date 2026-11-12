@@ -56,6 +56,7 @@ import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import com.drdisagree.teledrive.core.media.ApkIconExtractor
 import kotlinx.coroutines.flow.first
@@ -703,9 +704,26 @@ class DesktopThumbnailStore(
                 graphics.dispose()
             }
         }
+        val writer = ImageIO.getImageWritersByFormatName("jpg").asSequence().firstOrNull()
+            ?: return ByteArrayOutputStream().use { output ->
+                ImageIO.write(rgb, "jpg", output)
+                output.toByteArray()
+            }
         return ByteArrayOutputStream().use { output ->
-            ImageIO.write(rgb, "jpg", output)
-            output.toByteArray()
+            try {
+                ImageIO.createImageOutputStream(output).use { imageOutput ->
+                    writer.output = imageOutput
+                    val parameters = writer.defaultWriteParam
+                    if (parameters.canWriteCompressed()) {
+                        parameters.compressionMode = javax.imageio.ImageWriteParam.MODE_EXPLICIT
+                        parameters.compressionQuality = THUMBNAIL_JPEG_QUALITY
+                    }
+                    writer.write(null, IIOImage(rgb, null, null), parameters)
+                }
+                output.toByteArray()
+            } finally {
+                writer.dispose()
+            }
         }
     }
 
@@ -759,7 +777,8 @@ class DesktopThumbnailStore(
         const val JOB_INSERT_BATCH_SIZE = 250
         const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024
-        const val MAX_DIMENSION = 512
+        const val MAX_DIMENSION = 768
+        const val THUMBNAIL_JPEG_QUALITY = 0.86f
         const val VIDEO_FRAME_TIMEOUT_MS = 8_000L
         const val VIDEO_SNAPSHOT_TIMEOUT_MS = 5_000L
         const val VIDEO_SNAPSHOT_DELAY_MS = 100L
