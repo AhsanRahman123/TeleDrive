@@ -537,7 +537,8 @@ fun DesktopPreviewScreen(
                     contentDescription = stringResource(Res.string.preview_next),
                     enabled = index < state.files.lastIndex,
                     onClick = { index++ },
-                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp)
+                    // Leave the outermost right edge for the image zoom rail.
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 72.dp)
                 )
             }
         }
