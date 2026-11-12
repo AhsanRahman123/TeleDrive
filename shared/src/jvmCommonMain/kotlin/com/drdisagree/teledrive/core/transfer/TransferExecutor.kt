@@ -791,6 +791,7 @@ class TransferExecutor(
         transferDao.setLocalPath(transfer.id, null)
         fileDao.setLocalPath(entity.id, savedPath)
         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
+        refreshDownloadedMediaThumbnail(entity)
         return TransferOutcome.Completed
     }
 
@@ -862,7 +863,28 @@ class TransferExecutor(
 
         fileDao.setLocalPath(fileId, savedPath)
         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
+        refreshDownloadedMediaThumbnail(entity)
         return TransferOutcome.Completed
+    }
+
+    /**
+     * A completed original can replace a low-resolution remote thumbnail with a sharp local
+     * thumbnail. This is cache maintenance only: it never changes or recompresses the original.
+     * Keep thumbnail refresh best-effort so it cannot turn a successful download into a failure.
+     */
+    private suspend fun refreshDownloadedMediaThumbnail(entity: FileEntity) {
+        if (entity.category != FileCategory.IMAGE && entity.category != FileCategory.VIDEO) return
+        withContext(NonCancellable) {
+            runCatching {
+                thumbnailStore.refreshCachedThumbnailFromLocalOriginal(entity.id)
+            }.onFailure { error ->
+                SafeLog.w(
+                    "TransferExecutor",
+                    "Could not queue a local-original thumbnail refresh for ${entity.id}",
+                    error
+                )
+            }
+        }
     }
 
     /**
