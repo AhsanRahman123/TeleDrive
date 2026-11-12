@@ -32,7 +32,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -256,13 +256,13 @@ fun CacheManagerScreen(
             TopAppBar(
                 title = { Text("Free up space") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    TooltipIconButton(tooltip = "Back", onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     if (selectedTool == "CACHE") {
-                        IconButton(onClick = {
+                        TooltipIconButton(tooltip = "Refresh cache inventory", onClick = {
                             pageOffset = 0
                             entries = emptyList()
                             refreshKey++
