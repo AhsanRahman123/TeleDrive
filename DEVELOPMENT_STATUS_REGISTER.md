@@ -214,3 +214,15 @@ Only after the exact consolidated commit passes its relevant acceptance tests sh
 - **Visible dashboard:** Screenshot showed Favorites, Recent, and Storage summary (304 files, 14.8 GB). This confirms successful startup/onboarding and that a library overview is displayed. It does not by itself prove that individual file contents are accessible or that every feature works.
 - **Profile separation:** The app process uses `TELEDRIVE_DATA_DIR` pointing at `.teledrive-instance` inside the new clone. The local settings, Room DB, TDLib DB/files and keys are stored under that isolated root. The logged-in Telegram account is nevertheless the user's real account; remote cloud operations affect real Telegram data.
 - **Next:** Perform read-only navigation and viewer smoke tests first. Do not delete, move, rename, upload, clear cache, trash, or otherwise mutate real cloud/library data until the user explicitly chooses a disposable test item or test folder. Record each test against the exact commit.
+
+## 12. Follow-up fixes — 2026-11-13
+
+Latest follow-up source changes on `work/desktop-feature-fixes-20261112`:
+
+- Added the requested desktop player shortcuts: **P = seek backward 5 seconds** and **N = seek forward 5 seconds**. Existing left/right arrow seeking remains 10 seconds.
+- Fixed Files cut/paste lifecycle: a cut payload is retained until the requested move operations succeed. Failed moves leave the cut payload available for retry.
+- Clipboard cleanup is identity-guarded, so a newer cut of the same file/folder IDs is not cleared when an older asynchronous move finishes.
+- Added `FileClipboardTest` coverage for successful cleanup, retention of a newer cut payload, and non-consumption of copy payloads.
+- Expanded `WINDOWS_ACCEPTANCE_TEST_PLAN.md` with explicit checks for P/N seek mapping, failed cut/paste retry, newer clipboard replacement, Close all Files tabs, workspace restoration, and image rotate/mirror transformations.
+
+**Status: SOURCE-PRESENT; NOT YET COMPILED OR RUNTIME-VERIFIED on Windows.** The feature branch's PR #10 remains draft. The repository workflow does not run a push build for this custom feature branch; use the documented local Windows acceptance sequence and keep PR #10 draft until the exact current head passes the relevant tests and user-facing checks.
