@@ -762,17 +762,29 @@ private fun PreviewPane(
     // preserves the single VLC surface across the transient Loading state and prevents the
     // black flash that otherwise occurs between adjacent local videos.
     var lastReadyLocalMedia by remember { mutableStateOf<PreviewContent.LocalMedia?>(null) }
+    var lastReadyStreamedMedia by remember { mutableStateOf<PreviewContent.StreamedMedia?>(null) }
     LaunchedEffect(content) {
         when (val resolved = content) {
-            is PreviewContent.LocalMedia -> lastReadyLocalMedia = resolved
+            is PreviewContent.LocalMedia -> {
+                lastReadyLocalMedia = resolved
+                lastReadyStreamedMedia = null
+            }
+            is PreviewContent.StreamedMedia -> {
+                lastReadyLocalMedia = null
+                lastReadyStreamedMedia = resolved
+            }
             is PreviewContent.Loading -> Unit
-            else -> lastReadyLocalMedia = null
+            else -> {
+                lastReadyLocalMedia = null
+                lastReadyStreamedMedia = null
+            }
         }
     }
+    val retainedMedia: PreviewContent? = lastReadyLocalMedia ?: lastReadyStreamedMedia
     val displayedContent = if (
         file.category in setOf(FileCategory.AUDIO, FileCategory.VIDEO) &&
-        content is PreviewContent.Loading && lastReadyLocalMedia != null
-    ) lastReadyLocalMedia!! else content
+        content is PreviewContent.Loading && retainedMedia != null
+    ) retainedMedia else content
     val urlOpener = LocalUrlOpener.current
     val preferredAudioLanguage by viewModel.preferredAudioLanguage.collectAsState()
     val preferredSubtitleLanguage by viewModel.preferredSubtitleLanguage.collectAsState()
