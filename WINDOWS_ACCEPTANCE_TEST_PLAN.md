@@ -194,7 +194,17 @@ Use disposable test files and distinguish three locations: app-managed Room/down
 - [ ] Use Close all Files tabs; confirm exactly one fresh root tab remains. Reopen folders and verify the selected tab/folder workspace restores after navigating to a preview and returning.
 - [ ] Drag a selected file/folder from Grid, List and Details onto another tab. Confirm the drag action (Move or Copy) is honored and the destination is that tab's current folder.
 - [ ] Confirm dropping onto the active tab is rejected and dropping onto an invalid/closed tab does not mutate anything.
+- [ ] Ctrl+T opens a new Files workspace tab from the file list, tab strip and toolbar; existing tabs and their folder/scroll state remain intact.
+- [ ] Ctrl+N opens the New Folder dialog in Files, including when focus is on a selected row or the Files toolbar. In the Gallery Albums root it opens New Album.
+- [ ] Ctrl+A selects all files and folders in the active Files folder, including file results on unloaded pages; the toolbar count equals the actual selected rows.
 - [ ] Ctrl+C copies selected files/folders; repeated Ctrl+V pastes additional copies. Ctrl+X cuts and Ctrl+V moves once. Confirm files and folders preserve metadata and local copies as appropriate.
+- [ ] Copy/cut in Files, Gallery media/albums, Search results and Favorites/Offline/Archived/Hidden collections; paste into an actual Files folder or Gallery album. Confirm the app clipboard is shared across sections and a successful cut is consumed only after every requested move succeeds.
+- [ ] In Favorites/Offline/Archived/Hidden, Ctrl+A selects matching files/folders and Ctrl+C/X copies/cuts selected items. These are filtered collections, not destination folders; verify Ctrl+V targets the Drive root.
+- [ ] In Search, Ctrl+A selects matching file results and Ctrl+C/X copies/cuts them. Ctrl+V is not assigned because Search has no destination folder.
+- [ ] In Thumbnail Manager and Thumbnail Queue, Ctrl+A selects all filtered inventory/queue items across pages. In Cache Manager and Backed-up local-copy inventory, Ctrl+A selects all matching rows.
+- [ ] In Trash, Ctrl+A selects all selectable trash rows. In Transfers, Ctrl+A selects all jobs visible under the current search/filter.
+- [ ] Test Ctrl+A/C/X/V inside Search, Cache Manager and Transfers text fields; text-field selection/clipboard must remain native and must not trigger collection actions.
+- [ ] Reproduce the screen-recorded Files bug: select many folders, click Clear selection, and confirm the toolbar returns to Files and every row's selected background/checkmark clears immediately. Then select exactly five folders and confirm exactly five rows remain highlighted and the toolbar says 5 selected. Navigate away/back and repeat.
 - [ ] In Files Grid/List/Details, selecting a file or folder shows a clearly visible filled primary badge with a contrasting checkmark; deselecting restores the neutral outline. Confirm this stronger selection treatment is Files-only and Gallery's visuals remain unchanged.
 - [ ] Trigger Ctrl+C/X/V after selecting with the mouse or checkbox, including when the destination folder is empty. Copy should leave the source and allow repeated paste; cut should move once and clear only after success.
 - [ ] Force a cut/move destination failure and confirm the cut clipboard remains available for retry. Start a newer cut while an earlier move is finishing and confirm the earlier completion does not clear the newer clipboard.
