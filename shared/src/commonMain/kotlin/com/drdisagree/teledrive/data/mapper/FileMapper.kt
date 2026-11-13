@@ -10,13 +10,19 @@ fun FileEntity.toDomain(): DriveFile {
     // available. Normalize at the domain boundary so previews and media queues recognize them
     // immediately, without requiring a destructive database migration.
     val resolvedMimeType = MimeTypes.resolve(name, mimeType)
+    val resolvedCategory = FileCategory.fromMimeType(resolvedMimeType)
+    // If neither the stored MIME nor the extension identifies the format, keep the category
+    // already stored in Room rather than demoting an older, correctly classified row to OTHER.
+    val resolvedCategoryOrStored = resolvedCategory.takeUnless {
+        it == FileCategory.OTHER
+    } ?: category
     return DriveFile(
         id = id,
         folderId = folderId,
         name = name,
         sizeBytes = sizeBytes,
         mimeType = resolvedMimeType,
-        category = FileCategory.fromMimeType(resolvedMimeType),
+        category = resolvedCategoryOrStored,
         localPath = localPath,
         contentHash = contentHash,
         chatId = chatId,
