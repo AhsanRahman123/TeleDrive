@@ -295,6 +295,7 @@ fun FilesScreen(
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
     var showDuplicateManager by remember { mutableStateOf(false) }
+    var showEmptyItems by remember { mutableStateOf(false) }
     var selectingAllFromShortcut by remember { mutableStateOf(false) }
     var deleteAfterSelectAll by remember { mutableStateOf(false) }
 
@@ -399,10 +400,11 @@ fun FilesScreen(
     }
 
     AppBackHandler(
-        enabled = showDuplicateManager || selectionMode || state.folderId != null || onBack != null
+        enabled = showDuplicateManager || showEmptyItems || selectionMode || state.folderId != null || onBack != null
     ) {
         when {
             showDuplicateManager -> showDuplicateManager = false
+            showEmptyItems -> showEmptyItems = false
             selectionMode -> viewModel.clearSelection()
             else -> navigateBackOneStep()
         }
@@ -540,7 +542,7 @@ fun FilesScreen(
                 .collectionCommandShortcuts(
                     focusRequester = filesCommandFocusRequester,
                     onSelectAll = {
-                        if (showDuplicateManager) {
+                        if (showDuplicateManager || showEmptyItems) {
                             false
                         } else {
                             when {
@@ -567,7 +569,7 @@ fun FilesScreen(
                     },
                     onDelete = {
                         when {
-                            showDuplicateManager || showCreateFolder || renameTarget != null -> false
+                            showDuplicateManager || showEmptyItems || showCreateFolder || renameTarget != null -> false
                             selectingAllFromShortcut -> {
                                 deleteAfterSelectAll = true
                                 true
@@ -580,22 +582,22 @@ fun FilesScreen(
                         }
                     },
                     onCopy = {
-                        if (showDuplicateManager) false else viewModel.copyToClipboardSelected()
+                        if (showDuplicateManager || showEmptyItems) false else viewModel.copyToClipboardSelected()
                     },
                     onCut = {
-                        if (showDuplicateManager) false else viewModel.cutSelected()
+                        if (showDuplicateManager || showEmptyItems) false else viewModel.cutSelected()
                     },
                     onPaste = {
-                        if (!showDuplicateManager && viewModel.hasClipboardItems()) {
+                        if (!showDuplicateManager && !showEmptyItems && viewModel.hasClipboardItems()) {
                             viewModel.paste()
                             true
                         } else false
                     },
                     onNewFolder = {
-                        if (showDuplicateManager) false else { showCreateFolder = true; true }
+                        if (showDuplicateManager || showEmptyItems) false else { showCreateFolder = true; true }
                     },
                     onNewTab = {
-                        if (showDuplicateManager) false else { createTab(); true }
+                        if (showDuplicateManager || showEmptyItems) false else { createTab(); true }
                     },
                     // Files has no inline text editor in this workspace (edit dialogs
                     // are separate windows), so handle shortcuts before row/button children.
@@ -605,8 +607,8 @@ fun FilesScreen(
             Scaffold(
                 snackbarHost = {},
                 topBar = {
-                    if (showDuplicateManager) {
-                        // DuplicateManagerScreen provides its own title and back control.
+                    if (showDuplicateManager || showEmptyItems) {
+                        // The active utility screen provides its own title and back control.
                     } else if (selectionMode) {
                         TopAppBar(
                             colors = liftedTopAppBarColors(lifted),
@@ -809,6 +811,15 @@ fun FilesScreen(
                                 }
                             },
                             actions = {
+                                TooltipIconButton(
+                                    tooltip = "Find empty files and folders",
+                                    onClick = { showEmptyItems = true }
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.FolderOff,
+                                        contentDescription = "Find empty files and folders"
+                                    )
+                                }
                                 TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                                     Icon(
                                         Icons.Filled.CheckBoxOutlineBlank,
@@ -904,7 +915,7 @@ fun FilesScreen(
                 },
                 floatingActionButton = {
                     AnimatedVisibility(
-                        visible = !showDuplicateManager && !selectionMode && (fabVisible || showAddMenu),
+                        visible = !showDuplicateManager && !showEmptyItems && !selectionMode && (fabVisible || showAddMenu),
                         enter = scaleIn() + fadeIn(),
                         exit = scaleOut() + fadeOut()
                     ) {
@@ -989,6 +1000,27 @@ fun FilesScreen(
                         DuplicateManagerScreen(
                             folderId = duplicateManagerFolderId,
                             onBack = { showDuplicateManager = false },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (showEmptyItems) {
+                        EmptyItemsScreen(
+                            folderId = state.folderId,
+                            onBack = { showEmptyItems = false },
+                            onMoveSelected = { fileIds, folderIds ->
+                                viewModel.selectItems(fileIds, folderIds)
+                                showEmptyItems = false
+                                showMovePicker = true
+                            },
+                            onCopySelected = { fileIds, folderIds ->
+                                viewModel.selectItems(fileIds, folderIds)
+                                showEmptyItems = false
+                                showCopyPicker = true
+                            },
+                            onDeleteSelected = { fileIds, folderIds ->
+                                viewModel.selectItems(fileIds, folderIds)
+                                showEmptyItems = false
+                                confirmTrash = true
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
