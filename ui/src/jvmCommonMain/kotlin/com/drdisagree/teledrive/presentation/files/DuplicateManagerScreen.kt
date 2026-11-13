@@ -199,6 +199,13 @@ fun DuplicateManagerScreen(
             DuplicateFileSort.NEWEST_FIRST -> matching.sortedByDescending { it.file.addedAt }
         }
     }
+    LaunchedEffect(state.queue) {
+        val liveQueueIds = state.queue
+            .filter { it.status != DuplicateScanStatus.CANCELLED }
+            .map { it.file.id }
+            .toSet()
+        selectedQueueIds = selectedQueueIds.intersect(liveQueueIds)
+    }
     val queueDragSelect = rememberDragSelect(
         listState = queueListState,
         onStart = { queueSelectionBase = selectedQueueIds },
