@@ -79,12 +79,17 @@ class DuplicateManagerRepositoryImpl(
             cancelAllRequested = false
 
             val ids = fileRepository.fileIdsInTree(folderId).distinct()
-            val entities = ids.chunked(SQL_BATCH_SIZE).flatMap { fileDao.byIds(it) }
-                .filter { it.trashedAt == null }
+            val entities = mutableListOf<FileEntity>()
+            for (batch in ids.chunked(SQL_BATCH_SIZE)) {
+                entities += fileDao.byIds(batch)
+            }
 
-            val queue = entities.map { entity ->
-                DuplicateScanQueueItem(
-                    file = entity.toScanFile(folderPathResolver.pathOf(entity.folderId ?: entity.preTrashFolderId)),
+            val queue = mutableListOf<DuplicateScanQueueItem>()
+            for (entity in entities) {
+                if (entity.trashedAt != null) continue
+                val folderPath = folderPathResolver.pathOf(entity.folderId ?: entity.preTrashFolderId)
+                queue += DuplicateScanQueueItem(
+                    file = entity.toScanFile(folderPath),
                     status = if (entity.contentHash.isNullOrBlank()) {
                         DuplicateScanStatus.WAITING
                     } else {
