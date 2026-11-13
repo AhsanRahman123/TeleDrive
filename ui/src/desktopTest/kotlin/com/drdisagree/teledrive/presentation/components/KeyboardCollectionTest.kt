@@ -10,6 +10,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -268,6 +271,7 @@ class KeyboardCollectionTest {
     @Test
     fun `collection select all does not intercept a nested text field shortcut`() {
         var selectedAll = 0
+        var editorValue by mutableStateOf(TextFieldValue("editable text"))
         rule.setContent {
             val listState = rememberLazyListState()
             val keyboard = rememberKeyboardCollection(listState)
@@ -283,9 +287,9 @@ class KeyboardCollectionTest {
             ) {
                 item {
                     Box(Modifier.keyboardCollectionItem(keyboard, 0)) {
-                        androidx.compose.foundation.text.BasicTextField(
-                            value = "editable text",
-                            onValueChange = {},
+                        BasicTextField(
+                            value = editorValue,
+                            onValueChange = { editorValue = it },
                             modifier = Modifier.testTag("nested-editor")
                         )
                     }
@@ -300,7 +304,10 @@ class KeyboardCollectionTest {
             keyUp(Key.CtrlLeft)
         }
 
+        rule.waitForIdle()
+
         assertEquals(0, selectedAll)
+        assertEquals(TextRange(0, "editable text".length), editorValue.selection)
     }
 
     @Test
