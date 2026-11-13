@@ -452,10 +452,10 @@ internal fun DesktopMediaPlayer(
         when {
             finished -> {
                 finished = false
-                player.controls().play()
+                player.submit { runCatching { player.controls().play() } }
             }
-            playing -> player.controls().pause()
-            else -> player.controls().play()
+            playing -> player.submit { runCatching { player.controls().pause() } }
+            else -> player.submit { runCatching { player.controls().play() } }
         }
     }
     val toggleMute: () -> Unit = {
@@ -501,12 +501,17 @@ internal fun DesktopMediaPlayer(
             "TeleDrive"
         )
         if (!snapshotDirectory.exists() && !snapshotDirectory.mkdirs()) return
-        player.snapshots().setSnapshotDirectory(snapshotDirectory.absolutePath)
-        player.snapshots().save()
+        player.submit {
+            runCatching {
+                player.snapshots().setSnapshotDirectory(snapshotDirectory.absolutePath)
+                player.snapshots().save()
+            }
+        }
     }
     fun setPlaybackRate(value: Float) {
-        rate = normalizePlaybackRate(value)
-        player.controls().setRate(rate)
+        val requestedRate = normalizePlaybackRate(value)
+        rate = requestedRate
+        player.submit { runCatching { player.controls().setRate(requestedRate) } }
         interactionTick++
     }
     fun cycleAudioTrack() {
@@ -681,12 +686,12 @@ internal fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.MediaPlay -> {
-                        player.controls().play()
+                        player.submit { runCatching { player.controls().play() } }
                         interactionTick++
                         true
                     }
                     key == Key.MediaPause -> {
-                        player.controls().pause()
+                        player.submit { runCatching { player.controls().pause() } }
                         interactionTick++
                         true
                     }
@@ -696,7 +701,8 @@ internal fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.MediaStop || (key == Key.S && !shift && !ctrl && !alt) -> {
-                        player.controls().stop()
+                        acceptsCurrentMediaEvents.set(false)
+                        player.submit { runCatching { player.controls().stop() } }
                         playing = false
                         finished = true
                         timeMs = 0L
@@ -781,22 +787,22 @@ internal fun DesktopMediaPlayer(
                     }
                     // Short, dedicated seek shortcuts requested for keyboard users.
                     key == Key.P && !ctrl && !alt && !shift -> {
-                        player.controls().skipTime(-SHORT_KEY_SEEK_STEP_MS)
+                        player.submit { runCatching { player.controls().skipTime(-SHORT_KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.N && !ctrl && !alt && !shift -> {
-                        player.controls().skipTime(SHORT_KEY_SEEK_STEP_MS)
+                        player.submit { runCatching { player.controls().skipTime(SHORT_KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionLeft && !ctrl && !alt && !shift -> {
-                        player.controls().skipTime(-KEY_SEEK_STEP_MS)
+                        player.submit { runCatching { player.controls().skipTime(-KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionRight && !ctrl && !alt && !shift -> {
-                        player.controls().skipTime(KEY_SEEK_STEP_MS)
+                        player.submit { runCatching { player.controls().skipTime(KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
@@ -812,7 +818,9 @@ internal fun DesktopMediaPlayer(
                             false
                         } else {
                             val direction = if (key == Key.DirectionRight) 1L else -1L
-                            player.controls().skipTime(direction * jumpMs)
+                            player.submit {
+                                runCatching { player.controls().skipTime(direction * jumpMs) }
+                            }
                             revealControlsForSeek()
                             true
                         }
@@ -1033,7 +1041,9 @@ internal fun DesktopMediaPlayer(
                 },
                 onInteraction = { interactionTick++ },
                 onPlayPause = togglePlayback,
-                onSeekTo = { millis -> player.controls().setTime(millis) },
+                onSeekTo = { millis ->
+                    player.submit { runCatching { player.controls().setTime(millis) } }
+                },
                 onToggleMute = toggleMute,
                 onVolumeChange = { setPlayerVolume(it) },
                 onBrightnessChange = {
