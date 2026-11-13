@@ -4,7 +4,7 @@ Last audited: 2026-11-13
 Repository: `AhsanRahman123/TeleDrive`
 Development branch: `work/desktop-feature-fixes-20261112`
 Stack base: PR #9 head `36f3da98f960c879c548099b30150c74ee9b33e5`
-Latest code head audited: `cff8d023ff52cfd95287df51207ea6998d2f3e96`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
+Latest code head audited: `11e9669f6f6dbb8cd36dc256c9f9fa86329c2659`. Documentation-only commits may follow this code head; fetch the branch tip before building and record its exact SHA.
 
 This register is the current status source for the consolidated development workspace. Older planning documents remain useful for feature intent, but their status labels may be stale. When this register conflicts with an older note, re-audit the source and tests before changing the status.
 
@@ -290,3 +290,12 @@ Keyboard commands now present in source:
 Files, Gallery, Thumbnail Manager, Search and virtual collection screens share the same app-level `FileClipboard`. A cut entry is cleared only after all requested move operations succeed; copy remains reusable. Gallery also uses the same success-only cut cleanup.
 
 **Status: SOURCE-PRESENT; NOT YET COMPILED OR RUNTIME-VERIFIED on Windows.** The user previously reported Ctrl+C/X/V working in Files, and earlier reported Files workspace tabs, video switching and P/N seek behavior passing on the prior build. The recording-specific selection consistency fix and the newly expanded cross-section shortcut routes still require a fresh build and manual acceptance on the exact current head. Do not claim that the latest head has built or that every target has been runtime-verified.
+
+
+### Latest Windows build feedback — November 13, 2026
+
+The user fast-forwarded the clone to branch tip `7ac82d74cd4554a98535f3c56ac22f7183d89ef9` and ran `.\gradlew.bat --no-daemon :ui:desktopTest`. The task failed during `:ui:compileKotlinDesktop` with two identical unresolved-reference errors for `focusable` in the new `CollectionCommandShortcuts.kt` helper. The incorrect import was `androidx.compose.ui.focus.focusable`; `Modifier.focusable` is provided by Compose Foundation.
+
+Correction committed: `11e9669f6f6dbb8cd36dc256c9f9fa86329c2659`, changing the import to `androidx.compose.foundation.focusable`.
+
+**Status: FIX COMMITTED; NOT YET REBUILT.** The failed attempt did not execute the UI desktop tests. The user should fetch the latest branch tip and rerun `:ui:desktopTest` once to establish whether further compile errors remain. Do not rerun `:shared:desktopTest` for this UI-only import correction.
