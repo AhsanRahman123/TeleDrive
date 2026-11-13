@@ -177,7 +177,7 @@ class DuplicateManagerRepositoryImpl(
                 } else item
             })
         }
-        if (activeFileId in fileIds) activeTask?.cancel()
+        if (activeFileId?.let { it in fileIds } == true) activeTask?.cancel()
     }
 
     override fun resumeFiles(fileIds: Set<String>) {
@@ -207,7 +207,7 @@ class DuplicateManagerRepositoryImpl(
                 } else item
             })
         }
-        if (activeFileId in fileIds) activeTask?.cancel()
+        if (activeFileId?.let { it in fileIds } == true) activeTask?.cancel()
     }
 
     override fun retryFailed() {
