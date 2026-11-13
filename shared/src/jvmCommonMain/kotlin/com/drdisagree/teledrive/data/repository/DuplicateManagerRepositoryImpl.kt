@@ -484,7 +484,11 @@ class DuplicateManagerRepositoryImpl(
         }
 
         return if (entity.isEncrypted) {
-            decryptAndHash(source, entity.id)
+            try {
+                decryptAndHash(source, entity.id)
+            } finally {
+                if (source.name.endsWith(".assembled")) source.delete()
+            }
         } else {
             try {
                 Hashing.sha256(source)
@@ -498,7 +502,7 @@ class DuplicateManagerRepositoryImpl(
         val parts = filePartDao.partsOf(entity.id).sortedBy { it.partIndex }
         if (parts.size < entity.partCount || parts.isEmpty()) return null
 
-        val target = File.createTempFile("td-duplicate-\${entity.id.take(8)}-", ".assembled")
+        val target = File.createTempFile("td-duplicate-" + entity.id.take(8) + "-", ".assembled")
         var completed = false
         try {
             target.outputStream().buffered().use { output ->
@@ -543,7 +547,7 @@ class DuplicateManagerRepositoryImpl(
 
     private suspend fun decryptAndHash(encryptedFile: File, fileId: String): String? {
         val key = wrappedKeyRepository.get(CryptoKeys.CONTENT) ?: return null
-        val plaintext = File.createTempFile("td-duplicate-\${fileId.take(8)}-", ".plain")
+        val plaintext = File.createTempFile("td-duplicate-" + fileId.take(8) + "-", ".plain")
         return try {
             encryptedFile.inputStream().buffered().use { input ->
                 plaintext.outputStream().buffered().use { output ->
@@ -557,7 +561,6 @@ class DuplicateManagerRepositoryImpl(
             null
         } finally {
             plaintext.delete()
-            if (encryptedFile.name.endsWith(".assembled")) encryptedFile.delete()
         }
     }
 
