@@ -79,6 +79,7 @@ fun DuplicateManagerScreen(
     val state by repository.state.collectAsState()
 
     var showQueue by remember { mutableStateOf(false) }
+    var showCheckedQueue by remember(folderId) { mutableStateOf(false) }
     var selectedIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
     var selectedQueueIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
     var queueSearch by remember(folderId) { mutableStateOf("") }
@@ -113,7 +114,9 @@ fun DuplicateManagerScreen(
 
     LaunchedEffect(folderId) {
         selectedIds = emptySet()
+        selectedQueueIds = emptySet()
         showQueue = false
+        showCheckedQueue = false
         repository.startScan(folderId)
     }
     fun matchesType(file: DuplicateScanFile): Boolean = when (typeFilter) {
@@ -181,10 +184,17 @@ fun DuplicateManagerScreen(
         orderedFiles(group).map { it.id }
     }.toSet()
 
-    val sortedQueue = remember(state.queue, queueSearch, queueSort) {
+    val checkedQueueCount = state.queue.count { it.status == DuplicateScanStatus.SCANNED }
+    val sortedQueue = remember(state.queue, queueSearch, queueSort, showCheckedQueue) {
         val needle = queueSearch.trim().lowercase()
         val matching = state.queue.filter { item ->
-            item.status != DuplicateScanStatus.CANCELLED && (
+            val belongsToSelectedView = if (showCheckedQueue) {
+                item.status == DuplicateScanStatus.SCANNED
+            } else {
+                item.status != DuplicateScanStatus.SCANNED &&
+                    item.status != DuplicateScanStatus.CANCELLED
+            }
+            belongsToSelectedView && (
                 needle.isBlank() ||
                     item.file.name.lowercase().contains(needle) ||
                     item.file.folderPath.lowercase().contains(needle)
@@ -199,12 +209,23 @@ fun DuplicateManagerScreen(
             DuplicateFileSort.NEWEST_FIRST -> matching.sortedByDescending { it.file.addedAt }
         }
     }
-    LaunchedEffect(state.queue) {
-        val liveQueueIds = state.queue
-            .filter { it.status != DuplicateScanStatus.CANCELLED }
+    LaunchedEffect(state.queue, showCheckedQueue) {
+        val visibleQueueIds = state.queue
+            .filter { item ->
+                if (showCheckedQueue) {
+                    item.status == DuplicateScanStatus.SCANNED
+                } else {
+                    item.status != DuplicateScanStatus.SCANNED &&
+                        item.status != DuplicateScanStatus.CANCELLED
+                }
+            }
             .map { it.file.id }
             .toSet()
-        selectedQueueIds = selectedQueueIds.intersect(liveQueueIds)
+        selectedQueueIds = selectedQueueIds.intersect(visibleQueueIds)
+    }
+    LaunchedEffect(showCheckedQueue) {
+        selectedQueueIds = emptySet()
+        queueListState.scrollToItem(0)
     }
     val queueDragSelect = rememberDragSelect(
         listState = queueListState,
@@ -224,6 +245,7 @@ fun DuplicateManagerScreen(
     val activeQueueCount = state.waitingCount + state.generatingCount
     val visibleQueueCount = pendingQueueCount + state.failedCount
     val queueEta = when {
+        showCheckedQueue -> "$checkedQueueCount file(s) checked · duplicate matches are shown in View results"
         state.isPaused -> "Estimated remaining: paused"
         activeQueueCount == 0 && individuallyPausedCount > 0 ->
             "Estimated remaining: ${individuallyPausedCount} individually paused"
@@ -352,33 +374,35 @@ fun DuplicateManagerScreen(
         }
 
         if (showQueue) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    enabled = state.isRunning && !state.isPaused,
-                    onClick = repository::pauseAll
-                ) { Text("Pause all") }
-                OutlinedButton(
-                    enabled = state.isPaused,
-                    onClick = repository::resumeAll
-                ) { Text("Resume all") }
-                OutlinedButton(
-                    enabled = state.queue.any {
-                        it.status == DuplicateScanStatus.WAITING ||
-                            it.status == DuplicateScanStatus.GENERATING ||
-                            it.status == DuplicateScanStatus.PAUSED
-                    },
-                    onClick = {
-                        repository.cancelAll()
-                        selectedQueueIds = emptySet()
-                    }
-                ) { Text("Cancel all") }
-                OutlinedButton(
-                    enabled = state.failedCount > 0 || state.cancelledCount > 0,
-                    onClick = repository::retryFailed
-                ) { Text("Retry failed/cancelled") }
+            if (!showCheckedQueue) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        enabled = state.isRunning && !state.isPaused,
+                        onClick = repository::pauseAll
+                    ) { Text("Pause all") }
+                    OutlinedButton(
+                        enabled = state.isPaused,
+                        onClick = repository::resumeAll
+                    ) { Text("Resume all") }
+                    OutlinedButton(
+                        enabled = state.queue.any {
+                            it.status == DuplicateScanStatus.WAITING ||
+                                it.status == DuplicateScanStatus.GENERATING ||
+                                it.status == DuplicateScanStatus.PAUSED
+                        },
+                        onClick = {
+                            repository.cancelAll()
+                            selectedQueueIds = emptySet()
+                        }
+                    ) { Text("Cancel all") }
+                    OutlinedButton(
+                        enabled = state.failedCount > 0 || state.cancelledCount > 0,
+                        onClick = repository::retryFailed
+                    ) { Text("Retry failed/cancelled") }
+                }
             }
 
             Text(
@@ -386,18 +410,37 @@ fun DuplicateManagerScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(onClick = { showCheckedQueue = false }) {
+                    Text((if (!showCheckedQueue) "● " else "") + "Current (" + visibleQueueCount + ")")
+                }
+                OutlinedButton(onClick = { showCheckedQueue = true }) {
+                    Text((if (showCheckedQueue) "● " else "") + "Checked (" + checkedQueueCount + ")")
+                }
+            }
             OutlinedTextField(
                 value = queueSearch,
                 onValueChange = { queueSearch = it },
                 modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                 singleLine = true,
-                label = { Text("Search queue by filename or folder") }
+                label = {
+                    Text(
+                        if (showCheckedQueue) "Search checked files"
+                        else "Search current queue by filename or folder"
+                    )
+                }
             )
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(selectedQueueIds.size.toString() + " selected", modifier = Modifier.weight(1f))
+                Text(
+                    if (showCheckedQueue) "$checkedQueueCount checked" else selectedQueueIds.size.toString() + " selected",
+                    modifier = Modifier.weight(1f)
+                )
                 Box {
                     OutlinedButton(onClick = { showQueueSortMenu = true }) {
                         Text(
@@ -434,20 +477,22 @@ fun DuplicateManagerScreen(
                         }
                     }
                 }
-                TextButton(
-                    enabled = sortedQueue.isNotEmpty(),
-                    onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
-                ) { Text("Select all") }
-                TextButton(
-                    enabled = sortedQueue.isNotEmpty(),
-                    onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
-                ) { Text("Select visible") }
-                TextButton(
-                    enabled = selectedQueueIds.isNotEmpty(),
-                    onClick = { selectedQueueIds = emptySet() }
-                ) { Text("Clear") }
+                if (!showCheckedQueue) {
+                    TextButton(
+                        enabled = sortedQueue.isNotEmpty(),
+                        onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
+                    ) { Text("Select all") }
+                    TextButton(
+                        enabled = sortedQueue.isNotEmpty(),
+                        onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
+                    ) { Text("Select visible") }
+                    TextButton(
+                        enabled = selectedQueueIds.isNotEmpty(),
+                        onClick = { selectedQueueIds = emptySet() }
+                    ) { Text("Clear") }
+                }
             }
-            if (selectedQueueIds.isNotEmpty()) {
+            if (!showCheckedQueue && selectedQueueIds.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { repository.pauseFiles(selectedQueueIds) }) {
                         Text("Pause selected")
@@ -480,7 +525,9 @@ fun DuplicateManagerScreen(
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
                         state = queueListState,
-                        modifier = Modifier.fillMaxSize().then(queueDragSelect),
+                        modifier = Modifier.fillMaxSize().then(
+                            if (showCheckedQueue) Modifier else queueDragSelect
+                        ),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         items(sortedQueue, key = { it.file.id }) { item ->
@@ -493,14 +540,16 @@ fun DuplicateManagerScreen(
                                     modifier = Modifier.padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Checkbox(
-                                        checked = item.file.id in selectedQueueIds,
-                                        onCheckedChange = { checked ->
-                                            selectedQueueIds = if (checked) {
-                                                selectedQueueIds + item.file.id
-                                            } else selectedQueueIds - item.file.id
-                                        }
-                                    )
+                                    if (!showCheckedQueue) {
+                                        Checkbox(
+                                            checked = item.file.id in selectedQueueIds,
+                                            onCheckedChange = { checked ->
+                                                selectedQueueIds = if (checked) {
+                                                    selectedQueueIds + item.file.id
+                                                } else selectedQueueIds - item.file.id
+                                            }
+                                        )
+                                    }
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(item.file.name, maxLines = 1)
                                         Text(
