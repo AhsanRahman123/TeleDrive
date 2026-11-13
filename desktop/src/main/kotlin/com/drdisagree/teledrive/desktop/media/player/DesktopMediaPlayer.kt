@@ -442,6 +442,7 @@ internal fun DesktopMediaPlayer(
     DisposableEffect(player) {
         onDispose {
             acceptsCurrentMediaEvents.set(false)
+            acceptsCurrentVideoFrames.set(false)
             // Keep teardown serialized with pending play/seek/track commands. Disposing the
             // composable must not race a queued media replacement against native player release.
             runCatching {
