@@ -45,12 +45,18 @@ fun Modifier.collectionCommandShortcuts(
     onPaste: (() -> Boolean)? = null,
     onNewFolder: (() -> Boolean)? = null,
     onNewTab: (() -> Boolean)? = null,
+    onDelete: (() -> Boolean)? = null,
     interceptBeforeChildren: Boolean = false
 ): Modifier {
     val handleShortcut: (KeyEvent) -> Boolean = { event ->
         val command = event.isCtrlPressed || event.isMetaPressed
         val plainCommand = command && !event.isAltPressed && !event.isShiftPressed
-        if (event.type != KeyEventType.KeyDown || !plainCommand) {
+        val plain = !command && !event.isAltPressed && !event.isShiftPressed
+        if (event.type != KeyEventType.KeyDown) {
+            false
+        } else if (plain && event.key == Key.Delete) {
+            onDelete?.invoke() == true
+        } else if (!plainCommand) {
             false
         } else {
             val action = when (event.key) {
