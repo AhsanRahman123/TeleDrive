@@ -1254,6 +1254,7 @@ fun FilesScreen(
             message = stringResource(Res.string.common_restore_trash_emptied),
             confirmLabel = stringResource(Res.string.common_move_trash),
             destructive = true,
+            confirmOnEnter = true,
             onConfirm = {
                 confirmTrash = false
                 viewModel.trashSelected()
