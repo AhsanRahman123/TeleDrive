@@ -486,14 +486,18 @@ class FilesViewModel(
         publishSelectionSnapshot()
     }
 
-    fun selectAll() {
+    fun selectAll(onComplete: (() -> Unit)? = null) {
         viewModelScope.launch {
-            val ids = fileRepository.fileIds(querySpec.first())
-            folderSelection.update { uiState.value.folders.map { folder -> folder.id }.toSet() }
-            selection.update { ids.toSet() }
-            _selectionModeEnabled.update { ids.isNotEmpty() || folderSelection.value.isNotEmpty() }
-            _allSelected.update { true }
-            publishSelectionSnapshot()
+            try {
+                val ids = fileRepository.fileIds(querySpec.first())
+                folderSelection.update { uiState.value.folders.map { folder -> folder.id }.toSet() }
+                selection.update { ids.toSet() }
+                _selectionModeEnabled.update { ids.isNotEmpty() || folderSelection.value.isNotEmpty() }
+                _allSelected.update { true }
+                publishSelectionSnapshot()
+            } finally {
+                onComplete?.invoke()
+            }
         }
     }
 
