@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import net.lingala.zip4j.ZipFile
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.CompressorStreamFactory
 import java.io.File
 
 /** Original local files are always plaintext; only remote copies and caches are ever encrypted. */
@@ -204,8 +206,42 @@ class PreviewContentResolver(
                 PreviewContent.Archive(entries, "7Z")
             }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
 
+            "application/x-tar" -> readTar(path, compressed = false)
+            "application/x-compressed-tar" -> readTar(path, compressed = true)
+
             else -> PreviewContent.Unsupported(Res.string.preview_only_zip)
         }
+
+    private fun readTar(path: String, compressed: Boolean): PreviewContent = runCatching {
+        val input = File(path).inputStream().buffered()
+        val tarInput = if (compressed) {
+            CompressorStreamFactory().createCompressorInputStream(input)
+        } else {
+            input
+        }
+        TarArchiveInputStream(tarInput).use { archive ->
+            val entries = buildList {
+                while (size < MAX_ARCHIVE_ENTRIES) {
+                    val entry = archive.nextEntry ?: break
+                    add(
+                        ArchiveEntry(
+                            name = entry.name,
+                            sizeBytes = entry.size.coerceAtLeast(0L),
+                            compressedBytes = 0L,
+                            isDirectory = entry.isDirectory
+                        )
+                    )
+                }
+            }
+            PreviewContent.Archive(
+                entries = entries,
+                format = if (compressed) "TAR (compressed)" else "TAR"
+            )
+        }
+    }.getOrElse {
+        SafeLog.w(TAG, "Could not read TAR archive metadata", it)
+        PreviewContent.Failed(Res.string.preview_archive_failed)
+    }
 
     private suspend fun fetchToCache(
         file: DriveFile,
@@ -267,5 +303,6 @@ class PreviewContentResolver(
         private const val TAG = "PreviewContent"
         private const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
         private const val TEXT_LIMIT = 256 * 1024
+        private const val MAX_ARCHIVE_ENTRIES = 5_000
     }
 }
