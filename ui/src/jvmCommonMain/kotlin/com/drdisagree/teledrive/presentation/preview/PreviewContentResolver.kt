@@ -113,6 +113,7 @@ class PreviewContentResolver(
         // never starts unasked.
         val autoFetchable = file.sizeBytes <= AUTO_PREVIEW_LIMIT &&
                 (MimeTypes.isImage(file.mimeType) ||
+                        file.category == FileCategory.IMAGE ||
                         MimeTypes.isText(file.mimeType) ||
                         MimeTypes.isApk(file.mimeType, file.name))
         if (!autoFetchable) {
@@ -136,12 +137,16 @@ class PreviewContentResolver(
         .flowOn(dispatchers.io)
 
     private fun fromLocal(file: DriveFile, path: String): PreviewContent = when {
-        MimeTypes.isImage(file.mimeType) -> PreviewContent.Image(File(path))
-        MimeTypes.isVideo(file.mimeType) -> PreviewContent.LocalMedia(path, isAudio = false)
-        MimeTypes.isAudio(file.mimeType) -> PreviewContent.LocalMedia(path, isAudio = true)
+        MimeTypes.isImage(file.mimeType) || file.category == FileCategory.IMAGE ->
+            PreviewContent.Image(File(path))
+        MimeTypes.isVideo(file.mimeType) || file.category == FileCategory.VIDEO ->
+            PreviewContent.LocalMedia(path, isAudio = false)
+        MimeTypes.isAudio(file.mimeType) || file.category == FileCategory.AUDIO ->
+            PreviewContent.LocalMedia(path, isAudio = true)
         MimeTypes.isPdf(file.mimeType) -> PreviewContent.Pdf(path)
         MimeTypes.isText(file.mimeType) -> readText(path)
-        MimeTypes.isArchive(file.mimeType) -> readArchive(file, path)
+        MimeTypes.isArchive(file.mimeType) || file.category == FileCategory.ARCHIVE ->
+            readArchive(file, path)
         MimeTypes.isApk(file.mimeType, file.name) -> readApk(path)
         else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
     }
