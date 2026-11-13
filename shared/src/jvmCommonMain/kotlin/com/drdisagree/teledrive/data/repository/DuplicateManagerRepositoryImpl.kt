@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.join
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -60,11 +62,11 @@ class DuplicateManagerRepositoryImpl(
     private val _state = MutableStateFlow(DuplicateManagerState())
     override val state: StateFlow<DuplicateManagerState> = _state.asStateFlow()
 
-    private var workerJob: Job? = null
-    private var activeTask: Job? = null
-    private var scanGeneration = 0L
-    private var activeFileId: String? = null
-    private var cancelAllRequested = false
+    @Volatile private var workerJob: Job? = null
+    @Volatile private var activeTask: Job? = null
+    @Volatile private var scanGeneration = 0L
+    @Volatile private var activeFileId: String? = null
+    @Volatile private var cancelAllRequested = false
 
     override suspend fun startScan(folderId: String) {
         startMutex.withLock {
@@ -140,6 +142,7 @@ class DuplicateManagerRepositoryImpl(
 
     override fun cancelAll() {
         cancelAllRequested = true
+        scanGeneration++
         activeTask?.cancel()
         workerJob?.cancel()
         workerJob = null
@@ -210,17 +213,20 @@ class DuplicateManagerRepositoryImpl(
         if (activeFileId?.let { it in fileIds } == true) activeTask?.cancel()
     }
 
-    override fun retryFailed() {
-        synchronized(cancelledFileIds) { cancelledFileIds.clear() }
+    override fun retryFiles(fileIds: Set<String>) {
+        if (fileIds.isEmpty()) return
+        synchronized(cancelledFileIds) { cancelledFileIds.removeAll(fileIds) }
+        synchronized(pausedFileIds) { pausedFileIds.removeAll(fileIds) }
         cancelAllRequested = false
         _state.update { current ->
             current.copy(
                 isPaused = false,
                 queue = current.queue.map { item ->
                     if (
-                        item.status == DuplicateScanStatus.FAILED ||
-                        item.status == DuplicateScanStatus.CANCELLED ||
-                        item.status == DuplicateScanStatus.PAUSED
+                        item.file.id in fileIds &&
+                        (item.status == DuplicateScanStatus.FAILED ||
+                            item.status == DuplicateScanStatus.CANCELLED ||
+                            item.status == DuplicateScanStatus.PAUSED)
                     ) {
                         item.copy(status = DuplicateScanStatus.WAITING, error = null)
                     } else item
@@ -230,10 +236,31 @@ class DuplicateManagerRepositoryImpl(
         launchWorkerIfNeeded()
     }
 
+    override fun retryFailed() {
+        retryFiles(
+            _state.value.queue.filter {
+                it.status == DuplicateScanStatus.FAILED ||
+                    it.status == DuplicateScanStatus.CANCELLED
+            }.map { it.file.id }.toSet()
+        )
+    }
+
     private fun launchWorkerIfNeeded() {
         if (cancelAllRequested || _state.value.isPaused) return
         if (_state.value.queue.none { it.status == DuplicateScanStatus.WAITING }) return
-        if (workerJob?.isActive == true) return
+        val currentWorker = workerJob
+        if (currentWorker?.isActive == true) {
+            // A retry can arrive while the previous worker is exiting its final iteration.
+            // Join it first, then launch a fresh worker if the new waiting rows remain.
+            scope.launch {
+                currentWorker.join()
+                if (workerJob === currentWorker) {
+                    workerJob = null
+                    launchWorkerIfNeeded()
+                }
+            }
+            return
+        }
         launchWorker(scanGeneration)
     }
 
