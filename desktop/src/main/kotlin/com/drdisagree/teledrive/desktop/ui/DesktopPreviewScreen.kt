@@ -462,13 +462,15 @@ fun DesktopPreviewScreen(
                             overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.titleMedium
                         )
-                        Text(
-                            text = "$previewFolderName · ${displayIndex + 1}/${state.files.size}",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (file != null && state.files.isNotEmpty()) {
+                            Text(
+                                text = "$previewFolderName · ${displayIndex + 1}/${state.files.size}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
