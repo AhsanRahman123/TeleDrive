@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.presentation.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -281,13 +282,13 @@ class KeyboardCollectionTest {
                     )
             ) {
                 item {
-                    androidx.compose.foundation.text.BasicTextField(
-                        value = "editable text",
-                        onValueChange = {},
-                        modifier = Modifier
-                            .keyboardCollectionItem(keyboard, 0)
-                            .testTag("nested-editor")
-                    )
+                    Box(Modifier.keyboardCollectionItem(keyboard, 0)) {
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = "editable text",
+                            onValueChange = {},
+                            modifier = Modifier.testTag("nested-editor")
+                        )
+                    }
                 }
             }
         }
