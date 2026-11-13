@@ -120,6 +120,7 @@ import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -168,6 +169,7 @@ internal fun DesktopMediaPlayer(
 ) {
     val factory = VlcPlayback.factory ?: return
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
+    var hasCurrentMediaFrame by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf(false) }
     var finished by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(true) }
@@ -200,21 +202,29 @@ internal fun DesktopMediaPlayer(
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
     val acceptsCurrentMediaEvents = remember(factory, isAudio) { AtomicBoolean(false) }
+    // Render callbacks can finish copying/decoding after a media switch. Tag each accepted
+    // frame with the active generation so an outgoing frame can never replace the new one.
+    val currentVideoFrameGeneration = remember(factory, isAudio) { AtomicLong(0L) }
+    val acceptsCurrentVideoFrames = remember(factory, isAudio) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
     val frameUpdates = remember(factory, isAudio) {
-        Channel<VideoFramePixels>(capacity = Channel.CONFLATED)
+        Channel<Pair<Long, VideoFramePixels>>(capacity = Channel.CONFLATED)
     }
-    LaunchedEffect(frameUpdates) {
-        for (nextFrame in frameUpdates) {
+    LaunchedEffect(frameUpdates, currentVideoFrameGeneration) {
+        for ((generation, nextFrame) in frameUpdates) {
             // Bitmap installation can be expensive for full-resolution frames. Keep that work
-            // off the UI dispatcher; only publish the completed immutable image on Compose Main.
+            // off the UI dispatcher; only publish a frame if it still belongs to this MRL.
             val image = withContext(Dispatchers.Default) {
                 nextFrame.toImageBitmap()
             } ?: continue
-            frame = image
+            if (generation == currentVideoFrameGeneration.get()) {
+                frame = image
+                hasCurrentMediaFrame = true
+                buffering = false
+            }
         }
     }
     DisposableEffect(frameUpdates) {
@@ -238,7 +248,10 @@ internal fun DesktopMediaPlayer(
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
-                    if (acceptsCurrentMediaEvents.get()) frameUpdates.trySend(image)
+                    val generation = currentVideoFrameGeneration.get()
+                    if (acceptsCurrentVideoFrames.get()) {
+                        frameUpdates.trySend(generation to image)
+                    }
                 })
             }
             events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
@@ -249,7 +262,9 @@ internal fun DesktopMediaPlayer(
                     playerScope.launch {
                         playing = true
                         finished = false
-                        buffering = false
+                        // VLC's playing event can precede its first video frame. Keep the old
+                        // frame covered until the new source has actually rendered a frame.
+                        buffering = !isAudio && !hasCurrentMediaFrame
                         // VLC can report the media length before the first playing event. Read
                         // the status here as a fallback so the remaining-time label and seekbar
                         // are initialized even when lengthChanged arrived during opening.
@@ -300,7 +315,9 @@ internal fun DesktopMediaPlayer(
 
                 override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
                     if (acceptsCurrentMediaEvents.get()) {
-                        playerScope.launch { buffering = newCache < 100f }
+                        playerScope.launch {
+                            buffering = newCache < 100f || (!isAudio && !hasCurrentMediaFrame)
+                        }
                     }
                 }
 
@@ -315,7 +332,10 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun error(mediaPlayer: MediaPlayer) {
-                    acceptsCurrentMediaEvents.set(false)
+                    // Errors before the incoming item reaches playing are returned by
+                    // MediaApi.start(); ignore late errors from the outgoing source.
+                    if (!acceptsCurrentMediaEvents.getAndSet(false)) return
+                    acceptsCurrentVideoFrames.set(false)
                     playerScope.launch {
                         playing = false
                         finished = true
@@ -385,6 +405,9 @@ internal fun DesktopMediaPlayer(
         // when moving to the next video. Close the event gate while swapping sources so late
         // callbacks from the outgoing item cannot update the incoming item's state.
         acceptsCurrentMediaEvents.set(false)
+        acceptsCurrentVideoFrames.set(false)
+        currentVideoFrameGeneration.incrementAndGet()
+        hasCurrentMediaFrame = false
         while (frameUpdates.tryReceive().isSuccess) Unit
         while (timeUpdates.tryReceive().isSuccess) Unit
         // Keep the last completed frame visible under the buffering overlay until the
@@ -400,9 +423,13 @@ internal fun DesktopMediaPlayer(
             // installed. start() then waits for the incoming source to report playing or
             // error instead of returning while video output is still being initialized.
             runCatching { player.controls().stop() }
+            // stop() has completed the outgoing native transition; only now allow render
+            // callbacks from the next source into the generation-tagged frame channel.
+            acceptsCurrentVideoFrames.set(true)
             val started = runCatching { player.media().start(mrl) }.getOrDefault(false)
             if (!started) {
                 acceptsCurrentMediaEvents.set(false)
+                acceptsCurrentVideoFrames.set(false)
                 playerScope.launch {
                     playing = false
                     finished = true
@@ -729,6 +756,7 @@ internal fun DesktopMediaPlayer(
                     }
                     key == Key.MediaStop || (key == Key.S && !shift && !ctrl && !alt) -> {
                         acceptsCurrentMediaEvents.set(false)
+            acceptsCurrentVideoFrames.set(false)
                         player.submit { runCatching { player.controls().stop() } }
                         playing = false
                         finished = true
