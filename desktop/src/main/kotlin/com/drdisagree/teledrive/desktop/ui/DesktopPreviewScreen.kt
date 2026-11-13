@@ -1149,7 +1149,7 @@ private fun PreviewPane(
                                     state = zoomableState,
                                     // Telephoto routes clicks through this callback so its
                                     // own double-click zoom and pan/pinch gestures remain intact.
-                                    onClick = onToggleImageChrome,
+                                    onClick = { _ -> onToggleImageChrome() },
                                     onDoubleClick = { state, centroid ->
                                         zoomScope.launch {
                                             if ((state.zoomFraction ?: 0f) > 0f) {
