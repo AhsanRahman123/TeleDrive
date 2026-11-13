@@ -494,8 +494,8 @@ fun FilesScreen(
                 .collectionCommandShortcuts(
                     focusRequester = filesCommandFocusRequester,
                     onSelectAll = { viewModel.selectAll(); true },
-                    onCopy = { if (selectedCount > 0) { viewModel.copyToClipboardSelected(); true } else false },
-                    onCut = { if (selectedCount > 0) { viewModel.cutSelected(); true } else false },
+                    onCopy = viewModel::copyToClipboardSelected,
+                    onCut = viewModel::cutSelected,
                     onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
                     onNewFolder = { showCreateFolder = true; true },
                     onNewTab = { createTab(); true },
@@ -1335,7 +1335,9 @@ private fun FilesContent(
         // File-manager mouse drags should extend the current selection, not invert it
         // when the gesture starts over an already-selected item. Resolve gaps and the
         // padded viewport edge so auto-scroll continues extending the range.
-        mouseDragAddsToSelection = true,
+        // The starting row determines the gesture: selected anchor = deselect range;
+        // unselected anchor = select range. Do not force every mouse drag to be additive.
+        mouseDragAddsToSelection = false,
         resolveNearestVisibleItem = true
     )
     Box(modifier = Modifier.fillMaxSize()) {
