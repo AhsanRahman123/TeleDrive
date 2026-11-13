@@ -543,17 +543,21 @@ fun FilesScreen(
                         if (showDuplicateManager) {
                             false
                         } else {
-                            if (!selectingAllFromShortcut) {
-                                selectingAllFromShortcut = true
-                                viewModel.selectAll {
-                                    selectingAllFromShortcut = false
-                                    if (deleteAfterSelectAll) {
-                                        deleteAfterSelectAll = false
-                                        if (
-                                            viewModel.selectionSnapshot.value.count > 0 &&
-                                            !showCreateFolder && renameTarget == null
-                                        ) {
-                                            confirmTrash = true
+                            when {
+                                selectingAllFromShortcut -> Unit
+                                allSelected -> viewModel.clearSelection()
+                                else -> {
+                                    selectingAllFromShortcut = true
+                                    viewModel.selectAll {
+                                        selectingAllFromShortcut = false
+                                        if (deleteAfterSelectAll) {
+                                            deleteAfterSelectAll = false
+                                            if (
+                                                viewModel.selectionSnapshot.value.count > 0 &&
+                                                !showCreateFolder && renameTarget == null
+                                            ) {
+                                                confirmTrash = true
+                                            }
                                         }
                                     }
                                 }
