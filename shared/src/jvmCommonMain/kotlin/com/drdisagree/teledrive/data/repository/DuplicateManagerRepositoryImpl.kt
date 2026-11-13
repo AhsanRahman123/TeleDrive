@@ -148,7 +148,10 @@ class DuplicateManagerRepositoryImpl(
             current.copy(
                 isPaused = false,
                 queue = current.queue.map { item ->
-                    if (item.status == DuplicateScanStatus.PAUSED) {
+                    if (
+                        item.status == DuplicateScanStatus.PAUSED &&
+                        !isFilePaused(item.file.id)
+                    ) {
                         item.copy(status = DuplicateScanStatus.WAITING, error = null)
                     } else item
                 }
