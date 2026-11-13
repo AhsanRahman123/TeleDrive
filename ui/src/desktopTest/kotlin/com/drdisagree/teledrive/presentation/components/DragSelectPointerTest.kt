@@ -332,7 +332,58 @@ class DragSelectPointerTest {
     }
 
     @Test
-    fun `Trash list drag starting on a selected row adds the range without removing existing selection`() {
+    fun `Trash drag from a selected anchor deselects the same range as Files`() {
+        var selected by mutableStateOf(setOf(0, 1, 2))
+        var rangeBase by mutableStateOf(setOf(0, 1, 2))
+
+        rule.setContent {
+            val listState = rememberLazyListState()
+            val dragSelect = rememberDragSelect(
+                listState = listState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                mouseDragAddsToSelection = false,
+                resolveNearestVisibleItem = true
+            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(width = 180.dp, height = 220.dp)
+                    .testTag("trash-selection-list")
+                    .then(dragSelect)
+            ) {
+                listItems((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("trash-selection-list").performMouseInput {
+            moveTo(Offset(90f, 30f))
+            press()
+            moveTo(Offset(90f, 150f), delayMillis = 100)
+            release()
+        }
+        rule.waitForIdle()
+
+        assertEquals(emptySet<Int>(), selected)
+    }
+
+    @Test
+    fun `Trash drag from an unselected anchor adds the crossed range like Files`() {
         var selected by mutableStateOf(setOf(0, 1))
         var rangeBase by mutableStateOf(setOf(0, 1))
 
@@ -350,14 +401,14 @@ class DragSelectPointerTest {
                     }
                 },
                 onEnd = {},
-                mouseDragAddsToSelection = true,
+                mouseDragAddsToSelection = false,
                 resolveNearestVisibleItem = true
             )
             LazyColumn(
                 state = listState,
                 modifier = Modifier
-                    .size(width = 180.dp, height = 220.dp)
-                    .testTag("trash-selection-list")
+                    .size(width = 180.dp, height = 360.dp)
+                    .testTag("trash-selection-list-add")
                     .then(dragSelect)
             ) {
                 listItems((0 until 5).toList()) { index ->
@@ -366,21 +417,20 @@ class DragSelectPointerTest {
                             .fillMaxWidth()
                             .height(60.dp)
                             .background(if (index in selected) Color.Blue else Color.Gray)
-                            .testTag("trash-row-$index")
                     )
                 }
             }
         }
 
-        rule.onNodeWithTag("trash-selection-list").performMouseInput {
-            moveTo(Offset(90f, 30f))
+        rule.onNodeWithTag("trash-selection-list-add").performMouseInput {
+            moveTo(Offset(90f, 150f))
             press()
-            moveTo(Offset(90f, 150f), delayMillis = 100)
+            moveTo(Offset(90f, 270f), delayMillis = 100)
             release()
         }
         rule.waitForIdle()
 
-        assertEquals(setOf(0, 1, 2), selected)
+        assertEquals(setOf(0, 1, 2, 3, 4), selected)
     }
 
 }
