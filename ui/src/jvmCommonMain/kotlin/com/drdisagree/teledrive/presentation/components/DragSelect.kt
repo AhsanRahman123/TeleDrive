@@ -213,6 +213,19 @@ private fun dragSelect(
                     activeAnchor = -1
                     activeShouldSelect = true
                 }
+
+                // The pointer movement that crosses mouse drag-slop is consumed by
+                // awaitMouseDragStart(). It may be the last movement before release,
+                // so initialize edge scrolling here rather than waiting for another event.
+                if (mouseDragStart != null) {
+                    autoScroll = edgeScroll(
+                        initialPosition.y,
+                        size.height,
+                        edgePx,
+                        maxScrollPx
+                    )
+                }
+
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
