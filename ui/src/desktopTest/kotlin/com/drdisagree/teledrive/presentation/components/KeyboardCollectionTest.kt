@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.presentation.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,6 +10,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -200,6 +204,117 @@ class KeyboardCollectionTest {
         rule.onNodeWithTag("before").performKeyInput { pressKey(Key.Tab) }
 
         rule.onNodeWithTag("row-0").assertIsFocused()
+    }
+
+    @Test
+    fun `collection commands are dispatched while a row owns focus`() {
+        var selectedAll = 0
+        var copied = 0
+        var cut = 0
+        var pasted = 0
+        var newFolder = 0
+        var newTab = 0
+
+        rule.setContent {
+            val listState = rememberLazyListState()
+            val keyboard = rememberKeyboardCollection(listState)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(300.dp, 200.dp)
+                    .keyboardCollection(
+                        keyboard,
+                        itemCount = 1,
+                        shortcuts = CollectionShortcuts(
+                            onSelectAll = { selectedAll++ },
+                            onCopy = { copied++ },
+                            onCut = { cut++ },
+                            onPaste = { pasted++ },
+                            onNewFolder = { newFolder++ },
+                            onNewTab = { newTab++ }
+                        )
+                    )
+            ) {
+                item {
+                    BasicText(
+                        "row",
+                        Modifier
+                            .keyboardCollectionItem(keyboard, 0)
+                            .testTag("command-row")
+                            .size(100.dp)
+                            .clickable {}
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("command-row").requestFocus()
+        rule.onNodeWithTag("command-row").performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.A)
+            pressKey(Key.C)
+            pressKey(Key.X)
+            pressKey(Key.V)
+            pressKey(Key.N)
+            pressKey(Key.T)
+            keyUp(Key.CtrlLeft)
+        }
+
+        assertEquals(1, selectedAll)
+        assertEquals(1, copied)
+        assertEquals(1, cut)
+        assertEquals(1, pasted)
+        assertEquals(1, newFolder)
+        assertEquals(1, newTab)
+    }
+
+    @Test
+    fun `collection select all does not intercept a nested text field shortcut`() {
+        var selectedAll = 0
+        var editorValue by mutableStateOf(
+            TextFieldValue("editable text", selection = TextRange("editable text".length))
+        )
+        rule.setContent {
+            val listState = rememberLazyListState()
+            val keyboard = rememberKeyboardCollection(listState)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(300.dp, 200.dp)
+                    .keyboardCollection(
+                        keyboard,
+                        itemCount = 1,
+                        shortcuts = CollectionShortcuts(onSelectAll = { selectedAll++ })
+                    )
+            ) {
+                item {
+                    Box(Modifier.keyboardCollectionItem(keyboard, 0)) {
+                        BasicTextField(
+                            value = editorValue,
+                            onValueChange = { editorValue = it },
+                            modifier = Modifier.testTag("nested-editor")
+                        )
+                    }
+                }
+            }
+        }
+
+        rule.onNodeWithTag("nested-editor").requestFocus()
+        rule.onNodeWithTag("nested-editor").performKeyInput {
+            pressKey(Key.DirectionLeft)
+        }
+        rule.waitForIdle()
+        assertEquals(TextRange("editable text".length - 1), editorValue.selection)
+
+        rule.onNodeWithTag("nested-editor").performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.A)
+            keyUp(Key.CtrlLeft)
+        }
+        rule.waitForIdle()
+
+        assertEquals(0, selectedAll)
+        assertEquals(TextRange(0, "editable text".length), editorValue.selection)
     }
 
     @Test

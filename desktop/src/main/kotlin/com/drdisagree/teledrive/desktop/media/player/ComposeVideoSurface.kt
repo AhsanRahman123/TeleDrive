@@ -15,19 +15,31 @@ import uk.co.caprica.vlcj.player.embedded.videosurface.callback.BufferFormatCall
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.RenderCallback
 import uk.co.caprica.vlcj.player.embedded.videosurface.callback.format.RV32BufferFormat
 
-/** Frames arrive as BGRA, matching Skia's layout, so each frame is one buffer copy. */
-internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoSurface {
-    var width = 0
-    var height = 0
-    var pixels = ByteArray(0)
+/**
+ * VLC invokes [RenderCallback.display] on a native render thread. Every ImageBitmap must own
+ * immutable pixel storage: Skia retains the byte array passed to installPixels for the lifetime
+ * of the bitmap. Reusing one mutable byte array between frames lets VLC overwrite pixels that
+ * Compose is still drawing, which can show partial/green frames when media dimensions change.
+ */
+internal data class VideoFramePixels(
+    val width: Int,
+    val height: Int,
+    val rowBytes: Int,
+    val pixels: ByteArray
+) {
+    fun toImageBitmap(): ImageBitmap? {
+        if (width <= 0 || height <= 0 || rowBytes < width * BYTES_PER_PIXEL) return null
+        val bitmap = Bitmap()
+        val info = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+        if (!bitmap.installPixels(info, pixels, rowBytes)) return null
+        return bitmap.asComposeImageBitmap()
+    }
+}
 
+internal fun composeVideoSurface(onFrame: (VideoFramePixels) -> Unit): CallbackVideoSurface {
     val bufferFormat = object : BufferFormatCallbackAdapter() {
-        override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat {
-            width = sourceWidth
-            height = sourceHeight
-            pixels = ByteArray(sourceWidth * sourceHeight * 4)
-            return RV32BufferFormat(sourceWidth, sourceHeight)
-        }
+        override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat =
+            RV32BufferFormat(sourceWidth, sourceHeight)
     }
 
     val render = object : RenderCallback {
@@ -42,15 +54,23 @@ internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoS
             displayWidth: Int,
             displayHeight: Int
         ) {
-            if (width == 0 || height == 0) return
-            val source = nativeBuffers[0]
-            source.rewind()
-            source.get(pixels, 0, minOf(pixels.size, source.remaining()))
-            val bitmap = Bitmap()
-            val info = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
-            bitmap.allocPixels(info)
-            bitmap.installPixels(info, pixels, width * 4)
-            onFrame(bitmap.asComposeImageBitmap())
+            val width = bufferFormat.width
+            val height = bufferFormat.height
+            if (width <= 0 || height <= 0) return
+
+            val rowBytes = bufferFormat.pitches.firstOrNull() ?: (width * BYTES_PER_PIXEL)
+            if (rowBytes < width * BYTES_PER_PIXEL) return
+            val byteCount = rowBytes.toLong() * height
+            if (byteCount <= 0L || byteCount > Int.MAX_VALUE) return
+
+            val source = nativeBuffers.firstOrNull() ?: return
+            // Never publish a partial frame. A truncated copy is exactly the sort of
+            // green/black strip that can appear during a resolution or media transition.
+            val framePixels = copyVideoFramePixels(source, rowBytes, height) ?: return
+
+            // Keep native callback work bounded. Skia bitmap construction happens after the
+            // conflated handoff on the Compose dispatcher, so superseded frames are never decoded.
+            onFrame(VideoFramePixels(width, height, rowBytes, framePixels))
         }
     }
 
@@ -61,3 +81,24 @@ internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoS
         VideoSurfaceAdapters.getVideoSurfaceAdapter()
     )
 }
+
+/**
+ * Copies one complete VLC plane into storage owned by the published Compose frame.
+ * The returned array is never reused by later frames because Skia retains it.
+ */
+internal fun copyVideoFramePixels(
+    source: ByteBuffer,
+    rowBytes: Int,
+    height: Int
+): ByteArray? {
+    if (rowBytes <= 0 || height <= 0) return null
+    val byteCount = rowBytes.toLong() * height
+    if (byteCount <= 0L || byteCount > Int.MAX_VALUE) return null
+
+    val readable = source.duplicate().apply { position(0) }
+    if (readable.remaining() < byteCount.toInt()) return null
+
+    return ByteArray(byteCount.toInt()).also { readable.get(it) }
+}
+
+private const val BYTES_PER_PIXEL = 4

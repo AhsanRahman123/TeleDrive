@@ -25,7 +25,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,7 +34,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +49,8 @@ import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -77,7 +78,7 @@ fun ThumbnailQueueScreen(
     val repository = koinInject<CacheRepository>()
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
-    val activeJobs by repository.observeThumbnailActiveJobs().collectAsState(initial = emptySet())
+    var activeQueueIds by remember { mutableStateOf(emptySet<String>()) }
     var items by remember { mutableStateOf(emptyList<ThumbnailQueueItem>()) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var failedQueueIds by remember { mutableStateOf(emptySet<String>()) }
@@ -115,6 +116,7 @@ fun ThumbnailQueueScreen(
             pendingCount = repository.thumbnailQueueCount()
             failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
             queuePaused = repository.thumbnailQueuePaused()
+            activeQueueIds = repository.thumbnailQueueActiveFileIds()
             val remainingWork = (pendingCount - failedQueueIds.size).coerceAtLeast(0)
 
             val sampleAt = System.currentTimeMillis()
@@ -191,14 +193,14 @@ fun ThumbnailQueueScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
+                TooltipIconButton(tooltip = "Back", onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Thumbnail queue", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "${(pendingCount - activeJobs.size).coerceAtLeast(0)} waiting · " +
-                            activeJobs.size + " generating · " + pendingCount + " total" +
+                        "${(pendingCount - activeQueueIds.size).coerceAtLeast(0)} waiting · " +
+                            activeQueueIds.size + " generating · " + pendingCount + " total" +
                             if (queuePaused) " · Paused" else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -223,18 +225,20 @@ fun ThumbnailQueueScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = { scope.launch { scrollState.animateScrollTo(0) } }) {
+                TooltipIconButton(tooltip = "Scroll to top", onClick = { scope.launch { scrollState.animateScrollTo(0) } }) {
                     Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Scroll to top")
                 }
-                IconButton(onClick = {
+                TooltipIconButton(tooltip = "Scroll to bottom", onClick = {
                     scope.launch { scrollState.animateScrollTo(scrollState.maxValue) }
                 }) {
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to bottom")
                 }
-                IconButton(onClick = {
+                TooltipIconButton(tooltip = "Refresh queue", onClick = {
                     scope.launch {
                         items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
                         pendingCount = repository.thumbnailQueueCount()
+                        activeQueueIds = repository.thumbnailQueueActiveFileIds()
+                        failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
                         queuePaused = repository.thumbnailQueuePaused()
                     }
                 }) {
@@ -260,12 +264,27 @@ fun ThumbnailQueueScreen(
                 )
             }
 
+            val commandFocusRequester = rememberCollectionCommandFocusRequester()
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(scrollState)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .collectionCommandShortcuts(
+                            focusRequester = commandFocusRequester,
+                            onSelectAll = {
+                                scope.launch {
+                                    selectingAll = true
+                                    try {
+                                        selectedIds = repository.thumbnailQueueAllFileIds().toSet()
+                                    } finally {
+                                        selectingAll = false
+                                    }
+                                }
+                                true
+                            }
+                        ),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                 if (queuePaused) {
@@ -274,10 +293,10 @@ fun ThumbnailQueueScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
-                } else if (activeJobs.isNotEmpty()) {
+                } else if (activeQueueIds.isNotEmpty()) {
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     Text(
-                        "Working on " + activeJobs.size +
+                        "Working on " + activeQueueIds.size +
                             " item(s) in parallel. Jobs remain queued across app restarts.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -419,7 +438,7 @@ fun ThumbnailQueueScreen(
                                 ThumbnailQueueRow(
                                     item = item,
                                     selected = item.fileId in selectedIds,
-                                    active = item.fileId in activeJobs,
+                                    active = item.fileId in activeQueueIds,
                                     globallyPaused = queuePaused,
                                     onSelect = { checked ->
                                         selectedIds = if (checked) selectedIds + item.fileId

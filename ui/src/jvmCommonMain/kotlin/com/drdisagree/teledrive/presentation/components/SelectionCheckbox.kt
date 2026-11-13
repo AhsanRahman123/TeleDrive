@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material3.Icon
@@ -26,35 +27,41 @@ import org.jetbrains.compose.resources.stringResource
 fun SelectionCheckbox(
     checked: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    highContrast: Boolean = false
 ) {
+    val emphasized = highContrast && checked
     Surface(
         modifier = modifier.size(48.dp),
         shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        tonalElevation = 2.dp
+        color = if (emphasized) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        contentColor = if (emphasized) MaterialTheme.colorScheme.onPrimary
+        else MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(
+            1.dp,
+            if (emphasized) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant
+        ),
+        tonalElevation = if (emphasized) 4.dp else 2.dp
     ) {
         IconButton(
             onClick = onClick,
             modifier = Modifier.size(48.dp)
         ) {
             Icon(
-                imageVector = if (checked) {
-                    Icons.Filled.CheckBox
-                } else {
-                    Icons.Filled.CheckBoxOutlineBlank
+                imageVector = when {
+                    emphasized -> Icons.Filled.Check
+                    checked -> Icons.Filled.CheckBox
+                    else -> Icons.Filled.CheckBoxOutlineBlank
                 },
                 contentDescription = stringResource(
                     if (checked) Res.string.common_content_description_selected else Res.string.common_select
                 ),
                 modifier = Modifier.size(28.dp),
-                tint = if (checked) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                }
+                tint = if (emphasized) MaterialTheme.colorScheme.onPrimary
+                else if (checked) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface
             )
         }
     }

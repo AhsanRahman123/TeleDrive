@@ -502,9 +502,11 @@ class SyncRepositoryImpl(
         val name = local?.name?.takeIf { choice.keepsLocal { it.name } }
             ?: manifest?.name ?: existing?.name
             ?: document.fileName.ifBlank { "file-${document.messageId}" }
-        val mime = manifest?.mimeType ?: document.mimeType.ifBlank {
-            MimeTypes.fromFileName(name)
-        }
+        // Telegram can label arbitrary uploaded documents as application/octet-stream.
+        // A manifest or Telegram MIME value that is generic must not hide a known extension:
+        // otherwise valid audio/video/image files are indexed as OTHER and never reach their
+        // native preview path.
+        val mime = MimeTypes.resolve(name, manifest?.mimeType, document.mimeType)
 
         val now = System.currentTimeMillis()
         val trashedAt = when {

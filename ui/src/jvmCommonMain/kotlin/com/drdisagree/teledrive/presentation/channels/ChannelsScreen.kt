@@ -47,7 +47,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -177,7 +177,7 @@ fun ChannelsScreen(
                 colors = liftedTopAppBarColors(lifted),
                 title = { Text(stringResource(Res.string.common_storage_channels)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -185,7 +185,7 @@ fun ChannelsScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = viewModel::refresh) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.channels_look_drives), onClick = viewModel::refresh) {
                         Icon(
                             Icons.Filled.Refresh,
                             contentDescription = stringResource(Res.string.channels_look_drives)
@@ -334,7 +334,8 @@ private fun ChannelRow(
             )
         }
         Box {
-            IconButton(
+            TooltipIconButton(
+                tooltip = stringResource(Res.string.channels_drive_actions),
                 onClick = { showMenu = true },
                 modifier = Modifier.focusProperties { canFocus = actionsFocusable }
             ) {

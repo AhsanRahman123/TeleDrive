@@ -16,6 +16,9 @@ interface ThumbnailStore {
     /** Explicit user request; bypasses the manual-only viewing policy. */
     suspend fun generateNow(fileId: String): ByteArray? = thumbnailBytes(fileId)
 
+    /** Refresh an existing automatic image/video thumbnail after its original is downloaded. */
+    suspend fun refreshCachedThumbnailFromLocalOriginal(fileId: String) = Unit
+
     /** Durable, non-blocking preparation after a successful upload. */
     suspend fun enqueueAfterUpload(fileId: String) = Unit
 

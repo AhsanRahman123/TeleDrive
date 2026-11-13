@@ -32,7 +32,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -60,6 +62,7 @@ import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -93,8 +96,11 @@ fun CacheManagerScreen(
     val settingsViewModel = koinViewModel<SettingsViewModel>()
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
+    val commandFocusRequester = rememberCollectionCommandFocusRequester()
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTool by remember { mutableStateOf("CACHE") }
+    var thumbnailManagerHasInternalBack by remember { mutableStateOf(false) }
+    var thumbnailManagerBackAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var confirmClearAllCache by remember { mutableStateOf(false) }
     var confirmClearThumbnailCache by remember { mutableStateOf(false) }
 
@@ -129,6 +135,32 @@ fun CacheManagerScreen(
     )
 
     val folderId = folderPath.lastOrNull()?.id
+
+    fun navigateBackOneStep() {
+        when {
+            selectedTool == "QUEUE" -> selectedTool = "THUMBNAILS"
+            selectedTool == "THUMBNAILS" && thumbnailManagerHasInternalBack -> {
+                thumbnailManagerBackAction?.invoke()
+            }
+            selectedTool != "CACHE" -> selectedTool = "CACHE"
+            folderPath.isNotEmpty() -> {
+                folderPath = folderPath.dropLast(1)
+                pageOffset = 0
+                selectedPaths = emptySet()
+                selectedFolderIds = emptySet()
+            }
+            else -> onBack()
+        }
+    }
+
+    LaunchedEffect(selectedTool) {
+        if (selectedTool != "THUMBNAILS") {
+            thumbnailManagerHasInternalBack = false
+            thumbnailManagerBackAction = null
+        }
+        if (selectedTool == "CACHE") commandFocusRequester.requestFocus()
+    }
+    AppBackHandler { navigateBackOneStep() }
     val folderDragSelect = rememberDragSelect(
         listState = folderListState,
         onStart = { folderRangeSelectionBase = selectedFolderIds },
@@ -256,13 +288,13 @@ fun CacheManagerScreen(
             TopAppBar(
                 title = { Text("Free up space") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    TooltipIconButton(tooltip = "Back", onClick = ::navigateBackOneStep) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     if (selectedTool == "CACHE") {
-                        IconButton(onClick = {
+                        TooltipIconButton(tooltip = "Refresh cache inventory", onClick = {
                             pageOffset = 0
                             entries = emptyList()
                             refreshKey++
@@ -296,11 +328,23 @@ fun CacheManagerScreen(
                     onClick = { selectedTool = "QUEUE" },
                     label = { Text("View queue") }
                 )
+                FilterChip(
+                    selected = selectedTool == "LOCAL_COPIES",
+                    onClick = { selectedTool = "LOCAL_COPIES" },
+                    label = { Text("Local copies") }
+                )
             }
             when (selectedTool) {
+                "LOCAL_COPIES" -> LocalCopyInventoryScreen(
+                    modifier = Modifier.weight(1f).fillMaxWidth()
+                )
                 "THUMBNAILS" -> ThumbnailManagerScreen(
                     onBack = { selectedTool = "CACHE" },
-                    modifier = Modifier.weight(1f).fillMaxWidth()
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onInternalBackStateChange = { canGoBack, action ->
+                        thumbnailManagerHasInternalBack = canGoBack
+                        thumbnailManagerBackAction = action.takeIf { canGoBack }
+                    }
                 )
                 "QUEUE" -> ThumbnailQueueScreen(
                     onBack = { selectedTool = "THUMBNAILS" },
@@ -310,7 +354,32 @@ fun CacheManagerScreen(
                     Column(
                         modifier = Modifier.fillMaxSize()
                             .verticalScroll(scrollState)
-                            .padding(horizontal = 18.dp, vertical = 12.dp),
+                            .padding(horizontal = 18.dp, vertical = 12.dp)
+                            .collectionCommandShortcuts(
+                                focusRequester = commandFocusRequester,
+                                onSelectAll = {
+                                    scope.launch {
+                                        busy = true
+                                        try {
+                                            val paths = repository.cacheEntryPathsMatching(
+                                                folderId, typeFilter, searchQuery
+                                            ).toMutableSet()
+                                            if (folderId == null) {
+                                                folders.forEach { folder ->
+                                                    paths += repository.cacheEntryPathsInFolderTree(
+                                                        folder.id, typeFilter, searchQuery
+                                                    )
+                                                }
+                                            }
+                                            selectedPaths = paths
+                                            selectedFolderIds = folders.map { it.id }.toSet()
+                                        } finally {
+                                            busy = false
+                                        }
+                                    }
+                                    true
+                                }
+                            ),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

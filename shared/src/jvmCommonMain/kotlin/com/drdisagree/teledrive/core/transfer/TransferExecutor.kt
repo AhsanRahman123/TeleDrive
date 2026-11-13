@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.core.transfer
 
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.KeyUnavailableException
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
@@ -603,6 +604,11 @@ class TransferExecutor(
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
                                     )
+                                    SafeLog.d(
+                                        "TransferDiagnostics",
+                                        "DOWNLOAD_SAMPLE transferId=${transfer.id} bytes=${event.transferredBytes} " +
+                                            "total=${entity.sizeBytes} bytesPerSecond=$speed"
+                                    )
                                 } else {
                                     // Keep progress timestamps fresh for every TDLib update;
                                     // the speed sample itself is only refreshed once per second.
@@ -720,6 +726,11 @@ class TransferExecutor(
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
                                     )
+                                    SafeLog.d(
+                                        "TransferDiagnostics",
+                                        "PART_DOWNLOAD_SAMPLE transferId=${transfer.id} bytes=${event.transferredBytes} " +
+                                            "total=${entity.sizeBytes} bytesPerSecond=$speed"
+                                    )
                                 } else {
                                     transferDao.updateTransferredBytes(
                                         transfer.id, event.transferredBytes, now
@@ -780,6 +791,7 @@ class TransferExecutor(
         transferDao.setLocalPath(transfer.id, null)
         fileDao.setLocalPath(entity.id, savedPath)
         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
+        refreshDownloadedMediaThumbnail(entity)
         return TransferOutcome.Completed
     }
 
@@ -851,7 +863,28 @@ class TransferExecutor(
 
         fileDao.setLocalPath(fileId, savedPath)
         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
+        refreshDownloadedMediaThumbnail(entity)
         return TransferOutcome.Completed
+    }
+
+    /**
+     * A completed original can replace a low-resolution remote thumbnail with a sharp local
+     * thumbnail. This is cache maintenance only: it never changes or recompresses the original.
+     * Keep thumbnail refresh best-effort so it cannot turn a successful download into a failure.
+     */
+    private suspend fun refreshDownloadedMediaThumbnail(entity: FileEntity) {
+        if (entity.category != FileCategory.IMAGE && entity.category != FileCategory.VIDEO) return
+        withContext(NonCancellable) {
+            runCatching {
+                thumbnailStore.refreshCachedThumbnailFromLocalOriginal(entity.id)
+            }.onFailure { error ->
+                SafeLog.w(
+                    "TransferExecutor",
+                    "Could not queue a local-original thumbnail refresh for ${entity.id}",
+                    error
+                )
+            }
+        }
     }
 
     /**

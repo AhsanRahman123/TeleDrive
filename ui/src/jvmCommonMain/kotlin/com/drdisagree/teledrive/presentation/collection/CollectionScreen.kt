@@ -31,7 +31,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -53,6 +53,8 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.common.isInitialLoad
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
@@ -148,7 +150,8 @@ fun CollectionScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = if (selectionMode) stringResource(Res.string.common_clear_selection) else stringResource(Res.string.common_back),
                         onClick = { if (selectionMode) viewModel.clearSelection() else onBack() }
                     ) {
                         Icon(
@@ -169,7 +172,7 @@ fun CollectionScreen(
                         enter = fadeIn() + scaleIn(),
                         exit = fadeOut() + scaleOut()
                     ) {
-                        IconButton(onClick = viewModel::downloadMissing) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.collection_offline_download_missing), onClick = viewModel::downloadMissing) {
                             Icon(
                                 Icons.Filled.CloudDownload,
                                 contentDescription = stringResource(
@@ -179,14 +182,15 @@ fun CollectionScreen(
                         }
                     }
                     if (!selectionMode) {
-                        IconButton(onClick = viewModel::startSelectionMode) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                             Icon(
                                 Icons.Filled.CheckBoxOutlineBlank,
                                 contentDescription = stringResource(Res.string.common_select)
                             )
                         }
                     } else {
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (allSelected) Res.string.common_deselect_all else Res.string.common_select_all),
                             onClick = {
                                 if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
                             }
@@ -205,7 +209,7 @@ fun CollectionScreen(
                             )
                         }
                         if (selectionCount > 0) {
-                            IconButton(onClick = viewModel::removeFromCollection) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.collection_remove_from, stringResource(viewModel.type.titleRes)), onClick = viewModel::removeFromCollection) {
                                 Icon(
                                     Icons.Filled.RemoveCircleOutline,
                                     contentDescription = stringResource(
@@ -214,14 +218,14 @@ fun CollectionScreen(
                                     )
                                 )
                             }
-                            IconButton(onClick = { confirmTrash = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_move_trash), onClick = { confirmTrash = true }) {
                                 Icon(
                                     Icons.Filled.Delete,
                                     contentDescription = stringResource(Res.string.common_move_trash)
                                 )
                             }
                             Box {
-                                IconButton(onClick = { showSelectionOverflow = true }) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                     Icon(
                                         Icons.Filled.MoreVert,
                                         contentDescription = stringResource(Res.string.common_actions)
@@ -332,10 +336,30 @@ fun CollectionScreen(
                 if (!selectionMode) toggleAt(index)
                 confirmTrash = true
             },
+            onCopy = { index ->
+                if (!selectionMode) toggleAt(index)
+                viewModel.copyToClipboardSelected()
+            },
+            onCut = { index ->
+                if (!selectionMode) toggleAt(index)
+                viewModel.cutSelected()
+            },
+            onPaste = viewModel::paste,
             onBack = onBack,
             onClear = if (selectionMode) viewModel::clearSelection else null
         )
-        Box(modifier = Modifier.fillMaxSize()) {
+        val commandFocusRequester = rememberCollectionCommandFocusRequester()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .collectionCommandShortcuts(
+                    focusRequester = commandFocusRequester,
+                    onSelectAll = { viewModel.selectAll(); true },
+                    onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
+                    onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
+                    onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false }
+                )
+        ) {
                 LazyColumn(
             state = listState,
             modifier = Modifier

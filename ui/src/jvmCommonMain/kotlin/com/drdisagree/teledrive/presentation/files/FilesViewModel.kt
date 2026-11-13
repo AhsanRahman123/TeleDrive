@@ -94,9 +94,31 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.time.Duration.Companion.milliseconds
 
+internal data class FilesSelectionSnapshot(
+    val fileIds: Set<String> = emptySet(),
+    val folderIds: Set<String> = emptySet(),
+    val selectionModeEnabled: Boolean = false,
+    val allSelected: Boolean = false
+) {
+    val count: Int get() = fileIds.size + folderIds.size
+}
+
+/** Selection mode remains visible throughout a range gesture, even when its range is empty. */
+internal fun keepFilesSelectionMode(
+    rangeSelectionActive: Boolean,
+    selectedFileCount: Int,
+    selectedFolderCount: Int
+): Boolean = rangeSelectionActive || selectedFileCount > 0 || selectedFolderCount > 0
+
+data class FilesTabState(
+    val id: Int,
+    val folderId: String?,
+    val label: String
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class FilesViewModel(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val fileRepository: FileRepository,
     private val cacheRepository: CacheRepository,
     private val trashRepository: TrashRepository,
@@ -111,12 +133,118 @@ class FilesViewModel(
     private val telegramClient: TelegramClient
 ) : ViewModel() {
 
-    private val folderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
+    private val initialFolderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
+
+    private fun restoreWorkspaceTabs(): List<FilesTabState> {
+        val encoded = savedStateHandle.get<ArrayList<String>>(KEY_WORKSPACE_TABS).orEmpty()
+        return encoded.chunked(3).mapNotNull { fields ->
+            if (fields.size != 3) return@mapNotNull null
+            val id = fields[0].toIntOrNull() ?: return@mapNotNull null
+            FilesTabState(id, fields[1].ifEmpty { null }, fields[2])
+        }.distinctBy { it.id }
+    }
+
+    private val _workspaceTabs = MutableStateFlow(
+        restoreWorkspaceTabs().ifEmpty {
+            listOf(FilesTabState(0, initialFolderId, "Files"))
+        }
+    )
+    internal val workspaceTabs: StateFlow<List<FilesTabState>> = _workspaceTabs.asStateFlow()
+
+    private val _selectedWorkspaceTabId = MutableStateFlow(
+        savedStateHandle.get<Int>(KEY_SELECTED_WORKSPACE_TAB_ID)
+            ?.takeIf { id -> _workspaceTabs.value.any { it.id == id } }
+            ?: _workspaceTabs.value.first().id
+    )
+    val selectedWorkspaceTabId: StateFlow<Int> = _selectedWorkspaceTabId.asStateFlow()
+
+    // On process recreation, resume the selected workspace tab rather than the route's
+    // original folder. The tab strip and the active folder must describe the same tab.
+    private val _activeFolderId = MutableStateFlow(
+        _workspaceTabs.value.firstOrNull { it.id == _selectedWorkspaceTabId.value }?.folderId
+            ?: initialFolderId
+    )
+    val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
+
+    private var nextWorkspaceTabId = maxOf(
+        savedStateHandle.get<Int>(KEY_NEXT_WORKSPACE_TAB_ID) ?: 1,
+        (_workspaceTabs.value.maxOfOrNull { it.id } ?: 0) + 1
+    )
+
+    private fun persistWorkspaceTabs() {
+        savedStateHandle[KEY_WORKSPACE_TABS] = ArrayList(
+            _workspaceTabs.value.flatMap { tab ->
+                listOf(tab.id.toString(), tab.folderId.orEmpty(), tab.label)
+            }
+        )
+        savedStateHandle[KEY_SELECTED_WORKSPACE_TAB_ID] = _selectedWorkspaceTabId.value
+        savedStateHandle[KEY_NEXT_WORKSPACE_TAB_ID] = nextWorkspaceTabId
+    }
+
+    fun updateSelectedWorkspaceTab(folderId: String?, label: String) {
+        val selectedId = _selectedWorkspaceTabId.value
+        val current = _workspaceTabs.value
+        val updated = current.map { tab ->
+            if (tab.id == selectedId) tab.copy(folderId = folderId, label = label) else tab
+        }
+        if (updated != current) {
+            _workspaceTabs.value = updated
+            persistWorkspaceTabs()
+        }
+    }
+
+    fun createWorkspaceTab() {
+        val newTab = FilesTabState(nextWorkspaceTabId++, null, "Files")
+        _workspaceTabs.value = _workspaceTabs.value + newTab
+        _selectedWorkspaceTabId.value = newTab.id
+        persistWorkspaceTabs()
+        setActiveFolder(null)
+    }
+
+    fun activateWorkspaceTab(tabId: Int) {
+        val tab = _workspaceTabs.value.firstOrNull { it.id == tabId } ?: return
+        if (_selectedWorkspaceTabId.value == tabId) return
+        _selectedWorkspaceTabId.value = tabId
+        persistWorkspaceTabs()
+        setActiveFolder(tab.folderId)
+    }
+
+    fun closeWorkspaceTab(tabId: Int) {
+        val current = _workspaceTabs.value
+        if (current.size <= 1) return
+        val oldIndex = current.indexOfFirst { it.id == tabId }
+        if (oldIndex < 0) return
+        val nextTabs = current.filterNot { it.id == tabId }
+        _workspaceTabs.value = nextTabs
+        if (_selectedWorkspaceTabId.value == tabId) {
+            val replacement = nextTabs[oldIndex.coerceAtMost(nextTabs.lastIndex)]
+            _selectedWorkspaceTabId.value = replacement.id
+            setActiveFolder(replacement.folderId)
+        }
+        persistWorkspaceTabs()
+    }
+
+    /** Close every open Files tab and leave one fresh root tab ready to use. */
+    fun closeAllWorkspaceTabs() {
+        val freshTab = FilesTabState(nextWorkspaceTabId++, null, "Files")
+        _workspaceTabs.value = listOf(freshTab)
+        _selectedWorkspaceTabId.value = freshTab.id
+        persistWorkspaceTabs()
+        setActiveFolder(null)
+    }
+
+    fun setActiveFolder(folderId: String?) {
+        clearSelection()
+        if (_activeFolderId.value == folderId) return
+        _activeFolderId.value = folderId
+    }
 
     val listPosition = ListPosition(savedStateHandle)
 
     private val selection = MutableStateFlow<Set<String>>(emptySet())
     private val folderSelection = MutableStateFlow<Set<String>>(emptySet())
+    val selectedFileIds: StateFlow<Set<String>> = selection.asStateFlow()
+    val selectedFolderIds: StateFlow<Set<String>> = folderSelection.asStateFlow()
     private val _selectionModeEnabled = MutableStateFlow(false)
     val selectionModeEnabled: StateFlow<Boolean> = _selectionModeEnabled.asStateFlow()
 
@@ -124,8 +252,27 @@ class FilesViewModel(
     val working: StateFlow<UiText?> = _working.asStateFlow()
 
     private var rangeBase: Pair<Set<String>, Set<String>>? = null
+    /**
+     * Range selection is a gesture-level mode, not a consequence of the current range size.
+     * In particular, dragging from an already-selected item temporarily removes items. The
+     * selection toolbar must stay mounted until the pointer gesture ends, even if the range
+     * momentarily becomes empty.
+     */
+    private var rangeSelectionActive = false
     private val _allSelected = MutableStateFlow(false)
     val allSelected: StateFlow<Boolean> = _allSelected.asStateFlow()
+
+    private val _selectionSnapshot = MutableStateFlow(FilesSelectionSnapshot())
+    internal val selectionSnapshot: StateFlow<FilesSelectionSnapshot> = _selectionSnapshot.asStateFlow()
+
+    private fun publishSelectionSnapshot() {
+        _selectionSnapshot.value = FilesSelectionSnapshot(
+            fileIds = selection.value,
+            folderIds = folderSelection.value,
+            selectionModeEnabled = _selectionModeEnabled.value,
+            allSelected = _allSelected.value
+        )
+    }
 
     private val _messages = MutableSharedFlow<UiText>(extraBufferCapacity = 8)
     val messages = _messages.asSharedFlow()
@@ -180,12 +327,19 @@ class FilesViewModel(
         }
     }
 
-    private val currentFolder: Flow<DriveFolder?> = folderFlow()
+    private val currentFolderState: Flow<Pair<String?, DriveFolder?>> =
+        _activeFolderId.flatMapLatest { activeId ->
+            if (activeId == null) {
+                flowOf(activeId to null)
+            } else {
+                fileRepository.observeFolder(activeId).map { folder -> activeId to folder }
+            }
+        }
 
     private val querySpec: Flow<FileQuerySpec> =
-        combine(settingsRepository.preferences, currentFolder) { prefs, folder ->
+        combine(settingsRepository.preferences, currentFolderState) { prefs, (activeId, folder) ->
             FileQuerySpec(
-                folderId = folderId,
+                folderId = activeId,
                 filterByFolder = true,
                 showHidden = folder?.isHidden == true,
                 showArchived = folder?.isArchived == true,
@@ -193,6 +347,21 @@ class FilesViewModel(
                 sortDirection = prefs.sortDirection
             )
         }.distinctUntilChanged()
+
+    private val currentFolders = combine(
+        settingsRepository.preferences,
+        currentFolderState
+    ) { prefs, (activeId, folder) ->
+        prefs to (activeId to folder)
+    }.flatMapLatest { (prefs, context) ->
+        fileRepository.observeFolders(
+            parentId = context.first,
+            showHidden = context.second?.isHidden == true,
+            showArchived = context.second?.isArchived == true,
+            sortField = prefs.sortField,
+            sortDirection = prefs.sortDirection
+        )
+    }
 
     val pagedFiles: Flow<PagingData<DriveFile>> = querySpec
         .flatMapLatest { fileRepository.pagedFiles(it) }
@@ -221,22 +390,13 @@ class FilesViewModel(
         settingsRepository.preferences,
         selectionCapabilities,
         folderSelection,
-        currentFolder,
-        combine(settingsRepository.preferences, currentFolder) { prefs, folder ->
-            prefs to folder
-        }.flatMapLatest { (prefs, folder) ->
-            fileRepository.observeFolders(
-                parentId = folderId,
-                showHidden = folder?.isHidden == true,
-                showArchived = folder?.isArchived == true,
-                sortField = prefs.sortField,
-                sortDirection = prefs.sortDirection
-            )
-        }
-    ) { prefs: UserPreferences, selectionState, selectedFolders, folder, folders ->
+        currentFolderState,
+        currentFolders
+    ) { prefs: UserPreferences, selectionState, selectedFolders, folderState, folders ->
+        val (activeId, folder) = folderState
         val (selected, capabilities) = selectionState
         FilesUiState(
-            folderId = folderId,
+            folderId = activeId,
             folderName = folder?.name?.let(UiText::Plain)
                 ?: UiText.Resource(Res.string.files_root_name),
             breadcrumbs = breadcrumbsFor(folder),
@@ -253,10 +413,6 @@ class FilesViewModel(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FilesUiState())
 
-    private fun folderFlow(): Flow<DriveFolder?> =
-        folderId?.let { fileRepository.observeFolder(it) }
-            ?: MutableStateFlow<DriveFolder?>(null)
-
     private suspend fun breadcrumbsFor(folder: DriveFolder?): List<FolderCrumb> {
         val trail = ArrayDeque<FolderCrumb>()
         var current = folder
@@ -271,6 +427,7 @@ class FilesViewModel(
 
     fun startSelectionMode() {
         _selectionModeEnabled.update { true }
+        publishSelectionSnapshot()
     }
 
     fun selectFileForContext(fileId: String) {
@@ -280,6 +437,7 @@ class FilesViewModel(
             selection.update { setOf(fileId) }
             folderSelection.update { emptySet() }
         }
+        publishSelectionSnapshot()
     }
 
     fun selectFolderForContext(folderId: String) {
@@ -289,6 +447,7 @@ class FilesViewModel(
             selection.update { emptySet() }
             folderSelection.update { setOf(folderId) }
         }
+        publishSelectionSnapshot()
     }
 
     fun toggleSelection(fileId: String) {
@@ -296,6 +455,12 @@ class FilesViewModel(
         selection.update { current ->
             if (fileId in current) current - fileId else current + fileId
         }
+        _selectionModeEnabled.value = keepFilesSelectionMode(
+            rangeSelectionActive,
+            selection.value.size,
+            folderSelection.value.size
+        )
+        publishSelectionSnapshot()
     }
 
     fun toggleFolderSelection(folderId: String) {
@@ -303,13 +468,22 @@ class FilesViewModel(
         folderSelection.update { current ->
             if (folderId in current) current - folderId else current + folderId
         }
+        _selectionModeEnabled.value = keepFilesSelectionMode(
+            rangeSelectionActive,
+            selection.value.size,
+            folderSelection.value.size
+        )
+        publishSelectionSnapshot()
     }
 
     fun clearSelection() {
-        _selectionModeEnabled.update { false }
-        _allSelected.update { false }
-        selection.update { emptySet() }
-        folderSelection.update { emptySet() }
+        rangeBase = null
+        rangeSelectionActive = false
+        _selectionModeEnabled.value = false
+        _allSelected.value = false
+        selection.value = emptySet()
+        folderSelection.value = emptySet()
+        publishSelectionSnapshot()
     }
 
     fun selectAll() {
@@ -317,12 +491,17 @@ class FilesViewModel(
             val ids = fileRepository.fileIds(querySpec.first())
             folderSelection.update { uiState.value.folders.map { folder -> folder.id }.toSet() }
             selection.update { ids.toSet() }
+            _selectionModeEnabled.update { ids.isNotEmpty() || folderSelection.value.isNotEmpty() }
             _allSelected.update { true }
+            publishSelectionSnapshot()
         }
     }
 
     fun startRangeSelection() {
         rangeBase = selection.value to folderSelection.value
+        rangeSelectionActive = true
+        _selectionModeEnabled.value = true
+        publishSelectionSnapshot()
     }
 
     fun extendRangeSelection(
@@ -334,10 +513,23 @@ class FilesViewModel(
         _allSelected.update { false }
         selection.update { if (shouldSelect) base.first + fileIds else base.first - fileIds.toSet() }
         folderSelection.update { if (shouldSelect) base.second + folderIds else base.second - folderIds.toSet() }
+        _selectionModeEnabled.value = keepFilesSelectionMode(
+            rangeSelectionActive,
+            selection.value.size,
+            folderSelection.value.size
+        )
+        publishSelectionSnapshot()
     }
 
     fun endRangeSelection() {
         rangeBase = null
+        rangeSelectionActive = false
+        _selectionModeEnabled.value = keepFilesSelectionMode(
+            rangeSelectionActive = false,
+            selectedFileCount = selection.value.size,
+            selectedFolderCount = folderSelection.value.size
+        )
+        publishSelectionSnapshot()
     }
 
     fun zoomIn() = applyZoom(GridZoomLevel::zoomedIn)
@@ -366,7 +558,7 @@ class FilesViewModel(
 
     fun createFolder(name: String) {
         viewModelScope.launch {
-            when (val result = fileRepository.createFolder(folderId, name)) {
+            when (val result = fileRepository.createFolder(_activeFolderId.value, name)) {
                 is AppResult.Success -> Unit
                 is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
             }
@@ -573,12 +765,68 @@ class FilesViewModel(
         _messages.tryEmit(UiText.Resource(Res.string.files_cut_count, total))
     }
 
-    fun paste() {
-        val items = clipboard.take() ?: return
-        move(items.fileIds, items.folderIds, folderId)
+    fun copyToClipboardSelected() {
+        val items = CutItems(selection.value.toList(), folderSelection.value.toList(), isCut = false)
+        val total = items.fileIds.size + items.folderIds.size
+        if (total == 0) return
+        clearSelection()
+        clipboard.copy(items)
+        _messages.tryEmit(UiText.Plain("Copied $total item(s). Navigate to a destination and press Ctrl+V."))
     }
 
-    private fun move(ids: List<String>, folderIds: List<String>, targetFolderId: String?) {
+    fun dragPayloadForFile(fileId: String): String {
+        val selectedFiles = selection.value
+        val selectedFolders = folderSelection.value
+        val includeSelection = fileId in selectedFiles
+        return FileTabDragData(
+            fileIds = if (includeSelection) selectedFiles.toList() else listOf(fileId),
+            folderIds = if (includeSelection) selectedFolders.toList() else emptyList()
+        ).encode()
+    }
+
+    fun dragPayloadForFolder(folderId: String): String {
+        val selectedFiles = selection.value
+        val selectedFolders = folderSelection.value
+        val includeSelection = folderId in selectedFolders
+        return FileTabDragData(
+            fileIds = if (includeSelection) selectedFiles.toList() else emptyList(),
+            folderIds = if (includeSelection) selectedFolders.toList() else listOf(folderId)
+        ).encode()
+    }
+
+    fun handleTabDrop(payload: String, targetFolderId: String?, copy: Boolean): Boolean {
+        val items = FileTabDragData.decode(payload) ?: return false
+        if (items.fileIds.isEmpty() && items.folderIds.isEmpty()) return false
+        clearSelection()
+        if (copy) {
+            copyItems(items.fileIds, items.folderIds, targetFolderId)
+        } else {
+            move(items.fileIds, items.folderIds, targetFolderId)
+        }
+        return true
+    }
+
+    fun hasClipboardItems(): Boolean = clipboard.peek() != null
+
+    fun paste() {
+        val items = clipboard.peek() ?: return
+        if (items.isCut) {
+            // Keep the cut payload until every requested move succeeds. If a destination
+            // conflict or repository failure occurs, the user can retry without reselecting.
+            move(items.fileIds, items.folderIds, _activeFolderId.value) {
+                clipboard.clearIfMatches(items)
+            }
+        } else {
+            copyItems(items.fileIds, items.folderIds, _activeFolderId.value)
+        }
+    }
+
+    private fun move(
+        ids: List<String>,
+        folderIds: List<String>,
+        targetFolderId: String?,
+        onSuccess: (() -> Unit)? = null
+    ) {
         viewModelScope.launch {
             var failures = 0
             if (ids.isNotEmpty()) {
@@ -595,12 +843,15 @@ class FilesViewModel(
                     _messages.tryEmit(result.error.toUiText())
                 }
             }
-            if (failures == 0) _messages.tryEmit(
-                UiText.Resource(
-                    Res.string.message_moved_count,
-                    ids.size + folderIds.size
+            if (failures == 0) {
+                _messages.tryEmit(
+                    UiText.Resource(
+                        Res.string.message_moved_count,
+                        ids.size + folderIds.size
+                    )
                 )
-            )
+                onSuccess?.invoke()
+            }
         }
     }
 
@@ -608,6 +859,11 @@ class FilesViewModel(
         val ids = selection.value.toList()
         val folderIds = folderSelection.value.toList()
         clearSelection()
+        copyItems(ids, folderIds, targetFolderId)
+    }
+
+    private fun copyItems(ids: List<String>, folderIds: List<String>, targetFolderId: String?) {
+        if (ids.isEmpty() && folderIds.isEmpty()) return
         _copying.update { true }
         viewModelScope.launch {
             try {
@@ -621,8 +877,8 @@ class FilesViewModel(
                     }
                 }
 
-                folderIds.forEach { folderId ->
-                    when (val result = fileRepository.copyFolder(folderId, targetFolderId)) {
+                folderIds.forEach { sourceFolderId ->
+                    when (val result = fileRepository.copyFolder(sourceFolderId, targetFolderId)) {
                         is AppResult.Success -> {
                             copiedItems += result.value.copiedItems
                             totalItems += result.value.totalItems
@@ -663,8 +919,16 @@ class FilesViewModel(
     private var pendingLocalCopyIds: List<String> = emptyList()
 
     fun inspectSelectedStorage() {
-        storageAuditFileIds = selection.value.toList()
-        loadStorageAudit(storageAuditFileIds)
+        val fileIds = selection.value.toList()
+        val folderIds = folderSelection.value.toList()
+        viewModelScope.launch {
+            // A folder audit expands to all library files beneath that folder so the user
+            // can inspect each managed copy and TDLib path before choosing what to keep.
+            storageAuditFileIds = (fileIds + folderIds.flatMap { folderId ->
+                fileRepository.fileIdsInTree(folderId)
+            }).distinct()
+            loadStorageAudit(storageAuditFileIds)
+        }
     }
 
     fun refreshStorageAudit() {
@@ -905,7 +1169,7 @@ class FilesViewModel(
     private val _folderConflict = MutableStateFlow<FolderConflict?>(null)
     val folderConflict: StateFlow<FolderConflict?> = _folderConflict.asStateFlow()
 
-    fun importAndUpload(uris: List<String>, target: String? = folderId) {
+    fun importAndUpload(uris: List<String>, target: String? = _activeFolderId.value) {
         if (uris.isEmpty()) return
         importScope.launch {
             // Capture before expanding or showing the folder-conflict dialog. Cancel all
@@ -1126,5 +1390,8 @@ class FilesViewModel(
     companion object {
         private const val MIN_REFRESH_VISIBLE_MS = 700L
         private const val MAX_BREADCRUMB_DEPTH = 64
+        private const val KEY_WORKSPACE_TABS = "files_workspace_tabs"
+        private const val KEY_SELECTED_WORKSPACE_TAB_ID = "files_workspace_selected_tab_id"
+        private const val KEY_NEXT_WORKSPACE_TAB_ID = "files_workspace_next_tab_id"
     }
 }

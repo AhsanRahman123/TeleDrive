@@ -7,6 +7,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,8 +19,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -43,7 +43,7 @@ import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -53,7 +53,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -75,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -118,10 +119,9 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -183,32 +183,80 @@ internal fun DesktopMediaPlayer(
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionTick by remember { mutableIntStateOf(0) }
     var controlsPinned by remember { mutableStateOf(false) }
+    var seekFeedbackVisible by remember { mutableStateOf(false) }
+    var seekFeedbackTick by remember { mutableIntStateOf(0) }
+    var hKeyPressed by remember { mutableStateOf(false) }
     var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
+    var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
     // a play/resume event cannot reapply the initial 100% / unmuted values.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
     val latestRepeatOne = rememberUpdatedState(repeatOne)
     val latestSleepAtTrackEnd = rememberUpdatedState(sleepAtTrackEnd)
+    val latestOnPlaybackFinished = rememberUpdatedState(onPlaybackFinished)
+    val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
     val playerScope = rememberCoroutineScope()
+    // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
+    // media. The new source becomes active only after VLC reports that it has started playing.
+    val acceptsCurrentMediaEvents = remember(factory, isAudio) { AtomicBoolean(false) }
 
-    val player = remember(mrl, isAudio) {
+    // VLC calls its render callback from a native thread. Conflate pending frames before
+    // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
+    // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
+    val frameUpdates = remember(factory, isAudio) {
+        Channel<VideoFramePixels>(capacity = Channel.CONFLATED)
+    }
+    LaunchedEffect(frameUpdates) {
+        for (nextFrame in frameUpdates) {
+            // Bitmap installation can be expensive for full-resolution frames. Keep that work
+            // off the UI dispatcher; only publish the completed immutable image on Compose Main.
+            val image = withContext(Dispatchers.Default) {
+                nextFrame.toImageBitmap()
+            } ?: continue
+            frame = image
+        }
+    }
+    DisposableEffect(frameUpdates) {
+        onDispose { frameUpdates.close() }
+    }
+
+    // Keep high-frequency playback position notifications bounded as well.
+    val timeUpdates = remember(factory, isAudio) {
+        Channel<Long>(capacity = Channel.CONFLATED)
+    }
+    LaunchedEffect(timeUpdates) {
+        for (position in timeUpdates) timeMs = position
+    }
+    DisposableEffect(timeUpdates) {
+        onDispose { timeUpdates.close() }
+    }
+
+    // One native VLC instance is retained for the lifetime of this media viewer. The
+    // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
+    val player = remember(factory, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
-            if (!isAudio) videoSurface().set(composeVideoSurface { frame = it })
+            if (!isAudio) {
+                videoSurface().set(composeVideoSurface { image ->
+                    if (acceptsCurrentMediaEvents.get()) frameUpdates.trySend(image)
+                })
+            }
             events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
+                // vlcj event callbacks run on native/event threads. Compose state is only
+                // mutated from the player scope, never directly from those callback threads.
                 override fun playing(mediaPlayer: MediaPlayer) {
-                    playing = true
-                    finished = false
-                    buffering = false
-                    // Do not call LibVLC from this native callback thread. The event thread
-                    // must return immediately; volume restoration is queued below via submit().
-                    trackTick++
+                    acceptsCurrentMediaEvents.set(true)
+                    playerScope.launch {
+                        playing = true
+                        finished = false
+                        buffering = false
+                        trackTick++
+                    }
                 }
 
                 override fun audioDeviceChanged(mediaPlayer: MediaPlayer, audioDevice: String) {
                     // Windows can replace the default output when USB/Bluetooth earphones are
-                    // attached. Publish the state change on Compose's dispatcher, and never
-                    // call LibVLC from this native callback.
+                    // attached. Re-apply audio state from the Compose scope.
                     playerScope.launch { trackTick++ }
                 }
 
@@ -217,39 +265,49 @@ internal fun DesktopMediaPlayer(
                     type: TrackType,
                     id: Int
                 ) {
-                    trackTick++
+                    playerScope.launch { trackTick++ }
                 }
 
                 override fun paused(mediaPlayer: MediaPlayer) {
-                    playing = false
+                    if (acceptsCurrentMediaEvents.get()) {
+                        playerScope.launch { playing = false }
+                    }
                 }
 
                 override fun finished(mediaPlayer: MediaPlayer) {
-                    playing = false
-                    finished = true
+                    if (!acceptsCurrentMediaEvents.getAndSet(false)) return
                     playerScope.launch {
+                        playing = false
+                        finished = true
                         if (!latestRepeatOne.value || latestSleepAtTrackEnd.value) {
-                            onPlaybackFinished()
+                            latestOnPlaybackFinished.value()
                         }
                     }
                 }
 
                 override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
-                    buffering = newCache < 100f
+                    if (acceptsCurrentMediaEvents.get()) {
+                        playerScope.launch { buffering = newCache < 100f }
+                    }
                 }
 
                 override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
-                    timeMs = newTime
+                    if (acceptsCurrentMediaEvents.get()) timeUpdates.trySend(newTime)
                 }
 
                 override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
-                    durationMs = newLength
+                    if (acceptsCurrentMediaEvents.get()) {
+                        playerScope.launch { durationMs = newLength }
+                    }
                 }
 
                 override fun error(mediaPlayer: MediaPlayer) {
-                    playing = false
-                    finished = true
-                    buffering = false
+                    acceptsCurrentMediaEvents.set(false)
+                    playerScope.launch {
+                        playing = false
+                        finished = true
+                        buffering = false
+                    }
                 }
             })
         }
@@ -308,17 +366,38 @@ internal fun DesktopMediaPlayer(
     }
 
     val fullscreenController = LocalFullscreenController.current
-    DisposableEffect(player, mrl) {
-        player.media().play(mrl)
+    LaunchedEffect(player, mrl) {
+        // Queue media replacement on vlcj's serialized player executor. Direct calls from the
+        // Compose thread can race native playback callbacks while the player is switching files.
+        // Keep the last completed frame visible under the buffering indicator until the incoming
+        // source produces its first accepted frame; late frames from the outgoing source are gated.
+        acceptsCurrentMediaEvents.set(false)
+        playing = false
+        finished = false
+        buffering = true
+        timeMs = 0L
+        durationMs = 0L
+        trackTick++
+        player.submit {
+            runCatching { player.controls().stop() }
+            runCatching { player.media().play(mrl) }
+                .onFailure { playerScope.launch {
+                    playing = false
+                    finished = true
+                    buffering = false
+                } }
+        }
+    }
+
+    DisposableEffect(player) {
         onDispose {
-            // Release VLC off the Compose UI thread so switching files stays responsive.
-            val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-            teardownScope.launch {
-                try {
+            acceptsCurrentMediaEvents.set(false)
+            // Keep teardown serialized with pending play/seek/track commands. Disposing the
+            // composable must not race a queued media replacement against native player release.
+            runCatching {
+                player.submit {
                     runCatching { player.controls().stop() }
                     runCatching { player.release() }
-                } finally {
-                    teardownScope.cancel()
                 }
             }
         }
@@ -362,21 +441,49 @@ internal fun DesktopMediaPlayer(
 
     val trackWord = stringResource(Res.string.player_track)
     val playerFocusRequester = remember { FocusRequester() }
+    val windowInfo = LocalWindowInfo.current
     LaunchedEffect(mrl) { playerFocusRequester.requestFocus() }
+    LaunchedEffect(windowInfo.isWindowFocused) {
+        if (!windowInfo.isWindowFocused) {
+            // A key release may be delivered to another application during Alt+Tab.
+            hKeyPressed = false
+        } else {
+            playerFocusRequester.requestFocus()
+        }
+    }
 
     val togglePlayback: () -> Unit = {
         when {
             finished -> {
                 finished = false
-                player.controls().play()
+                player.submit { runCatching { player.controls().play() } }
             }
-            playing -> player.controls().pause()
-            else -> player.controls().play()
+            playing -> player.submit { runCatching { player.controls().pause() } }
+            else -> player.submit { runCatching { player.controls().play() } }
         }
     }
     val toggleMute: () -> Unit = {
         muted = !muted
         player.submitAudioState(volume, muted)
+    }
+    val toggleControlsVisibility: () -> Unit = {
+        val showControls = !(controlsVisible || seekFeedbackVisible)
+        val updated = controlPreferences.copy(showPlayerControls = showControls)
+        controlPreferences = updated
+        controlsPinned = false
+        seekFeedbackVisible = false
+        PlayerControlPreferencesStore.save(updated)
+        controlsVisible = showControls
+        latestOnControlsVisibilityChange.value(showControls)
+        interactionTick++
+        lastVisibilityInteractionTick = interactionTick
+    }
+    val revealControlsForSeek: () -> Unit = {
+        seekFeedbackVisible = true
+        controlsVisible = true
+        latestOnControlsVisibilityChange.value(true)
+        interactionTick++
+        seekFeedbackTick++
     }
     fun setPlayerVolume(value: Int, unmute: Boolean = true) {
         val nextVolume = value.coerceIn(0, MAX_VOLUME)
@@ -398,12 +505,17 @@ internal fun DesktopMediaPlayer(
             "TeleDrive"
         )
         if (!snapshotDirectory.exists() && !snapshotDirectory.mkdirs()) return
-        player.snapshots().setSnapshotDirectory(snapshotDirectory.absolutePath)
-        player.snapshots().save()
+        player.submit {
+            runCatching {
+                player.snapshots().setSnapshotDirectory(snapshotDirectory.absolutePath)
+                player.snapshots().save()
+            }
+        }
     }
     fun setPlaybackRate(value: Float) {
-        rate = normalizePlaybackRate(value)
-        player.controls().setRate(rate)
+        val requestedRate = normalizePlaybackRate(value)
+        rate = requestedRate
+        player.submit { runCatching { player.controls().setRate(requestedRate) } }
         interactionTick++
     }
     fun cycleAudioTrack() {
@@ -494,24 +606,47 @@ internal fun DesktopMediaPlayer(
         controlsPinned,
         controlPreferences.autoHidePlayerControls,
         controlPreferences.showPlayerControls,
-        controlPreferences.hideDelayMillis
+        controlPreferences.hideDelayMillis,
+        seekFeedbackVisible
     ) {
         if (!controlPreferences.showPlayerControls) {
-            controlsVisible = false
-            onControlsVisibilityChange(false)
+            if (controlsVisible) controlsVisible = false
+            latestOnControlsVisibilityChange.value(false)
             return@LaunchedEffect
         }
-        controlsVisible = true
-        onControlsVisibilityChange(true)
+        // Media changes restart this timer but do not reveal controls hidden by the user.
+        // Only a real keyboard/pointer interaction may reveal an auto-hidden control bar.
+        if (interactionTick != lastVisibilityInteractionTick) {
+            lastVisibilityInteractionTick = interactionTick
+            if (!controlsVisible) controlsVisible = true
+        }
+        if (!controlsVisible) {
+            latestOnControlsVisibilityChange.value(false)
+            return@LaunchedEffect
+        }
+        latestOnControlsVisibilityChange.value(true)
         if (!controlPreferences.autoHidePlayerControls || controlsPinned) {
             return@LaunchedEffect
         }
-        // Hide the complete player chrome after inactivity even while paused.
-        // Previously the !playing early return left every button permanently visible.
-        delay(controlPreferences.hideDelayMillis.milliseconds)
-        if (!controlsPinned) {
+        val hideDelay = if (seekFeedbackVisible) {
+            SEEK_FEEDBACK_DURATION_MS.milliseconds
+        } else {
+            controlPreferences.hideDelayMillis.milliseconds
+        }
+        delay(hideDelay)
+        if (!controlsPinned && interactionTick == lastVisibilityInteractionTick) {
             controlsVisible = false
-            onControlsVisibilityChange(false)
+            latestOnControlsVisibilityChange.value(false)
+        }
+    }
+
+    LaunchedEffect(seekFeedbackTick) {
+        if (seekFeedbackTick == 0) return@LaunchedEffect
+        seekFeedbackVisible = true
+        delay(SEEK_FEEDBACK_DURATION_MS)
+        seekFeedbackVisible = false
+        if (!controlPreferences.showPlayerControls && !controlsVisible) {
+            latestOnControlsVisibilityChange.value(false)
         }
     }
 
@@ -530,6 +665,13 @@ internal fun DesktopMediaPlayer(
             .background(Color.Black)
             .focusRequester(playerFocusRequester)
             .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp) {
+                    if (event.key == Key.H) {
+                        hKeyPressed = false
+                        return@onPreviewKeyEvent true
+                    }
+                    return@onPreviewKeyEvent false
+                }
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val key = event.key
                 val ctrl = event.isCtrlPressed
@@ -548,12 +690,12 @@ internal fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.MediaPlay -> {
-                        player.controls().play()
+                        player.submit { runCatching { player.controls().play() } }
                         interactionTick++
                         true
                     }
                     key == Key.MediaPause -> {
-                        player.controls().pause()
+                        player.submit { runCatching { player.controls().pause() } }
                         interactionTick++
                         true
                     }
@@ -563,7 +705,8 @@ internal fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.MediaStop || (key == Key.S && !shift && !ctrl && !alt) -> {
-                        player.controls().stop()
+                        acceptsCurrentMediaEvents.set(false)
+                        player.submit { runCatching { player.controls().stop() } }
                         playing = false
                         finished = true
                         timeMs = 0L
@@ -609,17 +752,8 @@ internal fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    // W/E are reserved for media navigation; Left/Right remain seek keys.
-                    key == Key.W && !ctrl && !alt && !shift -> {
-                        if (hasPrevious) onPrevious()
-                        interactionTick++
-                        true
-                    }
-                    key == Key.E && !ctrl && !alt && !shift -> {
-                        if (hasNext) onNext()
-                        interactionTick++
-                        true
-                    }
+                    // W/E are handled by the preview screen so mixed image/video folders
+                    // are navigated as one sequence. Player transport buttons stay queue-scoped.
                     !alt && !shift && key == Key.DirectionUp -> {
                         adjustPlayerVolume(VOLUME_STEP)
                         interactionTick++
@@ -655,14 +789,25 @@ internal fun DesktopMediaPlayer(
                         setPlaybackRate(1f)
                         true
                     }
+                    // Short, dedicated seek shortcuts requested for keyboard users.
+                    key == Key.P && !ctrl && !alt && !shift -> {
+                        player.submit { runCatching { player.controls().skipTime(-SHORT_KEY_SEEK_STEP_MS) } }
+                        revealControlsForSeek()
+                        true
+                    }
+                    key == Key.N && !ctrl && !alt && !shift -> {
+                        player.submit { runCatching { player.controls().skipTime(SHORT_KEY_SEEK_STEP_MS) } }
+                        revealControlsForSeek()
+                        true
+                    }
                     key == Key.DirectionLeft && !ctrl && !alt && !shift -> {
-                        player.controls().skipTime(-KEY_SEEK_STEP_MS)
-                        interactionTick++
+                        player.submit { runCatching { player.controls().skipTime(-KEY_SEEK_STEP_MS) } }
+                        revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionRight && !ctrl && !alt && !shift -> {
-                        player.controls().skipTime(KEY_SEEK_STEP_MS)
-                        interactionTick++
+                        player.submit { runCatching { player.controls().skipTime(KEY_SEEK_STEP_MS) } }
+                        revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionLeft || key == Key.DirectionRight -> {
@@ -677,8 +822,10 @@ internal fun DesktopMediaPlayer(
                             false
                         } else {
                             val direction = if (key == Key.DirectionRight) 1L else -1L
-                            player.controls().skipTime(direction * jumpMs)
-                            interactionTick++
+                            player.submit {
+                                runCatching { player.controls().skipTime(direction * jumpMs) }
+                            }
+                            revealControlsForSeek()
                             true
                         }
                     }
@@ -732,7 +879,22 @@ internal fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
-                    key == Key.H && !ctrl && !alt && !shift -> {
+                    key == Key.H && !ctrl && !alt && !shift && !hKeyPressed -> {
+                        hKeyPressed = true
+                        // Toggle the actual visibility, not only the saved preference:
+                        // controls can also be hidden by the auto-hide timer.
+                        val showControls = !controlsVisible
+                        val updated = controlPreferences.copy(showPlayerControls = showControls)
+                        controlPreferences = updated
+                        controlsPinned = false
+                        PlayerControlPreferencesStore.save(updated)
+                        controlsVisible = showControls
+                        latestOnControlsVisibilityChange.value(showControls)
+                        interactionTick++
+                        lastVisibilityInteractionTick = interactionTick
+                        true
+                    }
+                    key == Key.H && ctrl && !alt && !shift -> {
                         player.submit {
                             runCatching {
                                 player.subpictures().setDelay(player.subpictures().delay() + SYNC_STEP_US)
@@ -782,10 +944,7 @@ internal fun DesktopMediaPlayer(
             .pointerInput(player, playing, finished, isAudio) {
                 if (!isAudio) {
                     detectTapGestures(
-                        onTap = {
-                            togglePlayback()
-                            interactionTick++
-                        }
+                        onTap = { toggleControlsVisibility() }
                     )
                 }
             }
@@ -838,32 +997,15 @@ internal fun DesktopMediaPlayer(
             CircularWavyProgressIndicator(modifier = Modifier.size(56.dp))
         }
 
-        // Leave one small reveal affordance when the user permanently hides player chrome.
-        // Keyboard shortcut C remains available as well.
-        if (!controlPreferences.showPlayerControls) {
-            IconButton(
-                onClick = {
-                    val updated = controlPreferences.copy(showPlayerControls = true)
-                    controlPreferences = updated
-                    controlsPinned = true
-                    PlayerControlPreferencesStore.save(updated)
-                    interactionTick++
-                },
-                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Visibility,
-                    contentDescription = "Show player controls",
-                    tint = Color.White
-                )
-            }
-        }
-
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = controlsVisible || seekFeedbackVisible,
             enter = fadeIn(),
             exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
+            // Anchor the complete control surface to the player viewport, independent of
+            // window focus changes, top-bar visibility, and responsive FlowRow wrapping.
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
         ) {
             PlayerControlsBar(
                 player = player,
@@ -903,7 +1045,9 @@ internal fun DesktopMediaPlayer(
                 },
                 onInteraction = { interactionTick++ },
                 onPlayPause = togglePlayback,
-                onSeekTo = { millis -> player.controls().setTime(millis) },
+                onSeekTo = { millis ->
+                    player.submit { runCatching { player.controls().setTime(millis) } }
+                },
                 onToggleMute = toggleMute,
                 onVolumeChange = { setPlayerVolume(it) },
                 onBrightnessChange = {
@@ -918,6 +1062,15 @@ internal fun DesktopMediaPlayer(
                     if (!dragging) brightnessLastInputAt = System.currentTimeMillis()
                 },
                 onControlsKeepVisible = { controlsPinned = it },
+                onToggleControlsVisibility = {
+                    val updated = controlPreferences.copy(showPlayerControls = false)
+                    controlPreferences = updated
+                    controlsPinned = false
+                    PlayerControlPreferencesStore.save(updated)
+                    controlsVisible = false
+                    latestOnControlsVisibilityChange.value(false)
+                    lastVisibilityInteractionTick = interactionTick
+                },
                 onRate = ::setPlaybackRate,
                 onToggleRepeat = {
                     repeatOne = !repeatOne
@@ -943,6 +1096,7 @@ internal fun DesktopMediaPlayer(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun PlayerControlsBar(
     player: MediaPlayer,
     isAudio: Boolean,
@@ -976,6 +1130,7 @@ private fun PlayerControlsBar(
     onBrightnessChange: (Int) -> Unit,
     onBrightnessDragging: (Boolean) -> Unit,
     onControlsKeepVisible: (Boolean) -> Unit,
+    onToggleControlsVisibility: () -> Unit,
     onRate: (Float) -> Unit,
     onToggleRepeat: () -> Unit,
     onToggleRepeatAll: () -> Unit,
@@ -1144,10 +1299,12 @@ private fun PlayerControlsBar(
             onDispose { onControlsKeepVisible(false) }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        FlowRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             PlayerAutoHideSlider(
                 icon = if (muted) Icons.AutoMirrored.Filled.VolumeOff
@@ -1192,7 +1349,8 @@ private fun PlayerControlsBar(
             }
 
             Box {
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Player slider settings",
                     onClick = {
                         onInteraction()
                         showSliderSettings = true
@@ -1300,17 +1458,21 @@ private fun PlayerControlsBar(
             }
         }
 
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
+                .padding(horizontal = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
-                modifier = Modifier.align(Alignment.Center),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Previous video",
                     onClick = { onInteraction(); onPrevious() },
                     enabled = hasPrevious,
                     modifier = Modifier.size(38.dp)
@@ -1321,7 +1483,8 @@ private fun PlayerControlsBar(
                         tint = if (hasPrevious) Color.White else Color.White.copy(alpha = 0.35f)
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Rewind 10 seconds",
                     onClick = {
                         onInteraction()
                         onSeekTo((timeMs - SKIP_MS).coerceAtLeast(0))
@@ -1334,7 +1497,8 @@ private fun PlayerControlsBar(
                         tint = Color.White
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = stringResource(if (finished) Res.string.player_replay else if (playing) Res.string.player_pause else Res.string.player_play),
                     onClick = { onInteraction(); onPlayPause() },
                     modifier = Modifier.size(44.dp)
                 ) {
@@ -1355,7 +1519,8 @@ private fun PlayerControlsBar(
                         modifier = Modifier.size(28.dp)
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Forward 10 seconds",
                     onClick = {
                         onInteraction()
                         onSeekTo((timeMs + SKIP_MS).coerceAtMost(durationMs))
@@ -1368,7 +1533,8 @@ private fun PlayerControlsBar(
                         tint = Color.White
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Next video",
                     onClick = { onInteraction(); onNext() },
                     enabled = hasNext,
                     modifier = Modifier.size(38.dp)
@@ -1380,10 +1546,10 @@ private fun PlayerControlsBar(
                     )
                 }
             }
-
-            Row(
-                modifier = Modifier.align(Alignment.CenterEnd),
-                verticalAlignment = Alignment.CenterVertically
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Box {
                     TextButton(onClick = {
@@ -1407,7 +1573,8 @@ private fun PlayerControlsBar(
                         }
                     }
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = stringResource(if (repeatOne) Res.string.player_repeat_one else Res.string.player_repeat_off),
                     onClick = { onInteraction(); onToggleRepeat() },
                     modifier = Modifier.size(38.dp)
                 ) {
@@ -1419,7 +1586,8 @@ private fun PlayerControlsBar(
                         tint = if (repeatOne) MaterialTheme.colorScheme.primary else Color.White
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Repeat all videos",
                     onClick = { onInteraction(); onToggleRepeatAll() },
                     modifier = Modifier.size(38.dp)
                 ) {
@@ -1429,7 +1597,8 @@ private fun PlayerControlsBar(
                         tint = if (repeatAll) MaterialTheme.colorScheme.primary else Color.White
                     )
                 }
-                IconButton(
+                TooltipIconButton(
+                    tooltip = "Shuffle playback queue",
                     onClick = { onInteraction(); onToggleShuffle() },
                     modifier = Modifier.size(38.dp)
                 ) {
@@ -1440,7 +1609,8 @@ private fun PlayerControlsBar(
                     )
                 }
                 Box {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = "Open playback queue (${queueItems.size} items)",
                         onClick = { onInteraction(); showQueueMenu = true },
                         enabled = queueItems.isNotEmpty(),
                         modifier = Modifier.size(38.dp)
@@ -1456,23 +1626,21 @@ private fun PlayerControlsBar(
                         onDismissRequest = { showQueueMenu = false },
                         modifier = Modifier.heightIn(max = 420.dp)
                     ) {
-                        Column(Modifier.verticalScroll(rememberScrollState())) {
-                            queueItems.forEach { item ->
-                                DropdownMenuItem(
-                                    text = { Text(item.name, maxLines = 1) },
-                                    leadingIcon = {
-                                        RadioButton(
-                                            selected = item.id == currentQueueItemId,
-                                            onClick = null
-                                        )
-                                    },
-                                    onClick = {
-                                        showQueueMenu = false
-                                        onSelectQueueItem(item.id)
-                                        onInteraction()
-                                    }
-                                )
-                            }
+                        queueItems.forEach { item ->
+                            DropdownMenuItem(
+                                text = { Text(item.name, maxLines = 1) },
+                                leadingIcon = {
+                                    RadioButton(
+                                        selected = item.id == currentQueueItemId,
+                                        onClick = null
+                                    )
+                                },
+                                onClick = {
+                                    showQueueMenu = false
+                                    onSelectQueueItem(item.id)
+                                    onInteraction()
+                                }
+                            )
                         }
                     }
                 }
@@ -1530,7 +1698,8 @@ private fun PlayerControlsBar(
                 }
                 if (!isAudio) {
                     Box {
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (subtitlesOn) Res.string.player_hide_subtitles else Res.string.player_show_subtitles),
                             onClick = { onInteraction(); showSubtitleMenu = true },
                             enabled = textTracks.isNotEmpty(),
                             modifier = Modifier.size(38.dp)
@@ -1570,7 +1739,8 @@ private fun PlayerControlsBar(
                     }
                 }
                 Box {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = stringResource(Res.string.player_audio_track),
                         onClick = { onInteraction(); showAudioMenu = true },
                         enabled = audioTracks.isNotEmpty(),
                         modifier = Modifier.size(38.dp)
@@ -1598,7 +1768,8 @@ private fun PlayerControlsBar(
                     }
                 }
                 if (!isAudio) {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = stringResource(Res.string.player_scaling),
                         onClick = { onInteraction(); onScaling(scaling.next()) },
                         modifier = Modifier.size(38.dp)
                     ) {
@@ -1613,8 +1784,20 @@ private fun PlayerControlsBar(
                         )
                     }
                 }
+                TooltipIconButton(
+                    tooltip = "Hide player controls",
+                    onClick = { onToggleControlsVisibility() },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.VisibilityOff,
+                        contentDescription = "Hide player controls",
+                        tint = Color.White
+                    )
+                }
                 fullscreen?.let { controller ->
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = stringResource(if (controller.isFullscreen()) Res.string.player_exit_full_screen else Res.string.player_full_screen),
                         onClick = { onInteraction(); controller.toggle() },
                         modifier = Modifier.size(38.dp)
                     ) {
@@ -1673,7 +1856,9 @@ private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
+private const val SHORT_KEY_SEEK_STEP_MS = 5_000L
 private const val KEY_SEEK_STEP_MS = 10_000L
+private const val SEEK_FEEDBACK_DURATION_MS = 1_500L
 private const val VOLUME_STEP = 5
 private const val MAX_VOLUME = 200
 private const val MAX_BRIGHTNESS = 100

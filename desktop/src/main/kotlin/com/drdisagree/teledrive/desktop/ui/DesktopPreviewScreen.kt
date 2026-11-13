@@ -1,5 +1,9 @@
 package com.drdisagree.teledrive.desktop.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -16,6 +20,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.focusable
@@ -29,6 +35,9 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -46,8 +55,10 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.Rotate90DegreesCcw
+import androidx.compose.material.icons.filled.Rotate90DegreesCw
+import androidx.compose.material.icons.filled.Flip
+import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -55,7 +66,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipAnchor
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -76,16 +88,22 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
+import androidx.compose.animation.core.SnapSpec
+import coil3.compose.rememberAsyncImagePainter
 import coil3.compose.AsyncImagePainter
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
@@ -142,8 +160,6 @@ import com.drdisagree.teledrive.resources.preview_confirm_trash_file_message
 import com.drdisagree.teledrive.resources.preview_download_view
 import com.drdisagree.teledrive.resources.preview_file_info
 import com.drdisagree.teledrive.resources.preview_image_undecodable
-import com.drdisagree.teledrive.resources.preview_zoom_in
-import com.drdisagree.teledrive.resources.preview_zoom_out
 import com.drdisagree.teledrive.resources.preview_move_to_trash
 import com.drdisagree.teledrive.resources.preview_next
 import com.drdisagree.teledrive.resources.preview_no_preview
@@ -171,7 +187,7 @@ import com.drdisagree.teledrive.desktop.resources.Res as DesktopRes
  * Media never plays in the window; anything the shared resolver cannot render inline opens in the
  * system viewer.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalComposeUiApi::class)
 @Composable
 fun DesktopPreviewScreen(
     onBack: () -> Unit,
@@ -181,7 +197,8 @@ fun DesktopPreviewScreen(
     val fullscreenController = LocalFullscreenController.current
 
     fun leavePreview() {
-        fullscreenController?.setFullscreen(false)
+        // Back navigates to the previous screen; fullscreen is a window-level preference
+        // and must not be silently exited as a side effect of navigation.
         onBack()
     }
 
@@ -193,6 +210,9 @@ fun DesktopPreviewScreen(
         mutableStateOf(state.initialIndex.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
+    var imageRotationDegrees by remember(file?.id) { mutableIntStateOf(0) }
+    var mirrorImageHorizontally by remember(file?.id) { mutableStateOf(false) }
+    var mirrorImageVertically by remember(file?.id) { mutableStateOf(false) }
     val mediaCategory = file?.category?.takeIf {
         it == FileCategory.AUDIO || it == FileCategory.VIDEO
     }
@@ -220,25 +240,9 @@ fun DesktopPreviewScreen(
         }
     }
 
-    var restoreFullscreenAfterNavigation by remember { mutableStateOf(false) }
-
     fun selectQueueFile(fileId: String) {
         val target = state.files.indexOfFirst { it.id == fileId }
-        if (target >= 0 && target != index) {
-            restoreFullscreenAfterNavigation =
-                fullscreenController?.isFullscreen() == true
-            index = target
-        }
-    }
-
-    LaunchedEffect(file?.id) {
-        if (restoreFullscreenAfterNavigation) {
-            // Wait until the replacement VLC surface has attached, then reassert fullscreen
-            // directly. A toggle can accidentally leave the window floating after rapid W/E.
-            delay(100L)
-            fullscreenController?.setFullscreen(true)
-            restoreFullscreenAfterNavigation = false
-        }
+        if (target >= 0 && target != index) index = target
     }
 
     fun previousMedia() {
@@ -350,7 +354,8 @@ fun DesktopPreviewScreen(
     var playerChromeVisible by remember { mutableStateOf(true) }
     val viewerFocusRequester = remember { FocusRequester() }
     LaunchedEffect(file?.id) {
-        playerChromeVisible = true
+        // Do not reveal the preview chrome on every queue item change. The player owns
+        // the user's hidden/visible preference and reports it through the callback below.
         viewerFocusRequester.requestFocus()
     }
 
@@ -362,8 +367,7 @@ fun DesktopPreviewScreen(
             .focusRequester(viewerFocusRequester)
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown ||
-                    event.isCtrlPressed || event.isAltPressed || event.isShiftPressed ||
-                    mediaCategory != null
+                    event.isCtrlPressed || event.isAltPressed || event.isShiftPressed
                 ) {
                     return@onPreviewKeyEvent false
                 }
@@ -393,7 +397,7 @@ fun DesktopPreviewScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = ::leavePreview) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = ::leavePreview) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -402,14 +406,60 @@ fun DesktopPreviewScreen(
                 },
                 actions = {
                     file?.let { currentFile ->
-                        IconButton(onClick = { viewModel.showInfo(currentFile) }) {
+                        if (currentFile.category == FileCategory.IMAGE) {
+                            TooltipIconButton(
+                                tooltip = "Rotate counter-clockwise",
+                                onClick = {
+                                    imageRotationDegrees = (imageRotationDegrees + 270) % 360
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Rotate90DegreesCcw,
+                                    contentDescription = "Rotate counter-clockwise"
+                                )
+                            }
+                            TooltipIconButton(
+                                tooltip = "Rotate clockwise",
+                                onClick = {
+                                    imageRotationDegrees = (imageRotationDegrees + 90) % 360
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Rotate90DegreesCw,
+                                    contentDescription = "Rotate clockwise"
+                                )
+                            }
+                            TooltipIconButton(
+                                tooltip = "Mirror horizontally",
+                                onClick = { mirrorImageHorizontally = !mirrorImageHorizontally }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Flip,
+                                    contentDescription = "Mirror horizontally",
+                                    tint = if (mirrorImageHorizontally) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            TooltipIconButton(
+                                tooltip = "Mirror vertically",
+                                onClick = { mirrorImageVertically = !mirrorImageVertically }
+                            ) {
+                                Icon(
+                                    Icons.Filled.FlipCameraAndroid,
+                                    contentDescription = "Mirror vertically",
+                                    tint = if (mirrorImageVertically) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        TooltipIconButton(tooltip = stringResource(Res.string.preview_file_info), onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
                                 Icons.Filled.Info,
                                 contentDescription = stringResource(Res.string.preview_file_info)
                             )
                         }
                         Box {
-                            IconButton(onClick = { showOverflow = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showOverflow = true }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = stringResource(Res.string.common_actions)
@@ -439,6 +489,9 @@ fun DesktopPreviewScreen(
                 viewModel = viewModel,
                 file = pageFile,
                 snackbarHostState = snackbarHostState,
+                imageRotationDegrees = imageRotationDegrees,
+                mirrorImageHorizontally = mirrorImageHorizontally,
+                mirrorImageVertically = mirrorImageVertically,
                 hasPrevious = if (mediaCategory != null) {
                     queueIndex > 0 || (repeatAll && queueFiles.size > 1) ||
                         (shuffle && shuffleCursor > 0)
@@ -491,9 +544,10 @@ fun DesktopPreviewScreen(
                     // VLC players own native resources. Do not keep outgoing and incoming
                     // video players alive together during AnimatedContent transitions.
                     if (mediaCategory != null) {
-                        key(file.id) {
-                            RenderPreviewPane(file)
-                        }
+                        // Keep the media player composable at a stable call site while the
+                        // queue changes its file arguments. DesktopMediaPlayer replaces the
+                        // MRL in the retained VLC instance instead of flashing a new surface.
+                        RenderPreviewPane(file)
                     } else {
                         AnimatedContent(
                             targetState = index to file,
@@ -540,7 +594,8 @@ fun DesktopPreviewScreen(
                     contentDescription = stringResource(Res.string.preview_next),
                     enabled = index < state.files.lastIndex,
                     onClick = { index++ },
-                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp)
+                    // Leave the outermost right edge for the image zoom rail.
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 72.dp)
                 )
             }
         }
@@ -721,6 +776,98 @@ private fun PreviewOverflowMenu(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun VerticalZoomSlider(
+    zoomFraction: Float,
+    onZoomFractionChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val latestFraction = rememberUpdatedState(zoomFraction.coerceIn(0f, 1f))
+    val latestOnChange = rememberUpdatedState(onZoomFractionChange)
+    val thumbColor = MaterialTheme.colorScheme.primary
+    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    val surfaceColor = MaterialTheme.colorScheme.surface
+
+    Box(
+        modifier = modifier
+            .width(38.dp)
+            .height(196.dp)
+            .pointerInput(Unit) {
+                detectTapGestures { position ->
+                    val range = (size.height - 20.dp.toPx()).coerceAtLeast(1f)
+                    val value = (1f - ((position.y - 10.dp.toPx()) / range)).coerceIn(0f, 1f)
+                    latestOnChange.value(value)
+                }
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { position ->
+                        val range = (size.height - 20.dp.toPx()).coerceAtLeast(1f)
+                        val value = (1f - ((position.y - 10.dp.toPx()) / range)).coerceIn(0f, 1f)
+                        latestOnChange.value(value)
+                    }
+                ) { change, _ ->
+                    change.consume()
+                    val range = (size.height - 20.dp.toPx()).coerceAtLeast(1f)
+                    val value = (1f - ((change.position.y - 10.dp.toPx()) / range)).coerceIn(0f, 1f)
+                    latestOnChange.value(value)
+                }
+            }
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.type == PointerEventType.Scroll) {
+                            val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                            if (delta != 0f) {
+                                // Desktop wheel-up is a negative Y delta: move toward maximum zoom.
+                                val step = if (delta < 0f) 0.08f else -0.08f
+                                latestOnChange.value(
+                                    (latestFraction.value + step).coerceIn(0f, 1f)
+                                )
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val horizontalCenter = size.width / 2f
+            val top = 10.dp.toPx()
+            val bottom = size.height - top
+            val fraction = zoomFraction.coerceIn(0f, 1f)
+            val thumbY = bottom - fraction * (bottom - top)
+            drawLine(
+                color = trackColor,
+                start = androidx.compose.ui.geometry.Offset(horizontalCenter, top),
+                end = androidx.compose.ui.geometry.Offset(horizontalCenter, bottom),
+                strokeWidth = 4.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = thumbColor,
+                start = androidx.compose.ui.geometry.Offset(horizontalCenter, thumbY),
+                end = androidx.compose.ui.geometry.Offset(horizontalCenter, bottom),
+                strokeWidth = 4.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawCircle(
+                color = surfaceColor,
+                radius = 9.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(horizontalCenter, thumbY)
+            )
+            drawCircle(
+                color = thumbColor,
+                radius = 7.dp.toPx(),
+                center = androidx.compose.ui.geometry.Offset(horizontalCenter, thumbY)
+            )
+        }
+    }
+}
+
 @Composable
 private fun PreviewPagerButton(
     icon: ImageVector,
@@ -729,17 +876,22 @@ private fun PreviewPagerButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    FilledIconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.size(48.dp),
-        colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.3f)
-        )
-    ) {
-        Icon(imageVector = icon, contentDescription = contentDescription)
+    // Alignment belongs on the outer layout surface, not inside TooltipAnchor's wrapper.
+    Box(modifier = modifier.size(48.dp)) {
+        TooltipAnchor(tooltip = contentDescription) {
+            FilledIconButton(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier.fillMaxSize(),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f),
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.3f)
+                )
+            ) {
+                Icon(imageVector = icon, contentDescription = contentDescription)
+            }
+        }
     }
 }
 
@@ -749,6 +901,9 @@ private fun PreviewPane(
     viewModel: PreviewViewModel,
     file: DriveFile,
     snackbarHostState: SnackbarHostState,
+    imageRotationDegrees: Int,
+    mirrorImageHorizontally: Boolean,
+    mirrorImageVertically: Boolean,
     hasPrevious: Boolean,
     hasNext: Boolean,
     onPrevious: () -> Unit,
@@ -770,11 +925,71 @@ private fun PreviewPane(
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val content by viewModel.contentFor(file).collectAsState()
+    // Keep the old local media source mounted while the next queued video resolves. This
+    // preserves the single VLC surface across the transient Loading state and prevents the
+    // black flash that otherwise occurs between adjacent local videos.
+    var lastReadyMedia by remember { mutableStateOf<Pair<DriveFile, PreviewContent>?>(null) }
+    LaunchedEffect(file.id, content) {
+        when (val resolved = content) {
+            is PreviewContent.LocalMedia,
+            is PreviewContent.StreamedMedia -> lastReadyMedia = file to resolved
+            is PreviewContent.Loading -> Unit
+            else -> lastReadyMedia = null
+        }
+    }
+    val retainPreviousMedia = file.category in setOf(FileCategory.AUDIO, FileCategory.VIDEO) &&
+            content is PreviewContent.Loading && lastReadyMedia != null
+    val displayedFile = if (retainPreviousMedia) lastReadyMedia!!.first else file
+    val displayedContent = if (retainPreviousMedia) lastReadyMedia!!.second else content
     val urlOpener = LocalUrlOpener.current
     val preferredAudioLanguage by viewModel.preferredAudioLanguage.collectAsState()
     val preferredSubtitleLanguage by viewModel.preferredSubtitleLanguage.collectAsState()
 
-    val edgeToEdge = when (content) {
+    // Resolve local and streamed sources before the content branch so the native VLC player
+    // remains at one stable composition call site while moving between cached and streamed files.
+    val streamServer = koinInject<MediaStreamServer>()
+    val telegramClient = koinInject<TelegramClient>()
+    val streamCrypto = koinInject<StreamCrypto>()
+    val wrappedKeyRepository = koinInject<WrappedKeyRepository>()
+    val streamedContent = displayedContent as? PreviewContent.StreamedMedia
+    val streamedMrl = remember(
+        displayedFile.id,
+        displayedFile.name,
+        displayedFile.mimeType,
+        streamedContent
+    ) {
+        streamedContent?.let { media ->
+            streamServer.serve(displayedFile.name, displayedFile.mimeType) {
+                if (media.parts.isEmpty()) {
+                    TelegramMediaByteSource(telegramClient, media.remoteFileId)
+                } else {
+                    PartedMediaByteSource(
+                        telegramClient = telegramClient,
+                        streamCrypto = streamCrypto,
+                        parts = media.parts,
+                        encrypted = media.encrypted,
+                        contentKey = if (media.encrypted) {
+                            wrappedKeyRepository.get(CryptoKeys.CONTENT)
+                        } else {
+                            null
+                        }
+                    )
+                }
+            }
+        }
+    }
+    val mediaMrl = when (val media = displayedContent) {
+        is PreviewContent.LocalMedia -> media.path
+        is PreviewContent.StreamedMedia -> streamedMrl
+        else -> null
+    }
+    val mediaIsAudio = when (val media = displayedContent) {
+        is PreviewContent.LocalMedia -> media.isAudio
+        is PreviewContent.StreamedMedia -> media.isAudio
+        else -> false
+    }
+
+    val edgeToEdge = when (displayedContent) {
         is PreviewContent.Image,
         is PreviewContent.LocalMedia,
         is PreviewContent.StreamedMedia -> true
@@ -786,7 +1001,7 @@ private fun PreviewPane(
             .fillMaxSize()
             .padding(top = if (edgeToEdge) 0.dp else TOP_BAR_INSET)
     ) {
-        when (val current = content) {
+        when (val current = displayedContent) {
             is PreviewContent.Loading -> LoadingState()
 
             is PreviewContent.DownloadProgress -> Column(
@@ -836,13 +1051,37 @@ private fun PreviewPane(
                 val zoomScope = rememberCoroutineScope()
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (undecodable) {
-                        EmptyState(
-                            icon = Icons.Filled.BrokenImage,
-                            title = stringResource(Res.string.preview_image_undecodable)
-                        )
+                        val imagePath = (current.model as? File)
+                            ?.takeIf { it.isFile }
+                            ?.absolutePath
+                            ?: file.localPath?.takeIf { File(it).isFile }
+                        if (imagePath != null) {
+                            OpenExternallyState(
+                                icon = Icons.Filled.BrokenImage,
+                                file = file,
+                                path = imagePath,
+                                snackbarHostState = snackbarHostState
+                            )
+                        } else {
+                            EmptyState(
+                                icon = Icons.Filled.BrokenImage,
+                                title = stringResource(Res.string.preview_image_undecodable)
+                            )
+                        }
                     } else {
-                        AsyncImage(
+                        // AsyncImage sizes the decoded bitmap to the viewport, which makes
+                        // zooming a low-resolution preview look blurred. The painter intentionally
+                        // requests the original source dimensions for the viewing surface; grid
+                        // thumbnails continue to use the separate bounded thumbnail pipeline.
+                        val imagePainter = rememberAsyncImagePainter(
                             model = current.model,
+                            onState = { imageState ->
+                                if (imageState is AsyncImagePainter.State.Error) undecodable = true
+                            },
+                            filterQuality = FilterQuality.High
+                        )
+                        Image(
+                            painter = imagePainter,
                             contentDescription = file.name,
                             modifier = Modifier
                                 .fillMaxSize()
@@ -857,79 +1096,68 @@ private fun PreviewPane(
                                             }
                                         }
                                     }
-                                ),
-                            contentScale = ContentScale.Fit,
-                            onState = { state ->
-                                if (state is AsyncImagePainter.State.Error) undecodable = true
-                            }
+                                )
+                                .graphicsLayer {
+                                    val intrinsic = imagePainter.intrinsicSize
+                                    val intrinsicIsUsable = intrinsic.width.isFinite() &&
+                                        intrinsic.height.isFinite() &&
+                                        intrinsic.width > 0f && intrinsic.height > 0f
+                                    val sourceAspect = if (intrinsicIsUsable) {
+                                        intrinsic.width / intrinsic.height
+                                    } else {
+                                        size.width / size.height.coerceAtLeast(1f)
+                                    }
+                                    val isQuarterTurn = imageRotationDegrees % 180 != 0
+                                    val fitScale = if (isQuarterTurn && sourceAspect > 0f) {
+                                        val fittedWidth: Float
+                                        val fittedHeight: Float
+                                        val viewportAspect = size.width / size.height.coerceAtLeast(1f)
+                                        if (sourceAspect > viewportAspect) {
+                                            fittedWidth = size.width
+                                            fittedHeight = size.width / sourceAspect
+                                        } else {
+                                            fittedHeight = size.height
+                                            fittedWidth = size.height * sourceAspect
+                                        }
+                                        minOf(
+                                            size.width / fittedHeight.coerceAtLeast(1f),
+                                            size.height / fittedWidth.coerceAtLeast(1f)
+                                        )
+                                    } else {
+                                        1f
+                                    }
+                                    rotationZ = imageRotationDegrees.toFloat()
+                                    scaleX = fitScale * if (mirrorImageHorizontally) -1f else 1f
+                                    scaleY = fitScale * if (mirrorImageVertically) -1f else 1f
+                                },
+                            contentScale = ContentScale.Fit
                         )
-                        Row(
+                        VerticalZoomSlider(
+                            zoomFraction = zoomableState.zoomFraction ?: 0f,
+                            onZoomFractionChange = { fraction ->
+                                zoomScope.launch {
+                                    if (fraction <= 0.001f) {
+                                        zoomableState.resetZoom(animationSpec = SnapSpec())
+                                    } else {
+                                        zoomableState.zoomTo(
+                                            zoomFactor = 1f + 3f * fraction,
+                                            animationSpec = SnapSpec()
+                                        )
+                                    }
+                                }
+                            },
                             modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilledIconButton(
-                                onClick = {
-                                    zoomScope.launch {
-                                        zoomableState.zoomBy(zoomFactor = 1.2f)
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ZoomIn,
-                                    contentDescription = stringResource(Res.string.preview_zoom_in)
-                                )
-                            }
-                            FilledIconButton(
-                                onClick = {
-                                    zoomScope.launch {
-                                        zoomableState.zoomBy(zoomFactor = 1f / 1.2f)
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ZoomOut,
-                                    contentDescription = stringResource(Res.string.preview_zoom_out)
-                                )
-                            }
-                        }
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 14.dp)
+                        )
                     }
                 }
             }
 
-            is PreviewContent.LocalMedia -> if (VlcPlayback.available) {
-                DesktopMediaPlayer(
-                    mrl = current.path,
-                    isAudio = current.isAudio,
-                    preferredAudioLanguage = preferredAudioLanguage,
-                    preferredSubtitleLanguage = preferredSubtitleLanguage,
-                    onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
-                    onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    hasPrevious = hasPrevious,
-                    hasNext = hasNext,
-                    queueItems = queueItems,
-                    currentQueueItemId = currentQueueItemId,
-                    repeatAll = repeatAll,
-                    shuffle = shuffle,
-                    sleepTimerLabel = sleepTimerLabel,
-                    sleepStopRequest = sleepStopRequest,
-                    sleepAtTrackEnd = sleepAtTrackEnd,
-                    onToggleRepeatAll = onToggleRepeatAll,
-                    onToggleShuffle = onToggleShuffle,
-                    onSelectQueueItem = onSelectQueueItem,
-                    onSetSleepTimer = onSetSleepTimer,
-                    onSleepAtTrackEnd = onSleepAtTrackEnd,
-                    onClearSleepTimer = onClearSleepTimer,
-                    onPlaybackFinished = onPlaybackFinished,
-                    onControlsVisibilityChange = onPlayerControlsVisibilityChange
-                )
-            } else {
+            is PreviewContent.LocalMedia -> if (!VlcPlayback.available) {
                 OpenExternallyState(
                     icon = if (current.isAudio) Icons.Filled.Audiotrack else Icons.Filled.Movie,
-                    file = file,
+                    file = displayedFile,
                     path = current.path,
                     snackbarHostState = snackbarHostState
                 )
@@ -942,39 +1170,11 @@ private fun PreviewPane(
                 snackbarHostState = snackbarHostState
             )
 
-            is PreviewContent.StreamedMedia -> if (VlcPlayback.available) {
-                InlineStreamPlayer(
-                    file = file,
-                    content = current,
-                    preferredAudioLanguage = preferredAudioLanguage,
-                    preferredSubtitleLanguage = preferredSubtitleLanguage,
-                    onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
-                    onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    hasPrevious = hasPrevious,
-                    hasNext = hasNext,
-                    queueItems = queueItems,
-                    currentQueueItemId = currentQueueItemId,
-                    repeatAll = repeatAll,
-                    shuffle = shuffle,
-                    sleepTimerLabel = sleepTimerLabel,
-                    sleepStopRequest = sleepStopRequest,
-                    sleepAtTrackEnd = sleepAtTrackEnd,
-                    onToggleRepeatAll = onToggleRepeatAll,
-                    onToggleShuffle = onToggleShuffle,
-                    onSelectQueueItem = onSelectQueueItem,
-                    onSetSleepTimer = onSetSleepTimer,
-                    onSleepAtTrackEnd = onSleepAtTrackEnd,
-                    onClearSleepTimer = onClearSleepTimer,
-                    onPlaybackFinished = onPlaybackFinished,
-                    onControlsVisibilityChange = onPlayerControlsVisibilityChange
-                )
-            } else {
+            is PreviewContent.StreamedMedia -> if (!VlcPlayback.available) {
                 StreamState(
-                    file = file,
+                    file = displayedFile,
                     content = current,
-                    onDownload = { viewModel.download(file) },
+                    onDownload = { viewModel.download(displayedFile) },
                     snackbarHostState = snackbarHostState
                 )
             }
@@ -1073,15 +1273,63 @@ private fun PreviewPane(
                 onDownload = { viewModel.download(file) }
             )
 
-            is PreviewContent.Unsupported -> EmptyState(
-                icon = Icons.Outlined.Description,
-                title = stringResource(Res.string.preview_no_preview),
-                description = stringResource(current.reasonRes),
-                actionLabel = if (file.hasLocalCopy) null else stringResource(Res.string.common_download),
-                onAction = if (file.hasLocalCopy) null else ({ viewModel.download(file) })
-            )
+            is PreviewContent.Unsupported -> {
+                // Keep broad desktop file support useful even when TeleDrive has no native
+                // renderer for a particular document/container. The original local file remains
+                // untouched and is opened with the user's registered Windows application.
+                val localPath = current.localPath?.takeIf { File(it).isFile }
+                    ?: file.localPath?.takeIf { File(it).isFile }
+                if (localPath != null) {
+                    OpenExternallyState(
+                        icon = Icons.Outlined.Description,
+                        file = file,
+                        path = localPath,
+                        snackbarHostState = snackbarHostState
+                    )
+                } else {
+                    EmptyState(
+                        icon = Icons.Outlined.Description,
+                        title = stringResource(Res.string.preview_no_preview),
+                        description = stringResource(current.reasonRes),
+                        actionLabel = stringResource(Res.string.common_download),
+                        onAction = { viewModel.download(file) }
+                    )
+                }
+            }
 
             is PreviewContent.Failed -> ErrorState(message = stringResource(current.messageRes))
+        }
+
+        // The same player subtree now handles both local and streamed sources. Only the MRL
+        // changes between files; Compose no longer removes one player branch and mounts another.
+        if (VlcPlayback.available && mediaMrl != null) {
+            DesktopMediaPlayer(
+                mrl = mediaMrl,
+                isAudio = mediaIsAudio,
+                preferredAudioLanguage = preferredAudioLanguage,
+                preferredSubtitleLanguage = preferredSubtitleLanguage,
+                onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
+                onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
+                onPrevious = onPrevious,
+                onNext = onNext,
+                hasPrevious = hasPrevious,
+                hasNext = hasNext,
+                queueItems = queueItems,
+                currentQueueItemId = currentQueueItemId,
+                repeatAll = repeatAll,
+                shuffle = shuffle,
+                sleepTimerLabel = sleepTimerLabel,
+                sleepStopRequest = sleepStopRequest,
+                sleepAtTrackEnd = sleepAtTrackEnd,
+                onToggleRepeatAll = onToggleRepeatAll,
+                onToggleShuffle = onToggleShuffle,
+                onSelectQueueItem = onSelectQueueItem,
+                onSetSleepTimer = onSetSleepTimer,
+                onSleepAtTrackEnd = onSleepAtTrackEnd,
+                onClearSleepTimer = onClearSleepTimer,
+                onPlaybackFinished = onPlaybackFinished,
+                onControlsVisibilityChange = onPlayerControlsVisibilityChange
+            )
         }
     }
 }
@@ -1122,86 +1370,6 @@ private fun OpenExternallyState(
             Text(stringResource(DesktopRes.string.preview_open_externally))
         }
     }
-}
-
-@Composable
-private fun InlineStreamPlayer(
-    file: DriveFile,
-    content: PreviewContent.StreamedMedia,
-    preferredAudioLanguage: String,
-    preferredSubtitleLanguage: String,
-    onPreferredAudioLanguage: (String) -> Unit,
-    onPreferredSubtitleLanguage: (String) -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    hasPrevious: Boolean,
-    hasNext: Boolean,
-    queueItems: List<PlayerQueueItem>,
-    currentQueueItemId: String?,
-    repeatAll: Boolean,
-    shuffle: Boolean,
-    sleepTimerLabel: String,
-    sleepStopRequest: Int,
-    sleepAtTrackEnd: Boolean,
-    onToggleRepeatAll: () -> Unit,
-    onToggleShuffle: () -> Unit,
-    onSelectQueueItem: (String) -> Unit,
-    onSetSleepTimer: (Long) -> Unit,
-    onSleepAtTrackEnd: () -> Unit,
-    onClearSleepTimer: () -> Unit,
-    onPlaybackFinished: () -> Unit,
-    onControlsVisibilityChange: (Boolean) -> Unit
-) {
-    val streamServer = koinInject<MediaStreamServer>()
-    val telegramClient = koinInject<TelegramClient>()
-    val streamCrypto = koinInject<StreamCrypto>()
-    val wrappedKeyRepository = koinInject<WrappedKeyRepository>()
-    val url = remember(file.id) {
-        streamServer.serve(file.name, file.mimeType) {
-            if (content.parts.isEmpty()) {
-                TelegramMediaByteSource(telegramClient, content.remoteFileId)
-            } else {
-                PartedMediaByteSource(
-                    telegramClient = telegramClient,
-                    streamCrypto = streamCrypto,
-                    parts = content.parts,
-                    encrypted = content.encrypted,
-                    contentKey = if (content.encrypted) {
-                        wrappedKeyRepository.get(CryptoKeys.CONTENT)
-                    } else {
-                        null
-                    }
-                )
-            }
-        }
-    }
-    DesktopMediaPlayer(
-        mrl = url,
-        isAudio = content.isAudio,
-        preferredAudioLanguage = preferredAudioLanguage,
-        preferredSubtitleLanguage = preferredSubtitleLanguage,
-        onPreferredAudioLanguage = onPreferredAudioLanguage,
-        onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
-        onPrevious = onPrevious,
-        onNext = onNext,
-        hasPrevious = hasPrevious,
-        hasNext = hasNext,
-        queueItems = queueItems,
-        currentQueueItemId = currentQueueItemId,
-        repeatAll = repeatAll,
-        shuffle = shuffle,
-        sleepTimerLabel = sleepTimerLabel,
-        sleepStopRequest = sleepStopRequest,
-        sleepAtTrackEnd = sleepAtTrackEnd,
-        onToggleRepeatAll = onToggleRepeatAll,
-        onToggleShuffle = onToggleShuffle,
-        onSelectQueueItem = onSelectQueueItem,
-        onSetSleepTimer = onSetSleepTimer,
-        onSleepAtTrackEnd = onSleepAtTrackEnd,
-        onClearSleepTimer = onClearSleepTimer,
-        onPlaybackFinished = onPlaybackFinished,
-        onControlsVisibilityChange = onControlsVisibilityChange
-    )
 }
 
 @Composable

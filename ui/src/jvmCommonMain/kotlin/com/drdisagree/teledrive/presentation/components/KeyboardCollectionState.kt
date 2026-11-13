@@ -79,14 +79,22 @@ class KeyboardCollectionState internal constructor(
 
     internal fun handle(event: KeyEvent, shortcuts: CollectionShortcuts): Boolean {
         if (event.type != KeyEventType.KeyDown || !focusInItem) return false
+        // Collection commands are scoped to the collection row itself. Native controls
+        // receive the event first through the bubbling phase before this handler is called.
+        if ((event.isCtrlPressed || event.isMetaPressed) && !focusOnItem) return false
         restorePending = false
         KeyboardHandoff.armed = false
         val command = event.isCtrlPressed || event.isMetaPressed
         val alt = event.isAltPressed
         val plain = !command && !alt && !event.isShiftPressed
+        // Let focused controls (for example a search or rename text field inside an item)
+        // consume their own Ctrl+A/C/X/V first. Collection commands are only handled here
+        // when the collection item itself owns focus; the outer workspace handler is the
+        // fallback for collection-level focus.
+        val plainCommand = command && !alt && !event.isShiftPressed
         val onItem = plain && focusOnItem
-        val vertical = plain && !horizontal
-        val across = plain && (horizontal || columns > 1)
+        val vertical = onItem && !horizontal
+        val across = onItem && (horizontal || columns > 1)
         val index = current
         return when {
             onItem && (event.key == Key.Enter || event.key == Key.NumPadEnter) -> {
@@ -94,15 +102,15 @@ class KeyboardCollectionState internal constructor(
                 false
             }
 
-            alt && event.key == Key.DirectionLeft -> back(shortcuts)
+            focusOnItem && alt && event.key == Key.DirectionLeft -> back(shortcuts)
             vertical && event.key == Key.DirectionDown -> moveRows(1).let { true }
             vertical && event.key == Key.DirectionUp -> moveRows(-1).let { true }
             across && event.key == Key.DirectionRight -> step(1).let { true }
             across && event.key == Key.DirectionLeft -> step(-1).let { true }
             onItem && event.key == Key.DirectionRight -> shortcuts.onExpand.fire(index)
             onItem && event.key == Key.DirectionLeft -> shortcuts.onCollapse.fire(index)
-            plain && event.key == Key.MoveHome -> focusIndex(firstItem()).let { true }
-            plain && event.key == Key.MoveEnd -> focusIndex(lastItem()).let { true }
+            onItem && event.key == Key.MoveHome -> focusIndex(firstItem()).let { true }
+            onItem && event.key == Key.MoveEnd -> focusIndex(lastItem()).let { true }
             vertical && event.key == Key.PageDown -> page(1).let { true }
             vertical && event.key == Key.PageUp -> page(-1).let { true }
             onItem && event.key == Key.Spacebar -> shortcuts.onToggleSelect.fire(index)
@@ -111,14 +119,16 @@ class KeyboardCollectionState internal constructor(
             }
 
             onItem && event.key == Key.F2 -> shortcuts.onRename.fire(index)
-            plain && event.key == Key.Backspace -> back(shortcuts)
-            plain && event.key == Key.Escape -> shortcuts.onClear.fire()
-            command && !alt && event.key == Key.A -> shortcuts.onSelectAll.fire()
-            command && !alt && focusOnItem && event.key == Key.X -> shortcuts.onCut.fire(index).also {
-                restorePending = it
-            }
-
-            command && !alt && event.key == Key.V -> shortcuts.onPaste.fire()
+            onItem && event.key == Key.Backspace -> back(shortcuts)
+            onItem && event.key == Key.Escape -> shortcuts.onClear.fire()
+            plainCommand && focusOnItem && event.key == Key.A -> shortcuts.onSelectAll.fire()
+            plainCommand && focusOnItem && event.key == Key.N -> shortcuts.onNewFolder.fire()
+            plainCommand && focusOnItem && event.key == Key.T -> shortcuts.onNewTab.fire()
+            plainCommand && focusOnItem && event.key == Key.C ->
+                shortcuts.onCopy.fire(index).also { restorePending = it }
+            plainCommand && focusOnItem && event.key == Key.X ->
+                shortcuts.onCut.fire(index).also { restorePending = it }
+            plainCommand && focusOnItem && event.key == Key.V -> shortcuts.onPaste.fire()
             else -> false
         }
     }

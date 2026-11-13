@@ -27,6 +27,7 @@ import com.drdisagree.teledrive.data.local.dao.ThumbnailPolicyDao
 import com.drdisagree.teledrive.data.local.dao.ThumbnailJobDao
 import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
 import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
+import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -56,6 +57,7 @@ import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import com.drdisagree.teledrive.core.media.ApkIconExtractor
 import kotlinx.coroutines.flow.first
@@ -199,6 +201,28 @@ class DesktopThumbnailStore(
         }
         readCachedThumbnail(fileId)?.let { return it }
         return generationSemaphore.withPermit { generate(fileId) }
+    }
+
+    /**
+     * A remote-only item may initially have a small Telegram thumbnail. Once its original
+     * image/video is downloaded, replace that cached representation with a bounded local
+     * thumbnail. Keep manual-only folders/files untouched and reuse the same cache slot.
+     */
+    override suspend fun refreshCachedThumbnailFromLocalOriginal(fileId: String) {
+        val entity = fileDao.byId(fileId) ?: return
+        if (entity.category != FileCategory.IMAGE && entity.category != FileCategory.VIDEO) return
+        if (effectivePolicy(fileId) != ThumbnailPolicy.AUTOMATIC) return
+        if (thumbnailDao.byFileId(fileId) == null) return
+
+        thumbnailJobDao.enqueue(
+            ThumbnailJobEntity(
+                fileId = fileId,
+                queuedAt = System.currentTimeMillis(),
+                force = true
+            )
+        )
+        // A refresh must not override a user-paused thumbnail queue.
+        jobWakeups.trySend(Unit)
     }
 
     override suspend fun enqueueAfterUpload(fileId: String) {
@@ -386,9 +410,9 @@ class DesktopThumbnailStore(
         val cachedEntry = thumbnailDao.byFileId(currentJob.fileId)
         val cachedFile = cachedEntry?.let { File(it.path) }
         val cached = cachedFile?.let { it.isFile && it.length() > 0L } == true
-        if (cached || (!currentJob.force &&
-                effectivePolicy(currentJob.fileId) != ThumbnailPolicy.AUTOMATIC)
-        ) {
+        val automaticPolicy = currentJob.force ||
+                effectivePolicy(currentJob.fileId) == ThumbnailPolicy.AUTOMATIC
+        if (shouldSkipThumbnailJob(cached, currentJob.force, automaticPolicy)) {
             thumbnailJobDao.delete(currentJob.fileId)
             return
         }
@@ -703,9 +727,26 @@ class DesktopThumbnailStore(
                 graphics.dispose()
             }
         }
+        val writer = ImageIO.getImageWritersByFormatName("jpg").asSequence().firstOrNull()
+            ?: return ByteArrayOutputStream().use { output ->
+                ImageIO.write(rgb, "jpg", output)
+                output.toByteArray()
+            }
         return ByteArrayOutputStream().use { output ->
-            ImageIO.write(rgb, "jpg", output)
-            output.toByteArray()
+            try {
+                ImageIO.createImageOutputStream(output).use { imageOutput ->
+                    writer.output = imageOutput
+                    val parameters = writer.defaultWriteParam
+                    if (parameters.canWriteCompressed()) {
+                        parameters.compressionMode = javax.imageio.ImageWriteParam.MODE_EXPLICIT
+                        parameters.compressionQuality = THUMBNAIL_JPEG_QUALITY
+                    }
+                    writer.write(null, IIOImage(rgb, null, null), parameters)
+                }
+                output.toByteArray()
+            } finally {
+                writer.dispose()
+            }
         }
     }
 
@@ -759,10 +800,19 @@ class DesktopThumbnailStore(
         const val JOB_INSERT_BATCH_SIZE = 250
         const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024
-        const val MAX_DIMENSION = 512
+        const val MAX_DIMENSION = 768
+        const val THUMBNAIL_JPEG_QUALITY = 0.86f
         const val VIDEO_FRAME_TIMEOUT_MS = 8_000L
         const val VIDEO_SNAPSHOT_TIMEOUT_MS = 5_000L
         const val VIDEO_SNAPSHOT_DELAY_MS = 100L
         const val IMAGE_SCALE_MODE = Image.SCALE_SMOOTH
     }
 }
+
+
+/** A forced/manual job is allowed to replace an existing cache entry and bypass automatic policy. */
+internal fun shouldSkipThumbnailJob(
+    cached: Boolean,
+    force: Boolean,
+    automaticPolicy: Boolean
+): Boolean = (cached && !force) || (!force && !automaticPolicy)

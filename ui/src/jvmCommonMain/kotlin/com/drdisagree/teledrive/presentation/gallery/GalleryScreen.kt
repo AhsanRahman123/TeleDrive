@@ -38,6 +38,9 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
+import com.drdisagree.teledrive.presentation.components.galleryGridColumnsForWindow
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
@@ -87,13 +90,15 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
@@ -269,7 +274,8 @@ private fun AlbumGrid(
     onToggleAlbum: (String) -> Unit,
     onStartRange: () -> Unit,
     onRange: (IntRange, Boolean) -> Unit,
-    onEndRange: () -> Unit
+    onEndRange: () -> Unit,
+    shortcuts: CollectionShortcuts
 ) {
     if (albums.isEmpty()) {
         EmptyState(
@@ -298,7 +304,7 @@ private fun AlbumGrid(
                 .fillMaxSize()
                 .padding(end = 10.dp)
                 .then(albumDragSelect)
-                .keyboardCollection(keyboard, albums.size),
+                .keyboardCollection(keyboard, albums.size, shortcuts),
             contentPadding = PaddingValues(
                 start = 12.dp,
                 end = 12.dp,
@@ -358,7 +364,7 @@ private fun AlbumGrid(
                 .fillMaxSize()
                 .padding(end = 10.dp)
                 .then(albumDragSelect)
-                .keyboardCollection(keyboard, albums.size)
+                .keyboardCollection(keyboard, albums.size, shortcuts)
                 .pinchZoom(onZoomIn = onZoomIn, onZoomOut = onZoomOut),
             contentPadding = PaddingValues(
                 start = 12.dp,
@@ -423,8 +429,7 @@ fun GalleryScreen(
     // Fit more media previews on wide windows while keeping phone grids unchanged.
     val isWideWindow = currentWindowAdaptiveInfoV2().windowSizeClass
         .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
-    val mediaGridColumns = if (isWideWindow) (state.gridSize + 2).coerceAtMost(6)
-        else state.gridSize
+    val mediaGridColumns = galleryGridColumnsForWindow(state.gridSize, isWideWindow)
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     var confirmTrash by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
@@ -435,6 +440,23 @@ fun GalleryScreen(
     var confirmDeleteLocal by remember { mutableStateOf(false) }
     var advancedFiltersExpanded by remember { mutableStateOf(false) }
 
+    val albumShortcuts = CollectionShortcuts(
+        onToggleSelect = { index ->
+            state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
+        },
+        onSelectAll = viewModel::selectAll,
+        onCopy = { index ->
+            if (!selectionMode) state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
+            viewModel.copyToClipboardSelected()
+        },
+        onCut = { index ->
+            if (!selectionMode) state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
+            viewModel.cutSelected()
+        },
+        onPaste = viewModel::paste,
+        onNewFolder = { showCreateAlbum = true },
+        onClear = if (selectionMode) viewModel::clearSelection else null
+    )
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
     val infoFolderPath by viewModel.infoFolderPath.collectAsStateWithLifecycle()
 
@@ -615,7 +637,7 @@ fun GalleryScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = viewModel::clearSelection) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_clear_selection), onClick = viewModel::clearSelection) {
                             Icon(
                                 Icons.Filled.Close,
                                 contentDescription = stringResource(Res.string.common_clear_selection)
@@ -623,7 +645,8 @@ fun GalleryScreen(
                         }
                     },
                     actions = {
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (allSelected) Res.string.common_deselect_all else Res.string.common_select_all),
                             onClick = {
                                 if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
                             }
@@ -643,7 +666,7 @@ fun GalleryScreen(
                         }
                         if (state.selectionCount > 0) {
                             Box {
-                                IconButton(onClick = { showSelectionOverflow = true }) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = stringResource(Res.string.common_actions)
@@ -794,7 +817,7 @@ fun GalleryScreen(
                     title = { Text(state.albumTitle ?: stringResource(Res.string.gallery_title)) },
                     navigationIcon = {
                         onBack?.let {
-                            IconButton(onClick = it) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = it) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = stringResource(Res.string.common_back)
@@ -804,26 +827,27 @@ fun GalleryScreen(
                     },
                     actions = {
                         if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
-                            IconButton(onClick = { showCreateAlbum = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.gallery_new_album), onClick = { showCreateAlbum = true }) {
                                 Icon(
                                     Icons.Filled.CreateNewFolder,
                                     contentDescription = stringResource(Res.string.gallery_new_album)
                                 )
                             }
                         }
-                        IconButton(onClick = viewModel::startSelectionMode) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                             Icon(
                                 Icons.Filled.CheckBoxOutlineBlank,
                                 contentDescription = stringResource(Res.string.common_select)
                             )
                         }
-                        IconButton(onClick = onViewThumbnailQueue) {
+                        TooltipIconButton(tooltip = "View thumbnail queue", onClick = onViewThumbnailQueue) {
                             Icon(
                                 Icons.Filled.CloudQueue,
                                 contentDescription = "View thumbnail queue"
                             )
                         }
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (state.viewMode == ViewMode.GRID) Res.string.gallery_view_list else Res.string.gallery_view_grid),
                             onClick = {
                                 viewModel.setViewMode(
                                     if (state.viewMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
@@ -845,7 +869,39 @@ fun GalleryScreen(
                                 )
                             )
                         }
-                        IconButton(onClick = { showSortMenu = true }) {
+                        if (state.viewMode == ViewMode.GRID) {
+                            TooltipIconButton(
+                                tooltip = "Increase gallery thumbnail size",
+                                onClick = {
+                                    if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                                        viewModel.zoomAlbumsIn()
+                                    } else {
+                                        viewModel.zoomIn()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.ZoomIn,
+                                    contentDescription = "Increase gallery thumbnail size"
+                                )
+                            }
+                            TooltipIconButton(
+                                tooltip = "Decrease gallery thumbnail size",
+                                onClick = {
+                                    if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
+                                        viewModel.zoomAlbumsOut()
+                                    } else {
+                                        viewModel.zoomOut()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.ZoomOut,
+                                    contentDescription = "Decrease gallery thumbnail size"
+                                )
+                            }
+                        }
+                        TooltipIconButton(tooltip = stringResource(Res.string.files_sort), onClick = { showSortMenu = true }) {
                             Icon(
                                 Icons.AutoMirrored.Filled.Sort,
                                 contentDescription = stringResource(Res.string.files_sort)
@@ -931,7 +987,7 @@ fun GalleryScreen(
                 },
                 trailingIcon = if (state.filters.searchQuery.isNotEmpty()) {
                     {
-                        IconButton(onClick = { viewModel.setSearchQuery("") }) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.gallery_clear_search), onClick = { viewModel.setSearchQuery("") }) {
                             Icon(
                                 Icons.Filled.Close,
                                 contentDescription = stringResource(Res.string.gallery_clear_search)
@@ -1054,7 +1110,20 @@ fun GalleryScreen(
                     LoadingState()
                     return@Column
                 }
-                AlbumGrid(
+                val albumCommandFocusRequester = rememberCollectionCommandFocusRequester()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .collectionCommandShortcuts(
+                            focusRequester = albumCommandFocusRequester,
+                            onSelectAll = { viewModel.selectAll(); true },
+                            onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
+                            onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
+                            onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
+                            onNewFolder = { showCreateAlbum = true; true }
+                        )
+                ) {
+                    AlbumGrid(
                     albums = state.albums,
                     columns = state.albumGridSize,
                     viewMode = state.viewMode,
@@ -1072,8 +1141,10 @@ fun GalleryScreen(
                             shouldSelect
                         )
                     },
-                    onEndRange = viewModel::endAlbumRangeSelection
-                )
+                    onEndRange = viewModel::endAlbumRangeSelection,
+                    shortcuts = albumShortcuts
+                    )
+                }
                 return@Column
             }
 
@@ -1114,17 +1185,31 @@ fun GalleryScreen(
                     if (viewModel.hasSelection()) confirmTrash = true
                 },
                 onRename = { index -> mediaIdAt(index)?.let(viewModel::requestRename) },
+                onCopy = { index ->
+                    selectIfNone(index)
+                    viewModel.copyToClipboardSelected()
+                },
                 onCut = { index ->
                     selectIfNone(index)
                     viewModel.cutSelected()
                 },
+                onPaste = viewModel::paste,
                 onBack = onBack,
                 onClear = if (selectionMode) viewModel::clearSelection else null
             )
+            val mediaCommandFocusRequester = rememberCollectionCommandFocusRequester()
             RefreshableContent(
                 isRefreshing = refreshing,
                 onRefresh = viewModel::refresh,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .collectionCommandShortcuts(
+                        focusRequester = mediaCommandFocusRequester,
+                        onSelectAll = { viewModel.selectAll(); true },
+                        onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
+                        onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
+                        onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false }
+                    )
             ) {
                 when {
                     media.isInitialLoad || !state.loaded -> LoadingState()
@@ -1171,10 +1256,17 @@ fun GalleryScreen(
 
                                 is GalleryListItem.Media -> {
                                     val file = item.file
+                                    var folderLocation by remember(file.id) {
+                                        mutableStateOf<String?>(null)
+                                    }
+                                    LaunchedEffect(file.folderId) {
+                                        folderLocation = viewModel.folderPathLabel(file.folderId)
+                                    }
                                     FileListItem(
                                         file = file,
                                         selected = file.id in state.selection,
                                         selectionMode = selectionMode,
+                                        location = folderLocation,
                                         onClick = {
                                             if (selectionMode) {
                                                 viewModel.toggleSelection(file.id)
@@ -1254,10 +1346,17 @@ fun GalleryScreen(
 
                                 is GalleryListItem.Media -> {
                                     val file = item.file
+                                    var folderLocation by remember(file.id) {
+                                        mutableStateOf<String?>(null)
+                                    }
+                                    LaunchedEffect(file.folderId) {
+                                        folderLocation = viewModel.folderPathLabel(file.folderId)
+                                    }
                                     FileGridItem(
                                         file = file,
                                         selected = file.id in state.selection,
                                         compact = true,
+                                        location = folderLocation,
                                         onToggleSelection = { viewModel.toggleSelection(file.id) },
                                         onClick = {
                                             if (selectionMode) {

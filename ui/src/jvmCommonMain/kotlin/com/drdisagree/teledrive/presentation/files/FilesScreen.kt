@@ -9,8 +9,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,7 +71,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -85,6 +88,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -94,11 +99,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -119,12 +135,13 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.isInitialLoad
-import com.drdisagree.teledrive.presentation.common.rememberPosition
 import com.drdisagree.teledrive.presentation.common.resolve
 import com.drdisagree.teledrive.presentation.components.ActionMenu
 import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileGridItem
@@ -252,14 +269,20 @@ fun FilesScreen(
     viewModel: FilesViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
-    val selectionMode = state.selectionMode || selectionModeEnabled
+    val selectionSnapshot by viewModel.selectionSnapshot.collectAsStateWithLifecycle()
+    val selectedFileIds = selectionSnapshot.fileIds
+    val selectedFolderIds = selectionSnapshot.folderIds
+    val selectedCount = selectionSnapshot.count
+    val selectionMode = selectedCount > 0 || selectionSnapshot.selectionModeEnabled
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val files = viewModel.pagedFiles.collectAsLazyPagingItems()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
     val storageAudit by viewModel.storageAudit.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
-    val allSelected by viewModel.allSelected.collectAsStateWithLifecycle()
+    val allSelected = selectionSnapshot.allSelected
+    val activeFolderId by viewModel.activeFolderId.collectAsStateWithLifecycle()
+    val tabs by viewModel.workspaceTabs.collectAsStateWithLifecycle()
+    val selectedTabId by viewModel.selectedWorkspaceTabId.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showCreateFolder by remember { mutableStateOf(false) }
@@ -326,10 +349,89 @@ fun FilesScreen(
     val working by viewModel.working.collectAsStateWithLifecycle()
     working?.let { BlockingProgressDialog(message = it.resolve()) }
 
-    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     val gridState = rememberLazyGridState()
-    gridState.rememberPosition(viewModel.listPosition, state.folders.size + files.itemCount)
+    val filesCommandFocusRequester = rememberCollectionCommandFocusRequester()
+    val tabPositions by rememberSaveable(
+        stateSaver = listSaver<MutableMap<Pair<Int, String?>, Pair<Int, Int>>, String>(
+            save = { positions ->
+                positions.flatMap { (key, value) ->
+                    listOf(
+                        key.first.toString(),
+                        key.second.orEmpty(),
+                        value.first.toString(),
+                        value.second.toString()
+                    )
+                }
+            },
+            restore = { encoded ->
+                encoded.chunked(4).mapNotNull { fields ->
+                    if (fields.size != 4) null
+                    else {
+                        val tabId = fields[0].toIntOrNull() ?: return@mapNotNull null
+                        val itemIndex = fields[2].toIntOrNull() ?: return@mapNotNull null
+                        val scrollOffset = fields[3].toIntOrNull() ?: return@mapNotNull null
+                        (tabId to fields[1].ifEmpty { null }) to (itemIndex to scrollOffset)
+                    }
+                }.toMap().toMutableMap()
+            }
+        )
+    ) { mutableStateOf(mutableMapOf()) }
+    fun saveCurrentTabPosition() {
+        tabPositions[selectedTabId to state.folderId] =
+            gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+    }
+    fun navigateToFolder(folderId: String?) {
+        saveCurrentTabPosition()
+        viewModel.setActiveFolder(folderId)
+    }
+    fun navigateBackOneStep() {
+        if (state.folderId != null) {
+            val parentFolderId = state.breadcrumbs.dropLast(1).lastOrNull()?.id
+            navigateToFolder(parentFolderId)
+        } else {
+            onBack?.invoke()
+        }
+    }
+
+    AppBackHandler(enabled = selectionMode || state.folderId != null || onBack != null) {
+        if (selectionMode) viewModel.clearSelection() else navigateBackOneStep()
+    }
+    fun activateTab(tab: FilesTabState) {
+        if (tab.id == selectedTabId) return
+        saveCurrentTabPosition()
+        viewModel.activateWorkspaceTab(tab.id)
+    }
+    fun createTab() {
+        saveCurrentTabPosition()
+        viewModel.createWorkspaceTab()
+    }
+    fun closeTab(tab: FilesTabState) {
+        if (tabs.size <= 1) return
+        tabPositions.keys.removeAll { it.first == tab.id }
+        viewModel.closeWorkspaceTab(tab.id)
+    }
+    fun closeAllTabs() {
+        tabPositions.clear()
+        viewModel.closeAllWorkspaceTabs()
+    }
+    val activeFolderLabel = if (activeFolderId == null) {
+        stringResource(Res.string.files)
+    } else {
+        state.breadcrumbs.lastOrNull()?.name?.resolve() ?: "Folder"
+    }
+    LaunchedEffect(activeFolderId, activeFolderLabel, selectedTabId) {
+        viewModel.updateSelectedWorkspaceTab(activeFolderId, activeFolderLabel)
+    }
+    LaunchedEffect(selectedTabId, state.folderId, files.itemCount, files.loadState.refresh) {
+        val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
+        if (currentTab.folderId != state.folderId || files.loadState.refresh is LoadState.Loading) {
+            return@LaunchedEffect
+        }
+        val target = tabPositions[selectedTabId to state.folderId] ?: (0 to 0)
+        val count = state.folders.size + files.itemCount
+        if (count > 0) gridState.scrollToItem(target.first.coerceIn(0, count - 1), target.second)
+    }
     var fabVisible by remember { mutableStateOf(true) }
     val listScrolls by remember {
         derivedStateOf { gridState.canScrollForward || gridState.canScrollBackward }
@@ -386,7 +488,19 @@ fun FilesScreen(
     val fabLift by animateDpAsState(targetValue = snackbarHeight, label = "fabLift")
 
     FileDropArea(onDropped = { references -> viewModel.importAndUpload(references) }) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .collectionCommandShortcuts(
+                    focusRequester = filesCommandFocusRequester,
+                    onSelectAll = { viewModel.selectAll(); true },
+                    onCopy = { if (selectedCount > 0) { viewModel.copyToClipboardSelected(); true } else false },
+                    onCut = { if (selectedCount > 0) { viewModel.cutSelected(); true } else false },
+                    onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
+                    onNewFolder = { showCreateFolder = true; true },
+                    onNewTab = { createTab(); true }
+                )
+        ) {
             Scaffold(
                 snackbarHost = {},
                 topBar = {
@@ -397,14 +511,14 @@ fun FilesScreen(
                                 Text(
                                     text = stringResource(
                                         Res.string.common_selection_count,
-                                        state.selectionCount
+                                        selectedCount
                                     ),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             },
                             navigationIcon = {
-                                IconButton(onClick = viewModel::clearSelection) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.common_clear_selection), onClick = viewModel::clearSelection) {
                                     Icon(
                                         Icons.Filled.Close,
                                         contentDescription = stringResource(Res.string.common_clear_selection)
@@ -412,7 +526,8 @@ fun FilesScreen(
                                 }
                             },
                             actions = {
-                                IconButton(
+                                TooltipIconButton(
+                                    tooltip = stringResource(if (allSelected) Res.string.common_deselect_all else Res.string.common_select_all),
                                     onClick = {
                                         if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
                                     }
@@ -430,26 +545,26 @@ fun FilesScreen(
                                         }
                                     )
                                 }
-                                if (state.selectionCount > 0) {
-                                    IconButton(onClick = { showMovePicker = true }) {
+                                if (selectedCount > 0) {
+                                    TooltipIconButton(tooltip = stringResource(Res.string.files_move), onClick = { showMovePicker = true }) {
                                         Icon(
                                             Icons.AutoMirrored.Filled.DriveFileMove,
                                             contentDescription = stringResource(Res.string.files_move)
                                         )
                                     }
                                     Box {
-                                        IconButton(onClick = { showSelectionOverflow = true }) {
+                                        TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                         Icon(
                                             Icons.Filled.MoreVert,
                                             contentDescription = stringResource(Res.string.common_actions)
                                         )
                                     }
                                     val editableNote = state.capabilities.canEditNote &&
-                                            state.selectionCount == 1 &&
-                                            state.folderSelection.isEmpty()
-                                    val filesOnly = !state.folderInSelection
+                                            selectedCount == 1 &&
+                                            selectedFolderIds.isEmpty()
+                                    val filesOnly = selectedFolderIds.isEmpty()
 
-                                    val selectedItemCount = state.selectionCount
+                                    val selectedItemCount = selectedCount
                                     val actions = buildList {
                                         if (filesOnly) {
                                             add(
@@ -467,7 +582,7 @@ fun FilesScreen(
                                                 ) { viewModel.downloadSelected() }
                                             )
                                         }
-                                        if (filesOnly) {
+                                        if (selectedItemCount > 0) {
                                             add(
                                                 MenuAction(
                                                     label = "Storage locations / Free up space",
@@ -579,23 +694,25 @@ fun FilesScreen(
                             colors = liftedTopAppBarColors(lifted),
                             title = { Text(stringResource(Res.string.files)) },
                             navigationIcon = {
-                                onBack?.let {
-                                    IconButton(onClick = it) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.ArrowBack,
-                                            contentDescription = stringResource(Res.string.common_back)
-                                        )
-                                    }
+                                TooltipIconButton(
+                                    tooltip = stringResource(Res.string.common_back),
+                                    onClick = ::navigateBackOneStep,
+                                    enabled = state.folderId != null || onBack != null
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = stringResource(Res.string.common_back)
+                                    )
                                 }
                             },
                             actions = {
-                                IconButton(onClick = viewModel::startSelectionMode) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                                     Icon(
                                         Icons.Filled.CheckBoxOutlineBlank,
                                         contentDescription = stringResource(Res.string.common_select)
                                     )
                                 }
-                                IconButton(onClick = onViewThumbnailQueue) {
+                                TooltipIconButton(tooltip = "View thumbnail queue", onClick = onViewThumbnailQueue) {
                                     Icon(
                                         Icons.Filled.CloudQueue,
                                         contentDescription = "View thumbnail queue"
@@ -605,20 +722,20 @@ fun FilesScreen(
                                     refreshing = refreshing,
                                     onRefresh = viewModel::refresh
                                 )
-                                IconButton(onClick = onOpenSearch) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.files_search), onClick = onOpenSearch) {
                                     Icon(
                                         Icons.Filled.Search,
                                         contentDescription = stringResource(Res.string.files_search)
                                     )
                                 }
-                                IconButton(onClick = { showCreateFolder = true }) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.files_new_folder), onClick = { showCreateFolder = true }) {
                                     Icon(
                                         Icons.Filled.CreateNewFolder,
                                         contentDescription = stringResource(Res.string.files_new_folder)
                                     )
                                 }
                                 Box {
-                                    IconButton(onClick = { showViewMenu = true }) {
+                                    TooltipIconButton(tooltip = stringResource(Res.string.files_change_view), onClick = { showViewMenu = true }) {
                                         Icon(
                                             Icons.Filled.ViewList,
                                             contentDescription = stringResource(Res.string.files_change_view)
@@ -651,7 +768,7 @@ fun FilesScreen(
                                         )
                                     }
                                 }
-                                IconButton(onClick = { showSortMenu = true }) {
+                                TooltipIconButton(tooltip = stringResource(Res.string.files_sort), onClick = { showSortMenu = true }) {
                                     Icon(
                                         Icons.AutoMirrored.Filled.Sort,
                                         contentDescription = stringResource(Res.string.files_sort)
@@ -753,8 +870,69 @@ fun FilesScreen(
                         .padding(top = padding.calculateTopPadding())
                         .nestedScroll(fabScrollConnection)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            tabs.forEach { tab ->
+                                FileTabDropTarget(
+                                    modifier = Modifier,
+                                    onDrop = { payload, copy ->
+                                        tab.id != selectedTabId &&
+                                            viewModel.handleTabDrop(payload, tab.folderId, copy)
+                                    }
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        TextButton(
+                                            onClick = { activateTab(tab) },
+                                            colors = ButtonDefaults.textButtonColors(
+                                                containerColor = if (tab.id == selectedTabId) {
+                                                    MaterialTheme.colorScheme.secondaryContainer
+                                                } else {
+                                                    Color.Transparent
+                                                },
+                                                contentColor = if (tab.id == selectedTabId) {
+                                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                }
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                        ) { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                                        if (tabs.size > 1) {
+                                            TooltipIconButton(tooltip = "Close ${tab.label} tab", onClick = { closeTab(tab) }, modifier = Modifier.size(28.dp)) {
+                                                Icon(
+                                                    Icons.Filled.Close,
+                                                    contentDescription = "Close ${tab.label} tab",
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        TooltipIconButton(tooltip = "Open new Files tab", onClick = ::createTab) {
+                            Icon(Icons.Filled.Add, contentDescription = "Open new Files tab")
+                        }
+                        if (tabs.size > 1) {
+                            TooltipIconButton(
+                                tooltip = "Close all Files tabs",
+                                onClick = ::closeAllTabs
+                            ) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Close all Files tabs"
+                                )
+                            }
+                        }
+                    }
                     if (state.breadcrumbs.size > 1) {
-                        Breadcrumbs(crumbs = state.breadcrumbs, onOpen = onOpenCrumb)
+                        Breadcrumbs(crumbs = state.breadcrumbs, onOpen = ::navigateToFolder)
                     }
                     RefreshableContent(
                         isRefreshing = refreshing,
@@ -784,16 +962,20 @@ fun FilesScreen(
                                 gridState = gridState,
                                 state = state,
                                 selectionMode = selectionMode,
+                                selectedFileIds = selectedFileIds,
+                                selectedFolderIds = selectedFolderIds,
                                 onShowContextMenu = { showSelectionOverflow = true },
                                 files = files,
                                 padding = PaddingValues(
                                     bottom = padding.calculateBottomPadding() +
                                             LocalBottomBarInset.current
                                 ),
-                                onOpenFolder = onOpenFolder,
+                                onOpenFolder = ::navigateToFolder,
                                 onOpenFile = onOpenFile,
                                 onRequestTrash = { confirmTrash = true },
-                                onBack = onBack,
+                                onCreateFolder = { showCreateFolder = true },
+                                onCreateTab = ::createTab,
+                                onBack = ::navigateBackOneStep,
                                 viewModel = viewModel
                             )
                         }
@@ -873,7 +1055,7 @@ fun FilesScreen(
             ),
             loadChildren = viewModel::childFolders,
             createFolder = viewModel::createFolderIn,
-            excludedFolderIds = state.folderSelection,
+            excludedFolderIds = selectedFolderIds,
             onConfirm = { target ->
                 showMovePicker = false
                 showCopyPicker = false
@@ -912,7 +1094,7 @@ fun FilesScreen(
         ConfirmDialog(
             title = stringResource(
                 Res.string.common_confirm_trash_count_title,
-                state.selectionCount
+                selectedCount
             ),
             message = stringResource(Res.string.common_restore_trash_emptied),
             confirmLabel = stringResource(Res.string.common_move_trash),
@@ -1069,12 +1251,16 @@ private fun FilesContent(
     gridState: LazyGridState,
     state: FilesUiState,
     selectionMode: Boolean,
+    selectedFileIds: Set<String>,
+    selectedFolderIds: Set<String>,
     onShowContextMenu: () -> Unit,
     files: LazyPagingItems<DriveFile>,
     padding: PaddingValues,
     onOpenFolder: (String) -> Unit,
     onOpenFile: (String, PreviewSequence) -> Unit,
     onRequestTrash: () -> Unit,
+    onCreateFolder: () -> Unit,
+    onCreateTab: () -> Unit,
     onBack: (() -> Unit)?,
     viewModel: FilesViewModel
 ) {
@@ -1103,22 +1289,28 @@ private fun FilesContent(
                 files.peek(index - state.folders.size)?.let { viewModel.requestRename(it.id, null) }
             }
         },
+        onCopy = { index ->
+            selectIfNone(index)
+            viewModel.copyToClipboardSelected()
+        },
         onCut = { index ->
             selectIfNone(index)
             viewModel.cutSelected()
         },
         onPaste = viewModel::paste,
+        onNewFolder = onCreateFolder,
+        onNewTab = onCreateTab,
         onBack = onBack,
-        onClear = if (selectionMode) viewModel::clearSelection else null
+        onClear = if (selectionMode) viewModel::clearSelection else onBack
     )
     val dragSelect = rememberDragSelect(
         gridState = gridState,
         onStart = viewModel::startRangeSelection,
         isSelected = { index ->
             if (index < state.folders.size) {
-                state.folderSelection.contains(state.folders[index].id)
+                state.folders[index].id in selectedFolderIds
             } else {
-                files.peek(index - state.folders.size)?.id?.let(state.selection::contains) == true
+                files.peek(index - state.folders.size)?.id?.let(selectedFileIds::contains) == true
             }
         },
         onRange = { range, shouldSelect ->
@@ -1166,11 +1358,12 @@ private fun FilesContent(
             }
         ) { index ->
             val folder = state.folders[index]
-            val folderSelected = folder.id in state.folderSelection
+            val folderSelected = folder.id in selectedFolderIds
             if (state.viewMode == ViewMode.GRID) {
                 FolderGridItem(
                     folder = folder,
                     selected = folderSelected,
+                    prominentSelectionCheckbox = true,
                     onClick = {
                         if (selectionMode) viewModel.toggleFolderSelection(folder.id)
                         else onOpenFolder(folder.id)
@@ -1180,6 +1373,7 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
+                        .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
                             viewModel.selectFolderForContext(folder.id)
                             onShowContextMenu()
@@ -1189,6 +1383,7 @@ private fun FilesContent(
                 FolderRow(
                     folder = folder,
                     selected = folderSelected,
+                    prominentSelectionCheckbox = true,
                     onClick = {
                         if (selectionMode) viewModel.toggleFolderSelection(folder.id)
                         else onOpenFolder(folder.id)
@@ -1198,6 +1393,7 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .animateItem()
+                        .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
                             viewModel.selectFolderForContext(folder.id)
                             onShowContextMenu()
@@ -1211,12 +1407,13 @@ private fun FilesContent(
             key = files.itemKey { "file-${it.id}" }
         ) { index ->
             val file = files[index] ?: return@items
-            val selected = file.id in state.selection
+            val selected = file.id in selectedFileIds
             val highlighted = file.id == highlightedFileId
             if (state.viewMode == ViewMode.GRID) {
                 FileGridItem(
                     file = file,
                     selected = selected,
+                    prominentSelectionCheckbox = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
                         if (selectionMode) viewModel.toggleSelection(file.id)
@@ -1235,6 +1432,7 @@ private fun FilesContent(
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .animateItem()
                         .focusHighlight(highlighted)
+                        .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
                             viewModel.selectFileForContext(file.id)
                             onShowContextMenu()
@@ -1244,6 +1442,7 @@ private fun FilesContent(
                 FileListItem(
                     file = file,
                     selected = selected,
+                    prominentSelectionCheckbox = true,
                     selectionMode = selectionMode,
                     prominent = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
@@ -1264,6 +1463,7 @@ private fun FilesContent(
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .animateItem()
                         .focusHighlight(highlighted)
+                        .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
                             viewModel.selectFileForContext(file.id)
                             onShowContextMenu()
@@ -1273,6 +1473,7 @@ private fun FilesContent(
                 FileDetailsItem(
                     file = file,
                     selected = selected,
+                    prominentSelectionCheckbox = true,
                     selectionMode = selectionMode,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
@@ -1292,6 +1493,7 @@ private fun FilesContent(
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .animateItem()
                         .focusHighlight(highlighted)
+                        .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
                             viewModel.selectFileForContext(file.id)
                             onShowContextMenu()

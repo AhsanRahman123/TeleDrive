@@ -824,6 +824,15 @@ class CacheRepositoryImpl(
         return thumbnailJobDao.count()
     }
 
+    override suspend fun thumbnailQueueActiveFileIds(): Set<String> {
+        val activeIds = thumbnailStore.observeActiveJobs().first()
+        if (activeIds.isEmpty()) return emptySet()
+        // A worker removes its durable queue row as soon as the cached thumbnail is committed.
+        // Its in-memory active marker can survive briefly while cleanup finishes; don't report
+        // those completed rows as still generating or count them as phantom queue entries.
+        return thumbnailJobDao.existingFileIds(activeIds.toList()).toSet()
+    }
+
     override suspend fun thumbnailQueueFileIds(
         offset: Int,
         limit: Int

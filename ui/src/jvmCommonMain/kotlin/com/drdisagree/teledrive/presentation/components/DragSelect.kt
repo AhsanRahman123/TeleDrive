@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationExceptio
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -125,7 +126,7 @@ private fun dragSelect(
                 null
             }
             if (anchor >= 0 && current != null) {
-                currentOnRange(minOf(anchor, current)..maxOf(anchor, current), activeShouldSelect)
+                currentOnRange(dragSelectionRange(anchor, current), activeShouldSelect)
             }
         }
     }
@@ -145,54 +146,62 @@ private fun dragSelect(
             }
             if (!shouldStart) return@awaitEachGesture
 
-            var anchor = currentIndexAt(down.position)
-            currentOnStart()
-            val clampPosition: (Offset) -> Offset = { point ->
-                Offset(
-                    x = point.x.coerceIn(0f, (size.width - 1).coerceAtLeast(0).toFloat()),
-                    y = point.y.coerceIn(0f, (size.height - 1).coerceAtLeast(0).toFloat())
-                )
-            }
-            val initialPosition = clampPosition(mouseDragStart?.position ?: down.position)
-            latestPointerPosition = initialPosition
-            val initialIndex = currentIndexAt(initialPosition)
-            val selectionAnchor = anchor ?: initialIndex
-            if (selectionAnchor != null) {
-                activeAnchor = selectionAnchor
-                // The anchor's state at pointer-down fixes the operation for this
-                // entire gesture. Dragging from a selected item removes the range;
-                // dragging from an unselected item adds it.
-                activeShouldSelect = !currentIsSelected(selectionAnchor)
-                val current = initialIndex ?: selectionAnchor
-                currentOnRange(
-                    minOf(selectionAnchor, current)..maxOf(selectionAnchor, current),
-                    activeShouldSelect
-                )
-            } else {
-                activeAnchor = -1
-                activeShouldSelect = true
-            }
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
-                change.consume()
-                if (!change.pressed) break
-                val position = clampPosition(change.position)
-                latestPointerPosition = position
-                val current = currentIndexAt(position)
-                if (current != null) {
-                    val start = anchor ?: current.also {
-                        anchor = it
-                        activeAnchor = it
-                    }
-                    currentOnRange(minOf(start, current)..maxOf(start, current), activeShouldSelect)
+            var selectionStarted = false
+            try {
+                var anchor = currentIndexAt(down.position)
+                currentOnStart()
+                selectionStarted = true
+                val clampPosition: (Offset) -> Offset = { point ->
+                    Offset(
+                        x = point.x.coerceIn(0f, (size.width - 1).coerceAtLeast(0).toFloat()),
+                        y = point.y.coerceIn(0f, (size.height - 1).coerceAtLeast(0).toFloat())
+                    )
                 }
-                autoScroll = edgeScroll(change.position.y, size.height, edgePx, maxScrollPx)
+                val initialPosition = clampPosition(mouseDragStart?.position ?: down.position)
+                latestPointerPosition = initialPosition
+                val initialIndex = currentIndexAt(initialPosition)
+                val selectionAnchor = anchor ?: initialIndex
+                if (selectionAnchor != null) {
+                    activeAnchor = selectionAnchor
+                    // The anchor's state at pointer-down fixes the operation for this
+                    // entire gesture. Dragging from a selected item removes the range;
+                    // dragging from an unselected item adds it.
+                    activeShouldSelect = !currentIsSelected(selectionAnchor)
+                    val current = initialIndex ?: selectionAnchor
+                    currentOnRange(
+                        dragSelectionRange(selectionAnchor, current),
+                        activeShouldSelect
+                    )
+                } else {
+                    activeAnchor = -1
+                    activeShouldSelect = true
+                }
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) break
+                    change.consume()
+                    val position = clampPosition(change.position)
+                    latestPointerPosition = position
+                    val current = currentIndexAt(position)
+                    if (current != null) {
+                        val start = anchor ?: current.also {
+                            anchor = it
+                            activeAnchor = it
+                            activeShouldSelect = !currentIsSelected(it)
+                        }
+                        currentOnRange(dragSelectionRange(start, current), activeShouldSelect)
+                    }
+                    autoScroll = edgeScroll(change.position.y, size.height, edgePx, maxScrollPx)
+                }
+            } finally {
+                // Always release the selection/auto-scroll state if the pointer gesture is
+                // cancelled by focus changes, recomposition, or navigation.
+                autoScroll = 0f
+                activeAnchor = -1
+                latestPointerPosition = null
+                if (selectionStarted) currentOnEnd()
             }
-            autoScroll = 0f
-            activeAnchor = -1
-            latestPointerPosition = null
-            currentOnEnd()
         }
     }
 }
@@ -206,6 +215,9 @@ private suspend fun AwaitPointerEventScope.awaitMouseDragStart(
 ): PointerInputChange? {
     while (true) {
         val event = awaitPointerEvent(PointerEventPass.Initial)
+        // Shift is reserved for deliberate file-to-tab transfers. Unmodified
+        // primary-button drags belong to the shared range-selection gesture.
+        if (event.keyboardModifiers.isShiftPressed) return null
         if (!event.buttons.isPrimaryPressed) return null
         val change = event.changes.fastFirstOrNull { it.id == down.id } ?: return null
         if (!change.pressed) return null
@@ -244,6 +256,13 @@ private fun edgeScroll(y: Float, viewportHeight: Int, edgePx: Float, maxScrollPx
 
         else -> 0f
     }
+
+/**
+ * Inclusive range between an anchor and the current pointer item. min/max makes
+ * upward and downward sweeps produce the same range.
+ */
+internal fun dragSelectionRange(anchorIndex: Int, currentIndex: Int): IntRange =
+    minOf(anchorIndex, currentIndex)..maxOf(anchorIndex, currentIndex)
 
 private val EDGE_SIZE = 88.dp
 private val SCROLL_PER_FRAME = 10.dp

@@ -34,7 +34,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -58,6 +58,8 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.ActionMenu
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
@@ -144,6 +146,14 @@ fun SearchScreen(
     val shortcuts = CollectionShortcuts(
         onToggleSelect = { index -> fileIdAt(index)?.let(viewModel::toggleSelection) },
         onSelectAll = viewModel::selectAll,
+        onCopy = { index ->
+            if (!selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
+            viewModel.copyToClipboardSelected()
+        },
+        onCut = { index ->
+            if (!selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
+            viewModel.cutSelected()
+        },
         onDelete = { index ->
             if (!selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
             viewModel.trashSelected()
@@ -176,7 +186,7 @@ fun SearchScreen(
                             modifier = Modifier.fillMaxWidth(),
                             trailingIcon = {
                                 if (state.query.isNotEmpty()) {
-                                    IconButton(onClick = { viewModel.setQuery("") }) {
+                                    TooltipIconButton(tooltip = stringResource(Res.string.common_clear), onClick = { viewModel.setQuery("") }) {
                                         Icon(
                                             Icons.Filled.Close,
                                             contentDescription = stringResource(Res.string.common_clear)
@@ -187,7 +197,7 @@ fun SearchScreen(
                         )
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = onBack) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(Res.string.common_back)
@@ -195,7 +205,7 @@ fun SearchScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = viewModel::startSelectionMode) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                             Icon(
                                 Icons.Filled.CheckBoxOutlineBlank,
                                 contentDescription = stringResource(Res.string.common_select)
@@ -248,7 +258,18 @@ fun SearchScreen(
                     )
                 }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            val commandFocusRequester = rememberCollectionCommandFocusRequester()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .collectionCommandShortcuts(
+                        focusRequester = commandFocusRequester,
+                        onSelectAll = { viewModel.selectAll(); true },
+                        onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
+                        onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false }
+                    )
+            ) {
                 when {
                 state.searching -> LoadingState()
                 !state.searched -> EmptyState(
@@ -423,7 +444,7 @@ private fun SearchSelectionBar(
         colors = liftedTopAppBarColors(lifted),
         title = { Text(state.selection.size.toString()) },
         navigationIcon = {
-            IconButton(onClick = viewModel::clearSelection) {
+            TooltipIconButton(tooltip = stringResource(Res.string.common_clear), onClick = viewModel::clearSelection) {
                 Icon(
                     Icons.Filled.Close,
                     contentDescription = stringResource(Res.string.common_clear)
@@ -431,7 +452,7 @@ private fun SearchSelectionBar(
             }
         },
         actions = {
-            IconButton(onClick = viewModel::selectAll) {
+            TooltipIconButton(tooltip = stringResource(Res.string.common_select_all), onClick = viewModel::selectAll) {
                 Icon(
                     Icons.Filled.SelectAll,
                     contentDescription = stringResource(Res.string.common_select_all)
@@ -439,7 +460,7 @@ private fun SearchSelectionBar(
             }
             if (state.selection.isNotEmpty()) {
                 Box {
-                    IconButton(onClick = { onMenuExpandedChange(true) }) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { onMenuExpandedChange(true) }) {
                     Icon(
                         Icons.Filled.MoreVert,
                         contentDescription = stringResource(Res.string.common_actions)

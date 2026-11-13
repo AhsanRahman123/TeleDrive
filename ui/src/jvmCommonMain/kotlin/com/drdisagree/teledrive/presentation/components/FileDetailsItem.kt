@@ -41,7 +41,8 @@ fun FileDetailsItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onToggleSelection: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    prominentSelectionCheckbox: Boolean = false
 ) {
     val compact = LocalCompactLayout.current
     val details = buildList {
@@ -73,6 +74,7 @@ fun FileDetailsItem(
         SelectionCheckbox(
             checked = selected,
             onClick = onToggleSelection,
+            highContrast = prominentSelectionCheckbox,
             modifier = Modifier.padding(end = 6.dp)
         )
         FileThumbnail(

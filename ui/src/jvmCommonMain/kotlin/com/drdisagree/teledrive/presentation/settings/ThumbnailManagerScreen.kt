@@ -39,7 +39,8 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -62,7 +63,13 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.drdisagree.teledrive.core.media.ThumbnailModel
 import com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier
+import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
+import com.drdisagree.teledrive.domain.repository.FileRepository
+import com.drdisagree.teledrive.presentation.common.load
+import com.drdisagree.teledrive.presentation.common.toUiText
+import com.drdisagree.teledrive.presentation.files.CutItems
+import com.drdisagree.teledrive.presentation.files.FileClipboard
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailFileUsage
 import com.drdisagree.teledrive.domain.repository.ThumbnailFolderUsage
@@ -77,6 +84,8 @@ import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -97,9 +106,12 @@ private const val THUMBNAIL_PAGE_SIZE = 60
 @Composable
 fun ThumbnailManagerScreen(
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onInternalBackStateChange: (Boolean, () -> Unit) -> Unit = { _, _ -> }
 ) {
     val cacheRepository = koinInject<CacheRepository>()
+    val fileRepository = koinInject<FileRepository>()
+    val fileClipboard = koinInject<FileClipboard>()
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
@@ -137,6 +149,121 @@ fun ThumbnailManagerScreen(
     val folderListState = rememberLazyListState()
 
     val folderId = folderPath.lastOrNull()?.id
+
+    fun hasFileSelection(): Boolean =
+        selectedIds.isNotEmpty() || selectedFolderIds.isNotEmpty()
+
+    fun copySelectedToClipboard() {
+        val items = CutItems(
+            fileIds = selectedIds.toList(),
+            folderIds = selectedFolderIds.toList(),
+            isCut = false
+        )
+        if (items.fileIds.isEmpty() && items.folderIds.isEmpty()) return
+        fileClipboard.copy(items)
+        selectedIds = emptySet()
+        selectedFolderIds = emptySet()
+        generationMessage =
+            "Copied ${items.fileIds.size + items.folderIds.size} item(s). Navigate to a Drive folder and press Ctrl+V."
+    }
+
+    fun cutSelectedToClipboard() {
+        val items = CutItems(
+            fileIds = selectedIds.toList(),
+            folderIds = selectedFolderIds.toList()
+        )
+        if (items.fileIds.isEmpty() && items.folderIds.isEmpty()) return
+        fileClipboard.cut(items)
+        selectedIds = emptySet()
+        selectedFolderIds = emptySet()
+        generationMessage =
+            "Cut ${items.fileIds.size + items.folderIds.size} item(s). Navigate to a Drive folder and press Ctrl+V."
+    }
+
+    fun pasteFromClipboard() {
+        val items = fileClipboard.peek() ?: return
+        scope.launch {
+            var succeeded = true
+            var failureMessage: String? = null
+            if (items.isCut) {
+                if (items.fileIds.isNotEmpty()) {
+                    when (val result = fileRepository.moveFiles(items.fileIds, folderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            failureMessage = result.error.toUiText().load()
+                        }
+                    }
+                }
+                items.folderIds.forEach { id ->
+                    when (val result = fileRepository.moveFolder(id, folderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            failureMessage = result.error.toUiText().load()
+                        }
+                    }
+                }
+            } else {
+                if (items.fileIds.isNotEmpty()) {
+                    when (val result = fileRepository.copyFiles(items.fileIds, folderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            failureMessage = result.error.toUiText().load()
+                        }
+                    }
+                }
+                items.folderIds.forEach { id ->
+                    when (val result = fileRepository.copyFolder(id, folderId)) {
+                        is AppResult.Success -> Unit
+                        is AppResult.Failure -> {
+                            succeeded = false
+                            failureMessage = result.error.toUiText().load()
+                        }
+                    }
+                }
+            }
+            if (succeeded) {
+                if (items.isCut) fileClipboard.clearIfMatches(items)
+                generationMessage = if (items.isCut) {
+                    "Moved ${items.fileIds.size + items.folderIds.size} item(s) into this folder."
+                } else {
+                    "Pasted ${items.fileIds.size + items.folderIds.size} copied item(s) into this folder."
+                }
+                refreshKey++
+            } else {
+                generationMessage = failureMessage ?: "Paste did not complete. The clipboard was retained."
+            }
+        }
+    }
+
+    fun navigateBackOneStep() {
+        when {
+            showQueue -> showQueue = false
+            folderPath.isNotEmpty() -> {
+                folderPath = folderPath.dropLast(1)
+                pageOffset = 0
+            }
+            else -> onBack()
+        }
+    }
+
+    LaunchedEffect(showQueue, folderPath) {
+        val hasInternalBack = showQueue || folderPath.isNotEmpty()
+        onInternalBackStateChange(hasInternalBack) {
+            when {
+                showQueue -> showQueue = false
+                folderPath.isNotEmpty() -> {
+                    folderPath = folderPath.dropLast(1)
+                    pageOffset = 0
+                }
+            }
+        }
+    }
+    AppBackHandler(enabled = showQueue || folderPath.isNotEmpty()) {
+        navigateBackOneStep()
+    }
     val folderDragSelect = rememberDragSelect(
         listState = folderListState,
         onStart = { folderRangeSelectionBase = selectedFolderIds },
@@ -453,7 +580,8 @@ fun ThumbnailManagerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (folderPath.isNotEmpty()) {
-                    IconButton(
+                    TooltipIconButton(
+                        tooltip = "Back to parent folder",
                         onClick = {
                             folderPath = folderPath.dropLast(1)
                             pageOffset = 0
@@ -475,17 +603,17 @@ fun ThumbnailManagerScreen(
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     modifier = Modifier.height(38.dp)
                 ) { Text("View queue") }
-                IconButton(onClick = {
+                TooltipIconButton(tooltip = "Scroll to top", onClick = {
                     scope.launch { scrollState.animateScrollTo(0) }
                 }) {
                     Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Scroll to top")
                 }
-                IconButton(onClick = {
+                TooltipIconButton(tooltip = "Scroll to bottom", onClick = {
                     scope.launch { scrollState.animateScrollTo(scrollState.maxValue) }
                 }) {
                     Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Scroll to bottom")
                 }
-                IconButton(onClick = { refreshKey++ }) {
+                TooltipIconButton(tooltip = "Refresh thumbnail inventory", onClick = { refreshKey++ }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
@@ -558,7 +686,36 @@ fun ThumbnailManagerScreen(
                 }
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            val commandFocusRequester = rememberCollectionCommandFocusRequester()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .collectionCommandShortcuts(
+                        focusRequester = commandFocusRequester,
+                        onSelectAll = {
+                            scope.launch {
+                                selectingAll = true
+                                try {
+                                    selectedIds = cacheRepository.thumbnailFileIdsMatching(
+                                        folderId = folderId,
+                                        cacheFilter = cacheFilter.name,
+                                        policyFilter = policyFilter.name,
+                                        effectivePolicyFilter = effectivePolicyFilter.name,
+                                        searchQuery = searchQuery
+                                    ).toSet()
+                                    selectedFolderIds = folders.map { it.id }.toSet()
+                                } finally {
+                                    selectingAll = false
+                                }
+                            }
+                            true
+                        },
+                        onCopy = { if (hasFileSelection()) { copySelectedToClipboard(); true } else false },
+                        onCut = { if (hasFileSelection()) { cutSelectedToClipboard(); true } else false },
+                        onPaste = { if (fileClipboard.peek() != null) { pasteFromClipboard(); true } else false }
+                    )
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -806,7 +963,7 @@ fun ThumbnailManagerScreen(
                             }
                         }
                     ) { Text("Generate all missing") }
-                    IconButton(onClick = { confirmClearFolderId = folderId }) {
+                    TooltipIconButton(tooltip = "Clear folder thumbnails", onClick = { confirmClearFolderId = folderId }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Clear folder thumbnails")
                     }
                 }
@@ -1101,7 +1258,7 @@ private fun ThumbnailFolderRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Checkbox(checked = selected, onCheckedChange = onSelectionChange)
-        IconButton(onClick = onOpen) {
+        TooltipIconButton(tooltip = "Open folder", onClick = onOpen) {
             Icon(Icons.Filled.Folder, contentDescription = "Open folder", tint = MaterialTheme.colorScheme.primary)
         }
         Column(modifier = Modifier.weight(1f).clickable(onClick = onOpen)) {
@@ -1132,10 +1289,10 @@ private fun ThumbnailFolderRow(
                 )
             }
         }
-        IconButton(onClick = onGenerate) {
+        TooltipIconButton(tooltip = "Generate folder thumbnails", onClick = onGenerate) {
             Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate folder thumbnails")
         }
-        IconButton(onClick = onRemove) {
+        TooltipIconButton(tooltip = "Delete folder thumbnails", onClick = onRemove) {
             Icon(Icons.Filled.Delete, contentDescription = "Delete folder thumbnails")
         }
         ThumbnailPolicyMenu(currentPolicy, allowInherit = true, onSelect = onPolicy)
@@ -1221,11 +1378,11 @@ private fun ThumbnailFileRow(
         }
         ThumbnailPolicyMenu(file.policy, allowInherit = true, onSelect = onPolicy)
         if (file.isCached) {
-            IconButton(onClick = onRemove) {
+            TooltipIconButton(tooltip = "Remove thumbnail", onClick = onRemove) {
                 Icon(Icons.Filled.Delete, contentDescription = "Remove thumbnail")
             }
         } else {
-            IconButton(onClick = onGenerate) {
+            TooltipIconButton(tooltip = "Generate thumbnail", onClick = onGenerate) {
                 Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate thumbnail")
             }
         }
@@ -1434,7 +1591,7 @@ private fun ThumbnailPolicyMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) {
+        TooltipIconButton(tooltip = "Thumbnail generation policy", onClick = { expanded = true }) {
             Icon(Icons.Filled.Tune, contentDescription = "Thumbnail policy")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

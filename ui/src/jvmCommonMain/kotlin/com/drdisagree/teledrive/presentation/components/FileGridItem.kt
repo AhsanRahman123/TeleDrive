@@ -45,8 +45,10 @@ fun FileGridItem(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    location: String? = null,
     showSelectionCheckbox: Boolean = true,
-    onToggleSelection: (() -> Unit)? = null
+    onToggleSelection: (() -> Unit)? = null,
+    prominentSelectionCheckbox: Boolean = false
 ) {
     Column(
         modifier = modifier
@@ -74,6 +76,7 @@ fun FileGridItem(
                 SelectionCheckbox(
                     checked = selected,
                     onClick = onToggleSelection ?: onClick,
+                    highContrast = prominentSelectionCheckbox,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(2.dp)
@@ -89,46 +92,64 @@ fun FileGridItem(
                 )
             }
         }
-        if (!compact) {
-            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+        if (!compact || location != null) {
+            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                if (!compact) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = file.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (file.isFavorite && showFavorite) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = stringResource(
+                                    Res.string.common_content_description_favorite
+                                ),
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                        if (file.isAvailableOffline) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Filled.OfflinePin,
+                                contentDescription = stringResource(
+                                    Res.string.common_content_description_available_offline
+                                ),
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+                    Text(
+                        text = Formatters.bytes(file.sizeBytes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
                     Text(
                         text = file.name,
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                        overflow = TextOverflow.Ellipsis
                     )
-                    if (file.isFavorite && showFavorite) {
-                        Spacer(Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Filled.Star,
-                            contentDescription = stringResource(
-                                Res.string.common_content_description_favorite
-                            ),
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.tertiary
-                        )
-                    }
-                    if (file.isAvailableOffline) {
-                        Spacer(Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Filled.OfflinePin,
-                            contentDescription = stringResource(
-                                Res.string.common_content_description_available_offline
-                            ),
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.secondary
-                        )
-                    }
                 }
-                Text(
-                    text = Formatters.bytes(file.sizeBytes),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                location?.takeIf { it.isNotBlank() }?.let { path ->
+                    Text(
+                        text = path,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

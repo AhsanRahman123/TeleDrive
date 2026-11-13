@@ -1,10 +1,29 @@
 package com.drdisagree.teledrive.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
+import com.sun.jna.Platform
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
@@ -32,6 +51,8 @@ import com.drdisagree.teledrive.desktop.ui.FullscreenController
 import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.desktop.ui.ProvideDesktopPlatformActions
 import com.drdisagree.teledrive.desktop.window.WindowsTitleBar
+import com.drdisagree.teledrive.desktop.window.WindowsBorderlessFullscreenController
+import com.drdisagree.teledrive.desktop.window.WindowsF11Shortcut
 import com.drdisagree.teledrive.domain.model.AppTheme
 import com.drdisagree.teledrive.core.logging.DebugLogController
 import com.drdisagree.teledrive.data.repository.FolderOwnershipRepair
@@ -85,26 +106,7 @@ fun main() {
     }
     application {
         val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
-        val fullscreenController = remember {
-            FullscreenController(
-                isFullscreen = { windowState.placement == WindowPlacement.Fullscreen },
-                toggle = {
-                    windowState.placement =
-                        if (windowState.placement == WindowPlacement.Fullscreen) {
-                            WindowPlacement.Floating
-                        } else {
-                            WindowPlacement.Fullscreen
-                        }
-                },
-                setFullscreen = { fullscreen ->
-                    windowState.placement = if (fullscreen) {
-                        WindowPlacement.Fullscreen
-                    } else {
-                        WindowPlacement.Floating
-                    }
-                }
-            )
-        }
+        var previousWindowPlacement by remember { mutableStateOf(windowState.placement) }
         Window(
             onCloseRequest = ::exitApplication,
             title = stringResource(SharedRes.string.app_name),
@@ -112,6 +114,45 @@ fun main() {
             state = windowState
         ) {
             window.minimumSize = Dimension(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+            // Windows must use borderless windowed fullscreen. WindowPlacement.Fullscreen
+            // delegates to Skiko's exclusive fullscreen path and blocks normal Alt+Tab switching.
+            val windowsFullscreen = remember(window) {
+                if (Platform.isWindows()) {
+                    WindowsBorderlessFullscreenController(window, windowState)
+                } else {
+                    null
+                }
+            }
+            val fullscreenController = remember(windowsFullscreen, windowState) {
+                FullscreenController(
+                    isFullscreen = {
+                        windowsFullscreen?.isFullscreen
+                            ?: (windowState.placement == WindowPlacement.Fullscreen)
+                    },
+                    toggle = {
+                        if (windowsFullscreen != null) {
+                            windowsFullscreen.toggle()
+                        } else if (windowState.placement == WindowPlacement.Fullscreen) {
+                            windowState.placement = previousWindowPlacement
+                        } else {
+                            previousWindowPlacement = windowState.placement
+                            windowState.placement = WindowPlacement.Fullscreen
+                        }
+                    },
+                    setFullscreen = { fullscreen ->
+                        if (windowsFullscreen != null) {
+                            windowsFullscreen.setFullscreen(fullscreen)
+                        } else if (fullscreen) {
+                            if (windowState.placement != WindowPlacement.Fullscreen) {
+                                previousWindowPlacement = windowState.placement
+                                windowState.placement = WindowPlacement.Fullscreen
+                            }
+                        } else if (windowState.placement == WindowPlacement.Fullscreen) {
+                            windowState.placement = previousWindowPlacement
+                        }
+                    }
+                )
+            }
             setSingletonImageLoaderFactory { context ->
                 ImageLoader.Builder(context)
                     .components {
@@ -134,13 +175,65 @@ fun main() {
                 AppTheme.SYSTEM -> systemDark
             }
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
-            CompositionLocalProvider(LocalFullscreenController provides fullscreenController) {
-                ProvideDesktopPlatformActions {
-                    TeleDriveApp(
-                        pendingShare = getKoin().get<PendingShare>(),
-                        notificationDestination = null,
-                        onDestinationHandled = {}
-                    )
+            // Windows uses an AWT-level dispatcher, so F11 is independent of whichever
+            // Compose child currently owns focus. Other desktop platforms retain the
+            // Compose window shortcut path.
+            val windowsF11Shortcut = remember(window, fullscreenController) {
+                if (Platform.isWindows()) {
+                    WindowsF11Shortcut(window) { fullscreenController.toggle() }
+                } else {
+                    null
+                }
+            }
+            DisposableEffect(windowsF11Shortcut) {
+                windowsF11Shortcut?.install()
+                onDispose { windowsF11Shortcut?.dispose() }
+            }
+
+            val windowShortcutFocus = remember { FocusRequester() }
+            val windowInfo = LocalWindowInfo.current
+            var fallbackF11Pressed by remember { mutableStateOf(false) }
+            LaunchedEffect(windowsF11Shortcut) {
+                if (windowsF11Shortcut == null) windowShortcutFocus.requestFocus()
+            }
+            LaunchedEffect(windowInfo.isWindowFocused) {
+                if (!windowInfo.isWindowFocused) fallbackF11Pressed = false
+            }
+            val keyboardShortcutModifier = if (windowsF11Shortcut == null) {
+                Modifier
+                    .focusRequester(windowShortcutFocus)
+                    .onPreviewKeyEvent { event ->
+                        if (event.key == Key.F11 && event.type == KeyEventType.KeyUp) {
+                            fallbackF11Pressed = false
+                            true
+                        } else if (
+                            event.type == KeyEventType.KeyDown &&
+                            event.key == Key.F11 &&
+                            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                        ) {
+                            if (!fallbackF11Pressed) {
+                                fallbackF11Pressed = true
+                                runCatching { fullscreenController.toggle() }
+                                    .onFailure { SafeLog.w("DesktopWindow", "F11 toggle failed", it) }
+                            }
+                            true
+                        } else false
+                    }
+                    .focusable()
+            } else {
+                Modifier
+            }
+            Box(
+                modifier = Modifier.fillMaxSize().then(keyboardShortcutModifier)
+            ) {
+                CompositionLocalProvider(LocalFullscreenController provides fullscreenController) {
+                    ProvideDesktopPlatformActions {
+                        TeleDriveApp(
+                            pendingShare = getKoin().get<PendingShare>(),
+                            notificationDestination = null,
+                            onDestinationHandled = {}
+                        )
+                    }
                 }
             }
         }

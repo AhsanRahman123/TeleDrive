@@ -44,7 +44,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -81,9 +81,13 @@ import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.core.telegram.TelegramClient
+import kotlinx.coroutines.flow.map
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
@@ -129,6 +133,7 @@ import com.drdisagree.teledrive.resources.transfers_section_paused
 import com.drdisagree.teledrive.resources.transfers_uploads_downloads_appear_here
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import kotlin.math.abs
 
@@ -142,6 +147,10 @@ fun TransfersScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val transferConcurrency by viewModel.transferConcurrency.collectAsStateWithLifecycle()
     val fileRevealer = LocalFileRevealer.current
+    val telegramClient = koinInject<TelegramClient>()
+    val speedLimitDirection by telegramClient.speedLimitNotifications
+        .map { isUpload -> if (isUpload) 1 else 0 }
+        .collectAsStateWithLifecycle(initialValue = -1)
     var concurrencyDraft by remember { mutableIntStateOf(transferConcurrency) }
     var confirmClearFinished by remember { mutableStateOf(false) }
     var confirmCancelAll by remember { mutableStateOf(false) }
@@ -247,7 +256,7 @@ fun TransfersScreen(
                 colors = liftedTopAppBarColors(lifted),
                 title = { Text(stringResource(Res.string.transfers)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -255,14 +264,14 @@ fun TransfersScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
+                    TooltipIconButton(tooltip = "Transfer settings", onClick = {
                         concurrencyDraft = transferConcurrency
                         showTransferSettings = true
                     }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Transfer settings")
                     }
                     if (state.active.any { it.state == TransferState.RUNNING }) {
-                        IconButton(onClick = viewModel::pauseAll) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.transfers_pause), onClick = viewModel::pauseAll) {
                             Icon(
                                 Icons.Filled.Pause,
                                 contentDescription = stringResource(Res.string.transfers_pause)
@@ -272,14 +281,14 @@ fun TransfersScreen(
                         state.active.any { it.state == TransferState.QUEUED } ||
                         state.paused.isNotEmpty()
                     ) {
-                        IconButton(onClick = viewModel::resumeAll) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.transfers_resume), onClick = viewModel::resumeAll) {
                             Icon(
                                 Icons.Filled.PlayArrow,
                                 contentDescription = stringResource(Res.string.transfers_resume)
                             )
                         }
                     }
-                    IconButton(onClick = { showMenu = true }) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showMenu = true }) {
                         Icon(
                             Icons.Filled.MoreVert,
                             contentDescription = stringResource(Res.string.common_actions)
@@ -405,7 +414,9 @@ fun TransfersScreen(
             }
         }
         val keyboard = rememberKeyboardCollection(listState) { rows.getOrNull(it) != null }
+        val commandFocusRequester = rememberCollectionCommandFocusRequester()
         val shortcuts = CollectionShortcuts(
+            onSelectAll = { selectedTransferIds = selectedTransferIds + visibleIds },
             onDelete = { index ->
                 rows.getOrNull(index)
                     ?.takeIf { it !in state.completed }
@@ -495,12 +506,30 @@ fun TransfersScreen(
             modifier = Modifier
                 .fillMaxSize()
                         .padding(end = 10.dp)
+                .collectionCommandShortcuts(
+                    focusRequester = commandFocusRequester,
+                    onSelectAll = { selectedTransferIds = selectedTransferIds + visibleIds; true }
+                )
                 .keyboardCollection(keyboard, rows.count { it != null }, shortcuts),
             contentPadding = padding.add(horizontal = 16.dp, top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
 ) {
             item(key = "transfer-toolbar") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (speedLimitDirection >= 0) {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = if (speedLimitDirection == 0) {
+                                    "Telegram has signalled an account-level download speed limit. TeleDrive cannot remove this server-side restriction. Check Telegram Premium eligibility; TDLib exposes a premium download speed-up option."
+                                } else {
+                                    "Telegram has signalled an account-level upload speed limit. This is applied by Telegram, not by TeleDrive."
+                                },
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -956,7 +985,7 @@ private fun TransferRow(
                     )
                 }
                 if (primaryIcon != null && onPrimary != null) {
-                    IconButton(onClick = onPrimary, modifier = actions) {
+                    TooltipIconButton(tooltip = primaryLabel.orEmpty(), onClick = onPrimary, modifier = actions) {
                         Icon(primaryIcon, contentDescription = primaryLabel)
                     }
                 }
@@ -964,7 +993,7 @@ private fun TransferRow(
                     onOpenInApp != null || onShowInFolder != null || onDetails != null
                 ) {
                     Box {
-                        IconButton(onClick = { showRowMenu = true }, modifier = actions) {
+                        TooltipIconButton(tooltip = "Transfer actions", onClick = { showRowMenu = true }, modifier = actions) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "Transfer actions")
                         }
                         DropdownMenu(

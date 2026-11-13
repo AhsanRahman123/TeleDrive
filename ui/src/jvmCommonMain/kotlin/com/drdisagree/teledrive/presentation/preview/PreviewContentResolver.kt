@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import net.lingala.zip4j.ZipFile
 import org.apache.commons.compress.archivers.sevenz.SevenZFile
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.CompressorStreamFactory
 import java.io.File
 
 /** Original local files are always plaintext; only remote copies and caches are ever encrypted. */
@@ -111,6 +113,7 @@ class PreviewContentResolver(
         // never starts unasked.
         val autoFetchable = file.sizeBytes <= AUTO_PREVIEW_LIMIT &&
                 (MimeTypes.isImage(file.mimeType) ||
+                        file.category == FileCategory.IMAGE ||
                         MimeTypes.isText(file.mimeType) ||
                         MimeTypes.isApk(file.mimeType, file.name))
         if (!autoFetchable) {
@@ -134,14 +137,18 @@ class PreviewContentResolver(
         .flowOn(dispatchers.io)
 
     private fun fromLocal(file: DriveFile, path: String): PreviewContent = when {
-        MimeTypes.isImage(file.mimeType) -> PreviewContent.Image(File(path))
-        MimeTypes.isVideo(file.mimeType) -> PreviewContent.LocalMedia(path, isAudio = false)
-        MimeTypes.isAudio(file.mimeType) -> PreviewContent.LocalMedia(path, isAudio = true)
+        MimeTypes.isImage(file.mimeType) || file.category == FileCategory.IMAGE ->
+            PreviewContent.Image(File(path))
+        MimeTypes.isVideo(file.mimeType) || file.category == FileCategory.VIDEO ->
+            PreviewContent.LocalMedia(path, isAudio = false)
+        MimeTypes.isAudio(file.mimeType) || file.category == FileCategory.AUDIO ->
+            PreviewContent.LocalMedia(path, isAudio = true)
         MimeTypes.isPdf(file.mimeType) -> PreviewContent.Pdf(path)
         MimeTypes.isText(file.mimeType) -> readText(path)
-        MimeTypes.isArchive(file.mimeType) -> readArchive(file, path)
+        MimeTypes.isArchive(file.mimeType) || file.category == FileCategory.ARCHIVE ->
+            readArchive(file, path)
         MimeTypes.isApk(file.mimeType, file.name) -> readApk(path)
-        else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type)
+        else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
     }
 
     private fun readApk(path: String): PreviewContent = runCatching {
@@ -150,9 +157,9 @@ class PreviewContentResolver(
         if (iconBytes != null) {
             PreviewContent.Image(iconBytes)
         } else {
-            PreviewContent.Unsupported(Res.string.preview_no_preview_for_type)
+            PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
         }
-    }.getOrElse { PreviewContent.Unsupported(Res.string.preview_no_preview_for_type) }
+    }.getOrElse { PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path) }
 
     private fun readText(path: String): PreviewContent = runCatching {
         val target = File(path)
@@ -204,8 +211,42 @@ class PreviewContentResolver(
                 PreviewContent.Archive(entries, "7Z")
             }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
 
-            else -> PreviewContent.Unsupported(Res.string.preview_only_zip)
+            "application/x-tar" -> readTar(path, compressed = false)
+            "application/x-compressed-tar" -> readTar(path, compressed = true)
+
+            else -> PreviewContent.Unsupported(Res.string.preview_only_zip, path)
         }
+
+    private fun readTar(path: String, compressed: Boolean): PreviewContent = runCatching {
+        val input = File(path).inputStream().buffered()
+        val tarInput = if (compressed) {
+            CompressorStreamFactory().createCompressorInputStream(input)
+        } else {
+            input
+        }
+        TarArchiveInputStream(tarInput).use { archive ->
+            val entries = buildList {
+                while (size < MAX_ARCHIVE_ENTRIES) {
+                    val entry = archive.nextEntry ?: break
+                    add(
+                        ArchiveEntry(
+                            name = entry.name,
+                            sizeBytes = entry.size.coerceAtLeast(0L),
+                            compressedBytes = 0L,
+                            isDirectory = entry.isDirectory
+                        )
+                    )
+                }
+            }
+            PreviewContent.Archive(
+                entries = entries,
+                format = if (compressed) "TAR (compressed)" else "TAR"
+            )
+        }
+    }.getOrElse {
+        SafeLog.w(TAG, "Could not read TAR archive metadata", it)
+        PreviewContent.Failed(Res.string.preview_archive_failed)
+    }
 
     private suspend fun fetchToCache(
         file: DriveFile,
@@ -267,5 +308,6 @@ class PreviewContentResolver(
         private const val TAG = "PreviewContent"
         private const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
         private const val TEXT_LIMIT = 256 * 1024
+        private const val MAX_ARCHIVE_ENTRIES = 5_000
     }
 }

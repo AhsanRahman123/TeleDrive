@@ -35,7 +35,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -68,6 +68,8 @@ import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.resolve
 import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileThumbnail
@@ -185,7 +187,7 @@ fun TrashScreen(
                         Text(stringResource(Res.string.common_selection_count, state.selection.size))
                     },
                     navigationIcon = {
-                        IconButton(onClick = viewModel::clearSelection) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_clear_selection), onClick = viewModel::clearSelection) {
                             Icon(
                                 Icons.Filled.Close,
                                 contentDescription = stringResource(Res.string.common_clear_selection)
@@ -193,7 +195,8 @@ fun TrashScreen(
                         }
                     },
                     actions = {
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = stringResource(if (allSelected) Res.string.common_deselect_all else Res.string.common_select_all),
                             onClick = {
                                 if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
                             }
@@ -212,20 +215,20 @@ fun TrashScreen(
                             )
                         }
                         if (state.selection.isNotEmpty()) {
-                            IconButton(onClick = viewModel::restoreSelected) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_restore), onClick = viewModel::restoreSelected) {
                                 Icon(
                                     Icons.Filled.RestoreFromTrash,
                                     contentDescription = stringResource(Res.string.common_restore)
                                 )
                             }
-                            IconButton(onClick = { confirmDeleteSelected = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_delete_forever), onClick = { confirmDeleteSelected = true }) {
                             Icon(
                                 Icons.Filled.DeleteForever,
                                 contentDescription = stringResource(Res.string.common_delete_forever)
                             )
                         }
                         Box {
-                            IconButton(onClick = { showSelectionOverflow = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                 Icon(
                                     Icons.Filled.MoreVert,
                                     contentDescription = stringResource(Res.string.common_actions)
@@ -261,7 +264,7 @@ fun TrashScreen(
                     colors = liftedTopAppBarColors(lifted),
                     title = { Text(stringResource(Res.string.trash)) },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = onBack) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(Res.string.common_back)
@@ -270,7 +273,7 @@ fun TrashScreen(
                     },
                     actions = {
                         if (state.rows.any { it.selectable }) {
-                            IconButton(onClick = viewModel::startSelectionMode) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                                 Icon(
                                     Icons.Filled.CheckBoxOutlineBlank,
                                     contentDescription = stringResource(Res.string.common_select)
@@ -278,7 +281,7 @@ fun TrashScreen(
                             }
                         }
                         if (state.items.isNotEmpty()) {
-                            IconButton(onClick = { confirmEmpty = true }) {
+                            TooltipIconButton(tooltip = stringResource(Res.string.trash_empty_trash_action), onClick = { confirmEmpty = true }) {
                                 Icon(
                                     Icons.Filled.DeleteForever,
                                     contentDescription = stringResource(Res.string.trash_empty_trash_action)
@@ -303,7 +306,15 @@ fun TrashScreen(
             )
             return@Scaffold
         }
-        Box(modifier = Modifier.fillMaxSize()) {
+        val commandFocusRequester = rememberCollectionCommandFocusRequester()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .collectionCommandShortcuts(
+                    focusRequester = commandFocusRequester,
+                    onSelectAll = { viewModel.selectAll(); true }
+                )
+        ) {
                 LazyColumn(
             state = listState,
             modifier = Modifier
@@ -419,7 +430,8 @@ fun TrashScreen(
                         )
                     }
                     if (row.expandable) {
-                        IconButton(
+                        TooltipIconButton(
+                            tooltip = if (row.expanded) "Collapse folder" else "Expand folder",
                             onClick = { viewModel.toggleExpanded(item.id) },
                             modifier = Modifier.focusProperties { canFocus = false }
                         ) {

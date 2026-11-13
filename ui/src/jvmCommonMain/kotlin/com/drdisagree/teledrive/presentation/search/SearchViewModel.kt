@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.presentation.common.UiText
+import com.drdisagree.teledrive.presentation.common.toUiText
+import com.drdisagree.teledrive.presentation.files.CutItems
+import com.drdisagree.teledrive.presentation.files.FileClipboard
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.files_queued_for_download
 import com.drdisagree.teledrive.domain.model.FileCategory
@@ -42,7 +45,8 @@ class SearchViewModel(
     private val fileRepository: FileRepository,
     private val trashRepository: TrashRepository,
     private val transferRepository: TransferRepository,
-    private val makeAvailableOffline: MakeAvailableOfflineUseCase
+    private val makeAvailableOffline: MakeAvailableOfflineUseCase,
+    private val clipboard: FileClipboard
 ) : ViewModel() {
 
     private val _messages = MutableSharedFlow<UiText>(extraBufferCapacity = 4)
@@ -158,6 +162,28 @@ class SearchViewModel(
 
     fun selectAll() {
         selection.value = uiState.value.results.map { it.id }.toSet()
+    }
+
+    fun hasSelection(): Boolean = selection.value.isNotEmpty()
+
+    fun copyToClipboardSelected() {
+        val ids = selection.value.toList()
+        if (ids.isEmpty()) return
+        clearSelection()
+        clipboard.copy(CutItems(fileIds = ids, folderIds = emptyList(), isCut = false))
+        _messages.tryEmit(
+            UiText.Plain("Copied ${ids.size} item(s). Navigate to Files or a Gallery folder and press Ctrl+V.")
+        )
+    }
+
+    fun cutSelected() {
+        val ids = selection.value.toList()
+        if (ids.isEmpty()) return
+        clearSelection()
+        clipboard.cut(CutItems(fileIds = ids, folderIds = emptyList()))
+        _messages.tryEmit(
+            UiText.Plain("Cut ${ids.size} item(s). Navigate to Files or a Gallery folder and press Ctrl+V.")
+        )
     }
 
     fun downloadSelected() {
