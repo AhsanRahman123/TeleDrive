@@ -352,6 +352,8 @@ fun DesktopPreviewScreen(
     var copyTarget by remember { mutableStateOf<DriveFile?>(null) }
     var moveTarget by remember { mutableStateOf<DriveFile?>(null) }
     var playerChromeVisible by remember { mutableStateOf(true) }
+    var imageChromeVisible by remember(file?.id) { mutableStateOf(true) }
+    val previewChromeVisible = if (mediaCategory != null) playerChromeVisible else imageChromeVisible
     val viewerFocusRequester = remember { FocusRequester() }
     LaunchedEffect(file?.id) {
         // Do not reveal the preview chrome on every queue item change. The player owns
@@ -372,6 +374,10 @@ fun DesktopPreviewScreen(
                     return@onPreviewKeyEvent false
                 }
                 when {
+                    event.key == Key.H && file?.category == FileCategory.IMAGE -> {
+                        imageChromeVisible = !imageChromeVisible
+                        true
+                    }
                     event.key == Key.W -> {
                         if (index > 0) index--
                         true
@@ -570,7 +576,7 @@ fun DesktopPreviewScreen(
                 }
             }
             AnimatedVisibility(
-                visible = playerChromeVisible,
+                visible = previewChromeVisible,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter)
@@ -579,7 +585,7 @@ fun DesktopPreviewScreen(
             }
             if (
                 state.files.size > 1 &&
-                playerChromeVisible &&
+                previewChromeVisible &&
                 file?.category !in setOf(FileCategory.AUDIO, FileCategory.VIDEO)
             ) {
                 PreviewPagerButton(
