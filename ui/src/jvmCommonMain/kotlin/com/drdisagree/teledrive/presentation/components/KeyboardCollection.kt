@@ -4,7 +4,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.semantics.collectionInfo
 import androidx.compose.ui.semantics.collectionItemInfo
 import androidx.compose.ui.semantics.semantics
@@ -19,7 +19,7 @@ fun Modifier.keyboardCollection(
         collectionInfo = state.collectionInfo(itemCount)
         if (label != null) collectionRole(label, grid = state.columns > 1)
     }
-    .onPreviewKeyEvent { event -> state.handle(event, shortcuts) }
+    .onKeyEvent { event -> state.handle(event, shortcuts) }
 
 fun Modifier.keyboardCollectionItem(
     state: KeyboardCollectionState,
