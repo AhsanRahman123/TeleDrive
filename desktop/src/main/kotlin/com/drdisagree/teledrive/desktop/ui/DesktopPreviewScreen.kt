@@ -1204,9 +1204,7 @@ private fun PreviewPane(
                                                     .coerceIn(0f, 1f)
                                             // Avoid flooding the zoom state with tiny mouse updates.
                                             if (
-                                                kotlin.math.abs(targetFraction - lastAppliedZoomFraction) < 0.012f &&
-                                                targetFraction > 0.001f &&
-                                                targetFraction < 0.999f
+                                                kotlin.math.abs(targetFraction - lastAppliedZoomFraction) < 0.012f
                                             ) {
                                                 return
                                             }
@@ -1233,6 +1231,7 @@ private fun PreviewPane(
                                             totalY += delta.y
 
                                             if (!change.pressed) {
+                                                if (verticalZoomStarted) updateZoomFromVerticalDrag()
                                                 if (horizontalSwipeStarted || verticalZoomStarted) {
                                                     change.consume()
                                                 }
