@@ -5,6 +5,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.RawQuery
 import androidx.room.RoomRawQuery
 import androidx.room.Update
@@ -196,6 +197,22 @@ interface FileDao {
 
     @Query("UPDATE files SET folderId = :folderId, modifiedAt = :modifiedAt WHERE id IN (:ids)")
     suspend fun move(ids: List<String>, folderId: String?, modifiedAt: Long)
+
+    /**
+     * A sync pass must never observe a new folderId without the corresponding dirty flag.
+     * Otherwise an old Telegram manifest can immediately reconcile the file back to its
+     * previous folder before the publish worker has a chance to run.
+     */
+    @Transaction
+    suspend fun moveAndMarkPendingPublish(
+        ids: List<String>,
+        folderId: String?,
+        modifiedAt: Long
+    ) {
+        if (ids.isEmpty()) return
+        move(ids, folderId, modifiedAt)
+        markPendingPublish(ids)
+    }
 
     @Query("UPDATE files SET isFavorite = :favorite WHERE id IN (:ids)")
     suspend fun setFavorite(ids: List<String>, favorite: Boolean)
