@@ -587,6 +587,7 @@ fun DesktopPreviewScreen(
                     sleepAtTrackEnd = false
                 },
                 onPlaybackFinished = ::handlePlaybackFinished,
+                onToggleImageChrome = { imageChromeVisible = !imageChromeVisible },
                 onPlayerControlsVisibilityChange = { playerChromeVisible = it }
             )
         }
@@ -980,6 +981,7 @@ private fun PreviewPane(
     onSleepAtTrackEnd: () -> Unit,
     onClearSleepTimer: () -> Unit,
     onPlaybackFinished: () -> Unit,
+    onToggleImageChrome: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val content by viewModel.contentFor(file).collectAsState()
@@ -1147,7 +1149,7 @@ private fun PreviewPane(
                                     state = zoomableState,
                                     // Telephoto routes clicks through this callback so its
                                     // own double-click zoom and pan/pinch gestures remain intact.
-                                    onClick = { imageChromeVisible = !imageChromeVisible },
+                                    onClick = onToggleImageChrome,
                                     onDoubleClick = { state, centroid ->
                                         zoomScope.launch {
                                             if ((state.zoomFraction ?: 0f) > 0f) {
