@@ -1277,7 +1277,8 @@ private fun PreviewPane(
                 // Keep broad desktop file support useful even when TeleDrive has no native
                 // renderer for a particular document/container. The original local file remains
                 // untouched and is opened with the user's registered Windows application.
-                val localPath = file.localPath?.takeIf { File(it).isFile }
+                val localPath = current.localPath?.takeIf { File(it).isFile }
+                    ?: file.localPath?.takeIf { File(it).isFile }
                 if (localPath != null) {
                     OpenExternallyState(
                         icon = Icons.Outlined.Description,
