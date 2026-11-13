@@ -79,6 +79,9 @@ class KeyboardCollectionState internal constructor(
 
     internal fun handle(event: KeyEvent, shortcuts: CollectionShortcuts): Boolean {
         if (event.type != KeyEventType.KeyDown || !focusInItem) return false
+        // This handler is attached to the lazy container as a preview handler. A nested
+        // editor also makes focusInItem true, but must retain native Ctrl/Meta shortcuts.
+        if ((event.isCtrlPressed || event.isMetaPressed) && !focusOnItem) return false
         restorePending = false
         KeyboardHandoff.armed = false
         val command = event.isCtrlPressed || event.isMetaPressed
