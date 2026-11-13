@@ -309,3 +309,61 @@ At the end, publish a short test report with:
 5. The exact commit recommended for the next implementation pass.
 
 Do not merge any draft PR into the upstream/default branch as part of local acceptance testing. Keep the working feature branch isolated until the user reviews and approves the result.
+
+
+## 11. November 13 consolidated repair acceptance
+
+Run against the exact latest branch head after the repair pass. Use the isolated desktop profile and disposable test files. Do not perform destructive tests against the user's real Telegram library.
+
+### 11.1 Files mouse drag selection
+
+- [ ] Drag from an unselected first row across several files and folders; every crossed row becomes selected.
+- [ ] Drag upward as well as downward; the inclusive range and selection count match.
+- [ ] Start a drag on an already-selected row; the drag removes the range without the toolbar switching out of selection mode mid-gesture.
+- [ ] Clear selection while items are selected; all checkmarks/highlights disappear and the toolbar returns to normal.
+- [ ] Drag near the top/bottom edges; auto-scroll extends the range without leaving stale rows selected.
+- [ ] Verify Gallery's selection, checkmarks and drag/drop are unchanged.
+
+### 11.2 Keyboard shortcuts and native text editing
+
+- [ ] With a Files row focused, verify Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+N and Ctrl+T.
+- [ ] Verify keyboard commands still work when collection-level focus is on the Files workspace rather than an individual row.
+- [ ] In search, rename and other editable text fields, verify Ctrl+A/C/X/V retain native text-editing behaviour and do not trigger collection commands.
+- [ ] Verify cut content is cleared only after successful moves; failed moves preserve it and copy remains reusable.
+- [ ] Repeat the relevant shortcuts in the other sections listed in the development register.
+
+### 11.3 VLC source switching and audio
+
+- [ ] Switch repeatedly between local videos, streamed videos and already-downloaded videos. Confirm one player instance remains mounted across source changes and no old audio continues.
+- [ ] Switch quickly among files, seek, pause/resume, use P/N and left/right arrows, change audio/subtitle tracks and playback speed.
+- [ ] Observe for green/corrupt frames, repeated/skipped frames, freezing, unexpected stop, black flash or an indefinitely stuck Preparing screen.
+- [ ] Play MP3, Opus, WAV, FLAC, AAC/M4A and OGG samples inside the same built-in player. Confirm sound, seek, volume/mute and queue controls.
+- [ ] Test video sound, device switching (speaker/headphones/Bluetooth) and audio-track selection.
+- [ ] Monitor CPU and memory while switching rapidly; verify channels and native player resources do not accumulate.
+
+### 11.4 MIME, archive and unsupported-format handling
+
+- [ ] Test common MP4/MKV/MOV/WebM, MP3/Opus/FLAC/M4A, PNG/JPEG/WebP/GIF and supported image formats.
+- [ ] Test representative camera RAW files (DNG/CR2/NEF/ARW), source-code files (JS/Kotlin/Python/PowerShell), Office documents, PDF and Markdown.
+- [ ] Test ZIP, 7Z, TAR, TAR.GZ and TAR.BZ2 archive listing.
+- [ ] Test RAR/CAB/CPIO and other recognized-but-not-internally-previewed files after downloading; confirm Open externally targets the cached file path.
+- [ ] Test files whose Telegram MIME is application/octet-stream but whose filename extension identifies the actual media type.
+- [ ] Confirm unknown/unrenderable formats remain available for download/open externally and never cause the entire Files workspace to fail.
+
+### 11.5 Download throughput and concurrency
+
+- [ ] Record Telegram speed-limit notification state during a large download; do not infer a client throttle from one speed reading.
+- [ ] Compare single-file throughput and aggregate throughput with transfer concurrency set to 1, 2, 3 and 6.
+- [ ] Verify progress uses actual TDLib transferred byte counts, not estimated or UI-ramped progress.
+- [ ] Pause/resume/cancel/restart a download and verify native TDLib transfer state and local partial data remain consistent.
+- [ ] Record whether Telegram shows an account-level speed limit. Do not label a Telegram/server/account restriction as an app defect.
+
+### 11.6 Consolidated build validation
+
+Run once from the Windows development checkout after fetching the exact latest branch tip:
+
+```powershell
+.\\gradlew.bat --no-daemon :shared:desktopTest :ui:desktopTest :desktop:test :desktop:compileKotlin
+```
+
+Record the exact HEAD SHA and all task outcomes. A successful compile/test run is not a substitute for the runtime scenarios above.
