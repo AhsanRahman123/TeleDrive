@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -48,6 +49,9 @@ import com.drdisagree.teledrive.domain.repository.DuplicateScanStatus
 import com.drdisagree.teledrive.domain.repository.TrashRepository
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -75,6 +79,12 @@ fun DuplicateManagerScreen(
 
     var showQueue by remember { mutableStateOf(false) }
     var selectedIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
+    var selectedQueueIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
+    var queueSearch by remember(folderId) { mutableStateOf("") }
+    var queueSort by remember(folderId) { mutableStateOf(DuplicateFileSort.OLDEST_FIRST) }
+    var showQueueSortMenu by remember { mutableStateOf(false) }
+    var queueSelectionBase by remember(folderId) { mutableStateOf(emptySet<String>()) }
+    val queueListState = rememberLazyListState()
     var search by remember { mutableStateOf("") }
     var typeFilter by remember { mutableStateOf(DuplicateTypeFilter.ALL) }
     var groupSort by remember { mutableStateOf(DuplicateGroupSort.LARGEST_WASTED) }
@@ -84,6 +94,21 @@ fun DuplicateManagerScreen(
     var showFileSortMenu by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var previousScanSample by remember(folderId) {
+        mutableStateOf(state.scannedFiles to System.currentTimeMillis())
+    }
+    var scanFilesPerSecond by remember(folderId) { mutableStateOf(0.0) }
+
+    LaunchedEffect(state.scannedFiles) {
+        val now = System.currentTimeMillis()
+        val (previousCount, previousAt) = previousScanSample
+        val delta = state.scannedFiles - previousCount
+        val elapsed = now - previousAt
+        if (delta > 0 && elapsed > 0L) {
+            scanFilesPerSecond = delta * 1_000.0 / elapsed.toDouble()
+        }
+        previousScanSample = state.scannedFiles to now
+    }
 
     LaunchedEffect(folderId) {
         selectedIds = emptySet()
@@ -155,15 +180,47 @@ fun DuplicateManagerScreen(
         orderedFiles(group).map { it.id }
     }.toSet()
 
-    val sortedQueue = remember(state.queue, fileSort) {
-        when (fileSort) {
-            DuplicateFileSort.NAME_ASC -> state.queue.sortedBy { it.file.name.lowercase() }
-            DuplicateFileSort.NAME_DESC -> state.queue.sortedByDescending { it.file.name.lowercase() }
-            DuplicateFileSort.SIZE_LARGEST -> state.queue.sortedByDescending { it.file.sizeBytes }
-            DuplicateFileSort.SIZE_SMALLEST -> state.queue.sortedBy { it.file.sizeBytes }
-            DuplicateFileSort.OLDEST_FIRST -> state.queue.sortedBy { it.file.addedAt }
-            DuplicateFileSort.NEWEST_FIRST -> state.queue.sortedByDescending { it.file.addedAt }
+    val sortedQueue = remember(state.queue, queueSearch, queueSort) {
+        val needle = queueSearch.trim().lowercase()
+        val matching = state.queue.filter { item ->
+            needle.isBlank() ||
+                item.file.name.lowercase().contains(needle) ||
+                item.file.folderPath.lowercase().contains(needle)
         }
+        when (queueSort) {
+            DuplicateFileSort.NAME_ASC -> matching.sortedBy { it.file.name.lowercase() }
+            DuplicateFileSort.NAME_DESC -> matching.sortedByDescending { it.file.name.lowercase() }
+            DuplicateFileSort.SIZE_LARGEST -> matching.sortedByDescending { it.file.sizeBytes }
+            DuplicateFileSort.SIZE_SMALLEST -> matching.sortedBy { it.file.sizeBytes }
+            DuplicateFileSort.OLDEST_FIRST -> matching.sortedBy { it.file.addedAt }
+            DuplicateFileSort.NEWEST_FIRST -> matching.sortedByDescending { it.file.addedAt }
+        }
+    }
+    val queueDragSelect = rememberDragSelect(
+        listState = queueListState,
+        onStart = { queueSelectionBase = selectedQueueIds },
+        isSelected = { index ->
+            sortedQueue.getOrNull(index)?.file?.id?.let(selectedQueueIds::contains) == true
+        },
+        onRange = { range, shouldSelect ->
+            val ids = range.mapNotNull { sortedQueue.getOrNull(it)?.file?.id }.toSet()
+            selectedQueueIds = if (shouldSelect) queueSelectionBase + ids
+            else queueSelectionBase - ids
+        },
+        onEnd = { queueSelectionBase = emptySet() }
+    )
+    val queuePendingCount = state.waitingCount + state.generatingCount +
+        state.queue.count { it.status == DuplicateScanStatus.PAUSED }
+    val queueEta = when {
+        state.isPaused -> "Estimated remaining: paused"
+        queuePendingCount == 0 && state.failedCount > 0 ->
+            "Estimated remaining: ${state.failedCount} file(s) need retry"
+        queuePendingCount == 0 -> "Queue complete"
+        scanFilesPerSecond > 0.0 -> {
+            val seconds = (queuePendingCount / scanFilesPerSecond).toLong().coerceAtLeast(1L)
+            "Estimated remaining: ${Formatters.duration(seconds * 1_000L)}"
+        }
+        else -> "Estimated remaining: calculating…"
     }
 
     fun selectAllMatches() {
@@ -300,11 +357,91 @@ fun DuplicateManagerScreen(
                 ) { Text("Retry failed/cancelled") }
             }
 
-            var selectedQueueIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
+            Text(
+                queueEta,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedTextField(
+                value = queueSearch,
+                onValueChange = { queueSearch = it },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                singleLine = true,
+                label = { Text("Search queue by filename or folder") }
+            )
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Text(selectedQueueIds.size.toString() + " selected", modifier = Modifier.weight(1f))
+                Box {
+                    OutlinedButton(onClick = { showQueueSortMenu = true }) {
+                        Text(
+                            "Sort: " + when (queueSort) {
+                                DuplicateFileSort.NAME_ASC -> "Name A–Z"
+                                DuplicateFileSort.NAME_DESC -> "Name Z–A"
+                                DuplicateFileSort.SIZE_LARGEST -> "Largest"
+                                DuplicateFileSort.SIZE_SMALLEST -> "Smallest"
+                                DuplicateFileSort.OLDEST_FIRST -> "Oldest"
+                                DuplicateFileSort.NEWEST_FIRST -> "Newest"
+                            }
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showQueueSortMenu,
+                        onDismissRequest = { showQueueSortMenu = false }
+                    ) {
+                        DuplicateFileSort.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        when (option) {
+                                            DuplicateFileSort.NAME_ASC -> "Name A–Z"
+                                            DuplicateFileSort.NAME_DESC -> "Name Z–A"
+                                            DuplicateFileSort.SIZE_LARGEST -> "Largest file"
+                                            DuplicateFileSort.SIZE_SMALLEST -> "Smallest file"
+                                            DuplicateFileSort.OLDEST_FIRST -> "Oldest first"
+                                            DuplicateFileSort.NEWEST_FIRST -> "Newest first"
+                                        }
+                                    )
+                                },
+                                onClick = { queueSort = option; showQueueSortMenu = false }
+                            )
+                        }
+                    }
+                }
+                TextButton(
+                    enabled = state.queue.isNotEmpty(),
+                    onClick = { selectedQueueIds = state.queue.map { it.file.id }.toSet() }
+                ) { Text("Select all") }
+                TextButton(
+                    enabled = sortedQueue.isNotEmpty(),
+                    onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
+                ) { Text("Select visible") }
+                TextButton(
+                    enabled = selectedQueueIds.isNotEmpty(),
+                    onClick = { selectedQueueIds = emptySet() }
+                ) { Text("Clear") }
+            }
+            if (selectedQueueIds.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { repository.pauseFiles(selectedQueueIds) }) {
+                        Text("Pause selected")
+                    }
+                    OutlinedButton(onClick = { repository.resumeFiles(selectedQueueIds) }) {
+                        Text("Resume selected")
+                    }
+                    OutlinedButton(onClick = {
+                        repository.cancelFiles(selectedQueueIds)
+                        selectedQueueIds = emptySet()
+                    }) { Text("Cancel selected") }
+                    OutlinedButton(onClick = {
+                        repository.retryFiles(selectedQueueIds)
+                        selectedQueueIds = emptySet()
+                    }) { Text("Retry selected") }
+                }
+            }
+
                 Text(selectedQueueIds.size.toString() + " selected", modifier = Modifier.weight(1f))
                 TextButton(
                     enabled = state.queue.isNotEmpty(),
@@ -340,12 +477,16 @@ fun DuplicateManagerScreen(
 
             if (state.queue.isEmpty()) {
                 Text("There are no files in this folder tree.")
+            } else if (sortedQueue.isEmpty()) {
+                Text("No queue items match this search.")
             } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(sortedQueue, key = { it.file.id }) { item ->
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        state = queueListState,
+                        modifier = Modifier.fillMaxSize().then(queueDragSelect),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(sortedQueue, key = { it.file.id }) { item ->
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),
@@ -420,7 +561,16 @@ fun DuplicateManagerScreen(
                                 }
                             }
                         }
+                        }
                     }
+                    DesktopVerticalScrollbar(
+                        state = queueListState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxSize()
+                    )
+                    DesktopScrollEdgeControls(
+                        state = queueListState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                    )
                 }
             }
         } else {
