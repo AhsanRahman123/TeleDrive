@@ -1205,7 +1205,7 @@ private fun PreviewPane(
                                         var rightDragConsumed = false
                                         var lastAppliedZoomFraction = initialZoomFraction
 
-                                        suspend fun updateZoomFromVerticalDrag(force: Boolean = false) {
+                                        fun updateZoomFromVerticalDrag(force: Boolean = false) {
                                             val dragRange = (size.height * 0.65f).coerceAtLeast(1f)
                                             val targetFraction =
                                                 (initialZoomFraction - totalY / dragRange)
@@ -1215,9 +1215,13 @@ private fun PreviewPane(
                                             // This also resets any pan offset left over from zooming.
                                             if (targetFraction <= IMAGE_FIT_SNAP_FRACTION) {
                                                 if (lastAppliedZoomFraction > IMAGE_FIT_SNAP_FRACTION || force) {
-                                                    zoomableState.resetZoom(animationSpec = SnapSpec())
+                                                    lastAppliedZoomFraction = 0f
+                                                    zoomScope.launch {
+                                                        zoomableState.resetZoom(animationSpec = SnapSpec())
+                                                    }
+                                                } else {
+                                                    lastAppliedZoomFraction = 0f
                                                 }
-                                                lastAppliedZoomFraction = 0f
                                                 return
                                             }
 
@@ -1229,10 +1233,12 @@ private fun PreviewPane(
                                             }
 
                                             lastAppliedZoomFraction = targetFraction
-                                            zoomableState.zoomTo(
-                                                zoomFactor = 1f + 3f * targetFraction,
-                                                animationSpec = SnapSpec()
-                                            )
+                                            zoomScope.launch {
+                                                zoomableState.zoomTo(
+                                                    zoomFactor = 1f + 3f * targetFraction,
+                                                    animationSpec = SnapSpec()
+                                                )
+                                            }
                                         }
 
                                         // Consume the right-button press immediately so it cannot
@@ -1298,16 +1304,22 @@ private fun PreviewPane(
                                                     if (!rightPanStarted && distance > slop) {
                                                         rightPanStarted = true
                                                         change.consume()
-                                                        zoomableState.panBy(
-                                                            androidx.compose.ui.geometry.Offset(totalX, totalY),
-                                                            animationSpec = SnapSpec()
-                                                        )
+                                                        val panDelta = androidx.compose.ui.geometry.Offset(totalX, totalY)
+                                                        zoomScope.launch {
+                                                            zoomableState.panBy(
+                                                                panDelta,
+                                                                animationSpec = SnapSpec()
+                                                            )
+                                                        }
                                                     } else if (rightPanStarted) {
                                                         change.consume()
-                                                        zoomableState.panBy(
-                                                            delta,
-                                                            animationSpec = SnapSpec()
-                                                        )
+                                                        val panDelta = delta
+                                                        zoomScope.launch {
+                                                            zoomableState.panBy(
+                                                                panDelta,
+                                                                animationSpec = SnapSpec()
+                                                            )
+                                                        }
                                                     }
                                                 } else if (!rightSwipeStarted && !rightDragConsumed) {
                                                     when {
