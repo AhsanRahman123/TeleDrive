@@ -409,6 +409,10 @@ fun DesktopPreviewScreen(
                         }
                         true
                     }
+                    event.key == Key.Delete && file != null && mediaCategory == null -> {
+                        if (trashTarget == null) trashTarget = file
+                        true
+                    }
                     event.key == Key.W -> {
                         if (index > 0) index--
                         true
@@ -513,6 +517,15 @@ fun DesktopPreviewScreen(
                                 )
                             }
                         }
+                        TooltipIconButton(
+                            tooltip = stringResource(Res.string.common_move_trash),
+                            onClick = { if (trashTarget == null) trashTarget = currentFile }
+                        ) {
+                            Icon(
+                                Icons.Filled.DeleteOutline,
+                                contentDescription = stringResource(Res.string.common_move_trash)
+                            )
+                        }
                         TooltipIconButton(tooltip = stringResource(Res.string.preview_file_info), onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
                                 Icons.Filled.Info,
@@ -590,6 +603,7 @@ fun DesktopPreviewScreen(
                     sleepAtTrackEnd = false
                 },
                 onPlaybackFinished = ::handlePlaybackFinished,
+                onDelete = { if (trashTarget == null) trashTarget = pageFile },
                 onToggleImageChrome = { imageChromeVisible = !imageChromeVisible },
                 onPlayerControlsVisibilityChange = { playerChromeVisible = it }
             )
@@ -681,6 +695,7 @@ fun DesktopPreviewScreen(
             message = stringResource(Res.string.preview_confirm_trash_file_message, target.name),
             confirmLabel = stringResource(Res.string.common_move_trash),
             destructive = true,
+            confirmOnEnter = true,
             onConfirm = {
                 viewModel.moveToTrash(target)
                 trashTarget = null
@@ -984,6 +999,7 @@ private fun PreviewPane(
     onSleepAtTrackEnd: () -> Unit,
     onClearSleepTimer: () -> Unit,
     onPlaybackFinished: () -> Unit,
+    onDelete: () -> Unit,
     onToggleImageChrome: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
@@ -1475,7 +1491,8 @@ private fun PreviewPane(
                 onSleepAtTrackEnd = onSleepAtTrackEnd,
                 onClearSleepTimer = onClearSleepTimer,
                 onPlaybackFinished = onPlaybackFinished,
-                onControlsVisibilityChange = onPlayerControlsVisibilityChange
+                onControlsVisibilityChange = onPlayerControlsVisibilityChange,
+                onDelete = onDelete
             )
         }
     }
