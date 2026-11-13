@@ -21,7 +21,22 @@ import uk.co.caprica.vlcj.player.embedded.videosurface.callback.format.RV32Buffe
  * of the bitmap. Reusing one mutable byte array between frames lets VLC overwrite pixels that
  * Compose is still drawing, which can show partial/green frames when media dimensions change.
  */
-internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoSurface {
+internal data class VideoFramePixels(
+    val width: Int,
+    val height: Int,
+    val rowBytes: Int,
+    val pixels: ByteArray
+) {
+    fun toImageBitmap(): ImageBitmap? {
+        if (width <= 0 || height <= 0 || rowBytes < width * BYTES_PER_PIXEL) return null
+        val bitmap = Bitmap()
+        val info = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
+        if (!bitmap.installPixels(info, pixels, rowBytes)) return null
+        return bitmap.asComposeImageBitmap()
+    }
+}
+
+internal fun composeVideoSurface(onFrame: (VideoFramePixels) -> Unit): CallbackVideoSurface {
     val bufferFormat = object : BufferFormatCallbackAdapter() {
         override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat =
             RV32BufferFormat(sourceWidth, sourceHeight)
@@ -53,10 +68,9 @@ internal fun composeVideoSurface(onFrame: (ImageBitmap) -> Unit): CallbackVideoS
             // green/black strip that can appear during a resolution or media transition.
             val framePixels = copyVideoFramePixels(source, rowBytes, height) ?: return
 
-            val info = ImageInfo(width, height, ColorType.BGRA_8888, ColorAlphaType.OPAQUE)
-            val bitmap = Bitmap()
-            if (!bitmap.installPixels(info, framePixels, rowBytes)) return
-            onFrame(bitmap.asComposeImageBitmap())
+            // Keep native callback work bounded. Skia bitmap construction happens after the
+            // conflated handoff on the Compose dispatcher, so superseded frames are never decoded.
+            onFrame(VideoFramePixels(width, height, rowBytes, framePixels))
         }
     }
 
