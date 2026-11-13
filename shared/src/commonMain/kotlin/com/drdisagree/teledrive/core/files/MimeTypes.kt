@@ -71,11 +71,11 @@ object MimeTypes {
         "vob" to "video/dvd",
         "divx" to "video/divx",
         "mp4v" to "video/mp4",
-        "mxf" to "application/mxf",
+        "mxf" to "video/mxf",
         "ogm" to "video/ogg",
         "dv" to "video/dv",
-        "rm" to "application/vnd.rn-realmedia",
-        "rmvb" to "application/vnd.rn-realmedia-vbr",
+        "rm" to "video/x-pn-realvideo",
+        "rmvb" to "video/x-pn-realvideo",
 
         // Images
         "jpg" to "image/jpeg",
