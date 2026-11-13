@@ -29,27 +29,25 @@ fun Modifier.keyboardCollection(
         collectionInfo = state.collectionInfo(itemCount)
         if (label != null) collectionRole(label, grid = state.columns > 1)
     }
-    // Keep navigation/focus handoff in preview so Enter can be observed before a
-    // clickable row consumes it. Modifier shortcuts are deferred to the bubble phase:
-    // editable descendants (search, rename, text fields) get first refusal.
+    // Only Enter needs preview handling: a clickable row may consume it before
+    // bubbling, and the collection uses it to transfer focus into a newly opened folder.
+    // All other keys bubble first so editable descendants can process their native keys.
     .onPreviewKeyEvent { event ->
-        if (event.isCollectionCommandShortcut()) false
-        else state.handle(event, shortcuts)
-    }
-    .onKeyEvent { event ->
-        if (event.isCollectionCommandShortcut()) state.handle(event, shortcuts)
+        if (event.isPlainCollectionEnter()) state.handle(event, shortcuts)
         else false
     }
+    .onKeyEvent { event ->
+        if (event.isPlainCollectionEnter()) false
+        else state.handle(event, shortcuts)
+    }
 
-private fun KeyEvent.isCollectionCommandShortcut(): Boolean =
+private fun KeyEvent.isPlainCollectionEnter(): Boolean =
     type == KeyEventType.KeyDown &&
-        (isCtrlPressed || isMetaPressed) &&
+        !isCtrlPressed &&
+        !isMetaPressed &&
         !isAltPressed &&
         !isShiftPressed &&
-        when (key) {
-            Key.A, Key.C, Key.X, Key.V, Key.N, Key.T -> true
-            else -> false
-        }
+        (key == Key.Enter || key == Key.NumPadEnter)
 
 fun Modifier.keyboardCollectionItem(
     state: KeyboardCollectionState,
