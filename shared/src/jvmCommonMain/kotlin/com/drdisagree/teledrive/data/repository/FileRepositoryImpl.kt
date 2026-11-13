@@ -22,6 +22,9 @@ import com.drdisagree.teledrive.core.publish.PublishScheduler
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.core.telegram.TelegramException
+import com.drdisagree.teledrive.core.telegram.RemoteDocument
+import com.drdisagree.teledrive.core.telegram.TelegramDocumentCopyRequest
+import com.drdisagree.teledrive.core.telegram.TelegramDocumentCopyResult
 import com.drdisagree.teledrive.data.local.FileQueryBuilder
 import com.drdisagree.teledrive.data.local.OffsetRefreshPagingSource
 import com.drdisagree.teledrive.data.local.dao.FileDao
@@ -46,6 +49,8 @@ import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.usecase.FolderCycleCheck
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -314,17 +319,35 @@ class FileRepositoryImpl(
         ids: List<String>,
         targetFolderId: String?
     ): AppResult<Int> {
+        if (ids.isEmpty()) return AppResult.Success(0)
         if (targetFolderId != null && folderDao.byId(targetFolderId) == null) {
             return AppResult.Failure(AppError.NotFound)
         }
-        val existingNames = fileDao.namesInFolder(targetFolderId).toMutableList()
-        var copied = 0
-        var lastError: AppError? = null
 
+        val existingNames = fileDao.namesInFolder(targetFolderId).toMutableList()
+        val localCopies = mutableListOf<FileEntity>()
+        val remoteCopies = mutableListOf<PendingRemoteCopy>()
+
+        // Prepare records once, preserving the user's selection order and unique names.
+        // A remote-backed source already has a durable Telegram copy; duplicating its local
+        // cache is unnecessary and can block the UI on large files.
         for (source in fileDao.byIds(ids)) {
             val name = FileNameUtils.uniqueName(source.name) { candidate ->
                 existingNames.any { it.equals(candidate, ignoreCase = true) }
             }
+            existingNames += name
+
+            val remoteFileId = source.remoteFileId
+            val sourceChatId = source.chatId
+            val isRemoteBacked = remoteFileId != null && sourceChatId != null
+            val localPath = if (isRemoteBacked) {
+                null
+            } else {
+                withContext(Dispatchers.IO) {
+                    duplicateLocalCopy(source.localPath, name)
+                }
+            }
+
             val now = System.currentTimeMillis()
             val copy = source.copy(
                 id = UUID.randomUUID().toString(),
@@ -335,31 +358,82 @@ class FileRepositoryImpl(
                 remoteFileId = null,
                 remoteUniqueId = null,
                 backupState = BackupState.NONE,
-                localPath = duplicateLocalCopy(source.localPath, name),
+                localPath = localPath,
                 trashedAt = null,
                 preTrashFolderId = null,
                 addedAt = now,
                 modifiedAt = now
             )
 
-            val remoteFileId = source.remoteFileId
-            val sourceChatId = source.chatId
-            if (remoteFileId != null && sourceChatId != null) {
-                when (val result = copyRemote(copy, remoteFileId, sourceChatId)) {
-                    is AppResult.Success -> {
-                        fileDao.upsert(result.value)
-                        existingNames.add(name)
-                        copied++
-                    }
-
-                    is AppResult.Failure -> lastError = result.error
-                }
+            if (isRemoteBacked) {
+                remoteCopies += PendingRemoteCopy(copy, remoteFileId!!, sourceChatId!!)
             } else {
-                fileDao.upsert(copy)
-                existingNames.add(name)
-                copied++
+                localCopies += copy
             }
         }
+
+        // Local-only copies require no Telegram round trip. Persist them together.
+        if (localCopies.isNotEmpty()) fileDao.upsertAll(localCopies)
+        var copied = localCopies.size
+        var lastError: AppError? = null
+
+        // A document album carries up to ten independent document captions/manifests.
+        // Batch by source chat because Telegram cannot mix channels in one album.
+        for ((chatId, chatCopies) in remoteCopies.groupBy { it.sourceChatId }) {
+            for (batch in chatCopies.chunked(10)) {
+                if (batch.size == 1) {
+                    val candidate = batch.single()
+                    when (val result = copyRemote(candidate.copy, candidate.remoteFileId, chatId)) {
+                        is AppResult.Success -> {
+                            fileDao.upsert(result.value)
+                            copied++
+                        }
+                        is AppResult.Failure -> lastError = result.error
+                    }
+                    continue
+                }
+
+                val outcomes = try {
+                    telegramClient.copyDocuments(
+                        chatId,
+                        batch.map { candidate ->
+                            remoteCopyRequest(candidate.copy, candidate.remoteFileId)
+                        }
+                    )
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    val telegramError = error as? TelegramException
+                        ?: TelegramException(500, error.message ?: "Telegram album copy failed")
+                    List(batch.size) { TelegramDocumentCopyResult(error = telegramError) }
+                }
+
+                val successfulCopies = mutableListOf<FileEntity>()
+                batch.forEachIndexed { index, candidate ->
+                    val outcome = outcomes.getOrNull(index)
+                    val document = outcome?.document
+                    if (document != null) {
+                        successfulCopies += withRemoteDocument(candidate.copy, document)
+                    } else {
+                        val error = outcome?.error
+                            ?: TelegramException(500, "Telegram returned an incomplete album result")
+                        lastError = if (error.isRateLimit) {
+                            AppError.RateLimited(error.retryAfterSeconds ?: 0)
+                        } else {
+                            AppError.TelegramError(error.code, error.message)
+                        }
+                    }
+                }
+
+                // Persist successes even when another album item failed. A retry only needs
+                // to create the copies that did not make it.
+                if (successfulCopies.isNotEmpty()) {
+                    fileDao.upsertAll(successfulCopies)
+                    copied += successfulCopies.size
+                }
+            }
+        }
+
         return if (copied == 0 && lastError != null) {
             AppResult.Failure(lastError)
         } else {
@@ -470,11 +544,16 @@ class FileRepositoryImpl(
         )
     }
 
-    private suspend fun copyRemote(
+    private data class PendingRemoteCopy(
+        val copy: FileEntity,
+        val remoteFileId: String,
+        val sourceChatId: Long
+    )
+
+    private suspend fun remoteCopyRequest(
         copy: FileEntity,
-        remoteFileId: String,
-        chatId: Long
-    ): AppResult<FileEntity> = try {
+        remoteFileId: String
+    ): TelegramDocumentCopyRequest {
         val manifest = RemoteFileManifest(
             fileId = copy.id,
             name = copy.name,
@@ -493,26 +572,43 @@ class FileRepositoryImpl(
             height = copy.height,
             durationMs = copy.durationMs
         )
-        val document = telegramClient.copyDocument(
-            chatId = chatId,
+        return TelegramDocumentCopyRequest(
             remoteFileId = remoteFileId,
             fileName = if (copy.isEncrypted) "${copy.id}.tde" else copy.name,
             mimeType = if (copy.isEncrypted) "application/octet-stream" else copy.mimeType,
             caption = manifestCodec.encode(manifest, copy.isEncrypted)
         )
-        AppResult.Success(
-            copy.copy(
-                chatId = document.chatId,
-                messageId = document.messageId,
-                remoteFileId = document.remoteFileId,
-                remoteUniqueId = document.uniqueFileId,
-                backupState = BackupState.BACKED_UP
-            )
+    }
+
+    private fun withRemoteDocument(
+        copy: FileEntity,
+        document: RemoteDocument
+    ): FileEntity = copy.copy(
+        chatId = document.chatId,
+        messageId = document.messageId,
+        remoteFileId = document.remoteFileId,
+        remoteUniqueId = document.uniqueFileId,
+        backupState = BackupState.BACKED_UP
+    )
+
+    private suspend fun copyRemote(
+        copy: FileEntity,
+        remoteFileId: String,
+        chatId: Long
+    ): AppResult<FileEntity> = try {
+        val request = remoteCopyRequest(copy, remoteFileId)
+        val document = telegramClient.copyDocument(
+            chatId = chatId,
+            remoteFileId = request.remoteFileId,
+            fileName = request.fileName,
+            mimeType = request.mimeType,
+            caption = request.caption
         )
-    } catch (e: TelegramException) {
+        AppResult.Success(withRemoteDocument(copy, document))
+    } catch (error: TelegramException) {
         AppResult.Failure(
-            if (e.isRateLimit) AppError.RateLimited(e.retryAfterSeconds ?: 0)
-            else AppError.TelegramError(e.code, e.message)
+            if (error.isRateLimit) AppError.RateLimited(error.retryAfterSeconds ?: 0)
+            else AppError.TelegramError(error.code, error.message)
         )
     }
 
