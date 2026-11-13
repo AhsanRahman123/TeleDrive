@@ -154,7 +154,9 @@ fun TrashScreen(
             )
         },
         onEnd = viewModel::endRangeSelection,
-        mouseDragAddsToSelection = false,
+        // A Trash drag should add the rows crossed without clearing an existing
+        // selection just because the gesture starts on an already-selected row.
+        mouseDragAddsToSelection = true,
         resolveNearestVisibleItem = true
     )
     val keyboard = rememberKeyboardCollection(listState)
