@@ -310,8 +310,9 @@ class FileRepositoryImpl(
         if (targetFolderId != null && folderDao.byId(targetFolderId) == null) {
             return AppResult.Failure(AppError.NotFound)
         }
-        fileDao.move(ids, targetFolderId, System.currentTimeMillis())
-        markFilesDirty(ids)
+        if (ids.isEmpty()) return AppResult.Success(Unit)
+        fileDao.moveAndMarkPendingPublish(ids, targetFolderId, System.currentTimeMillis())
+        publishScheduler.kick()
         return AppResult.Success(Unit)
     }
 
