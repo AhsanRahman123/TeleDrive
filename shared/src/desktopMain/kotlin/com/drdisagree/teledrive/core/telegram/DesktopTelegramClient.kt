@@ -9,6 +9,7 @@ import it.tdlight.ExceptionHandler
 import it.tdlight.Init
 import it.tdlight.UpdatesHandler
 import it.tdlight.jni.TdApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -1003,7 +1004,7 @@ class DesktopTelegramClient(
 
             val pending = paced {
                 send<TdApi.Messages>(
-                    TdApi.SendMessageAlbum(chatId, 0L, 0L, null, contents, false)
+                    TdApi.SendMessageAlbum(chatId, null, null, null, contents)
                 )
             }.messages.toList()
 
