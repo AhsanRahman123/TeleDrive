@@ -294,6 +294,7 @@ fun FilesScreen(
     var showCopyPicker by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
+    var showDuplicateManager by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -395,8 +396,14 @@ fun FilesScreen(
         }
     }
 
-    AppBackHandler(enabled = selectionMode || state.folderId != null || onBack != null) {
-        if (selectionMode) viewModel.clearSelection() else navigateBackOneStep()
+    AppBackHandler(
+        enabled = showDuplicateManager || selectionMode || state.folderId != null || onBack != null
+    ) {
+        when {
+            showDuplicateManager -> showDuplicateManager = false
+            selectionMode -> viewModel.clearSelection()
+            else -> navigateBackOneStep()
+        }
     }
     fun activateTab(tab: FilesTabState) {
         if (tab.id == selectedTabId) return
@@ -550,7 +557,9 @@ fun FilesScreen(
             Scaffold(
                 snackbarHost = {},
                 topBar = {
-                    if (selectionMode) {
+                    if (showDuplicateManager) {
+                        // DuplicateManagerScreen provides its own title and back control.
+                    } else if (selectionMode) {
                         TopAppBar(
                             colors = liftedTopAppBarColors(lifted),
                             title = {
@@ -764,6 +773,17 @@ fun FilesScreen(
                                         contentDescription = "View thumbnail queue"
                                     )
                                 }
+                                if (state.folderId != null) {
+                                    TooltipIconButton(
+                                        tooltip = "Find duplicate files in this folder",
+                                        onClick = { showDuplicateManager = true }
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ContentCopy,
+                                            contentDescription = "Find duplicate files"
+                                        )
+                                    }
+                                }
                                 RefreshAction(
                                     refreshing = refreshing,
                                     onRefresh = viewModel::refresh
@@ -916,6 +936,13 @@ fun FilesScreen(
                         .padding(top = padding.calculateTopPadding())
                         .nestedScroll(fabScrollConnection)
                 ) {
+                    if (showDuplicateManager && state.folderId != null) {
+                        DuplicateManagerScreen(
+                            folderId = state.folderId,
+                            onBack = { showDuplicateManager = false },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1025,6 +1052,7 @@ fun FilesScreen(
                                 viewModel = viewModel
                             )
                         }
+                    }
                     }
                 }
             }
