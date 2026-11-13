@@ -365,16 +365,16 @@ fun DesktopPreviewScreen(
     val viewerFocusRequester = remember { FocusRequester() }
     val windowInfo = LocalWindowInfo.current
     var imageHKeyPressed by remember { mutableStateOf(false) }
-    LaunchedEffect(file?.id) {
-        // Reclaim the preview shortcut target whenever the viewed file changes. This is
-        // essential after a hidden toolbar has removed the previously focused button.
-        viewerFocusRequester.requestFocus()
+    LaunchedEffect(file?.id, mediaCategory) {
+        // Images/documents use this preview shortcut target. The VLC surface owns focus
+        // for audio/video and must not have its keyboard controls stolen by the parent.
+        if (mediaCategory == null) viewerFocusRequester.requestFocus()
     }
-    LaunchedEffect(windowInfo.isWindowFocused) {
-        if (windowInfo.isWindowFocused) {
-            viewerFocusRequester.requestFocus()
-        } else {
+    LaunchedEffect(windowInfo.isWindowFocused, mediaCategory) {
+        if (!windowInfo.isWindowFocused) {
             imageHKeyPressed = false
+        } else if (mediaCategory == null) {
+            viewerFocusRequester.requestFocus()
         }
     }
 
@@ -424,7 +424,10 @@ fun DesktopPreviewScreen(
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Final)
-                        if (event.type == PointerEventType.Press) {
+                        if (
+                            event.type == PointerEventType.Press &&
+                            mediaCategory == null
+                        ) {
                             viewerFocusRequester.requestFocus()
                         }
                     }
