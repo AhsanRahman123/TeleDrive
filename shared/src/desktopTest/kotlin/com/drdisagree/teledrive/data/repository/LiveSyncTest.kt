@@ -77,6 +77,42 @@ class LiveSyncTest {
     }
 
     @Test
+    fun `a stale manifest after successful publish cannot revert a local folder move`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        database.folderDao().upsert(
+            com.drdisagree.teledrive.data.local.entity.FolderEntity(
+                id = "destination",
+                chatId = TEST_CHAT,
+                parentId = null,
+                name = "Destination",
+                createdAt = 1_000,
+                modifiedAt = 1_000,
+                changedAt = 1_000
+            )
+        )
+        val files = database.fileDao()
+        files.moveAndMarkPendingPublish(listOf("f1"), "destination", modifiedAt = 100_000)
+
+        // Simulate the outbox accepting the new manifest: the published baseline now records
+        // the destination folder and pendingPublish has been cleared, but a delayed old
+        // Telegram event still returns the original manifest.
+        val published = files.byId("f1")!!
+        files.setRemoteBase("f1", FileBase.of(published).toText())
+        files.clearPendingPublish("f1")
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
+        val unchanged = files.byId("f1")!!
+        assertEquals("destination", unchanged.folderId)
+        assertEquals(100_000L, unchanged.modifiedAt)
+        assertFalse(unchanged.pendingPublish)
+    }
+
+    @Test
     fun `an upload from another device appears`() = runBlocking {
         telegram.documents = listOf(document(30, harness.caption(manifest("new", "new.jpg"))))
 
