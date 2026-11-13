@@ -245,6 +245,13 @@ class FilesViewModel(
     val working: StateFlow<UiText?> = _working.asStateFlow()
 
     private var rangeBase: Pair<Set<String>, Set<String>>? = null
+    /**
+     * Range selection is a gesture-level mode, not a consequence of the current range size.
+     * In particular, dragging from an already-selected item temporarily removes items. The
+     * selection toolbar must stay mounted until the pointer gesture ends, even if the range
+     * momentarily becomes empty.
+     */
+    private var rangeSelectionActive = false
     private val _allSelected = MutableStateFlow(false)
     val allSelected: StateFlow<Boolean> = _allSelected.asStateFlow()
 
@@ -457,10 +464,12 @@ class FilesViewModel(
     }
 
     fun clearSelection() {
-        _selectionModeEnabled.update { false }
-        _allSelected.update { false }
-        selection.update { emptySet() }
-        folderSelection.update { emptySet() }
+        rangeBase = null
+        rangeSelectionActive = false
+        _selectionModeEnabled.value = false
+        _allSelected.value = false
+        selection.value = emptySet()
+        folderSelection.value = emptySet()
         publishSelectionSnapshot()
     }
 
@@ -477,6 +486,9 @@ class FilesViewModel(
 
     fun startRangeSelection() {
         rangeBase = selection.value to folderSelection.value
+        rangeSelectionActive = true
+        _selectionModeEnabled.value = true
+        publishSelectionSnapshot()
     }
 
     fun extendRangeSelection(
@@ -488,13 +500,17 @@ class FilesViewModel(
         _allSelected.update { false }
         selection.update { if (shouldSelect) base.first + fileIds else base.first - fileIds.toSet() }
         folderSelection.update { if (shouldSelect) base.second + folderIds else base.second - folderIds.toSet() }
-        _selectionModeEnabled.value =
-            selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        _selectionModeEnabled.value = rangeSelectionActive ||
+                selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
         publishSelectionSnapshot()
     }
 
     fun endRangeSelection() {
         rangeBase = null
+        rangeSelectionActive = false
+        _selectionModeEnabled.value =
+            selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        publishSelectionSnapshot()
     }
 
     fun zoomIn() = applyZoom(GridZoomLevel::zoomedIn)
