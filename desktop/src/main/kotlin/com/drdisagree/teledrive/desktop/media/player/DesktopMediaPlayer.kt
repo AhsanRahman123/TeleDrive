@@ -367,9 +367,9 @@ internal fun DesktopMediaPlayer(
     LaunchedEffect(player, mrl) {
         // Queue media replacement on vlcj's serialized player executor. Direct calls from the
         // Compose thread can race native playback callbacks while the player is switching files.
-        // Clear the outgoing frame so an old video's last image is never presented as the new one.
+        // Keep the last completed frame visible under the buffering indicator until the incoming
+        // source produces its first accepted frame; late frames from the outgoing source are gated.
         acceptsCurrentMediaEvents.set(false)
-        frame = null
         playing = false
         finished = false
         buffering = true
