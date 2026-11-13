@@ -141,6 +141,7 @@ import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.ctrlClickSelect
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
@@ -530,6 +531,12 @@ fun FilesScreen(
                 .collectionCommandShortcuts(
                     focusRequester = filesCommandFocusRequester,
                     onSelectAll = { viewModel.selectAll(); true },
+                    onDelete = {
+                        if (selectedCount > 0 && !showCreateFolder && renameTarget == null) {
+                            confirmTrash = true
+                            true
+                        } else false
+                    },
                     onCopy = viewModel::copyToClipboardSelected,
                     onCut = viewModel::cutSelected,
                     onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
@@ -1418,6 +1425,7 @@ private fun FilesContent(
                     onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
+                        .ctrlClickSelect { viewModel.toggleFolderSelection(folder.id) }
                         .animateItem()
                         .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
@@ -1438,6 +1446,7 @@ private fun FilesContent(
                     onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
+                        .ctrlClickSelect { viewModel.toggleFolderSelection(folder.id) }
                         .animateItem()
                         .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
@@ -1476,6 +1485,7 @@ private fun FilesContent(
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
+                        .ctrlClickSelect { viewModel.toggleSelection(file.id) }
                         .animateItem()
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
@@ -1507,6 +1517,7 @@ private fun FilesContent(
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
+                        .ctrlClickSelect { viewModel.toggleSelection(file.id) }
                         .animateItem()
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
@@ -1537,6 +1548,7 @@ private fun FilesContent(
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
+                        .ctrlClickSelect { viewModel.toggleSelection(file.id) }
                         .animateItem()
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
