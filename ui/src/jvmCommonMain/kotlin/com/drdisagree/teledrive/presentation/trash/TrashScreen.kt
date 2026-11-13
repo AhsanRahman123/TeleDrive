@@ -154,9 +154,9 @@ fun TrashScreen(
             )
         },
         onEnd = viewModel::endRangeSelection,
-        // A Trash drag should add the rows crossed without clearing an existing
-        // selection just because the gesture starts on an already-selected row.
-        mouseDragAddsToSelection = true,
+        // Match Files exactly: an unselected anchor selects the crossed range,
+        // while a selected anchor deselects that range.
+        mouseDragAddsToSelection = false,
         resolveNearestVisibleItem = true
     )
     val keyboard = rememberKeyboardCollection(listState)
