@@ -455,8 +455,11 @@ class FilesViewModel(
         selection.update { current ->
             if (fileId in current) current - fileId else current + fileId
         }
-        _selectionModeEnabled.value =
-            selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        _selectionModeEnabled.value = keepFilesSelectionMode(
+            rangeSelectionActive,
+            selection.value.size,
+            folderSelection.value.size
+        )
         publishSelectionSnapshot()
     }
 
@@ -465,8 +468,11 @@ class FilesViewModel(
         folderSelection.update { current ->
             if (folderId in current) current - folderId else current + folderId
         }
-        _selectionModeEnabled.value =
-            selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        _selectionModeEnabled.value = keepFilesSelectionMode(
+            rangeSelectionActive,
+            selection.value.size,
+            folderSelection.value.size
+        )
         publishSelectionSnapshot()
     }
 
