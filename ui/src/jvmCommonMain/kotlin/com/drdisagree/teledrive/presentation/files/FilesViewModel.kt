@@ -486,7 +486,9 @@ class FilesViewModel(
         publishSelectionSnapshot()
     }
 
-    fun selectAll(onComplete: (() -> Unit)? = null) {
+    fun selectAll() = selectAll(onComplete = null)
+
+    fun selectAll(onComplete: (() -> Unit)?) {
         viewModelScope.launch {
             try {
                 val ids = fileRepository.fileIds(querySpec.first())
