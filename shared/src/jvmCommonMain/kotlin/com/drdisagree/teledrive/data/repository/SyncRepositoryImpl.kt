@@ -516,7 +516,9 @@ class SyncRepositoryImpl(
             // A delayed Telegram update can deliver the pre-move caption after the local
             // publish succeeded. Preserve any unqueued local delta and let the outbox publish
             // it again; otherwise ignore the stale remote event.
-            if (recoveredLocalPublish) fileDao.markPendingPublish(listOf(existing.id))
+            if (recoveredLocalPublish) {
+                existing?.let { fileDao.markPendingPublish(listOf(it.id)) }
+            }
             return ReconcileResult.UNCHANGED
         }
 
