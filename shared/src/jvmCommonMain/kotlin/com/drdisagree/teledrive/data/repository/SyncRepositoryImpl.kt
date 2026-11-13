@@ -470,6 +470,21 @@ class SyncRepositoryImpl(
             fileDao.byId(indexed.id) ?: indexed
         }
 
+        val publishedBase = FileBase.fromText(existing?.remoteBase)
+        val incomingBase = manifest?.let { FileBase.of(it) }
+        val stalePublishedManifest = existing != null &&
+            !existing.pendingPublish &&
+            publishedBase != null &&
+            incomingBase != null &&
+            incomingBase != publishedBase &&
+            manifest.modifiedAt < existing.modifiedAt
+        if (stalePublishedManifest) {
+            // A delayed Telegram update can deliver the pre-move caption after the local
+            // publish succeeded and cleared pendingPublish. Do not roll the file back to a
+            // manifest older than the last locally-published version.
+            return ReconcileResult.UNCHANGED
+        }
+
         val damagedSplitCount = splitCountOfDamagedFirstPart(document, known)
         if (manifest != null && manifest.isPart) {
             recordPart(document, manifest)
@@ -566,8 +581,11 @@ class SyncRepositoryImpl(
             ?: (document.dateSeconds * 1000L),
             modifiedAt = maxOf(
                 local?.modifiedAt ?: Long.MIN_VALUE,
-                manifest?.modifiedAt ?: existing?.modifiedAt ?: (document.dateSeconds * 1000L)
-            ),
+                manifest?.modifiedAt ?: Long.MIN_VALUE,
+                existing?.modifiedAt ?: Long.MIN_VALUE
+            ).let { latest ->
+                if (latest == Long.MIN_VALUE) document.dateSeconds * 1000L else latest
+            },
             addedAt = existing?.addedAt ?: now,
             partCount = damagedSplitCount ?: manifest?.partCount ?: existing?.partCount ?: 0,
             iconFileId = manifest?.iconFileId ?: existing?.iconFileId,
