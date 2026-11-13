@@ -71,6 +71,10 @@ class SyncRepositoryImpl(
     private val syncMutex = Mutex()
     private val captionRepairsQueued = mutableSetOf<String>()
 
+    // Remember how many pending rows this repository instance has already scheduled.
+    // A new instance starts at zero so work left pending across an app restart is kicked once.
+    private var lastScheduledPendingPublishCount = 0
+
     @Volatile
     private var lastFullSyncAt = 0L
 
@@ -102,16 +106,18 @@ class SyncRepositoryImpl(
                 _indexedSoFar.value = 0
             }
             try {
-                val pendingPublishBefore = fileDao.pendingPublishCount()
                 doSync(incremental, quiet).also { result ->
                     if (!incremental && result is AppResult.Success) {
                         lastFullSyncAt = System.currentTimeMillis()
                     }
-                    // Only schedule work newly queued by this sync. Existing pending rows
-                    // were already scheduled when they became dirty and must not be kicked again.
-                    if (fileDao.pendingPublishCount() > pendingPublishBefore) {
+                    val pendingNow = fileDao.pendingPublishCount()
+                    // Kick once when pending work first appears in this instance, including
+                    // work left over from a previous process. Do not re-kick unchanged rows
+                    // on every full resync.
+                    if (pendingNow > lastScheduledPendingPublishCount) {
                         publishScheduler.kick()
                     }
+                    lastScheduledPendingPublishCount = pendingNow
                 }
             } catch (e: TelegramException) {
                 AppResult.Failure(
