@@ -331,6 +331,10 @@ fun DuplicateManagerScreen(
                         repository.cancelFiles(selectedQueueIds)
                         selectedQueueIds = emptySet()
                     }) { Text("Cancel selected") }
+                    OutlinedButton(onClick = {
+                        repository.retryFiles(selectedQueueIds)
+                        selectedQueueIds = emptySet()
+                    }) { Text("Retry selected") }
                 }
             }
 
@@ -409,7 +413,7 @@ fun DuplicateManagerScreen(
                                     DuplicateScanStatus.FAILED,
                                     DuplicateScanStatus.CANCELLED -> {
                                         TextButton(onClick = {
-                                            repository.retryFailed()
+                                            repository.retryFiles(setOf(item.file.id))
                                         }) { Text("Retry") }
                                     }
                                     DuplicateScanStatus.SCANNED -> Unit
