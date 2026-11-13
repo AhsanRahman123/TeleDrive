@@ -20,6 +20,11 @@ enum class FileCategory {
                     mimeType == "application/xml" ||
                     mimeType == "application/yaml" ||
                     mimeType == "application/toml" ||
+                    mimeType == "application/javascript" ||
+                    mimeType == "application/x-httpd-php" ||
+                    mimeType == "application/x-sh" ||
+                    mimeType == "application/x-python" ||
+                    mimeType == "application/x-powershell" ||
                     mimeType == "application/xhtml+xml" ||
                     mimeType == "application/rtf" ||
                     mimeType == "application/epub+zip" ||
