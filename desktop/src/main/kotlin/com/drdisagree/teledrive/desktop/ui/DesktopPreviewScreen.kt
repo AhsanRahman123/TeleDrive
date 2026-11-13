@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -36,6 +38,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1145,6 +1149,76 @@ private fun PreviewPane(
                             contentDescription = file.name,
                             modifier = Modifier
                                 .fillMaxSize()
+                                // A held left-mouse drag navigates only while the image is at
+                                // its fit zoom. Once zoomed, Telephoto keeps ownership of drag
+                                // gestures for panning. We wait for horizontal slop before
+                                // consuming anything so clicks and double-click zoom still work.
+                                .pointerInput(zoomableState, onPrevious, onNext) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        if (
+                                            down.type != PointerType.Mouse ||
+                                            !down.buttons.isPrimaryPressed ||
+                                            (zoomableState.zoomFraction ?: 0f) > 0.001f
+                                        ) {
+                                            return@awaitEachGesture
+                                        }
+
+                                        var lastPosition = down.position
+                                        var totalX = 0f
+                                        var totalY = 0f
+                                        var horizontalSwipeStarted = false
+
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == down.id }
+                                                ?: break
+                                            val delta = change.position - lastPosition
+                                            lastPosition = change.position
+                                            totalX += delta.x
+                                            totalY += delta.y
+
+                                            if (!change.pressed) {
+                                                if (horizontalSwipeStarted) change.consume()
+                                                break
+                                            }
+
+                                            if (!horizontalSwipeStarted) {
+                                                val slop = viewConfiguration.touchSlop
+                                                val horizontalDistance = kotlin.math.abs(totalX)
+                                                val verticalDistance = kotlin.math.abs(totalY)
+                                                when {
+                                                    verticalDistance > slop &&
+                                                        verticalDistance > horizontalDistance * 1.2f -> {
+                                                        // Let vertical movement keep its normal behavior.
+                                                        return@awaitEachGesture
+                                                    }
+                                                    horizontalDistance > slop &&
+                                                        horizontalDistance > verticalDistance * 1.2f -> {
+                                                        horizontalSwipeStarted = true
+                                                        change.consume()
+                                                    }
+                                                }
+                                            } else {
+                                                change.consume()
+                                            }
+                                        }
+
+                                        if (
+                                            horizontalSwipeStarted &&
+                                            (zoomableState.zoomFraction ?: 0f) <= 0.001f
+                                        ) {
+                                            val swipeThreshold = maxOf(
+                                                72.dp.toPx(),
+                                                size.width * 0.12f
+                                            )
+                                            when {
+                                                totalX >= swipeThreshold -> onPrevious()
+                                                totalX <= -swipeThreshold -> onNext()
+                                            }
+                                        }
+                                    }
+                                }
                                 .zoomable(
                                     state = zoomableState,
                                     // Telephoto routes clicks through this callback so its
