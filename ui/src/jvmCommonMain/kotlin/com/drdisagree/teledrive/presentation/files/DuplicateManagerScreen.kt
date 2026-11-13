@@ -209,16 +209,23 @@ fun DuplicateManagerScreen(
         },
         onEnd = { queueSelectionBase = emptySet() }
     )
-    val queuePendingCount = state.waitingCount + state.generatingCount +
-        state.queue.count { it.status == DuplicateScanStatus.PAUSED }
+    val activeQueueCount = state.waitingCount + state.generatingCount
+    val individuallyPausedCount = state.queue.count { it.status == DuplicateScanStatus.PAUSED }
     val queueEta = when {
         state.isPaused -> "Estimated remaining: paused"
-        queuePendingCount == 0 && state.failedCount > 0 ->
-            "Estimated remaining: ${state.failedCount} file(s) need retry"
-        queuePendingCount == 0 -> "Queue complete"
+        activeQueueCount == 0 && individuallyPausedCount > 0 ->
+            "${individuallyPausedCount} file(s) paused · resume them to continue"
+        activeQueueCount == 0 && state.failedCount > 0 ->
+            "${state.failedCount} file(s) failed · retry them to continue"
+        activeQueueCount == 0 -> "Queue complete"
         scanFilesPerSecond > 0.0 -> {
-            val seconds = (queuePendingCount / scanFilesPerSecond).toLong().coerceAtLeast(1L)
-            "Estimated remaining: ${Formatters.duration(seconds * 1_000L)}"
+            val seconds = (activeQueueCount / scanFilesPerSecond).toLong().coerceAtLeast(1L)
+            val eta = Formatters.duration(seconds * 1_000L)
+            if (individuallyPausedCount > 0) {
+                "Estimated remaining: ${eta} · ${individuallyPausedCount} paused"
+            } else {
+                "Estimated remaining: ${eta}"
+            }
         }
         else -> "Estimated remaining: calculating…"
     }
