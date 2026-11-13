@@ -423,14 +423,50 @@ fun FilesScreen(
     LaunchedEffect(activeFolderId, activeFolderLabel, selectedTabId) {
         viewModel.updateSelectedWorkspaceTab(activeFolderId, activeFolderLabel)
     }
-    LaunchedEffect(selectedTabId, state.folderId, files.itemCount, files.loadState.refresh) {
+    val selectedWorkspaceTabFolderId =
+        tabs.firstOrNull { it.id == selectedTabId }?.folderId
+
+    // Restore a tab/folder position only when navigation changes. Do not key this effect
+    // to Paging itemCount: every appended page changes that count, and re-running
+    // scrollToItem(0) was snapping the user back to the top while they scrolled.
+    LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId) {
         val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
-        if (currentTab.folderId != state.folderId || files.loadState.refresh is LoadState.Loading) {
-            return@LaunchedEffect
-        }
+        if (currentTab.folderId != state.folderId) return@LaunchedEffect
+
+        snapshotFlow { files.loadState.refresh }
+            .first { it !is LoadState.Loading }
+
         val target = tabPositions[selectedTabId to state.folderId] ?: (0 to 0)
+        val targetIndex = target.first.coerceAtLeast(0)
+        val targetFileIndex = targetIndex - state.folders.size
+
+        // If a saved tab position is beyond the first Paging page, request pages until
+        // that item is available (or the source reaches its end) before restoring once.
+        if (targetFileIndex >= 0) {
+            while (
+                files.itemCount <= targetFileIndex &&
+                !files.loadState.append.endOfPaginationReached &&
+                files.loadState.append !is LoadState.Error
+            ) {
+                val loadedCount = files.itemCount
+                if (loadedCount <= 0) break
+                files[loadedCount - 1]
+                val advanced = withTimeoutOrNull(FOCUS_PAGE_WAIT_MS.milliseconds) {
+                    snapshotFlow { files.itemCount to files.loadState.append }
+                        .first { (count, append) ->
+                            count > loadedCount ||
+                                append.endOfPaginationReached ||
+                                append is LoadState.Error
+                        }
+                } ?: break
+                if (advanced.second is LoadState.Error) break
+            }
+        }
+
         val count = state.folders.size + files.itemCount
-        if (count > 0) gridState.scrollToItem(target.first.coerceIn(0, count - 1), target.second)
+        if (count > 0) {
+            gridState.scrollToItem(targetIndex.coerceIn(0, count - 1), target.second)
+        }
     }
     var fabVisible by remember { mutableStateOf(true) }
     val listScrolls by remember {
