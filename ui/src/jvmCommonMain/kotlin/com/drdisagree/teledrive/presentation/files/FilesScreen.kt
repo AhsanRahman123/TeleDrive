@@ -954,9 +954,10 @@ fun FilesScreen(
                         .padding(top = padding.calculateTopPadding())
                         .nestedScroll(fabScrollConnection)
                 ) {
-                    if (showDuplicateManager && state.folderId != null) {
+                    val duplicateManagerFolderId = state.folderId
+                    if (showDuplicateManager && duplicateManagerFolderId != null) {
                         DuplicateManagerScreen(
-                            folderId = state.folderId,
+                            folderId = duplicateManagerFolderId,
                             onBack = { showDuplicateManager = false },
                             modifier = Modifier.fillMaxSize()
                         )
