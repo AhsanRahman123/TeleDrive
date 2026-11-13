@@ -22,6 +22,9 @@ interface FileDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(file: FileEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(files: List<FileEntity>)
+
     @Update
     suspend fun update(file: FileEntity)
 
