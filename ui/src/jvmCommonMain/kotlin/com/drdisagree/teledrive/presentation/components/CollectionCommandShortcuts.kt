@@ -18,6 +18,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 
 /**
  * Gives a collection surface a fallback keyboard target when no individual row owns focus.
@@ -74,6 +77,16 @@ fun Modifier.collectionCommandShortcuts(
 
     return this
         .focusRequester(focusRequester)
+        .pointerInput(focusRequester) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    if (event.type == PointerEventType.Press) {
+                        focusRequester.requestFocus()
+                    }
+                }
+            }
+        }
         .then(
             if (interceptBeforeChildren) {
                 Modifier.onPreviewKeyEvent(handleShortcut)
