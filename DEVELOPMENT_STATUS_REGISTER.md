@@ -361,3 +361,15 @@ Correction committed: `11e9669f6f6dbb8cd36dc256c9f9fa86329c2659`, changing the i
 - Keep PR #10 in draft and do not merge until the new branch head completes the consolidated Gradle task set and the Windows runtime checklist below.
 
 Latest code head when this section was written: `6e83aabf944798cef789b9f200991b98c67b50e1`. Documentation commits may advance the branch tip; always fetch and record the final branch SHA before building.
+
+
+### Final repair-pass follow-up — November 13, 2026
+
+Additional source hardening after the first consolidated repair entry:
+
+- The single VLC player call site now keeps local and streamed media within the same Compose subtree. Full-resolution frame conversion is dispatched off the UI thread after the conflated handoff, and VLC teardown is queued on the same serialized player executor as play/seek/track commands. New media callbacks are disabled before teardown.
+- MIME normalization preserves a previously stored non-OTHER category when both the declared MIME and filename remain unrecognized. Preview resolution also respects stored IMAGE/VIDEO/AUDIO/ARCHIVE categories as a fallback when older Room rows still have a generic MIME value.
+
+Latest source commit: `d44cb2c4ba1542e3f4cc81f7d8f9800cc76932e6`.
+
+These follow-ups are **SOURCE-PRESENT; NOT YET COMPILED OR RUN**. All new repair code and tests still require a consolidated Windows validation pass. Previous user-reported Gradle successes apply only to parent head `b99169ce6df996ec4daba4ea58d02ca2f8c683a4`.
