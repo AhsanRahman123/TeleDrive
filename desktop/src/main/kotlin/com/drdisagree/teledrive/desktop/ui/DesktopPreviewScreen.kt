@@ -945,6 +945,50 @@ private fun PreviewPane(
     val preferredAudioLanguage by viewModel.preferredAudioLanguage.collectAsState()
     val preferredSubtitleLanguage by viewModel.preferredSubtitleLanguage.collectAsState()
 
+    // Resolve local and streamed sources before the content branch so the native VLC player
+    // remains at one stable composition call site while moving between cached and streamed files.
+    val streamServer = koinInject<MediaStreamServer>()
+    val telegramClient = koinInject<TelegramClient>()
+    val streamCrypto = koinInject<StreamCrypto>()
+    val wrappedKeyRepository = koinInject<WrappedKeyRepository>()
+    val streamedContent = displayedContent as? PreviewContent.StreamedMedia
+    val streamedMrl = remember(
+        displayedFile.id,
+        displayedFile.name,
+        displayedFile.mimeType,
+        streamedContent
+    ) {
+        streamedContent?.let { media ->
+            streamServer.serve(displayedFile.name, displayedFile.mimeType) {
+                if (media.parts.isEmpty()) {
+                    TelegramMediaByteSource(telegramClient, media.remoteFileId)
+                } else {
+                    PartedMediaByteSource(
+                        telegramClient = telegramClient,
+                        streamCrypto = streamCrypto,
+                        parts = media.parts,
+                        encrypted = media.encrypted,
+                        contentKey = if (media.encrypted) {
+                            wrappedKeyRepository.get(CryptoKeys.CONTENT)
+                        } else {
+                            null
+                        }
+                    )
+                }
+            }
+        }
+    }
+    val mediaMrl = when (val media = displayedContent) {
+        is PreviewContent.LocalMedia -> media.path
+        is PreviewContent.StreamedMedia -> streamedMrl
+        else -> null
+    }
+    val mediaIsAudio = when (val media = displayedContent) {
+        is PreviewContent.LocalMedia -> media.isAudio
+        is PreviewContent.StreamedMedia -> media.isAudio
+        else -> false
+    }
+
     val edgeToEdge = when (displayedContent) {
         is PreviewContent.Image,
         is PreviewContent.LocalMedia,
@@ -1110,38 +1154,10 @@ private fun PreviewPane(
                 }
             }
 
-            is PreviewContent.LocalMedia -> if (VlcPlayback.available) {
-                DesktopMediaPlayer(
-                    mrl = current.path,
-                    isAudio = current.isAudio,
-                    preferredAudioLanguage = preferredAudioLanguage,
-                    preferredSubtitleLanguage = preferredSubtitleLanguage,
-                    onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
-                    onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    hasPrevious = hasPrevious,
-                    hasNext = hasNext,
-                    queueItems = queueItems,
-                    currentQueueItemId = currentQueueItemId,
-                    repeatAll = repeatAll,
-                    shuffle = shuffle,
-                    sleepTimerLabel = sleepTimerLabel,
-                    sleepStopRequest = sleepStopRequest,
-                    sleepAtTrackEnd = sleepAtTrackEnd,
-                    onToggleRepeatAll = onToggleRepeatAll,
-                    onToggleShuffle = onToggleShuffle,
-                    onSelectQueueItem = onSelectQueueItem,
-                    onSetSleepTimer = onSetSleepTimer,
-                    onSleepAtTrackEnd = onSleepAtTrackEnd,
-                    onClearSleepTimer = onClearSleepTimer,
-                    onPlaybackFinished = onPlaybackFinished,
-                    onControlsVisibilityChange = onPlayerControlsVisibilityChange
-                )
-            } else {
+            is PreviewContent.LocalMedia -> if (!VlcPlayback.available) {
                 OpenExternallyState(
                     icon = if (current.isAudio) Icons.Filled.Audiotrack else Icons.Filled.Movie,
-                    file = file,
+                    file = displayedFile,
                     path = current.path,
                     snackbarHostState = snackbarHostState
                 )
@@ -1154,39 +1170,11 @@ private fun PreviewPane(
                 snackbarHostState = snackbarHostState
             )
 
-            is PreviewContent.StreamedMedia -> if (VlcPlayback.available) {
-                InlineStreamPlayer(
+            is PreviewContent.StreamedMedia -> if (!VlcPlayback.available) {
+                StreamState(
                     file = displayedFile,
                     content = current,
-                    preferredAudioLanguage = preferredAudioLanguage,
-                    preferredSubtitleLanguage = preferredSubtitleLanguage,
-                    onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
-                    onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    hasPrevious = hasPrevious,
-                    hasNext = hasNext,
-                    queueItems = queueItems,
-                    currentQueueItemId = currentQueueItemId,
-                    repeatAll = repeatAll,
-                    shuffle = shuffle,
-                    sleepTimerLabel = sleepTimerLabel,
-                    sleepStopRequest = sleepStopRequest,
-                    sleepAtTrackEnd = sleepAtTrackEnd,
-                    onToggleRepeatAll = onToggleRepeatAll,
-                    onToggleShuffle = onToggleShuffle,
-                    onSelectQueueItem = onSelectQueueItem,
-                    onSetSleepTimer = onSetSleepTimer,
-                    onSleepAtTrackEnd = onSleepAtTrackEnd,
-                    onClearSleepTimer = onClearSleepTimer,
-                    onPlaybackFinished = onPlaybackFinished,
-                    onControlsVisibilityChange = onPlayerControlsVisibilityChange
-                )
-            } else {
-                StreamState(
-                    file = file,
-                    content = current,
-                    onDownload = { viewModel.download(file) },
+                    onDownload = { viewModel.download(displayedFile) },
                     snackbarHostState = snackbarHostState
                 )
             }
@@ -1310,6 +1298,38 @@ private fun PreviewPane(
 
             is PreviewContent.Failed -> ErrorState(message = stringResource(current.messageRes))
         }
+
+        // The same player subtree now handles both local and streamed sources. Only the MRL
+        // changes between files; Compose no longer removes one player branch and mounts another.
+        if (VlcPlayback.available && mediaMrl != null) {
+            DesktopMediaPlayer(
+                mrl = mediaMrl,
+                isAudio = mediaIsAudio,
+                preferredAudioLanguage = preferredAudioLanguage,
+                preferredSubtitleLanguage = preferredSubtitleLanguage,
+                onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
+                onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
+                onPrevious = onPrevious,
+                onNext = onNext,
+                hasPrevious = hasPrevious,
+                hasNext = hasNext,
+                queueItems = queueItems,
+                currentQueueItemId = currentQueueItemId,
+                repeatAll = repeatAll,
+                shuffle = shuffle,
+                sleepTimerLabel = sleepTimerLabel,
+                sleepStopRequest = sleepStopRequest,
+                sleepAtTrackEnd = sleepAtTrackEnd,
+                onToggleRepeatAll = onToggleRepeatAll,
+                onToggleShuffle = onToggleShuffle,
+                onSelectQueueItem = onSelectQueueItem,
+                onSetSleepTimer = onSetSleepTimer,
+                onSleepAtTrackEnd = onSleepAtTrackEnd,
+                onClearSleepTimer = onClearSleepTimer,
+                onPlaybackFinished = onPlaybackFinished,
+                onControlsVisibilityChange = onPlayerControlsVisibilityChange
+            )
+        }
     }
 }
 
@@ -1349,86 +1369,6 @@ private fun OpenExternallyState(
             Text(stringResource(DesktopRes.string.preview_open_externally))
         }
     }
-}
-
-@Composable
-private fun InlineStreamPlayer(
-    file: DriveFile,
-    content: PreviewContent.StreamedMedia,
-    preferredAudioLanguage: String,
-    preferredSubtitleLanguage: String,
-    onPreferredAudioLanguage: (String) -> Unit,
-    onPreferredSubtitleLanguage: (String) -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    hasPrevious: Boolean,
-    hasNext: Boolean,
-    queueItems: List<PlayerQueueItem>,
-    currentQueueItemId: String?,
-    repeatAll: Boolean,
-    shuffle: Boolean,
-    sleepTimerLabel: String,
-    sleepStopRequest: Int,
-    sleepAtTrackEnd: Boolean,
-    onToggleRepeatAll: () -> Unit,
-    onToggleShuffle: () -> Unit,
-    onSelectQueueItem: (String) -> Unit,
-    onSetSleepTimer: (Long) -> Unit,
-    onSleepAtTrackEnd: () -> Unit,
-    onClearSleepTimer: () -> Unit,
-    onPlaybackFinished: () -> Unit,
-    onControlsVisibilityChange: (Boolean) -> Unit
-) {
-    val streamServer = koinInject<MediaStreamServer>()
-    val telegramClient = koinInject<TelegramClient>()
-    val streamCrypto = koinInject<StreamCrypto>()
-    val wrappedKeyRepository = koinInject<WrappedKeyRepository>()
-    val url = remember(file.id) {
-        streamServer.serve(file.name, file.mimeType) {
-            if (content.parts.isEmpty()) {
-                TelegramMediaByteSource(telegramClient, content.remoteFileId)
-            } else {
-                PartedMediaByteSource(
-                    telegramClient = telegramClient,
-                    streamCrypto = streamCrypto,
-                    parts = content.parts,
-                    encrypted = content.encrypted,
-                    contentKey = if (content.encrypted) {
-                        wrappedKeyRepository.get(CryptoKeys.CONTENT)
-                    } else {
-                        null
-                    }
-                )
-            }
-        }
-    }
-    DesktopMediaPlayer(
-        mrl = url,
-        isAudio = content.isAudio,
-        preferredAudioLanguage = preferredAudioLanguage,
-        preferredSubtitleLanguage = preferredSubtitleLanguage,
-        onPreferredAudioLanguage = onPreferredAudioLanguage,
-        onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
-        onPrevious = onPrevious,
-        onNext = onNext,
-        hasPrevious = hasPrevious,
-        hasNext = hasNext,
-        queueItems = queueItems,
-        currentQueueItemId = currentQueueItemId,
-        repeatAll = repeatAll,
-        shuffle = shuffle,
-        sleepTimerLabel = sleepTimerLabel,
-        sleepStopRequest = sleepStopRequest,
-        sleepAtTrackEnd = sleepAtTrackEnd,
-        onToggleRepeatAll = onToggleRepeatAll,
-        onToggleShuffle = onToggleShuffle,
-        onSelectQueueItem = onSelectQueueItem,
-        onSetSleepTimer = onSetSleepTimer,
-        onSleepAtTrackEnd = onSleepAtTrackEnd,
-        onClearSleepTimer = onClearSleepTimer,
-        onPlaybackFinished = onPlaybackFinished,
-        onControlsVisibilityChange = onControlsVisibilityChange
-    )
 }
 
 @Composable
