@@ -98,6 +98,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -362,10 +363,19 @@ fun DesktopPreviewScreen(
         else -> true
     }
     val viewerFocusRequester = remember { FocusRequester() }
+    val windowInfo = LocalWindowInfo.current
+    var imageHKeyPressed by remember { mutableStateOf(false) }
     LaunchedEffect(file?.id) {
-        // Do not reveal the preview chrome on every queue item change. The player owns
-        // the user's hidden/visible preference and reports it through the callback below.
+        // Reclaim the preview shortcut target whenever the viewed file changes. This is
+        // essential after a hidden toolbar has removed the previously focused button.
         viewerFocusRequester.requestFocus()
+    }
+    LaunchedEffect(windowInfo.isWindowFocused) {
+        if (windowInfo.isWindowFocused) {
+            viewerFocusRequester.requestFocus()
+        } else {
+            imageHKeyPressed = false
+        }
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -375,14 +385,25 @@ fun DesktopPreviewScreen(
         modifier = Modifier
             .focusRequester(viewerFocusRequester)
             .onPreviewKeyEvent { event ->
+                // Match the video player's key lifecycle: consume H key-up to reset the
+                // repeat guard, and toggle only once for a physical key press.
+                if (event.key == Key.H && event.type == KeyEventType.KeyUp) {
+                    imageHKeyPressed = false
+                    return@onPreviewKeyEvent file?.category == FileCategory.IMAGE
+                }
                 if (event.type != KeyEventType.KeyDown ||
                     event.isCtrlPressed || event.isAltPressed || event.isShiftPressed
                 ) {
                     return@onPreviewKeyEvent false
                 }
                 when {
+                    // Video keeps ownership of its own H toggle; this avoids two toggles
+                    // fighting when the preview and VLC surface are both in the key path.
                     event.key == Key.H && file?.category == FileCategory.IMAGE -> {
-                        imageChromeVisible = !imageChromeVisible
+                        if (!imageHKeyPressed) {
+                            imageHKeyPressed = true
+                            imageChromeVisible = !imageChromeVisible
+                        }
                         true
                     }
                     event.key == Key.W -> {
@@ -396,7 +417,19 @@ fun DesktopPreviewScreen(
                     else -> false
                 }
             }
-            .focusable(),
+            .focusable()
+            .pointerInput(viewerFocusRequester) {
+                // A toolbar button can lose focus when H removes its own row. Reclaim the
+                // stable preview target after pointer dispatch so H/W/E remain available.
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Final)
+                        if (event.type == PointerEventType.Press) {
+                            viewerFocusRequester.requestFocus()
+                        }
+                    }
+                }
+            },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         @Composable
