@@ -5,7 +5,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -1155,10 +1154,20 @@ private fun PreviewPane(
                                 // consuming anything so clicks and double-click zoom still work.
                                 .pointerInput(zoomableState, onPrevious, onNext) {
                                     awaitEachGesture {
-                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        // Read the originating PointerEvent so right-clicks
+                                        // and other mouse buttons never start image navigation.
+                                        var downEvent = awaitPointerEvent()
+                                        var down = downEvent.changes.firstOrNull { it.pressed }
+                                        while (
+                                            downEvent.type != PointerEventType.Press ||
+                                            down == null
+                                        ) {
+                                            downEvent = awaitPointerEvent()
+                                            down = downEvent.changes.firstOrNull { it.pressed }
+                                        }
                                         if (
                                             down.type != PointerType.Mouse ||
-                                            !down.buttons.isPrimaryPressed ||
+                                            !downEvent.buttons.isPrimaryPressed ||
                                             (zoomableState.zoomFraction ?: 0f) > 0.001f
                                         ) {
                                             return@awaitEachGesture
