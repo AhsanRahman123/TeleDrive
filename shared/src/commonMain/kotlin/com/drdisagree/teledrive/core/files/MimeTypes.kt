@@ -178,13 +178,23 @@ object MimeTypes {
      * or generic, infer from the filename so a document uploaded as application/octet-stream
      * can still be recognized as audio, video, image, archive or a supported document.
      */
-    fun resolve(fileName: String, declaredMimeType: String?): String {
-        val declared = declaredMimeType
-            ?.substringBefore(';')
-            ?.trim()
-            ?.lowercase()
-            .orEmpty()
-        return if (declared in genericMimeTypes) fromFileName(fileName) else declared
+    fun resolve(
+        fileName: String,
+        declaredMimeType: String?,
+        fallbackMimeType: String? = null
+    ): String {
+        fun meaningful(value: String?): String? {
+            val normalized = value
+                ?.substringBefore(';')
+                ?.trim()
+                ?.lowercase()
+                .orEmpty()
+            return normalized.takeUnless { it in genericMimeTypes }
+        }
+
+        return meaningful(declaredMimeType)
+            ?: meaningful(fallbackMimeType)
+            ?: fromFileName(fileName)
     }
 
     fun isImage(mimeType: String): Boolean = mimeType.startsWith("image/")
