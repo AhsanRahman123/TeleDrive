@@ -270,6 +270,8 @@ class DragSelectPointerTest {
             press()
             // Keep the button down at the padded bottom edge. Auto-scroll must keep
             // mapping that point to the nearest visible row and extending the range.
+            moveTo(Offset(90f, 210f))
+            // Advance event time with the pointer still held at the edge.
             moveTo(Offset(90f, 210f), delayMillis = 900)
             release()
         }
