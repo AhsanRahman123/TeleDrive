@@ -102,11 +102,16 @@ class SyncRepositoryImpl(
                 _indexedSoFar.value = 0
             }
             try {
+                val pendingPublishBefore = fileDao.pendingPublishCount()
                 doSync(incremental, quiet).also { result ->
                     if (!incremental && result is AppResult.Success) {
                         lastFullSyncAt = System.currentTimeMillis()
                     }
-                    if (fileDao.pendingPublishCount() > 0) publishScheduler.kick()
+                    // Only schedule work newly queued by this sync. Existing pending rows
+                    // were already scheduled when they became dirty and must not be kicked again.
+                    if (fileDao.pendingPublishCount() > pendingPublishBefore) {
+                        publishScheduler.kick()
+                    }
                 }
             } catch (e: TelegramException) {
                 AppResult.Failure(
@@ -157,7 +162,6 @@ class SyncRepositoryImpl(
         var inserted = fromSnapshot
         var updated = 0
         var locked = 0
-        val repairsBefore = captionRepairsQueued.size
         val seenMessageIds = mutableSetOf<Long>()
         val channelDocuments = mutableListOf<RemoteDocument>()
         val snapshots = mutableListOf<RemoteDocument>()
@@ -207,7 +211,6 @@ class SyncRepositoryImpl(
                 }
             }
             if (reachedKnown) {
-                if (captionRepairsQueued.size > repairsBefore) publishScheduler.kick()
                 return finishSync(
                     chatId, seenMessageIds, mappedBeforeScan, inserted, updated, locked,
                     partial = true
@@ -217,7 +220,6 @@ class SyncRepositoryImpl(
             fromMessageId = page.nextFromMessageId
         }
 
-        if (captionRepairsQueued.size > repairsBefore) publishScheduler.kick()
         val result = finishSync(
             chatId, seenMessageIds, mappedBeforeScan, inserted, updated, locked,
             partial = incremental
