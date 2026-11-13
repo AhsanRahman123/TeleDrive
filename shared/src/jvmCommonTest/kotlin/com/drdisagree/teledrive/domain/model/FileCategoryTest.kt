@@ -29,5 +29,18 @@ class FileCategoryTest {
         assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/x-bzip2"))
         assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/x-xz"))
         assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/zstd"))
+        assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/x-cpio"))
+        assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/x-lz4"))
+    }
+
+    @Test
+    fun `application specific video containers remain in the video category`() {
+        assertEquals(FileCategory.VIDEO, FileCategory.fromMimeType("video/mxf"))
+        assertEquals(FileCategory.VIDEO, FileCategory.fromMimeType("video/x-pn-realvideo"))
+    }
+
+    @Test
+    fun `TOML files are documents`() {
+        assertEquals(FileCategory.DOCUMENT, FileCategory.fromMimeType("application/toml"))
     }
 }
