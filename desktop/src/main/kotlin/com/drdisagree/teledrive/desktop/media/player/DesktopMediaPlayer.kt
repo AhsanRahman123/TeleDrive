@@ -387,7 +387,8 @@ internal fun DesktopMediaPlayer(
         acceptsCurrentMediaEvents.set(false)
         while (frameUpdates.tryReceive().isSuccess) Unit
         while (timeUpdates.tryReceive().isSuccess) Unit
-        frame = null
+        // Keep the last completed frame visible under the buffering overlay until the
+        // incoming source produces its first accepted frame; clearing it here caused a flash.
         playing = false
         finished = false
         buffering = true
