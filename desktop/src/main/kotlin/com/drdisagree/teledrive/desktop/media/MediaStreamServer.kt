@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 import java.util.concurrent.Executors
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -20,6 +21,7 @@ class MediaStreamServer {
 
     private var server: HttpServer? = null
     private var active: ActiveStream? = null
+    private var activeStreamId: String? = null
 
     @Synchronized
     fun serve(fileName: String, fileMimeType: String, factory: () -> MediaByteSource): String {
@@ -31,17 +33,27 @@ class MediaStreamServer {
             it.start()
             server = it
         }
-        active?.shutdown()
-        active = ActiveStream(factory(), fileMimeType.ifBlank { FALLBACK_MIME })
+
+        // The stream ID is part of the URL. VLC can still have late range/HEAD requests for the
+        // outgoing MRL while the incoming MRL is being attached; those requests must never be
+        // allowed to read from the replacement file.
+        val nextStreamId = UUID.randomUUID().toString().replace("-", "")
+        val nextStream = ActiveStream(factory(), fileMimeType.ifBlank { FALLBACK_MIME })
+        val previous = active
+        active = nextStream
+        activeStreamId = nextStreamId
+        previous?.shutdown()
+
         val encodedName = URLEncoder.encode(fileName, StandardCharsets.UTF_8)
             .replace("+", "%20")
-        val url = "http://$LOOPBACK:${running.address.port}$CONTEXT/$encodedName"
+        val url = "http://$LOOPBACK:${running.address.port}$CONTEXT/$nextStreamId/$encodedName"
         SafeLog.d(TAG, "serving $fileName as $url")
         return url
     }
 
     @Synchronized
     fun stop() {
+        activeStreamId = null
         active?.shutdown()
         active = null
         server?.stop(0)
@@ -49,7 +61,15 @@ class MediaStreamServer {
     }
 
     private fun handle(exchange: HttpExchange) {
-        val stream = synchronized(this) { active }
+        val requestedStreamId = exchange.requestURI.rawPath
+            .orEmpty()
+            .removePrefix(CONTEXT)
+            .trimStart('/')
+            .substringBefore('/')
+            .takeIf { it.isNotEmpty() }
+        val stream = synchronized(this) {
+            if (requestedStreamId != null && requestedStreamId == activeStreamId) active else null
+        }
         if (stream == null || stream.closed) {
             exchange.sendResponseHeaders(404, -1)
             exchange.close()
