@@ -211,7 +211,11 @@ internal fun DesktopMediaPlayer(
     }
     LaunchedEffect(frameUpdates) {
         for (nextFrame in frameUpdates) {
-            val image = nextFrame.toImageBitmap() ?: continue
+            // Bitmap installation can be expensive for full-resolution frames. Keep that work
+            // off the UI dispatcher; only publish the completed immutable image on Compose Main.
+            val image = withContext(Dispatchers.Default) {
+                nextFrame.toImageBitmap()
+            } ?: continue
             frame = image
         }
     }
@@ -389,14 +393,12 @@ internal fun DesktopMediaPlayer(
 
     DisposableEffect(player) {
         onDispose {
-            // Release VLC only when leaving the player, not on each queue transition.
-            val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-            teardownScope.launch {
-                try {
+            // Keep teardown serialized with pending play/seek/track commands. Disposing the
+            // composable must not race a queued media replacement against native player release.
+            runCatching {
+                player.submit {
                     runCatching { player.controls().stop() }
                     runCatching { player.release() }
-                } finally {
-                    teardownScope.cancel()
                 }
             }
         }
