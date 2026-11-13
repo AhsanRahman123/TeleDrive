@@ -368,10 +368,27 @@ interface FileDao {
     suspend fun setLocalPath(id: String, localPath: String?)
 
     @Query(
-        """UPDATE files SET trashedAt = :trashedAt, preTrashFolderId = folderId, folderId = NULL
+        """UPDATE files
+           SET trashedAt = :trashedAt,
+               preTrashFolderId = folderId,
+               folderId = NULL,
+               modifiedAt = :trashedAt
            WHERE id IN (:ids)"""
     )
     suspend fun moveToTrash(ids: List<String>, trashedAt: Long)
+
+    /**
+     * Trash mutations must become visible to sync as one atomic change. Otherwise a remote
+     * reconciliation can observe the trashed row before pendingPublish is set and restore its
+     * old folder state from the still-current Telegram manifest.
+     */
+    @Transaction
+    suspend fun moveToTrashAndMarkPendingPublish(ids: List<String>, trashedAt: Long) {
+        ids.distinct().chunked(400).forEach { batch ->
+            moveToTrash(batch, trashedAt)
+            markPendingPublish(batch)
+        }
+    }
 
     @Query(
         """UPDATE files SET folderId = preTrashFolderId, trashedAt = NULL, preTrashFolderId = NULL
