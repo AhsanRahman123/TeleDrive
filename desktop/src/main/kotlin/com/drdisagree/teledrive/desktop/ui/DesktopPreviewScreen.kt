@@ -1171,13 +1171,13 @@ private fun PreviewPane(
                                 // Neither gesture consumes a simple click or double-click.
                                 .pointerInput(zoomableState, zoomScope, onPrevious, onNext) {
                                     awaitEachGesture {
-                                        var downEvent = awaitPointerEvent()
+                                        var downEvent = awaitPointerEvent(PointerEventPass.Initial)
                                         var down = downEvent.changes.firstOrNull { it.pressed }
                                         while (
                                             downEvent.type != PointerEventType.Press ||
                                             down == null
                                         ) {
-                                            downEvent = awaitPointerEvent()
+                                            downEvent = awaitPointerEvent(PointerEventPass.Initial)
                                             down = downEvent.changes.firstOrNull { it.pressed }
                                         }
                                         val mouseDown = down ?: return@awaitEachGesture
@@ -1222,7 +1222,7 @@ private fun PreviewPane(
                                         }
 
                                         while (true) {
-                                            val event = awaitPointerEvent()
+                                            val event = awaitPointerEvent(PointerEventPass.Initial)
                                             val change = event.changes.firstOrNull { it.id == mouseDown.id }
                                                 ?: break
                                             val delta = change.position - lastPosition
