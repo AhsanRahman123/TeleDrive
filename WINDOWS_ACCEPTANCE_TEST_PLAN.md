@@ -43,6 +43,8 @@ Run one focused stage at a time. Do not repeatedly rerun unrelated tasks after a
 - [ ] Launch isolated desktop app and confirm startup, navigation and clean shutdown.
 
 If a task does not exist in this branch, record that rather than inventing an alternative. If a task fails, diagnose the first relevant error before rerunning.
+The latest reported `:ui:desktopTest` attempt failed before tests ran: `:ui:compileKotlinDesktop` could not resolve `focusable` in `CollectionCommandShortcuts.kt`. The incorrect `androidx.compose.ui.focus.focusable` import has been corrected to `androidx.compose.foundation.focusable` in commit `11e9669f6f6dbb8cd36dc256c9f9fa86329c2659`. Fetch the latest branch and rerun `:ui:desktopTest`; no success is claimed until that run completes.
+
 
 ## 2. Player — highest priority
 
