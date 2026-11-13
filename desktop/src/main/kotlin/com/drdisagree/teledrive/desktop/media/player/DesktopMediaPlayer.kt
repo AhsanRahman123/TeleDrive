@@ -172,6 +172,12 @@ internal fun DesktopMediaPlayer(
     onDelete: () -> Unit = {}
 ) {
     val factory = VlcPlayback.factory ?: return
+    // Keep the gesture recogniser stable across player recompositions (for example,
+    // frame/progress/control updates) while always invoking the newest callbacks.
+    val latestPreviousAction = rememberUpdatedState(onPrevious)
+    val latestNextAction = rememberUpdatedState(onNext)
+    val latestHasPrevious = rememberUpdatedState(hasPrevious)
+    val latestHasNext = rememberUpdatedState(hasNext)
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var hasCurrentMediaFrame by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf(false) }
@@ -1039,7 +1045,7 @@ internal fun DesktopMediaPlayer(
             // Right-button horizontal swipes navigate the active preview sequence.
             // This handler is placed before the left-click detector so right-button
             // presses are consumed here and never toggle the player controls.
-            .pointerInput(onPrevious, onNext, hasPrevious, hasNext, isAudio) {
+            .pointerInput(isAudio) {
                 if (!isAudio) {
                     awaitEachGesture {
                         var downEvent = awaitPointerEvent(PointerEventPass.Initial)
@@ -1104,10 +1110,16 @@ internal fun DesktopMediaPlayer(
                         }
 
                         if (swipeStarted) {
-                            val swipeThreshold = maxOf(72.dp.toPx(), size.width * 0.12f)
+                            // A moderate threshold feels more reliable for mouse swipes,
+                            // while still filtering accidental short right-click drags.
+                            val swipeThreshold = maxOf(48.dp.toPx(), size.width * 0.07f)
                             when {
-                                totalX >= swipeThreshold && hasPrevious -> onPrevious()
-                                totalX <= -swipeThreshold && hasNext -> onNext()
+                                totalX >= swipeThreshold && latestHasPrevious.value -> {
+                                    latestPreviousAction.value()
+                                }
+                                totalX <= -swipeThreshold && latestHasNext.value -> {
+                                    latestNextAction.value()
+                                }
                             }
                         }
                     }
