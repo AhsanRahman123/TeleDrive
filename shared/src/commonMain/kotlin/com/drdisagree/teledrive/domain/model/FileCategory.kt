@@ -34,6 +34,7 @@ enum class FileCategory {
                     mimeType == "application/x-7z-compressed" ||
                     mimeType == "application/vnd.rar" ||
                     mimeType == "application/x-tar" ||
+                    mimeType == "application/x-compressed-tar" ||
                     mimeType == "application/gzip" ||
                     mimeType == "application/x-bzip" ||
                     mimeType == "application/x-bzip2" ||
