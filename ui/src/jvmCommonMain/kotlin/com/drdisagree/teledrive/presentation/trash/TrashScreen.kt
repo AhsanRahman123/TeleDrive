@@ -315,7 +315,10 @@ fun TrashScreen(
                 .fillMaxSize()
                 .collectionCommandShortcuts(
                     focusRequester = commandFocusRequester,
-                    onSelectAll = { viewModel.selectAll(); true }
+                    onSelectAll = {
+                        if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
+                        true
+                    }
                 )
         ) {
                 LazyColumn(
