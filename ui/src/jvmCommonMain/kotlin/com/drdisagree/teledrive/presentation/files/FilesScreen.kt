@@ -498,7 +498,10 @@ fun FilesScreen(
                     onCut = { if (selectedCount > 0) { viewModel.cutSelected(); true } else false },
                     onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
                     onNewFolder = { showCreateFolder = true; true },
-                    onNewTab = { createTab(); true }
+                    onNewTab = { createTab(); true },
+                    // Files has no inline text editor in this workspace (edit dialogs
+                    // are separate windows), so handle shortcuts before row/button children.
+                    interceptBeforeChildren = true
                 )
         ) {
             Scaffold(
