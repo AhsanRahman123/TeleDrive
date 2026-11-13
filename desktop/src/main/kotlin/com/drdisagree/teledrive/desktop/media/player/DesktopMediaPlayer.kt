@@ -396,18 +396,19 @@ internal fun DesktopMediaPlayer(
         durationMs = 0L
         trackTick++
         player.submit {
+            // stop() completes the outgoing source transition before the next media is
+            // installed. start() then waits for the incoming source to report playing or
+            // error instead of returning while video output is still being initialized.
             runCatching { player.controls().stop() }
-            // Keep callbacks gated until VLC reports that the new source is playing. The
-            // playing callback reads status().length()/time() as a fallback for early events.
-            runCatching { player.media().play(mrl) }
-                .onFailure {
-                    acceptsCurrentMediaEvents.set(false)
-                    playerScope.launch {
-                        playing = false
-                        finished = true
-                        buffering = false
-                    }
+            val started = runCatching { player.media().start(mrl) }.getOrDefault(false)
+            if (!started) {
+                acceptsCurrentMediaEvents.set(false)
+                playerScope.launch {
+                    playing = false
+                    finished = true
+                    buffering = false
                 }
+            }
         }
     }
 
