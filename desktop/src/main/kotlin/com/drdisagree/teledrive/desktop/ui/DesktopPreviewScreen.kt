@@ -421,12 +421,12 @@ fun DesktopPreviewScreen(
                     file?.let { currentFile ->
                         if (currentFile.category == FileCategory.IMAGE) {
                             TooltipIconButton(
-                                tooltip = "Hide image controls",
-                                onClick = { imageChromeVisible = false }
+                                tooltip = "Toggle image controls",
+                                onClick = { imageChromeVisible = !imageChromeVisible }
                             ) {
                                 Icon(
                                     Icons.Filled.VisibilityOff,
-                                    contentDescription = "Hide image controls"
+                                    contentDescription = "Toggle image controls"
                                 )
                             }
                             TooltipIconButton(
