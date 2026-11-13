@@ -88,9 +88,6 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerId
-import androidx.compose.ui.input.pointer.PointerType
-import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -172,13 +169,6 @@ internal fun DesktopMediaPlayer(
     onDelete: () -> Unit = {}
 ) {
     val factory = VlcPlayback.factory ?: return
-    // Keep the gesture recogniser stable across player recompositions (for example,
-    // frame/progress/control updates) while always invoking the newest callbacks.
-    val latestPreviousAction = rememberUpdatedState(onPrevious)
-    val latestNextAction = rememberUpdatedState(onNext)
-    val latestHasPrevious = rememberUpdatedState(hasPrevious)
-    val latestHasNext = rememberUpdatedState(hasNext)
-    val latestIsAudio = rememberUpdatedState(isAudio)
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var hasCurrentMediaFrame by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf(false) }
@@ -1043,103 +1033,6 @@ internal fun DesktopMediaPlayer(
                     blankCursor
                 }
             )
-            // Track the actual secondary-button state in one persistent event loop.
-            // This avoids relying on PointerInputChange.pressed for desktop mouse buttons,
-            // and survives MRL/playing/progress recompositions between video changes.
-            // The handler sits before detectTapGestures so right-clicks never toggle controls.
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    var trackedPointerId: PointerId? = null
-                    var lastPosition = Offset.Zero
-                    var totalX = 0f
-                    var totalY = 0f
-                    var swipeStarted = false
-                    var verticalDrag = false
-
-                    fun resetSwipeTracking() {
-                        trackedPointerId = null
-                        lastPosition = Offset.Zero
-                        totalX = 0f
-                        totalY = 0f
-                        swipeStarted = false
-                        verticalDrag = false
-                    }
-
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (latestIsAudio.value) {
-                            resetSwipeTracking()
-                            continue
-                        }
-
-                        val change = event.changes.firstOrNull { it.type == PointerType.Mouse }
-                            ?: continue
-                        val rightButtonPressed = event.buttons.isSecondaryPressed
-
-                        if (trackedPointerId == null) {
-                            if (
-                                event.type == PointerEventType.Press &&
-                                rightButtonPressed
-                            ) {
-                                trackedPointerId = change.id
-                                lastPosition = change.position
-                                totalX = 0f
-                                totalY = 0f
-                                swipeStarted = false
-                                verticalDrag = false
-                                // Suppress the context click and keep it away from the
-                                // regular tap detector, even for a short right-click.
-                                change.consume()
-                            }
-                            continue
-                        }
-
-                        if (change.id != trackedPointerId) continue
-
-                        val delta = change.position - lastPosition
-                        lastPosition = change.position
-                        totalX += delta.x
-                        totalY += delta.y
-
-                        if (rightButtonPressed) {
-                            if (!swipeStarted && !verticalDrag) {
-                                val horizontalDistance = kotlin.math.abs(totalX)
-                                val verticalDistance = kotlin.math.abs(totalY)
-                                val slop = viewConfiguration.touchSlop
-                                when {
-                                    horizontalDistance > slop &&
-                                        horizontalDistance > verticalDistance * 1.2f -> {
-                                        swipeStarted = true
-                                    }
-                                    verticalDistance > slop &&
-                                        verticalDistance > horizontalDistance * 1.2f -> {
-                                        verticalDrag = true
-                                    }
-                                }
-                            }
-                            // Consume all events while right button is held so the tap detector
-                            // and any context-click handling cannot steal the gesture.
-                            change.consume()
-                        } else {
-                            // The secondary button has been released. Finish once and reset
-                            // immediately so the next swipe starts from a clean state.
-                            change.consume()
-                            if (swipeStarted) {
-                                val swipeThreshold = maxOf(48.dp.toPx(), size.width * 0.07f)
-                                when {
-                                    totalX >= swipeThreshold && latestHasPrevious.value -> {
-                                        latestPreviousAction.value()
-                                    }
-                                    totalX <= -swipeThreshold && latestHasNext.value -> {
-                                        latestNextAction.value()
-                                    }
-                                }
-                            }
-                            resetSwipeTracking()
-                        }
-                    }
-                }
-            }
             .pointerInput(player, playing, finished, isAudio) {
                 if (!isAudio) {
                     detectTapGestures(
