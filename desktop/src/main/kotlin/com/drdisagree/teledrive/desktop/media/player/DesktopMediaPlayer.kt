@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -88,6 +89,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -1033,6 +1036,83 @@ internal fun DesktopMediaPlayer(
                     blankCursor
                 }
             )
+            // Right-button horizontal swipes navigate the active preview sequence.
+            // This handler is placed before the left-click detector so right-button
+            // presses are consumed here and never toggle the player controls.
+            .pointerInput(onPrevious, onNext, hasPrevious, hasNext, isAudio) {
+                if (!isAudio) {
+                    awaitEachGesture {
+                        var downEvent = awaitPointerEvent(PointerEventPass.Initial)
+                        var down = downEvent.changes.firstOrNull { it.pressed }
+                        while (
+                            downEvent.type != PointerEventType.Press ||
+                            down == null
+                        ) {
+                            downEvent = awaitPointerEvent(PointerEventPass.Initial)
+                            down = downEvent.changes.firstOrNull { it.pressed }
+                        }
+
+                        val mouseDown = down ?: return@awaitEachGesture
+                        if (
+                            mouseDown.type != PointerType.Mouse ||
+                            !downEvent.buttons.isSecondaryPressed
+                        ) {
+                            return@awaitEachGesture
+                        }
+
+                        // A right-click should not reach the player's left-click/tap handler.
+                        mouseDown.consume()
+                        var lastPosition = mouseDown.position
+                        var totalX = 0f
+                        var totalY = 0f
+                        var swipeStarted = false
+                        var verticalDrag = false
+
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == mouseDown.id }
+                                ?: break
+                            val delta = change.position - lastPosition
+                            lastPosition = change.position
+                            totalX += delta.x
+                            totalY += delta.y
+
+                            if (!change.pressed) {
+                                if (swipeStarted || verticalDrag) change.consume()
+                                break
+                            }
+
+                            if (!swipeStarted && !verticalDrag) {
+                                val horizontalDistance = kotlin.math.abs(totalX)
+                                val verticalDistance = kotlin.math.abs(totalY)
+                                val slop = viewConfiguration.touchSlop
+                                when {
+                                    horizontalDistance > slop &&
+                                        horizontalDistance > verticalDistance * 1.2f -> {
+                                        swipeStarted = true
+                                        change.consume()
+                                    }
+                                    verticalDistance > slop &&
+                                        verticalDistance > horizontalDistance * 1.2f -> {
+                                        verticalDrag = true
+                                        change.consume()
+                                    }
+                                }
+                            } else {
+                                change.consume()
+                            }
+                        }
+
+                        if (swipeStarted) {
+                            val swipeThreshold = maxOf(72.dp.toPx(), size.width * 0.12f)
+                            when {
+                                totalX >= swipeThreshold && hasPrevious -> onPrevious()
+                                totalX <= -swipeThreshold && hasNext -> onNext()
+                            }
+                        }
+                    }
+                }
+            }
             .pointerInput(player, playing, finished, isAudio) {
                 if (!isAudio) {
                     detectTapGestures(
