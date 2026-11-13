@@ -103,6 +103,13 @@ internal data class FilesSelectionSnapshot(
     val count: Int get() = fileIds.size + folderIds.size
 }
 
+/** Selection mode remains visible throughout a range gesture, even when its range is empty. */
+internal fun keepFilesSelectionMode(
+    rangeSelectionActive: Boolean,
+    selectedFileCount: Int,
+    selectedFolderCount: Int
+): Boolean = rangeSelectionActive || selectedFileCount > 0 || selectedFolderCount > 0
+
 data class FilesTabState(
     val id: Int,
     val folderId: String?,
@@ -500,16 +507,22 @@ class FilesViewModel(
         _allSelected.update { false }
         selection.update { if (shouldSelect) base.first + fileIds else base.first - fileIds.toSet() }
         folderSelection.update { if (shouldSelect) base.second + folderIds else base.second - folderIds.toSet() }
-        _selectionModeEnabled.value = rangeSelectionActive ||
-                selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        _selectionModeEnabled.value = keepFilesSelectionMode(
+            rangeSelectionActive,
+            selection.value.size,
+            folderSelection.value.size
+        )
         publishSelectionSnapshot()
     }
 
     fun endRangeSelection() {
         rangeBase = null
         rangeSelectionActive = false
-        _selectionModeEnabled.value =
-            selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        _selectionModeEnabled.value = keepFilesSelectionMode(
+            rangeSelectionActive = false,
+            selectedFileCount = selection.value.size,
+            selectedFolderCount = folderSelection.value.size
+        )
         publishSelectionSnapshot()
     }
 
