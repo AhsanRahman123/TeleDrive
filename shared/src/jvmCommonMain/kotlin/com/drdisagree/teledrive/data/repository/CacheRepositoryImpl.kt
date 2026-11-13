@@ -67,18 +67,6 @@ class CacheRepositoryImpl(
         stats.value = stats.value.copy(thumbnailBytes = thumbnailDao.totalSizeBytes())
     }
 
-    /**
-     * Remove exhausted queue rows for files that cannot produce media thumbnails.
-     * This is queue-only cleanup: source files and cached previews are never touched.
-     */
-    private suspend fun cleanupFailedUnsupportedThumbnailJobs() {
-        val unsupported = thumbnailJobDao.failedUnsupportedFileIds()
-        unsupported.chunked(JOB_BATCH_SIZE).forEach { batch ->
-            thumbnailJobDao.delete(batch)
-            thumbnailPolicyDao.clearQueueItemPauses(batch)
-        }
-    }
-
     override suspend fun clearThumbnails() {
         withThumbnailQueueTemporarilyPaused {
             // Keep durable queue entries and generation policy rules. Only cache files are deleted.
@@ -296,7 +284,6 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun thumbnailManagerSummary(): ThumbnailManagerSummary {
-        cleanupFailedUnsupportedThumbnailJobs()
         refreshThumbnailStats()
         val unfiled = thumbnailDao.unfiledAggregate()
         val orphaned = thumbnailDao.orphanedAggregate()
@@ -804,7 +791,6 @@ class CacheRepositoryImpl(
         limit: Int,
         sortOrder: String
     ): List<ThumbnailQueueItem> {
-        cleanupFailedUnsupportedThumbnailJobs()
         val active = thumbnailStore.observeActiveJobs().first()
         val allPaused = thumbnailPolicyDao.isQueuePaused()
         return thumbnailJobDao.page(
@@ -820,7 +806,6 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun thumbnailQueueCount(): Int {
-        cleanupFailedUnsupportedThumbnailJobs()
         return thumbnailJobDao.count()
     }
 
@@ -837,7 +822,6 @@ class CacheRepositoryImpl(
         offset: Int,
         limit: Int
     ): List<String> {
-        cleanupFailedUnsupportedThumbnailJobs()
         return thumbnailJobDao.fileIdsPage(
             offset = offset.coerceAtLeast(0),
             limit = limit.coerceIn(1, 500)
@@ -845,12 +829,10 @@ class CacheRepositoryImpl(
     }
 
     override suspend fun thumbnailQueueAllFileIds(): List<String> {
-        cleanupFailedUnsupportedThumbnailJobs()
         return thumbnailJobDao.allFileIds()
     }
 
     override suspend fun thumbnailQueueFailedFileIds(): List<String> {
-        cleanupFailedUnsupportedThumbnailJobs()
         return thumbnailJobDao.failedFileIds()
     }
 
