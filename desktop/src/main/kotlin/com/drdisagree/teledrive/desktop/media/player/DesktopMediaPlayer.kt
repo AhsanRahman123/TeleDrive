@@ -558,6 +558,9 @@ internal fun DesktopMediaPlayer(
         latestOnControlsVisibilityChange.value(showControls)
         interactionTick++
         lastVisibilityInteractionTick = interactionTick
+        // The surface tap is also a keyboard interaction point. Keep the stable player
+        // target focused after the chrome visibility state changes.
+        playerFocusRequester.requestFocus()
     }
     val revealControlsForSeek: () -> Unit = {
         seekFeedbackVisible = true
@@ -1034,7 +1037,10 @@ internal fun DesktopMediaPlayer(
                 var lastPosition = Offset.Unspecified
                 awaitPointerEventScope {
                     while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        // Final pass runs after child buttons/sliders process the
+                        // click. Reclaim focus here so Space and the player's other shortcuts
+                        // continue working even when a control was just clicked.
+                        val event = awaitPointerEvent(PointerEventPass.Final)
                         val position = event.changes.firstOrNull()?.position ?: continue
                         when (event.type) {
                             PointerEventType.Press -> {
