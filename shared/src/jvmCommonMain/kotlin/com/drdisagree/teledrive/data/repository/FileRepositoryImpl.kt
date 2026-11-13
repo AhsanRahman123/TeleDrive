@@ -359,6 +359,9 @@ class FileRepositoryImpl(
                 remoteUniqueId = null,
                 backupState = BackupState.NONE,
                 localPath = localPath,
+                // A server-side copy does not clone the local cache. Don't carry the source's
+                // offline pin over to a new record that has no local bytes yet.
+                isAvailableOffline = if (isRemoteBacked) false else source.isAvailableOffline,
                 trashedAt = null,
                 preTrashFolderId = null,
                 addedAt = now,
