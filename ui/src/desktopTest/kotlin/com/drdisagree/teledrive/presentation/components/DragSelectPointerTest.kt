@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items as listItems
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -326,6 +329,58 @@ class DragSelectPointerTest {
 
         assertTrue("the grid should have auto-scrolled", (gridStateSnapshot?.firstVisibleItemIndex ?: 0) > 0)
         assertTrue("the selection should grow with the scroll", selected.size > 3)
+    }
+
+    @Test
+    fun `Trash list drag starting on a selected row adds the range without removing existing selection`() {
+        var selected by mutableStateOf(setOf(0, 1))
+        var rangeBase by mutableStateOf(setOf(0, 1))
+
+        rule.setContent {
+            val listState = rememberLazyListState()
+            val dragSelect = rememberDragSelect(
+                listState = listState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                mouseDragAddsToSelection = true,
+                resolveNearestVisibleItem = true
+            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(width = 180.dp, height = 220.dp)
+                    .testTag("trash-selection-list")
+                    .then(dragSelect)
+            ) {
+                listItems((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                            .testTag("trash-row-$index")
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("trash-selection-list").performMouseInput {
+            moveTo(Offset(90f, 30f))
+            press()
+            moveTo(Offset(90f, 150f), delayMillis = 100)
+            release()
+        }
+        rule.waitForIdle()
+
+        assertEquals(setOf(0, 1, 2), selected)
     }
 
 }
