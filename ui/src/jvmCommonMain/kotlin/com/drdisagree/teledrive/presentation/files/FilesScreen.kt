@@ -537,18 +537,36 @@ fun FilesScreen(
                 .fillMaxSize()
                 .collectionCommandShortcuts(
                     focusRequester = filesCommandFocusRequester,
-                    onSelectAll = { viewModel.selectAll(); true },
+                    onSelectAll = {
+                        if (showDuplicateManager) false else { viewModel.selectAll(); true }
+                    },
                     onDelete = {
-                        if (selectedCount > 0 && !showCreateFolder && renameTarget == null) {
+                        if (
+                            !showDuplicateManager && selectedCount > 0 &&
+                            !showCreateFolder && renameTarget == null
+                        ) {
                             confirmTrash = true
                             true
                         } else false
                     },
-                    onCopy = viewModel::copyToClipboardSelected,
-                    onCut = viewModel::cutSelected,
-                    onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
-                    onNewFolder = { showCreateFolder = true; true },
-                    onNewTab = { createTab(); true },
+                    onCopy = {
+                        if (showDuplicateManager) false else viewModel.copyToClipboardSelected()
+                    },
+                    onCut = {
+                        if (showDuplicateManager) false else viewModel.cutSelected()
+                    },
+                    onPaste = {
+                        if (!showDuplicateManager && viewModel.hasClipboardItems()) {
+                            viewModel.paste()
+                            true
+                        } else false
+                    },
+                    onNewFolder = {
+                        if (showDuplicateManager) false else { showCreateFolder = true; true }
+                    },
+                    onNewTab = {
+                        if (showDuplicateManager) false else { createTab(); true }
+                    },
                     // Files has no inline text editor in this workspace (edit dialogs
                     // are separate windows), so handle shortcuts before row/button children.
                     interceptBeforeChildren = true
@@ -856,7 +874,7 @@ fun FilesScreen(
                 },
                 floatingActionButton = {
                     AnimatedVisibility(
-                        visible = !selectionMode && (fabVisible || showAddMenu),
+                        visible = !showDuplicateManager && !selectionMode && (fabVisible || showAddMenu),
                         enter = scaleIn() + fadeIn(),
                         exit = scaleOut() + fadeOut()
                     ) {
