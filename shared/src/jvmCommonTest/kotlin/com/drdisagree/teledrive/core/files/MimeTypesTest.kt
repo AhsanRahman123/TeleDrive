@@ -53,6 +53,33 @@ class MimeTypesTest {
     }
 
     @Test
+    fun `additional media and camera formats are recognized`() {
+        assertEquals("video/mxf", MimeTypes.fromFileName("camera.mxf"))
+        assertEquals("video/x-pn-realvideo", MimeTypes.fromFileName("camera.rmvb"))
+        assertEquals("image/x-adobe-dng", MimeTypes.fromFileName("photo.dng"))
+        assertEquals("image/x-nikon-nef", MimeTypes.fromFileName("photo.nef"))
+        assertTrue(MimeTypes.isVideo(MimeTypes.fromFileName("camera.mxf")))
+        assertTrue(MimeTypes.isImage(MimeTypes.fromFileName("photo.nef")))
+    }
+
+    @Test
+    fun `source code formats are recognized as text previews`() {
+        assertEquals("text/javascript", MimeTypes.fromFileName("app.mjs"))
+        assertEquals("text/x-kotlin", MimeTypes.fromFileName("Main.kt"))
+        assertEquals("text/x-powershell", MimeTypes.fromFileName("setup.ps1"))
+        assertTrue(MimeTypes.isText(MimeTypes.fromFileName("app.mjs")))
+        assertTrue(MimeTypes.isText(MimeTypes.fromFileName("settings.toml")))
+    }
+
+    @Test
+    fun `all advertised archive MIME types are classified as archives`() {
+        assertTrue(MimeTypes.isArchive(MimeTypes.fromFileName("backup.rar")))
+        assertTrue(MimeTypes.isArchive(MimeTypes.fromFileName("backup.cpio")))
+        assertTrue(MimeTypes.isArchive(MimeTypes.fromFileName("backup.lz4")))
+        assertTrue(MimeTypes.isArchive(MimeTypes.fromFileName("backup.ar")))
+    }
+
+    @Test
     fun `recognized media MIME is classified for preview routing`() {
         assertTrue(MimeTypes.isAudio(MimeTypes.resolve("voice.opus", "application/octet-stream")))
         assertTrue(MimeTypes.isVideo(MimeTypes.resolve("clip.mp4", "application/octet-stream")))
