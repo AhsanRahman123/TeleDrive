@@ -1007,10 +1007,23 @@ private fun PreviewPane(
                 val zoomScope = rememberCoroutineScope()
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (undecodable) {
-                        EmptyState(
-                            icon = Icons.Filled.BrokenImage,
-                            title = stringResource(Res.string.preview_image_undecodable)
-                        )
+                        val imagePath = (current.model as? File)
+                            ?.takeIf { it.isFile }
+                            ?.absolutePath
+                            ?: file.localPath?.takeIf { File(it).isFile }
+                        if (imagePath != null) {
+                            OpenExternallyState(
+                                icon = Icons.Filled.BrokenImage,
+                                file = file,
+                                path = imagePath,
+                                snackbarHostState = snackbarHostState
+                            )
+                        } else {
+                            EmptyState(
+                                icon = Icons.Filled.BrokenImage,
+                                title = stringResource(Res.string.preview_image_undecodable)
+                            )
+                        }
                     } else {
                         // AsyncImage sizes the decoded bitmap to the viewport, which makes
                         // zooming a low-resolution preview look blurred. The painter intentionally
