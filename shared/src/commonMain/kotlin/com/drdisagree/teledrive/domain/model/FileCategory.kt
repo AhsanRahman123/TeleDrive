@@ -19,6 +19,7 @@ enum class FileCategory {
                     mimeType == "application/jsonl" ||
                     mimeType == "application/xml" ||
                     mimeType == "application/yaml" ||
+                    mimeType == "application/toml" ||
                     mimeType == "application/xhtml+xml" ||
                     mimeType == "application/rtf" ||
                     mimeType == "application/epub+zip" ||
@@ -43,7 +44,12 @@ enum class FileCategory {
                     mimeType == "application/x-lzip" ||
                     mimeType == "application/x-lzma" ||
                     mimeType == "application/vnd.ms-cab-compressed" ||
-                    mimeType == "application/x-arj-compressed" -> ARCHIVE
+                    mimeType == "application/x-arj-compressed" ||
+                    mimeType == "application/x-cpio" ||
+                    mimeType == "application/x-compress" ||
+                    mimeType == "application/x-lz4" ||
+                    mimeType == "application/brotli" ||
+                    mimeType == "application/x-archive" -> ARCHIVE
 
             else -> OTHER
         }
