@@ -84,6 +84,11 @@ class KeyboardCollectionState internal constructor(
         val command = event.isCtrlPressed || event.isMetaPressed
         val alt = event.isAltPressed
         val plain = !command && !alt && !event.isShiftPressed
+        // Let focused controls (for example a search or rename text field inside an item)
+        // consume their own Ctrl+A/C/X/V first. Collection commands are only handled here
+        // when the collection item itself owns focus; the outer workspace handler is the
+        // fallback for collection-level focus.
+        val plainCommand = command && !alt && !event.isShiftPressed
         val onItem = plain && focusOnItem
         val vertical = plain && !horizontal
         val across = plain && (horizontal || columns > 1)
@@ -113,14 +118,14 @@ class KeyboardCollectionState internal constructor(
             onItem && event.key == Key.F2 -> shortcuts.onRename.fire(index)
             plain && event.key == Key.Backspace -> back(shortcuts)
             plain && event.key == Key.Escape -> shortcuts.onClear.fire()
-            command && !alt && event.key == Key.A -> shortcuts.onSelectAll.fire()
-            command && !alt && event.key == Key.N -> shortcuts.onNewFolder.fire()
-            command && !alt && event.key == Key.T -> shortcuts.onNewTab.fire()
-            command && !alt && focusOnItem && event.key == Key.C ->
+            plainCommand && focusOnItem && event.key == Key.A -> shortcuts.onSelectAll.fire()
+            plainCommand && focusOnItem && event.key == Key.N -> shortcuts.onNewFolder.fire()
+            plainCommand && focusOnItem && event.key == Key.T -> shortcuts.onNewTab.fire()
+            plainCommand && focusOnItem && event.key == Key.C ->
                 shortcuts.onCopy.fire(index).also { restorePending = it }
-            command && !alt && focusOnItem && event.key == Key.X ->
+            plainCommand && focusOnItem && event.key == Key.X ->
                 shortcuts.onCut.fire(index).also { restorePending = it }
-            command && !alt && event.key == Key.V -> shortcuts.onPaste.fire()
+            plainCommand && focusOnItem && event.key == Key.V -> shortcuts.onPaste.fire()
             else -> false
         }
     }
