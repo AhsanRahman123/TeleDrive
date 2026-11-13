@@ -138,7 +138,10 @@ object MimeTypes {
         "rar" to "application/vnd.rar",
         "tar" to "application/x-tar",
         "gz" to "application/gzip",
-        "tgz" to "application/gzip",
+        "tgz" to "application/x-compressed-tar",
+        "tbz" to "application/x-compressed-tar",
+        "tbz2" to "application/x-compressed-tar",
+        "txz" to "application/x-compressed-tar",
         "bz" to "application/x-bzip",
         "bz2" to "application/x-bzip2",
         "xz" to "application/x-xz",
@@ -165,7 +168,16 @@ object MimeTypes {
     )
 
     fun fromFileName(fileName: String): String {
-        val extension = fileName.substringAfterLast('.', "").lowercase()
+        val normalizedName = fileName.lowercase()
+        val compoundArchiveMime = when {
+            normalizedName.endsWith(".tar.gz") -> "application/x-compressed-tar"
+            normalizedName.endsWith(".tar.bz2") -> "application/x-compressed-tar"
+            normalizedName.endsWith(".tar.xz") -> "application/x-compressed-tar"
+            else -> null
+        }
+        if (compoundArchiveMime != null) return compoundArchiveMime
+
+        val extension = normalizedName.substringAfterLast('.', "")
         if (extension.isEmpty()) return GENERIC
         return knownExtensions[extension]
             ?: platformMimeTypeFromExtension(extension)
@@ -225,6 +237,7 @@ object MimeTypes {
         "application/x-7z-compressed",
         "application/vnd.rar",
         "application/x-tar",
+        "application/x-compressed-tar",
         "application/gzip",
         "application/x-bzip",
         "application/x-bzip2",
