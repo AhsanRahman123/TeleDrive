@@ -271,7 +271,9 @@ class KeyboardCollectionTest {
     @Test
     fun `collection select all does not intercept a nested text field shortcut`() {
         var selectedAll = 0
-        var editorValue by mutableStateOf(TextFieldValue("editable text"))
+        var editorValue by mutableStateOf(
+            TextFieldValue("editable text", selection = TextRange("editable text".length))
+        )
         rule.setContent {
             val listState = rememberLazyListState()
             val keyboard = rememberKeyboardCollection(listState)
@@ -299,11 +301,16 @@ class KeyboardCollectionTest {
 
         rule.onNodeWithTag("nested-editor").requestFocus()
         rule.onNodeWithTag("nested-editor").performKeyInput {
+            pressKey(Key.DirectionLeft)
+        }
+        rule.waitForIdle()
+        assertEquals(TextRange("editable text".length - 1), editorValue.selection)
+
+        rule.onNodeWithTag("nested-editor").performKeyInput {
             keyDown(Key.CtrlLeft)
             pressKey(Key.A)
             keyUp(Key.CtrlLeft)
         }
-
         rule.waitForIdle()
 
         assertEquals(0, selectedAll)
