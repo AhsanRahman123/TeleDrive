@@ -205,6 +205,7 @@ internal fun DesktopMediaPlayer(
     // Render callbacks can finish copying/decoding after a media switch. Tag each accepted
     // frame with the active generation so an outgoing frame can never replace the new one.
     val currentVideoFrameGeneration = remember(factory, isAudio) { AtomicLong(0L) }
+    val expectedMediaGeneration = remember(factory, isAudio) { AtomicLong(-1L) }
     val acceptsCurrentVideoFrames = remember(factory, isAudio) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
@@ -258,6 +259,7 @@ internal fun DesktopMediaPlayer(
                 // vlcj event callbacks run on native/event threads. Compose state is only
                 // mutated from the player scope, never directly from those callback threads.
                 override fun playing(mediaPlayer: MediaPlayer) {
+                    if (expectedMediaGeneration.get() != currentVideoFrameGeneration.get()) return
                     acceptsCurrentMediaEvents.set(true)
                     playerScope.launch {
                         playing = true
@@ -297,12 +299,16 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun paused(mediaPlayer: MediaPlayer) {
-                    if (acceptsCurrentMediaEvents.get()) {
+                    if (
+                        expectedMediaGeneration.get() == currentVideoFrameGeneration.get() &&
+                        acceptsCurrentMediaEvents.get()
+                    ) {
                         playerScope.launch { playing = false }
                     }
                 }
 
                 override fun finished(mediaPlayer: MediaPlayer) {
+                    if (expectedMediaGeneration.get() != currentVideoFrameGeneration.get()) return
                     if (!acceptsCurrentMediaEvents.getAndSet(false)) return
                     playerScope.launch {
                         playing = false
@@ -314,7 +320,10 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
-                    if (acceptsCurrentMediaEvents.get()) {
+                    if (
+                        expectedMediaGeneration.get() == currentVideoFrameGeneration.get() &&
+                        acceptsCurrentMediaEvents.get()
+                    ) {
                         playerScope.launch {
                             buffering = newCache < 100f || (!isAudio && !hasCurrentMediaFrame)
                         }
@@ -334,6 +343,7 @@ internal fun DesktopMediaPlayer(
                 override fun error(mediaPlayer: MediaPlayer) {
                     // Errors before the incoming item reaches playing are returned by
                     // MediaApi.start(); ignore late errors from the outgoing source.
+                    if (expectedMediaGeneration.get() != currentVideoFrameGeneration.get()) return
                     if (!acceptsCurrentMediaEvents.getAndSet(false)) return
                     acceptsCurrentVideoFrames.set(false)
                     playerScope.launch {
@@ -406,7 +416,8 @@ internal fun DesktopMediaPlayer(
         // callbacks from the outgoing item cannot update the incoming item's state.
         acceptsCurrentMediaEvents.set(false)
         acceptsCurrentVideoFrames.set(false)
-        currentVideoFrameGeneration.incrementAndGet()
+        val mediaGeneration = currentVideoFrameGeneration.incrementAndGet()
+        expectedMediaGeneration.set(-1L)
         hasCurrentMediaFrame = false
         while (frameUpdates.tryReceive().isSuccess) Unit
         while (timeUpdates.tryReceive().isSuccess) Unit
@@ -419,21 +430,35 @@ internal fun DesktopMediaPlayer(
         durationMs = 0L
         trackTick++
         player.submit {
-            // stop() completes the outgoing source transition before the next media is
-            // installed. start() then waits for the incoming source to report playing or
-            // error instead of returning while video output is still being initialized.
-            runCatching { player.controls().stop() }
-            // stop() has completed the outgoing native transition; only now allow render
-            // callbacks from the next source into the generation-tagged frame channel.
-            acceptsCurrentVideoFrames.set(true)
-            val started = runCatching { player.media().start(mrl) }.getOrDefault(false)
-            if (!started) {
-                acceptsCurrentMediaEvents.set(false)
-                acceptsCurrentVideoFrames.set(false)
-                playerScope.launch {
-                    playing = false
-                    finished = true
-                    buffering = false
+            // A newer selection can arrive while this command is waiting in VLC's serial
+            // executor. Never start an obsolete MRL after a newer generation was requested.
+            if (currentVideoFrameGeneration.get() == mediaGeneration) {
+                // Stop the outgoing source before attaching another item. MediaApi.start()
+                // waits until the incoming source reports playing or an error.
+                runCatching { player.controls().stop() }
+                if (currentVideoFrameGeneration.get() == mediaGeneration) {
+                    expectedMediaGeneration.set(mediaGeneration)
+                    // stop() has completed the outgoing native transition; only now allow
+                    // this source's render callbacks into the generation-tagged frame channel.
+                    acceptsCurrentVideoFrames.set(true)
+                    val started = runCatching { player.media().start(mrl) }.getOrDefault(false)
+                    val stillCurrent = currentVideoFrameGeneration.get() == mediaGeneration
+                    if (!started || !stillCurrent) {
+                        acceptsCurrentMediaEvents.set(false)
+                        acceptsCurrentVideoFrames.set(false)
+                        expectedMediaGeneration.compareAndSet(mediaGeneration, -1L)
+                        if (!stillCurrent) {
+                            // A newer MRL was requested while start() was waiting. Stop this
+                            // stale source before the next queued command attaches its media.
+                            runCatching { player.controls().stop() }
+                        } else {
+                            playerScope.launch {
+                                playing = false
+                                finished = true
+                                buffering = false
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -443,6 +468,7 @@ internal fun DesktopMediaPlayer(
         onDispose {
             acceptsCurrentMediaEvents.set(false)
             acceptsCurrentVideoFrames.set(false)
+            expectedMediaGeneration.set(-1L)
             // Keep teardown serialized with pending play/seek/track commands. Disposing the
             // composable must not race a queued media replacement against native player release.
             runCatching {
