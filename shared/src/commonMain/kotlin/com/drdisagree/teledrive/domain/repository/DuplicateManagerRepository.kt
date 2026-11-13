@@ -49,7 +49,9 @@ data class DuplicateFileGroup(
     val files: List<DuplicateScanFile>
 ) {
     val duplicateCount: Int get() = (files.size - 1).coerceAtLeast(0)
-    val wastedBytes: Long get() = duplicateCount * (files.maxOfOrNull { it.sizeBytes } ?: 0L)
+    val wastedBytes: Long
+        get() = (files.sumOf { it.sizeBytes } - (files.maxOfOrNull { it.sizeBytes } ?: 0L))
+            .coerceAtLeast(0L)
 }
 
 data class DuplicateManagerState(
