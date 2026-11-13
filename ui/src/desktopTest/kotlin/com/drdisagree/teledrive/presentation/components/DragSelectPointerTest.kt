@@ -124,6 +124,53 @@ class DragSelectPointerTest {
         assertFalse(rangeGestureActive)
         assertTrue(selectionMode)
     }
+    @Test
+    fun `dragging upward from a selected row deselects the crossed range`() {
+        var selected by mutableStateOf(setOf(0, 1, 2))
+        var rangeBase by mutableStateOf(setOf(0, 1, 2))
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) rangeBase + range else rangeBase - range.toSet()
+                },
+                onEnd = {},
+                resolveNearestVisibleItem = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 220.dp)
+                    .testTag("reverse-selection-grid")
+                    .then(dragSelect)
+            ) {
+                items((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("reverse-selection-grid").performMouseInput {
+            moveTo(Offset(90f, 150f))
+            press()
+            moveTo(Offset(90f, 30f), delayMillis = 100)
+            release()
+        }
+        rule.waitForIdle()
+
+        assertEquals(emptySet<Int>(), selected)
+    }
+
     @OptIn(ExperimentalFoundationApi::class)
     @Test
     fun `mouse drag adds to an existing Files selection across real row gestures`() {
