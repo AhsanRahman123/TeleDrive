@@ -27,6 +27,10 @@ class MimeTypesTest {
         assertEquals("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", MimeTypes.fromFileName("sheet.xlsx"))
         assertEquals("application/zip", MimeTypes.fromFileName("archive.zip"))
         assertEquals("application/x-7z-compressed", MimeTypes.fromFileName("archive.7z"))
+        assertEquals("application/x-tar", MimeTypes.fromFileName("archive.tar"))
+        assertEquals("application/x-compressed-tar", MimeTypes.fromFileName("archive.tar.gz"))
+        assertEquals("application/x-compressed-tar", MimeTypes.fromFileName("archive.tar.bz2"))
+        assertEquals("application/x-compressed-tar", MimeTypes.fromFileName("archive.txz"))
     }
 
     @Test
