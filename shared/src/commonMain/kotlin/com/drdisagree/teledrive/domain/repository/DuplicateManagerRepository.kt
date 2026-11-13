@@ -78,7 +78,7 @@ data class DuplicateManagerState(
 interface DuplicateManagerRepository {
     val state: StateFlow<DuplicateManagerState>
 
-    suspend fun startScan(folderId: String)
+    suspend fun startScan(folderId: String, resetQueue: Boolean = false)
 
     fun pauseAll()
     fun resumeAll()
