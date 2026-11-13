@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -216,6 +217,66 @@ class DragSelectPointerTest {
         assertTrue(selectionMode)
         assertEquals(0, clicks)
         assertEquals(0, longClicks)
+    }
+
+
+    @Test
+    fun `mouse drag keeps extending while auto scrolling through bottom padding`() {
+        var selected by mutableStateOf(emptySet<Int>())
+        var rangeBase by mutableStateOf(emptySet<Int>())
+        lateinit var gridStateSnapshot: androidx.compose.foundation.lazy.grid.LazyGridState
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            gridStateSnapshot = gridState
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                mouseDragAddsToSelection = true,
+                resolveNearestVisibleItem = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                contentPadding = PaddingValues(bottom = 100.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 220.dp)
+                    .testTag("edge-scroll-grid")
+                    .then(dragSelect)
+            ) {
+                items((0 until 30).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(Color.Gray)
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("edge-scroll-grid").performMouseInput {
+            moveTo(Offset(90f, 30f))
+            press()
+            // Keep the button down at the padded bottom edge. Auto-scroll must keep
+            // mapping that point to the nearest visible row and extending the range.
+            moveTo(Offset(90f, 210f), delayMillis = 900)
+            release()
+        }
+        rule.waitForIdle()
+
+        assertTrue("the grid should have auto-scrolled", gridStateSnapshot.firstVisibleItemIndex > 0)
+        assertTrue("the selection should grow with the scroll", selected.size > 3)
     }
 
 }
