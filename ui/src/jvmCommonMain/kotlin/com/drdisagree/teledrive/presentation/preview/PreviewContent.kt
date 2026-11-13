@@ -29,7 +29,11 @@ sealed interface PreviewContent {
 
     data class RequiresDownload(val sizeBytes: Long) : PreviewContent
 
-    data class Unsupported(val reasonRes: StringResource) : PreviewContent
+    /** Optional local source lets desktop open formats without an in-app renderer externally. */
+    data class Unsupported(
+        val reasonRes: StringResource,
+        val localPath: String? = null
+    ) : PreviewContent
 
     data class Failed(val messageRes: StringResource) : PreviewContent
 }
