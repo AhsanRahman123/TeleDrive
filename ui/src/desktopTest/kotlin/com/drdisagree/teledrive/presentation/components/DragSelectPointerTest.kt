@@ -224,7 +224,7 @@ class DragSelectPointerTest {
     fun `mouse drag keeps extending while auto scrolling through bottom padding`() {
         var selected by mutableStateOf(emptySet<Int>())
         var rangeBase by mutableStateOf(emptySet<Int>())
-        lateinit var gridStateSnapshot: androidx.compose.foundation.lazy.grid.LazyGridState
+        var gridStateSnapshot: androidx.compose.foundation.lazy.grid.LazyGridState? = null
 
         rule.setContent {
             val gridState = rememberLazyGridState()
@@ -275,7 +275,7 @@ class DragSelectPointerTest {
         }
         rule.waitForIdle()
 
-        assertTrue("the grid should have auto-scrolled", gridStateSnapshot.firstVisibleItemIndex > 0)
+        assertTrue("the grid should have auto-scrolled", (gridStateSnapshot?.firstVisibleItemIndex ?: 0) > 0)
         assertTrue("the selection should grow with the scroll", selected.size > 3)
     }
 
