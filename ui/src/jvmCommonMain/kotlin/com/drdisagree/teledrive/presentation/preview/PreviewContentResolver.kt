@@ -143,7 +143,7 @@ class PreviewContentResolver(
         MimeTypes.isText(file.mimeType) -> readText(path)
         MimeTypes.isArchive(file.mimeType) -> readArchive(file, path)
         MimeTypes.isApk(file.mimeType, file.name) -> readApk(path)
-        else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type)
+        else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
     }
 
     private fun readApk(path: String): PreviewContent = runCatching {
@@ -152,9 +152,9 @@ class PreviewContentResolver(
         if (iconBytes != null) {
             PreviewContent.Image(iconBytes)
         } else {
-            PreviewContent.Unsupported(Res.string.preview_no_preview_for_type)
+            PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
         }
-    }.getOrElse { PreviewContent.Unsupported(Res.string.preview_no_preview_for_type) }
+    }.getOrElse { PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path) }
 
     private fun readText(path: String): PreviewContent = runCatching {
         val target = File(path)
@@ -209,7 +209,7 @@ class PreviewContentResolver(
             "application/x-tar" -> readTar(path, compressed = false)
             "application/x-compressed-tar" -> readTar(path, compressed = true)
 
-            else -> PreviewContent.Unsupported(Res.string.preview_only_zip)
+            else -> PreviewContent.Unsupported(Res.string.preview_only_zip, path)
         }
 
     private fun readTar(path: String, compressed: Boolean): PreviewContent = runCatching {
