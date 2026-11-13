@@ -15,6 +15,7 @@ object MimeTypes {
         // Audio
         "mp3" to "audio/mpeg",
         "mp2" to "audio/mpeg",
+        "mpga" to "audio/mpeg",
         "m4a" to "audio/mp4",
         "m4b" to "audio/mp4",
         "m4p" to "audio/mp4",
@@ -39,6 +40,9 @@ object MimeTypes {
         "eac3" to "audio/eac3",
         "dts" to "audio/vnd.dts",
         "caf" to "audio/x-caf",
+        "spx" to "audio/ogg",
+        "weba" to "audio/webm",
+        "ra" to "audio/vnd.rn-realaudio",
 
         // Video
         "mp4" to "video/mp4",
@@ -66,6 +70,12 @@ object MimeTypes {
         "ogv" to "video/ogg",
         "vob" to "video/dvd",
         "divx" to "video/divx",
+        "mp4v" to "video/mp4",
+        "mxf" to "application/mxf",
+        "ogm" to "video/ogg",
+        "dv" to "video/dv",
+        "rm" to "application/vnd.rn-realmedia",
+        "rmvb" to "application/vnd.rn-realmedia-vbr",
 
         // Images
         "jpg" to "image/jpeg",
@@ -90,6 +100,23 @@ object MimeTypes {
         "j2k" to "image/jp2",
         "jxl" to "image/jxl",
         "raw" to "image/x-canon-cr2",
+        "tga" to "image/x-targa",
+        "dds" to "image/vnd-ms.dds",
+        "psd" to "image/vnd.adobe.photoshop",
+        "xcf" to "image/x-xcf",
+        "dng" to "image/x-adobe-dng",
+        "cr2" to "image/x-canon-cr2",
+        "cr3" to "image/x-canon-cr3",
+        "nef" to "image/x-nikon-nef",
+        "nrw" to "image/x-nikon-nrw",
+        "arw" to "image/x-sony-arw",
+        "srf" to "image/x-sony-srf",
+        "sr2" to "image/x-sony-sr2",
+        "raf" to "image/x-fuji-raf",
+        "orf" to "image/x-olympus-orf",
+        "rw2" to "image/x-panasonic-rw2",
+        "pef" to "image/x-pentax-pef",
+        "srw" to "image/x-samsung-srw",
 
         // Documents, text and structured data
         "pdf" to "application/pdf",
@@ -132,6 +159,48 @@ object MimeTypes {
         "epub" to "application/epub+zip",
         "mobi" to "application/x-mobipocket-ebook",
 
+        // Source code, configuration and scripts are safe to render as bounded plain text.
+        "js" to "text/javascript",
+        "mjs" to "text/javascript",
+        "cjs" to "text/javascript",
+        "css" to "text/css",
+        "scss" to "text/x-scss",
+        "sass" to "text/x-sass",
+        "less" to "text/x-less",
+        "kt" to "text/x-kotlin",
+        "kts" to "text/x-kotlin",
+        "java" to "text/x-java-source",
+        "py" to "text/x-python",
+        "pyw" to "text/x-python",
+        "rb" to "text/x-ruby",
+        "go" to "text/x-go",
+        "rs" to "text/x-rust",
+        "c" to "text/x-c",
+        "h" to "text/x-c",
+        "cc" to "text/x-c++",
+        "cpp" to "text/x-c++",
+        "cxx" to "text/x-c++",
+        "hpp" to "text/x-c++",
+        "hh" to "text/x-c++",
+        "cs" to "text/x-csharp",
+        "php" to "text/x-php",
+        "swift" to "text/x-swift",
+        "sh" to "text/x-shellscript",
+        "bash" to "text/x-shellscript",
+        "zsh" to "text/x-shellscript",
+        "ps1" to "text/x-powershell",
+        "psm1" to "text/x-powershell",
+        "bat" to "text/x-bat",
+        "cmd" to "text/x-bat",
+        "sql" to "text/x-sql",
+        "ini" to "text/plain",
+        "toml" to "application/toml",
+        "properties" to "text/plain",
+        "gradle" to "text/plain",
+        "xmls" to "application/xml",
+        "diff" to "text/x-diff",
+        "patch" to "text/x-diff",
+
         // Archives and compressed files
         "zip" to "application/zip",
         "7z" to "application/x-7z-compressed",
@@ -151,6 +220,11 @@ object MimeTypes {
         "lzma" to "application/x-lzma",
         "cab" to "application/vnd.ms-cab-compressed",
         "arj" to "application/x-arj-compressed",
+        "cpio" to "application/x-cpio",
+        "z" to "application/x-compress",
+        "lz4" to "application/x-lz4",
+        "br" to "application/brotli",
+        "ar" to "application/x-archive",
 
         // Application packages
         "apk" to "application/vnd.android.package-archive",
@@ -227,6 +301,12 @@ object MimeTypes {
         mimeType.startsWith("text/") ||
             mimeType == "application/json" ||
             mimeType == "application/jsonl" ||
+            mimeType == "application/javascript" ||
+            mimeType == "application/toml" ||
+            mimeType == "application/x-httpd-php" ||
+            mimeType == "application/x-sh" ||
+            mimeType == "application/x-python" ||
+            mimeType == "application/x-powershell" ||
             mimeType == "application/xml" ||
             mimeType == "application/yaml" ||
             mimeType == "application/xhtml+xml" ||
@@ -246,6 +326,11 @@ object MimeTypes {
         "application/x-lzip",
         "application/x-lzma",
         "application/vnd.ms-cab-compressed",
-        "application/x-arj-compressed"
+        "application/x-arj-compressed",
+        "application/x-cpio",
+        "application/x-compress",
+        "application/x-lz4",
+        "application/brotli",
+        "application/x-archive"
     )
 }
