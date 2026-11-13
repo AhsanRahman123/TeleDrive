@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Rotate90DegreesCw
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.outlined.Description
@@ -352,8 +353,14 @@ fun DesktopPreviewScreen(
     var copyTarget by remember { mutableStateOf<DriveFile?>(null) }
     var moveTarget by remember { mutableStateOf<DriveFile?>(null) }
     var playerChromeVisible by remember { mutableStateOf(true) }
-    var imageChromeVisible by remember(file?.id) { mutableStateOf(true) }
-    val previewChromeVisible = if (mediaCategory != null) playerChromeVisible else imageChromeVisible
+    // Keep the image-toolbar preference for the whole preview session, including when
+    // moving between image files. H (or the visible toolbar toggle) restores it.
+    var imageChromeVisible by remember { mutableStateOf(true) }
+    val previewChromeVisible = when {
+        mediaCategory != null -> playerChromeVisible
+        file?.category == FileCategory.IMAGE -> imageChromeVisible
+        else -> true
+    }
     val viewerFocusRequester = remember { FocusRequester() }
     LaunchedEffect(file?.id) {
         // Do not reveal the preview chrome on every queue item change. The player owns
@@ -413,6 +420,15 @@ fun DesktopPreviewScreen(
                 actions = {
                     file?.let { currentFile ->
                         if (currentFile.category == FileCategory.IMAGE) {
+                            TooltipIconButton(
+                                tooltip = "Hide image controls",
+                                onClick = { imageChromeVisible = false }
+                            ) {
+                                Icon(
+                                    Icons.Filled.VisibilityOff,
+                                    contentDescription = "Hide image controls"
+                                )
+                            }
                             TooltipIconButton(
                                 tooltip = "Rotate counter-clockwise",
                                 onClick = {
