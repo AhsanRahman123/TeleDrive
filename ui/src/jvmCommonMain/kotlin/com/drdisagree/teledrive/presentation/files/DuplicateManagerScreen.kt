@@ -167,7 +167,7 @@ fun DuplicateManagerScreen(
     }
 
     fun selectAllMatches() {
-        selectedIds = state.groups.flatMap { it.files }.map { it.id }.toSet()
+        selectedIds = filteredGroups.flatMap { it.files }.map { it.id }.toSet()
     }
 
     fun autoSelectExtras() {
@@ -240,7 +240,7 @@ fun DuplicateManagerScreen(
             }
             TooltipIconButton(tooltip = "Scan this folder again", onClick = {
                 selectedIds = emptySet()
-                scope.launch { repository.startScan(folderId) }
+                scope.launch { repository.startScan(folderId, resetQueue = true) }
             }) {
                 androidx.compose.material3.Icon(Icons.Filled.Refresh, contentDescription = "Rescan")
             }
