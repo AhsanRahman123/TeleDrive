@@ -68,6 +68,7 @@ import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.resolve
 import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.ctrlClickSelect
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
@@ -337,6 +338,13 @@ fun TrashScreen(
                 Row(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
+                        .then(
+                            if (row.selectable) {
+                                Modifier.ctrlClickSelect { viewModel.toggleSelection(item.id) }
+                            } else {
+                                Modifier
+                            }
+                        )
                         .animateItem()
                         .fillMaxWidth()
                         .padding(start = (row.depth * 20).dp)
