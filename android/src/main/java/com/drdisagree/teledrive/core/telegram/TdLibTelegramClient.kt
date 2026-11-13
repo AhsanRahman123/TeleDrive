@@ -979,7 +979,7 @@ class TdLibTelegramClient(
     ): List<TelegramDocumentCopyResult> {
         if (documents.isEmpty()) return emptyList()
         if (documents.size == 1) {
-            return super.copyDocuments(chatId, documents)
+            return super<TelegramClient>.copyDocuments(chatId, documents)
         }
         require(documents.size in 2..10) { "Telegram albums support 2 to 10 documents" }
 
