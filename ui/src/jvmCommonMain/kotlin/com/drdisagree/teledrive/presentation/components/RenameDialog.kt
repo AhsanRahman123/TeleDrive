@@ -40,17 +40,16 @@ fun RenameDialog(
     val nameFocusRequester = remember { FocusRequester() }
     var value by rememberSaveable(initialValue) { mutableStateOf(initialValue) }
 
-    // AlertDialog content lives in its own window. Wait until that window has
-    // completed a frame and the text field is attached before requesting focus.
-    LaunchedEffect(nameFocusRequester) {
-        withFrameNanos { }
-        nameFocusRequester.requestFocus()
-    }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+            // This effect belongs to the dialog window, so its focus request is
+            // dispatched after the dialog's own text field has completed layout.
+            LaunchedEffect(nameFocusRequester) {
+                withFrameNanos { }
+                nameFocusRequester.requestFocus()
+            }
             OutlinedTextField(
                 value = value,
                 onValueChange = { value = it },
