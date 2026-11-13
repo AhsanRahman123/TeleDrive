@@ -206,6 +206,13 @@ class PreviewViewModel(
 
     fun observeFile(fileId: String): Flow<DriveFile?> = fileRepository.observeFile(fileId)
 
+    /**
+     * Returns the physical parent folder for the currently viewed item.
+     * Items in the drive root use the Files label.
+     */
+    suspend fun parentFolderName(file: DriveFile): String =
+        file.folderId?.let { fileRepository.getFolder(it)?.name } ?: "Files"
+
     fun download(file: DriveFile) {
         viewModelScope.launch {
             when (val result = transferRepository.enqueueDownload(file.id)) {
