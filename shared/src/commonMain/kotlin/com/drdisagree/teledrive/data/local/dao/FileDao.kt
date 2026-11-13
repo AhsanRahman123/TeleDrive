@@ -209,9 +209,10 @@ interface FileDao {
         folderId: String?,
         modifiedAt: Long
     ) {
-        if (ids.isEmpty()) return
-        move(ids, folderId, modifiedAt)
-        markPendingPublish(ids)
+        ids.distinct().chunked(400).forEach { batch ->
+            move(batch, folderId, modifiedAt)
+            markPendingPublish(batch)
+        }
     }
 
     @Query("UPDATE files SET isFavorite = :favorite WHERE id IN (:ids)")
