@@ -77,6 +77,55 @@ class LiveSyncTest {
     }
 
     @Test
+    fun `a local file move is recovered when its pending publish marker was missed`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        database.folderDao().upsert(
+            com.drdisagree.teledrive.data.local.entity.FolderEntity(
+                id = "destination",
+                chatId = TEST_CHAT,
+                parentId = null,
+                name = "Destination",
+                createdAt = 1_000,
+                modifiedAt = 1_000,
+                changedAt = 1_000
+            )
+        )
+        val files = database.fileDao()
+        // Simulate the old race: folderId changed, but sync observed the row before it
+        // was marked pendingPublish.
+        files.move(listOf("f1"), "destination", modifiedAt = 100_000)
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
+        val moved = files.byId("f1")!!
+        assertEquals("destination", moved.folderId)
+        assertTrue(moved.pendingPublish)
+    }
+
+    @Test
+    fun `a local trash mutation is recovered when its pending publish marker was missed`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        val files = database.fileDao()
+        // Simulate a row changed just before its old non-atomic pendingPublish update.
+        files.moveToTrash(listOf("f1"), trashedAt = 100_000)
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
+        val trashed = files.byId("f1")!!
+        assertEquals(100_000L, trashed.trashedAt)
+        assertEquals(null, trashed.folderId)
+        assertTrue(trashed.pendingPublish)
+    }
+
+    @Test
     fun `a stale manifest after successful publish cannot revert a local folder move`() = runBlocking {
         telegram.documents = listOf(
             document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
