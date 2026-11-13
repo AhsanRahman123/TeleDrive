@@ -199,12 +199,12 @@ internal fun DesktopMediaPlayer(
     val playerScope = rememberCoroutineScope()
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
-    val acceptsCurrentMediaEvents = remember(mrl, isAudio) { AtomicBoolean(false) }
+    val acceptsCurrentMediaEvents = remember(factory, isAudio) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
-    val frameUpdates = remember(mrl, isAudio) {
+    val frameUpdates = remember(factory, isAudio) {
         Channel<VideoFramePixels>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(frameUpdates) {
@@ -222,7 +222,7 @@ internal fun DesktopMediaPlayer(
     }
 
     // Keep high-frequency playback position notifications bounded as well.
-    val timeUpdates = remember(mrl, isAudio) {
+    val timeUpdates = remember(factory, isAudio) {
         Channel<Long>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(timeUpdates) {
@@ -234,7 +234,7 @@ internal fun DesktopMediaPlayer(
 
     // One native VLC instance is retained for the lifetime of this media viewer. The
     // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
-    val player = remember(mrl, isAudio) {
+    val player = remember(factory, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
@@ -380,10 +380,14 @@ internal fun DesktopMediaPlayer(
 
     val fullscreenController = LocalFullscreenController.current
     LaunchedEffect(player, mrl) {
-        // Each MRL owns its own VLC player and event channels. This prevents late callbacks
-        // from a previous video from mutating the next video's frame/time state while VLC is
-        // switching sources. Commands still run on vlcj's serialized player executor.
+        // Reuse one VLC player for the lifetime of this viewer. Recreating native VLC and
+        // its render/event channels for every MRL caused the previously-fixed flash/black frame
+        // when moving to the next video. Close the event gate while swapping sources so late
+        // callbacks from the outgoing item cannot update the incoming item's state.
         acceptsCurrentMediaEvents.set(false)
+        while (frameUpdates.tryReceive().isSuccess) Unit
+        while (timeUpdates.tryReceive().isSuccess) Unit
+        frame = null
         playing = false
         finished = false
         buffering = true
@@ -392,10 +396,8 @@ internal fun DesktopMediaPlayer(
         trackTick++
         player.submit {
             runCatching { player.controls().stop() }
-            // Accept opening/length/time callbacks from this player before play(): VLC may
-            // emit lengthChanged before playing. The old player's independent token remains
-            // false after disposal, so its late events cannot leak into this media item.
-            acceptsCurrentMediaEvents.set(true)
+            // Keep callbacks gated until VLC reports that the new source is playing. The
+            // playing callback reads status().length()/time() as a fallback for early events.
             runCatching { player.media().play(mrl) }
                 .onFailure {
                     acceptsCurrentMediaEvents.set(false)

@@ -489,8 +489,10 @@ class SyncRepositoryImpl(
             local = local?.let { FileBase.of(it) },
             remote = manifest?.let { FileBase.of(it) },
             base = FileBase.fromText(existing?.remoteBase),
-            localIsNewer = local != null &&
-                    (manifest == null || local.modifiedAt >= manifest.modifiedAt)
+            // Without a shared baseline, timestamps cannot safely arbitrate local vs remote:
+            // a pending local move can have an older clock than a stale remote manifest.
+            // Preserve local pending edits until they have been published successfully.
+            localIsNewer = local != null
         )
 
         val folderId = when {

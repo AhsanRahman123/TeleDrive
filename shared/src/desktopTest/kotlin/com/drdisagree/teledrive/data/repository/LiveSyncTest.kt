@@ -45,6 +45,38 @@ class LiveSyncTest {
     }
 
     @Test
+    fun `a pending local move survives a stale remote manifest when the local clock is behind`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        database.folderDao().upsert(
+            com.drdisagree.teledrive.data.local.entity.FolderEntity(
+                id = "destination",
+                chatId = TEST_CHAT,
+                parentId = null,
+                name = "Destination",
+                createdAt = 1_000,
+                modifiedAt = 1_000,
+                changedAt = 1_000
+            )
+        )
+        val files = database.fileDao()
+        files.moveAndMarkPendingPublish(listOf("f1"), "destination", modifiedAt = 1_000)
+
+        // Legacy rows may not have a remote merge baseline. In that case timestamps alone
+        // must not let a stale remote folderId overwrite a locally-pending move.
+        files.byId("f1")!!.let { files.upsert(it.copy(remoteBase = null)) }
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
+        val moved = files.byId("f1")!!
+        assertEquals("destination", moved.folderId)
+        assertTrue(moved.pendingPublish)
+    }
+
+    @Test
     fun `an upload from another device appears`() = runBlocking {
         telegram.documents = listOf(document(30, harness.caption(manifest("new", "new.jpg"))))
 
