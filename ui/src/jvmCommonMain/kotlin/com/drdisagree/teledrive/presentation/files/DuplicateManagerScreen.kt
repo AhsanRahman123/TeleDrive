@@ -46,7 +46,6 @@ import com.drdisagree.teledrive.domain.repository.DuplicateManagerRepository
 import com.drdisagree.teledrive.domain.repository.DuplicateScanFile
 import com.drdisagree.teledrive.domain.repository.DuplicateScanStatus
 import com.drdisagree.teledrive.domain.repository.TrashRepository
-import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import kotlinx.coroutines.launch
@@ -91,10 +90,6 @@ fun DuplicateManagerScreen(
         showQueue = false
         repository.startScan(folderId)
     }
-    AppBackHandler(enabled = true) {
-        if (showQueue) showQueue = false else onBack()
-    }
-
     fun matchesType(file: DuplicateScanFile): Boolean = when (typeFilter) {
         DuplicateTypeFilter.ALL -> true
         DuplicateTypeFilter.IMAGE -> file.mimeType.startsWith("image/")
@@ -159,6 +154,17 @@ fun DuplicateManagerScreen(
     fun visibleFileIds(): Set<String> = filteredGroups.flatMap { group ->
         orderedFiles(group).map { it.id }
     }.toSet()
+
+    val sortedQueue = remember(state.queue, fileSort) {
+        when (fileSort) {
+            DuplicateFileSort.NAME_ASC -> state.queue.sortedBy { it.file.name.lowercase() }
+            DuplicateFileSort.NAME_DESC -> state.queue.sortedByDescending { it.file.name.lowercase() }
+            DuplicateFileSort.SIZE_LARGEST -> state.queue.sortedByDescending { it.file.sizeBytes }
+            DuplicateFileSort.SIZE_SMALLEST -> state.queue.sortedBy { it.file.sizeBytes }
+            DuplicateFileSort.OLDEST_FIRST -> state.queue.sortedBy { it.file.addedAt }
+            DuplicateFileSort.NEWEST_FIRST -> state.queue.sortedByDescending { it.file.addedAt }
+        }
+    }
 
     fun selectAllMatches() {
         selectedIds = state.groups.flatMap { it.files }.map { it.id }.toSet()
@@ -295,6 +301,24 @@ fun DuplicateManagerScreen(
             }
 
             var selectedQueueIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(selectedQueueIds.size.toString() + " selected", modifier = Modifier.weight(1f))
+                TextButton(
+                    enabled = state.queue.isNotEmpty(),
+                    onClick = { selectedQueueIds = state.queue.map { it.file.id }.toSet() }
+                ) { Text("Select all") }
+                TextButton(
+                    enabled = state.queue.isNotEmpty(),
+                    onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
+                ) { Text("Select visible") }
+                TextButton(
+                    enabled = selectedQueueIds.isNotEmpty(),
+                    onClick = { selectedQueueIds = emptySet() }
+                ) { Text("Clear") }
+            }
             if (selectedQueueIds.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { repository.pauseFiles(selectedQueueIds) }) {
@@ -317,7 +341,7 @@ fun DuplicateManagerScreen(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(state.queue, key = { it.file.id }) { item ->
+                    items(sortedQueue, key = { it.file.id }) { item ->
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(10.dp),
