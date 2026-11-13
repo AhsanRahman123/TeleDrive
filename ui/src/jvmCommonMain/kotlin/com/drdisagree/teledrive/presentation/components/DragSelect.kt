@@ -34,6 +34,13 @@ import androidx.compose.ui.util.fastFirstOrNull
 /**
  * The pressed item becomes the anchor; holding near an edge keeps the list scrolling so a range can
  * run past the viewport.
+ *
+ * [mouseDragAddsToSelection] makes desktop mouse drags additive even when they start on an item
+ * that is already selected. This avoids turning a normal drag-to-select gesture into a range
+ * deselection. Touch long-press selection retains its existing toggle behavior.
+ *
+ * [resolveNearestVisibleItem] lets a desktop drag keep extending through spacing and the padded
+ * edge area of a lazy collection, including while edge auto-scroll is moving the visible items.
  */
 @Composable
 fun rememberDragSelect(
@@ -43,23 +50,39 @@ fun rememberDragSelect(
     onRange: (IntRange, shouldSelect: Boolean) -> Unit,
     onEnd: () -> Unit,
     edgeSize: Dp = EDGE_SIZE,
-    scrollPerFrame: Dp = SCROLL_PER_FRAME
+    scrollPerFrame: Dp = SCROLL_PER_FRAME,
+    mouseDragAddsToSelection: Boolean = false,
+    resolveNearestVisibleItem: Boolean = false
 ): Modifier = dragSelect(
     scrollable = gridState,
     indexAt = { offset ->
-        gridState.layoutInfo.visibleItemsInfo.fastFirstOrNull { item ->
+        val visibleItems = gridState.layoutInfo.visibleItemsInfo
+        visibleItems.fastFirstOrNull { item ->
             offset.x >= item.offset.x &&
                     offset.x <= item.offset.x + item.size.width &&
                     offset.y >= item.offset.y &&
                     offset.y <= item.offset.y + item.size.height
-        }?.index
+        }?.index ?: if (resolveNearestVisibleItem) {
+            visibleItems.minByOrNull { item ->
+                distanceToItemSquared(
+                    point = offset,
+                    left = item.offset.x.toFloat(),
+                    top = item.offset.y.toFloat(),
+                    right = (item.offset.x + item.size.width).toFloat(),
+                    bottom = (item.offset.y + item.size.height).toFloat()
+                )
+            }?.index
+        } else {
+            null
+        }
     },
     onStart = onStart,
     isSelected = isSelected,
     onRange = onRange,
     onEnd = onEnd,
     edgeSize = edgeSize,
-    scrollPerFrame = scrollPerFrame
+    scrollPerFrame = scrollPerFrame,
+    mouseDragAddsToSelection = mouseDragAddsToSelection
 )
 
 @Composable
@@ -70,20 +93,30 @@ fun rememberDragSelect(
     onRange: (IntRange, shouldSelect: Boolean) -> Unit,
     onEnd: () -> Unit,
     edgeSize: Dp = EDGE_SIZE,
-    scrollPerFrame: Dp = SCROLL_PER_FRAME
+    scrollPerFrame: Dp = SCROLL_PER_FRAME,
+    mouseDragAddsToSelection: Boolean = false,
+    resolveNearestVisibleItem: Boolean = false
 ): Modifier = dragSelect(
     scrollable = listState,
     indexAt = { offset ->
-        listState.layoutInfo.visibleItemsInfo.fastFirstOrNull { item ->
+        val visibleItems = listState.layoutInfo.visibleItemsInfo
+        visibleItems.fastFirstOrNull { item ->
             offset.y >= item.offset && offset.y <= item.offset + item.size
-        }?.index
+        }?.index ?: if (resolveNearestVisibleItem) {
+            visibleItems.minByOrNull { item ->
+                distanceToInterval(offset.y, item.offset, item.offset + item.size)
+            }?.index
+        } else {
+            null
+        }
     },
     onStart = onStart,
     isSelected = isSelected,
     onRange = onRange,
     onEnd = onEnd,
     edgeSize = edgeSize,
-    scrollPerFrame = scrollPerFrame
+    scrollPerFrame = scrollPerFrame,
+    mouseDragAddsToSelection = mouseDragAddsToSelection
 )
 
 @Composable
@@ -95,7 +128,8 @@ private fun dragSelect(
     onRange: (IntRange, shouldSelect: Boolean) -> Unit,
     onEnd: () -> Unit,
     edgeSize: Dp,
-    scrollPerFrame: Dp
+    scrollPerFrame: Dp,
+    mouseDragAddsToSelection: Boolean
 ): Modifier {
     val density = LocalDensity.current
     val edgePx = with(density) { edgeSize.toPx() }
@@ -118,6 +152,8 @@ private fun dragSelect(
             scrollable.scrollBy(autoScroll)
 
             // Keep extending the range while the pointer is stationary near an edge.
+            // Files opts into nearest-item hit testing so the range continues through the
+            // collection's bottom content padding instead of scrolling without selecting.
             val anchor = activeAnchor
             val pointer = latestPointerPosition
             val current = if (anchor >= 0 && pointer != null) {
@@ -161,12 +197,13 @@ private fun dragSelect(
                 latestPointerPosition = initialPosition
                 val initialIndex = currentIndexAt(initialPosition)
                 val selectionAnchor = anchor ?: initialIndex
+                val additiveMouseRange = down.type == PointerType.Mouse && mouseDragAddsToSelection
                 if (selectionAnchor != null) {
                     activeAnchor = selectionAnchor
-                    // The anchor's state at pointer-down fixes the operation for this
-                    // entire gesture. Dragging from a selected item removes the range;
-                    // dragging from an unselected item adds it.
-                    activeShouldSelect = !currentIsSelected(selectionAnchor)
+                    // Desktop drag-to-select is always additive when opted in. Starting on an
+                    // already-selected row must not invert the gesture and erase the range.
+                    // Touch long-press keeps its previous selected/unselected toggle semantics.
+                    activeShouldSelect = additiveMouseRange || !currentIsSelected(selectionAnchor)
                     val current = initialIndex ?: selectionAnchor
                     currentOnRange(
                         dragSelectionRange(selectionAnchor, current),
@@ -188,7 +225,8 @@ private fun dragSelect(
                         val start = anchor ?: current.also {
                             anchor = it
                             activeAnchor = it
-                            activeShouldSelect = !currentIsSelected(it)
+                            activeShouldSelect =
+                                additiveMouseRange || !currentIsSelected(it)
                         }
                         currentOnRange(dragSelectionRange(start, current), activeShouldSelect)
                     }
@@ -204,6 +242,32 @@ private fun dragSelect(
             }
         }
     }
+}
+
+private fun distanceToItemSquared(
+    point: Offset,
+    left: Float,
+    top: Float,
+    right: Float,
+    bottom: Float
+): Float {
+    val dx = when {
+        point.x < left -> left - point.x
+        point.x > right -> point.x - right
+        else -> 0f
+    }
+    val dy = when {
+        point.y < top -> top - point.y
+        point.y > bottom -> point.y - bottom
+        else -> 0f
+    }
+    return dx * dx + dy * dy
+}
+
+private fun distanceToInterval(value: Float, start: Int, end: Int): Float = when {
+    value < start -> start - value
+    value > end -> value - end
+    else -> 0f
 }
 
 /**

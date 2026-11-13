@@ -9,6 +9,7 @@ import it.tdlight.ExceptionHandler
 import it.tdlight.Init
 import it.tdlight.UpdatesHandler
 import it.tdlight.jni.TdApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -17,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -964,6 +966,112 @@ class DesktopTelegramClient(
                 ?: throw TelegramException(500, "Copy did not complete")
 
             else -> throw TelegramException(500, "Copy did not complete")
+        }
+    }
+
+    /**
+     * Copies 2-10 documents in a single Telegram album request. Every item keeps its own
+     * manifest caption, and completion updates are correlated by their pending message IDs.
+     */
+    override suspend fun copyDocuments(
+        chatId: Long,
+        documents: List<TelegramDocumentCopyRequest>
+    ): List<TelegramDocumentCopyResult> {
+        if (documents.isEmpty()) return emptyList()
+        if (documents.size == 1) {
+            return super<TelegramClient>.copyDocuments(chatId, documents)
+        }
+        require(documents.size in 2..10) { "Telegram albums support 2 to 10 documents" }
+
+        val contents = documents.map { request ->
+            TdApi.InputMessageDocument(
+                TdApi.InputDocument(TdApi.InputFileRemote(request.remoteFileId), null, false),
+                TdApi.FormattedText(request.caption, emptyArray())
+            )
+        }.toTypedArray()
+
+        val subscribed = CompletableDeferred<Unit>()
+        val events = Channel<TdApi.Object>(Channel.UNLIMITED)
+        val collector = scope.launch {
+            updates.onSubscription { subscribed.complete(Unit) }.collect { event ->
+                events.send(event)
+            }
+        }
+
+        try {
+            withTimeoutOrNull(COPY_TIMEOUT_MS.milliseconds) { subscribed.await() }
+                ?: throw TelegramException(REQUEST_TIMEOUT_CODE, "Telegram update listener did not start")
+
+            val pending = paced {
+                send<TdApi.Messages>(
+                    TdApi.SendMessageAlbum(chatId, null, null, null, contents)
+                )
+            }.messages.toList()
+
+            if (pending.size != documents.size) {
+                val error = TelegramException(
+                    500,
+                    "Telegram returned ${pending.size} album messages for ${documents.size} documents"
+                )
+                return documents.map { TelegramDocumentCopyResult(error = error) }
+            }
+
+            val pendingIds = pending.mapTo(mutableSetOf()) { it.id }
+            val completed = mutableMapOf<Long, RemoteDocument>()
+            val failures = mutableMapOf<Long, TelegramException>()
+
+            val allFinished = withTimeoutOrNull(COPY_TIMEOUT_MS.milliseconds) {
+                while (completed.size + failures.size < pendingIds.size) {
+                    when (val event = events.receive()) {
+                        is TdApi.UpdateMessageSendSucceeded -> {
+                            if (event.oldMessageId in pendingIds) {
+                                val document = event.message.toRemoteDocument()
+                                if (document == null) {
+                                    failures[event.oldMessageId] = TelegramException(
+                                        500,
+                                        "Telegram album item was not returned as a document"
+                                    )
+                                } else {
+                                    completed[event.oldMessageId] = document
+                                }
+                            }
+                        }
+
+                        is TdApi.UpdateMessageSendFailed -> {
+                            if (event.oldMessageId in pendingIds) {
+                                failures[event.oldMessageId] = TelegramException.from(
+                                    event.error.code,
+                                    event.error.message
+                                )
+                            }
+                        }
+                    }
+                }
+                true
+            } != null
+
+            val timeout = if (allFinished) null else {
+                TelegramException(REQUEST_TIMEOUT_CODE, "Telegram did not finish copying the album")
+            }
+
+            return pending.map { message ->
+                completed[message.id]?.let { document ->
+                    TelegramDocumentCopyResult(document = document)
+                } ?: TelegramDocumentCopyResult(
+                    error = failures[message.id] ?: timeout
+                        ?: TelegramException(500, "Telegram album item has no completion result")
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: TelegramException) {
+            return documents.map { TelegramDocumentCopyResult(error = error) }
+        } catch (error: Exception) {
+            val wrapped = TelegramException(500, error.message ?: "Telegram album copy failed")
+            return documents.map { TelegramDocumentCopyResult(error = wrapped) }
+        } finally {
+            collector.cancel()
+            events.close()
         }
     }
 

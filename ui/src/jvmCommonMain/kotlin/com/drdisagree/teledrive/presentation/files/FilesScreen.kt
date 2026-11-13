@@ -141,6 +141,7 @@ import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.ctrlClickSelect
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
@@ -293,6 +294,7 @@ fun FilesScreen(
     var showCopyPicker by remember { mutableStateOf(false) }
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
+    var showDuplicateManager by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -394,8 +396,14 @@ fun FilesScreen(
         }
     }
 
-    AppBackHandler(enabled = selectionMode || state.folderId != null || onBack != null) {
-        if (selectionMode) viewModel.clearSelection() else navigateBackOneStep()
+    AppBackHandler(
+        enabled = showDuplicateManager || selectionMode || state.folderId != null || onBack != null
+    ) {
+        when {
+            showDuplicateManager -> showDuplicateManager = false
+            selectionMode -> viewModel.clearSelection()
+            else -> navigateBackOneStep()
+        }
     }
     fun activateTab(tab: FilesTabState) {
         if (tab.id == selectedTabId) return
@@ -423,14 +431,50 @@ fun FilesScreen(
     LaunchedEffect(activeFolderId, activeFolderLabel, selectedTabId) {
         viewModel.updateSelectedWorkspaceTab(activeFolderId, activeFolderLabel)
     }
-    LaunchedEffect(selectedTabId, state.folderId, files.itemCount, files.loadState.refresh) {
+    val selectedWorkspaceTabFolderId =
+        tabs.firstOrNull { it.id == selectedTabId }?.folderId
+
+    // Restore a tab/folder position only when navigation changes. Do not key this effect
+    // to Paging itemCount: every appended page changes that count, and re-running
+    // scrollToItem(0) was snapping the user back to the top while they scrolled.
+    LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId) {
         val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
-        if (currentTab.folderId != state.folderId || files.loadState.refresh is LoadState.Loading) {
-            return@LaunchedEffect
-        }
+        if (currentTab.folderId != state.folderId) return@LaunchedEffect
+
+        snapshotFlow { files.loadState.refresh }
+            .first { it !is LoadState.Loading }
+
         val target = tabPositions[selectedTabId to state.folderId] ?: (0 to 0)
+        val targetIndex = target.first.coerceAtLeast(0)
+        val targetFileIndex = targetIndex - state.folders.size
+
+        // If a saved tab position is beyond the first Paging page, request pages until
+        // that item is available (or the source reaches its end) before restoring once.
+        if (targetFileIndex >= 0) {
+            while (
+                files.itemCount <= targetFileIndex &&
+                !files.loadState.append.endOfPaginationReached &&
+                files.loadState.append !is LoadState.Error
+            ) {
+                val loadedCount = files.itemCount
+                if (loadedCount <= 0) break
+                files[loadedCount - 1]
+                val advanced = withTimeoutOrNull(FOCUS_PAGE_WAIT_MS.milliseconds) {
+                    snapshotFlow { files.itemCount to files.loadState.append }
+                        .first { (count, append) ->
+                            count > loadedCount ||
+                                append.endOfPaginationReached ||
+                                append is LoadState.Error
+                        }
+                } ?: break
+                if (advanced.second is LoadState.Error) break
+            }
+        }
+
         val count = state.folders.size + files.itemCount
-        if (count > 0) gridState.scrollToItem(target.first.coerceIn(0, count - 1), target.second)
+        if (count > 0) {
+            gridState.scrollToItem(targetIndex.coerceIn(0, count - 1), target.second)
+        }
     }
     var fabVisible by remember { mutableStateOf(true) }
     val listScrolls by remember {
@@ -493,18 +537,47 @@ fun FilesScreen(
                 .fillMaxSize()
                 .collectionCommandShortcuts(
                     focusRequester = filesCommandFocusRequester,
-                    onSelectAll = { viewModel.selectAll(); true },
-                    onCopy = { if (selectedCount > 0) { viewModel.copyToClipboardSelected(); true } else false },
-                    onCut = { if (selectedCount > 0) { viewModel.cutSelected(); true } else false },
-                    onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
-                    onNewFolder = { showCreateFolder = true; true },
-                    onNewTab = { createTab(); true }
+                    onSelectAll = {
+                        if (showDuplicateManager) false else { viewModel.selectAll(); true }
+                    },
+                    onDelete = {
+                        if (
+                            !showDuplicateManager && selectedCount > 0 &&
+                            !showCreateFolder && renameTarget == null
+                        ) {
+                            confirmTrash = true
+                            true
+                        } else false
+                    },
+                    onCopy = {
+                        if (showDuplicateManager) false else viewModel.copyToClipboardSelected()
+                    },
+                    onCut = {
+                        if (showDuplicateManager) false else viewModel.cutSelected()
+                    },
+                    onPaste = {
+                        if (!showDuplicateManager && viewModel.hasClipboardItems()) {
+                            viewModel.paste()
+                            true
+                        } else false
+                    },
+                    onNewFolder = {
+                        if (showDuplicateManager) false else { showCreateFolder = true; true }
+                    },
+                    onNewTab = {
+                        if (showDuplicateManager) false else { createTab(); true }
+                    },
+                    // Files has no inline text editor in this workspace (edit dialogs
+                    // are separate windows), so handle shortcuts before row/button children.
+                    interceptBeforeChildren = true
                 )
         ) {
             Scaffold(
                 snackbarHost = {},
                 topBar = {
-                    if (selectionMode) {
+                    if (showDuplicateManager) {
+                        // DuplicateManagerScreen provides its own title and back control.
+                    } else if (selectionMode) {
                         TopAppBar(
                             colors = liftedTopAppBarColors(lifted),
                             title = {
@@ -718,6 +791,17 @@ fun FilesScreen(
                                         contentDescription = "View thumbnail queue"
                                     )
                                 }
+                                if (state.folderId != null) {
+                                    TooltipIconButton(
+                                        tooltip = "Find duplicate files in this folder",
+                                        onClick = { showDuplicateManager = true }
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ContentCopy,
+                                            contentDescription = "Find duplicate files"
+                                        )
+                                    }
+                                }
                                 RefreshAction(
                                     refreshing = refreshing,
                                     onRefresh = viewModel::refresh
@@ -790,7 +874,7 @@ fun FilesScreen(
                 },
                 floatingActionButton = {
                     AnimatedVisibility(
-                        visible = !selectionMode && (fabVisible || showAddMenu),
+                        visible = !showDuplicateManager && !selectionMode && (fabVisible || showAddMenu),
                         enter = scaleIn() + fadeIn(),
                         exit = scaleOut() + fadeOut()
                     ) {
@@ -870,6 +954,13 @@ fun FilesScreen(
                         .padding(top = padding.calculateTopPadding())
                         .nestedScroll(fabScrollConnection)
                 ) {
+                    if (showDuplicateManager && state.folderId != null) {
+                        DuplicateManagerScreen(
+                            folderId = state.folderId,
+                            onBack = { showDuplicateManager = false },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -979,6 +1070,7 @@ fun FilesScreen(
                                 viewModel = viewModel
                             )
                         }
+                    }
                     }
                 }
             }
@@ -1328,7 +1420,14 @@ private fun FilesContent(
             }
             viewModel.extendRangeSelection(fileIds, folderIds, shouldSelect)
         },
-        onEnd = viewModel::endRangeSelection
+        onEnd = viewModel::endRangeSelection,
+        // File-manager mouse drags should extend the current selection, not invert it
+        // when the gesture starts over an already-selected item. Resolve gaps and the
+        // padded viewport edge so auto-scroll continues extending the range.
+        // The starting row determines the gesture: selected anchor = deselect range;
+        // unselected anchor = select range. Do not force every mouse drag to be additive.
+        mouseDragAddsToSelection = false,
+        resolveNearestVisibleItem = true
     )
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
@@ -1372,6 +1471,7 @@ private fun FilesContent(
                     onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
+                        .ctrlClickSelect { viewModel.toggleFolderSelection(folder.id) }
                         .animateItem()
                         .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
@@ -1392,6 +1492,7 @@ private fun FilesContent(
                     onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
+                        .ctrlClickSelect { viewModel.toggleFolderSelection(folder.id) }
                         .animateItem()
                         .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
@@ -1430,6 +1531,7 @@ private fun FilesContent(
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
+                        .ctrlClickSelect { viewModel.toggleSelection(file.id) }
                         .animateItem()
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
@@ -1461,6 +1563,7 @@ private fun FilesContent(
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
+                        .ctrlClickSelect { viewModel.toggleSelection(file.id) }
                         .animateItem()
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
@@ -1491,6 +1594,7 @@ private fun FilesContent(
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
+                        .ctrlClickSelect { viewModel.toggleSelection(file.id) }
                         .animateItem()
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }

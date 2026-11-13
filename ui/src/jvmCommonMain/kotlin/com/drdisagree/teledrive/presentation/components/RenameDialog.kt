@@ -35,7 +35,20 @@ fun RenameDialog(
                 value = value,
                 onValueChange = { value = it },
                 singleLine = true,
-                label = { Text(stringResource(Res.string.common_name)) }
+                label = { Text(stringResource(Res.string.common_name)) },
+                modifier = Modifier.onPreviewKeyEvent { event ->
+                    val valid = value.isNotBlank() && value.trim() != initialValue
+                    if (
+                        valid &&
+                        event.type == KeyEventType.KeyDown &&
+                        (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                    ) {
+                        onConfirm(value.trim())
+                        true
+                    } else {
+                        false
+                    }
+                }
             )
         },
         confirmButton = {
