@@ -165,7 +165,8 @@ internal fun DesktopMediaPlayer(
     onSleepAtTrackEnd: () -> Unit = {},
     onClearSleepTimer: () -> Unit = {},
     onPlaybackFinished: () -> Unit = {},
-    onControlsVisibilityChange: (Boolean) -> Unit = {}
+    onControlsVisibilityChange: (Boolean) -> Unit = {},
+    onDelete: () -> Unit = {}
 ) {
     val factory = VlcPlayback.factory ?: return
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
@@ -754,6 +755,7 @@ internal fun DesktopMediaPlayer(
                         hKeyPressed = false
                         return@onPreviewKeyEvent true
                     }
+                    if (event.key == Key.Delete) return@onPreviewKeyEvent true
                     return@onPreviewKeyEvent false
                 }
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -763,6 +765,11 @@ internal fun DesktopMediaPlayer(
                 val shift = event.isShiftPressed
 
                 when {
+                    key == Key.Delete && !ctrl && !alt && !shift -> {
+                        onDelete()
+                        interactionTick++
+                        true
+                    }
                     key == Key.Spacebar && !ctrl && !alt && !shift -> {
                         togglePlayback()
                         interactionTick++
