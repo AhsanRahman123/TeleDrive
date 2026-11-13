@@ -245,6 +245,29 @@ class DuplicateManagerRepositoryImpl(
         persistControlState()
     }
 
+    override fun removeTrashedFiles(fileIds: Set<String>) {
+        if (fileIds.isEmpty()) return
+
+        // A currently hashing file may be cancelled while its Trash operation commits.
+        // Mark it cancelled before removing it so the worker treats cancellation as an
+        // expected queue action rather than terminating the entire scan.
+        synchronized(cancelledFileIds) { cancelledFileIds.addAll(fileIds) }
+        synchronized(pausedFileIds) { pausedFileIds.removeAll(fileIds) }
+        if (activeFileId?.let { it in fileIds } == true) activeTask?.cancel()
+
+        _state.update { current ->
+            val remaining = current.queue.filterNot { it.file.id in fileIds }
+            current.copy(
+                queue = remaining,
+                groups = buildGroups(remaining),
+                scannedFiles = remaining.count { it.status == DuplicateScanStatus.SCANNED },
+                totalFiles = remaining.size,
+                activeFileId = current.activeFileId?.takeUnless { it in fileIds }
+            )
+        }
+        persistControlState()
+    }
+
     override fun retryFiles(fileIds: Set<String>) {
         if (fileIds.isEmpty()) return
         synchronized(cancelledFileIds) { cancelledFileIds.removeAll(fileIds) }
