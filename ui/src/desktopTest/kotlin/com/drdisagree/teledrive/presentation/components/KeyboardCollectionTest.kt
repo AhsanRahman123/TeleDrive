@@ -203,6 +203,106 @@ class KeyboardCollectionTest {
     }
 
     @Test
+    fun `collection commands are dispatched while a row owns focus`() {
+        var selectedAll = 0
+        var copied = 0
+        var cut = 0
+        var pasted = 0
+        var newFolder = 0
+        var newTab = 0
+
+        rule.setContent {
+            val listState = rememberLazyListState()
+            val keyboard = rememberKeyboardCollection(listState)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(300.dp, 200.dp)
+                    .keyboardCollection(
+                        keyboard,
+                        itemCount = 1,
+                        shortcuts = CollectionShortcuts(
+                            onSelectAll = { selectedAll++ },
+                            onCopy = { copied++ },
+                            onCut = { cut++ },
+                            onPaste = { pasted++ },
+                            onNewFolder = { newFolder++ },
+                            onNewTab = { newTab++ }
+                        )
+                    )
+            ) {
+                item {
+                    BasicText(
+                        "row",
+                        Modifier
+                            .keyboardCollectionItem(keyboard, 0)
+                            .testTag("command-row")
+                            .size(100.dp)
+                            .clickable {}
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("command-row").requestFocus()
+        rule.onNodeWithTag("command-row").performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.A)
+            pressKey(Key.C)
+            pressKey(Key.X)
+            pressKey(Key.V)
+            pressKey(Key.N)
+            pressKey(Key.T)
+            keyUp(Key.CtrlLeft)
+        }
+
+        assertEquals(1, selectedAll)
+        assertEquals(1, copied)
+        assertEquals(1, cut)
+        assertEquals(1, pasted)
+        assertEquals(1, newFolder)
+        assertEquals(1, newTab)
+    }
+
+    @Test
+    fun `collection select all does not intercept a nested text field shortcut`() {
+        var selectedAll = 0
+        rule.setContent {
+            val listState = rememberLazyListState()
+            val keyboard = rememberKeyboardCollection(listState)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(300.dp, 200.dp)
+                    .keyboardCollection(
+                        keyboard,
+                        itemCount = 1,
+                        shortcuts = CollectionShortcuts(onSelectAll = { selectedAll++ })
+                    )
+            ) {
+                item {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = "editable text",
+                        onValueChange = {},
+                        modifier = Modifier
+                            .keyboardCollectionItem(keyboard, 0)
+                            .testTag("nested-editor")
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("nested-editor").requestFocus()
+        rule.onNodeWithTag("nested-editor").performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.A)
+            keyUp(Key.CtrlLeft)
+        }
+
+        assertEquals(0, selectedAll)
+    }
+
+    @Test
     fun `backspace goes back`() {
         setGrid(columns = 1)
         rule.onNodeWithTag("item-0").requestFocus()
