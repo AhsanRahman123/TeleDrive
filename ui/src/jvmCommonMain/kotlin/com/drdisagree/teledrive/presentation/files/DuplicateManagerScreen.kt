@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -182,6 +184,7 @@ fun DuplicateManagerScreen(
     val sortedQueue = remember(state.queue, queueSearch, queueSort) {
         val needle = queueSearch.trim().lowercase()
         val matching = state.queue.filter { item ->
+            item.status != DuplicateScanStatus.CANCELLED &&
             needle.isBlank() ||
                 item.file.name.lowercase().contains(needle) ||
                 item.file.folderPath.lowercase().contains(needle)
@@ -208,8 +211,8 @@ fun DuplicateManagerScreen(
         },
         onEnd = { queueSelectionBase = emptySet() }
     )
-    val activeQueueCount = state.waitingCount + state.generatingCount
     val individuallyPausedCount = state.queue.count { it.status == DuplicateScanStatus.PAUSED }
+    val activeQueueCount = state.waitingCount + state.generatingCount + individuallyPausedCount + state.failedCount
     val queueEta = when {
         state.isPaused -> "Estimated remaining: paused"
         activeQueueCount == 0 && individuallyPausedCount > 0 ->
@@ -259,6 +262,8 @@ fun DuplicateManagerScreen(
                         when (val result = trashRepository.moveFilesToTrash(ids)) {
                             is AppResult.Success -> {
                                 selectedIds = emptySet()
+                                selectedQueueIds = selectedQueueIds - ids.toSet()
+                                repository.removeTrashedFiles(ids.toSet())
                                 message = "Moved " + ids.size + " file(s) to Trash."
                                 repository.startScan(folderId)
                             }
@@ -299,7 +304,7 @@ fun DuplicateManagerScreen(
                 )
             }
             TextButton(onClick = { showQueue = !showQueue }) {
-                Text(if (showQueue) "View results" else "View queue (" + state.totalFiles + ")")
+                Text(if (showQueue) "View results" else "View queue (" + activeQueueCount + ")")
             }
             TooltipIconButton(tooltip = "Scan this folder again", onClick = {
                 selectedIds = emptySet()
@@ -355,7 +360,10 @@ fun DuplicateManagerScreen(
                             it.status == DuplicateScanStatus.GENERATING ||
                             it.status == DuplicateScanStatus.PAUSED
                     },
-                    onClick = repository::cancelAll
+                    onClick = {
+                        repository.cancelAll()
+                        selectedQueueIds = emptySet()
+                    }
                 ) { Text("Cancel all") }
                 OutlinedButton(
                     enabled = state.failedCount > 0 || state.cancelledCount > 0,
@@ -418,7 +426,7 @@ fun DuplicateManagerScreen(
                 }
                 TextButton(
                     enabled = state.queue.isNotEmpty(),
-                    onClick = { selectedQueueIds = state.queue.map { it.file.id }.toSet() }
+                    onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
                 ) { Text("Select all") }
                 TextButton(
                     enabled = sortedQueue.isNotEmpty(),
@@ -541,7 +549,7 @@ fun DuplicateManagerScreen(
                     }
                     DesktopVerticalScrollbar(
                         state = queueListState,
-                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxSize()
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(12.dp)
                     )
                     DesktopScrollEdgeControls(
                         state = queueListState,
