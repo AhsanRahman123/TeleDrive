@@ -473,7 +473,9 @@ class DuplicateManagerRepositoryImpl(
         val entity = fileDao.byId(fileId) ?: return null
         entity.contentHash?.takeIf { it.isNotBlank() }?.let { return it }
 
-        val local = entity.localPath?.let(::File)?.takeIf { it.isFile && it.length() > 0L }
+        // Empty files are valid content too: hashing them lets identical zero-byte files
+        // appear in the same duplicate group instead of being skipped as unreadable.
+        val local = entity.localPath?.let(::File)?.takeIf { it.isFile }
         if (local != null) {
             return Hashing.sha256(local)
         }
