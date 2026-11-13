@@ -80,7 +80,7 @@ fun Modifier.collectionCommandShortcuts(
         .pointerInput(focusRequester) {
             awaitPointerEventScope {
                 while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val event = awaitPointerEvent(PointerEventPass.Final)
                     if (event.type == PointerEventType.Press) {
                         focusRequester.requestFocus()
                     }
