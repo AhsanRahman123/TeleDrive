@@ -514,8 +514,13 @@ fun DuplicateManagerScreen(
             if (sortedQueue.isEmpty()) {
                 Text(
                     when {
+                        queueSearch.isNotBlank() && showCheckedQueue ->
+                            "No checked files match this search."
+                        queueSearch.isNotBlank() ->
+                            "No current queue items match this search."
+                        showCheckedQueue ->
+                            "No files have been checked yet. They will appear here as the scan progresses."
                         state.queue.isEmpty() -> "There are no files in this folder tree."
-                        queueSearch.isNotBlank() -> "No queue items match this search."
                         state.failedCount > 0 || state.cancelledCount > 0 ->
                             "No active queue items. Failed/cancelled items can be retried above."
                         else -> "Queue complete."
