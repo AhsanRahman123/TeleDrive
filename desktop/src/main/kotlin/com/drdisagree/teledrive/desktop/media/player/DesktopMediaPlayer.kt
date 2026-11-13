@@ -119,6 +119,7 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -198,6 +199,9 @@ internal fun DesktopMediaPlayer(
     val latestOnPlaybackFinished = rememberUpdatedState(onPlaybackFinished)
     val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
     val playerScope = rememberCoroutineScope()
+    // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
+    // media. The new source becomes active only after VLC reports that it has started playing.
+    val acceptsCurrentMediaEvents = remember(factory, isAudio) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
@@ -229,13 +233,14 @@ internal fun DesktopMediaPlayer(
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
-                    frameUpdates.trySend(image)
+                    if (acceptsCurrentMediaEvents.get()) frameUpdates.trySend(image)
                 })
             }
             events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
                 // vlcj event callbacks run on native/event threads. Compose state is only
                 // mutated from the player scope, never directly from those callback threads.
                 override fun playing(mediaPlayer: MediaPlayer) {
+                    acceptsCurrentMediaEvents.set(true)
                     playerScope.launch {
                         playing = true
                         finished = false
@@ -259,10 +264,13 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun paused(mediaPlayer: MediaPlayer) {
-                    playerScope.launch { playing = false }
+                    if (acceptsCurrentMediaEvents.get()) {
+                        playerScope.launch { playing = false }
+                    }
                 }
 
                 override fun finished(mediaPlayer: MediaPlayer) {
+                    if (!acceptsCurrentMediaEvents.getAndSet(false)) return
                     playerScope.launch {
                         playing = false
                         finished = true
@@ -273,18 +281,23 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
-                    playerScope.launch { buffering = newCache < 100f }
+                    if (acceptsCurrentMediaEvents.get()) {
+                        playerScope.launch { buffering = newCache < 100f }
+                    }
                 }
 
                 override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
-                    timeUpdates.trySend(newTime)
+                    if (acceptsCurrentMediaEvents.get()) timeUpdates.trySend(newTime)
                 }
 
                 override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
-                    playerScope.launch { durationMs = newLength }
+                    if (acceptsCurrentMediaEvents.get()) {
+                        playerScope.launch { durationMs = newLength }
+                    }
                 }
 
                 override fun error(mediaPlayer: MediaPlayer) {
+                    acceptsCurrentMediaEvents.set(false)
                     playerScope.launch {
                         playing = false
                         finished = true
@@ -352,6 +365,7 @@ internal fun DesktopMediaPlayer(
         // Queue media replacement on vlcj's serialized player executor. Direct calls from the
         // Compose thread can race native playback callbacks while the player is switching files.
         // Clear the outgoing frame so an old video's last image is never presented as the new one.
+        acceptsCurrentMediaEvents.set(false)
         frame = null
         playing = false
         finished = false
