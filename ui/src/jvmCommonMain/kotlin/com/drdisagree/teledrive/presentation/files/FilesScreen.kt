@@ -295,6 +295,8 @@ fun FilesScreen(
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
     var showDuplicateManager by remember { mutableStateOf(false) }
+    var selectingAllFromShortcut by remember { mutableStateOf(false) }
+    var deleteAfterSelectAll by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -538,16 +540,40 @@ fun FilesScreen(
                 .collectionCommandShortcuts(
                     focusRequester = filesCommandFocusRequester,
                     onSelectAll = {
-                        if (showDuplicateManager) false else { viewModel.selectAll(); true }
+                        if (showDuplicateManager) {
+                            false
+                        } else {
+                            if (!selectingAllFromShortcut) {
+                                selectingAllFromShortcut = true
+                                viewModel.selectAll {
+                                    selectingAllFromShortcut = false
+                                    if (deleteAfterSelectAll) {
+                                        deleteAfterSelectAll = false
+                                        if (
+                                            viewModel.selectionSnapshot.value.count > 0 &&
+                                            !showCreateFolder && renameTarget == null
+                                        ) {
+                                            confirmTrash = true
+                                        }
+                                    }
+                                }
+                            }
+                            true
+                        }
                     },
                     onDelete = {
-                        if (
-                            !showDuplicateManager && selectedCount > 0 &&
-                            !showCreateFolder && renameTarget == null
-                        ) {
-                            confirmTrash = true
-                            true
-                        } else false
+                        when {
+                            showDuplicateManager || showCreateFolder || renameTarget != null -> false
+                            selectingAllFromShortcut -> {
+                                deleteAfterSelectAll = true
+                                true
+                            }
+                            selectedCount > 0 -> {
+                                confirmTrash = true
+                                true
+                            }
+                            else -> false
+                        }
                     },
                     onCopy = {
                         if (showDuplicateManager) false else viewModel.copyToClipboardSelected()
