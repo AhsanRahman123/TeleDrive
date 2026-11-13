@@ -1165,22 +1165,23 @@ private fun PreviewPane(
                                             downEvent = awaitPointerEvent()
                                             down = downEvent.changes.firstOrNull { it.pressed }
                                         }
+                                        val mouseDown = down ?: return@awaitEachGesture
                                         if (
-                                            down.type != PointerType.Mouse ||
+                                            mouseDown.type != PointerType.Mouse ||
                                             !downEvent.buttons.isPrimaryPressed ||
                                             (zoomableState.zoomFraction ?: 0f) > 0.001f
                                         ) {
                                             return@awaitEachGesture
                                         }
 
-                                        var lastPosition = down.position
+                                        var lastPosition = mouseDown.position
                                         var totalX = 0f
                                         var totalY = 0f
                                         var horizontalSwipeStarted = false
 
                                         while (true) {
                                             val event = awaitPointerEvent()
-                                            val change = event.changes.firstOrNull { it.id == down.id }
+                                            val change = event.changes.firstOrNull { it.id == mouseDown.id }
                                                 ?: break
                                             val delta = change.position - lastPosition
                                             lastPosition = change.position
