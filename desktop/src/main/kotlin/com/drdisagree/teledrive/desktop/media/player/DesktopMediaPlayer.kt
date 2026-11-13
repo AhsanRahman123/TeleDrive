@@ -199,25 +199,54 @@ internal fun DesktopMediaPlayer(
     val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
     val playerScope = rememberCoroutineScope()
 
+    // VLC calls its render callback from a native thread. Conflate pending frames before
+    // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
+    // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
+    val frameUpdates = remember(factory, isAudio) {
+        Channel<ImageBitmap>(capacity = Channel.CONFLATED)
+    }
+    LaunchedEffect(frameUpdates) {
+        for (nextFrame in frameUpdates) frame = nextFrame
+    }
+    DisposableEffect(frameUpdates) {
+        onDispose { frameUpdates.close() }
+    }
+
+    // Keep high-frequency playback position notifications bounded as well.
+    val timeUpdates = remember(factory, isAudio) {
+        Channel<Long>(capacity = Channel.CONFLATED)
+    }
+    LaunchedEffect(timeUpdates) {
+        for (position in timeUpdates) timeMs = position
+    }
+    DisposableEffect(timeUpdates) {
+        onDispose { timeUpdates.close() }
+    }
+
     // One native VLC instance is retained for the lifetime of this media viewer. The
     // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
     val player = remember(factory, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
-            if (!isAudio) videoSurface().set(composeVideoSurface { frame = it })
+            if (!isAudio) {
+                videoSurface().set(composeVideoSurface { image ->
+                    frameUpdates.trySend(image)
+                })
+            }
             events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
+                // vlcj event callbacks run on native/event threads. Compose state is only
+                // mutated from the player scope, never directly from those callback threads.
                 override fun playing(mediaPlayer: MediaPlayer) {
-                    playing = true
-                    finished = false
-                    buffering = false
-                    // Do not call LibVLC from this native callback thread. The event thread
-                    // must return immediately; volume restoration is queued below via submit().
-                    trackTick++
+                    playerScope.launch {
+                        playing = true
+                        finished = false
+                        buffering = false
+                        trackTick++
+                    }
                 }
 
                 override fun audioDeviceChanged(mediaPlayer: MediaPlayer, audioDevice: String) {
                     // Windows can replace the default output when USB/Bluetooth earphones are
-                    // attached. Publish the state change on Compose's dispatcher, and never
-                    // call LibVLC from this native callback.
+                    // attached. Re-apply audio state from the Compose scope.
                     playerScope.launch { trackTick++ }
                 }
 
@@ -226,17 +255,17 @@ internal fun DesktopMediaPlayer(
                     type: TrackType,
                     id: Int
                 ) {
-                    trackTick++
+                    playerScope.launch { trackTick++ }
                 }
 
                 override fun paused(mediaPlayer: MediaPlayer) {
-                    playing = false
+                    playerScope.launch { playing = false }
                 }
 
                 override fun finished(mediaPlayer: MediaPlayer) {
-                    playing = false
-                    finished = true
                     playerScope.launch {
+                        playing = false
+                        finished = true
                         if (!latestRepeatOne.value || latestSleepAtTrackEnd.value) {
                             latestOnPlaybackFinished.value()
                         }
@@ -244,21 +273,23 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
-                    buffering = newCache < 100f
+                    playerScope.launch { buffering = newCache < 100f }
                 }
 
                 override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
-                    timeMs = newTime
+                    timeUpdates.trySend(newTime)
                 }
 
                 override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
-                    durationMs = newLength
+                    playerScope.launch { durationMs = newLength }
                 }
 
                 override fun error(mediaPlayer: MediaPlayer) {
-                    playing = false
-                    finished = true
-                    buffering = false
+                    playerScope.launch {
+                        playing = false
+                        finished = true
+                        buffering = false
+                    }
                 }
             })
         }
@@ -318,15 +349,25 @@ internal fun DesktopMediaPlayer(
 
     val fullscreenController = LocalFullscreenController.current
     LaunchedEffect(player, mrl) {
-        // Reuse the video surface and keep the last frame visible until VLC supplies the
-        // replacement frame. Reset only media-specific UI state, not the native player.
+        // Queue media replacement on vlcj's serialized player executor. Direct calls from the
+        // Compose thread can race native playback callbacks while the player is switching files.
+        // Clear the outgoing frame so an old video's last image is never presented as the new one.
+        frame = null
         playing = false
         finished = false
         buffering = true
         timeMs = 0L
         durationMs = 0L
         trackTick++
-        player.media().play(mrl)
+        player.submit {
+            runCatching { player.controls().stop() }
+            runCatching { player.media().play(mrl) }
+                .onFailure { playerScope.launch {
+                    playing = false
+                    finished = true
+                    buffering = false
+                } }
+        }
     }
 
     DisposableEffect(player) {
