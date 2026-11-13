@@ -354,7 +354,7 @@ fun DesktopPreviewScreen(
     var moveTarget by remember { mutableStateOf<DriveFile?>(null) }
     var playerChromeVisible by remember { mutableStateOf(true) }
     // Keep the image-toolbar preference for the whole preview session, including when
-    // moving between image files. H (or the visible toolbar toggle) restores it.
+    // moving between image files. H restores hidden controls; the visible toolbar icon hides them.
     var imageChromeVisible by remember { mutableStateOf(true) }
     val previewChromeVisible = when {
         mediaCategory != null -> playerChromeVisible
