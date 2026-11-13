@@ -1164,14 +1164,13 @@ private fun PreviewPane(
                             contentDescription = file.name,
                             modifier = Modifier
                                 .fillMaxSize()
-                                // A held left-mouse drag navigates only while the image is at
-                                // its fit zoom. Once zoomed, Telephoto keeps ownership of drag
-                                // gestures for panning. We wait for horizontal slop before
-                                // consuming anything so clicks and double-click zoom still work.
-                                .pointerInput(zoomableState, onPrevious, onNext) {
+                                // A held left-mouse drag is directional: horizontal movement
+                                // changes images at fit zoom, while vertical movement adjusts
+                                // zoom live. When already zoomed, horizontal movement is left
+                                // untouched so Telephoto can continue panning normally.
+                                // Neither gesture consumes a simple click or double-click.
+                                .pointerInput(zoomableState, zoomScope, onPrevious, onNext) {
                                     awaitEachGesture {
-                                        // Read the originating PointerEvent so right-clicks
-                                        // and other mouse buttons never start image navigation.
                                         var downEvent = awaitPointerEvent()
                                         var down = downEvent.changes.firstOrNull { it.pressed }
                                         while (
@@ -1184,16 +1183,45 @@ private fun PreviewPane(
                                         val mouseDown = down ?: return@awaitEachGesture
                                         if (
                                             mouseDown.type != PointerType.Mouse ||
-                                            !downEvent.buttons.isPrimaryPressed ||
-                                            (zoomableState.zoomFraction ?: 0f) > 0.001f
+                                            !downEvent.buttons.isPrimaryPressed
                                         ) {
                                             return@awaitEachGesture
                                         }
 
+                                        val initialZoomFraction =
+                                            (zoomableState.zoomFraction ?: 0f).coerceIn(0f, 1f)
                                         var lastPosition = mouseDown.position
                                         var totalX = 0f
                                         var totalY = 0f
                                         var horizontalSwipeStarted = false
+                                        var verticalZoomStarted = false
+                                        var lastAppliedZoomFraction = initialZoomFraction
+
+                                        fun updateZoomFromVerticalDrag() {
+                                            val dragRange = (size.height * 0.65f).coerceAtLeast(1f)
+                                            val targetFraction =
+                                                (initialZoomFraction - totalY / dragRange)
+                                                    .coerceIn(0f, 1f)
+                                            // Avoid flooding the zoom state with tiny mouse updates.
+                                            if (
+                                                kotlin.math.abs(targetFraction - lastAppliedZoomFraction) < 0.012f &&
+                                                targetFraction > 0.001f &&
+                                                targetFraction < 0.999f
+                                            ) {
+                                                return
+                                            }
+                                            lastAppliedZoomFraction = targetFraction
+                                            zoomScope.launch {
+                                                if (targetFraction <= 0.001f) {
+                                                    zoomableState.resetZoom(animationSpec = SnapSpec())
+                                                } else {
+                                                    zoomableState.zoomTo(
+                                                        zoomFactor = 1f + 3f * targetFraction,
+                                                        animationSpec = SnapSpec()
+                                                    )
+                                                }
+                                            }
+                                        }
 
                                         while (true) {
                                             val event = awaitPointerEvent()
@@ -1205,35 +1233,42 @@ private fun PreviewPane(
                                             totalY += delta.y
 
                                             if (!change.pressed) {
-                                                if (horizontalSwipeStarted) change.consume()
+                                                if (horizontalSwipeStarted || verticalZoomStarted) {
+                                                    change.consume()
+                                                }
                                                 break
                                             }
 
-                                            if (!horizontalSwipeStarted) {
+                                            if (!horizontalSwipeStarted && !verticalZoomStarted) {
                                                 val slop = viewConfiguration.touchSlop
                                                 val horizontalDistance = kotlin.math.abs(totalX)
                                                 val verticalDistance = kotlin.math.abs(totalY)
                                                 when {
                                                     verticalDistance > slop &&
                                                         verticalDistance > horizontalDistance * 1.2f -> {
-                                                        // Let vertical movement keep its normal behavior.
-                                                        return@awaitEachGesture
+                                                        verticalZoomStarted = true
+                                                        change.consume()
+                                                        updateZoomFromVerticalDrag()
                                                     }
                                                     horizontalDistance > slop &&
                                                         horizontalDistance > verticalDistance * 1.2f -> {
+                                                        // A zoomed image keeps its native pan gesture.
+                                                        if (initialZoomFraction > 0.001f) {
+                                                            return@awaitEachGesture
+                                                        }
                                                         horizontalSwipeStarted = true
                                                         change.consume()
                                                     }
                                                 }
-                                            } else {
+                                            } else if (verticalZoomStarted) {
+                                                change.consume()
+                                                updateZoomFromVerticalDrag()
+                                            } else if (horizontalSwipeStarted) {
                                                 change.consume()
                                             }
                                         }
 
-                                        if (
-                                            horizontalSwipeStarted &&
-                                            (zoomableState.zoomFraction ?: 0f) <= 0.001f
-                                        ) {
+                                        if (horizontalSwipeStarted && initialZoomFraction <= 0.001f) {
                                             val swipeThreshold = maxOf(
                                                 72.dp.toPx(),
                                                 size.width * 0.12f
