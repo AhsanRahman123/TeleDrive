@@ -486,6 +486,20 @@ class FilesViewModel(
         publishSelectionSnapshot()
     }
 
+    /**
+     * Replaces the current selection with items discovered outside the visible folder listing,
+     * such as results from the Empty Items scanner. The normal Files toolbar then owns all actions.
+     */
+    fun selectItems(fileIds: List<String>, folderIds: List<String>) {
+        rangeBase = null
+        rangeSelectionActive = false
+        selection.value = fileIds.toSet()
+        folderSelection.value = folderIds.toSet()
+        _allSelected.value = false
+        _selectionModeEnabled.value = selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        publishSelectionSnapshot()
+    }
+
     fun selectAll() = selectAll(onComplete = null)
 
     fun selectAll(onComplete: (() -> Unit)?) {
