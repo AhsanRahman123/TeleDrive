@@ -218,6 +218,12 @@ fun DesktopPreviewScreen(
         mutableStateOf(state.initialIndex.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
+
+    val displayIndex = if (state.files.isEmpty()) 0 else index.coerceIn(0, state.files.lastIndex)
+    var previewFolderName by remember { mutableStateOf("Files") }
+    LaunchedEffect(file?.id, file?.folderId) {
+        previewFolderName = file?.let { viewModel.parentFolderName(it) } ?: "Files"
+    }
     var imageRotationDegrees by remember(file?.id) { mutableIntStateOf(0) }
     var mirrorImageHorizontally by remember(file?.id) { mutableStateOf(false) }
     var mirrorImageVertically by remember(file?.id) { mutableStateOf(false) }
@@ -449,11 +455,21 @@ fun DesktopPreviewScreen(
         fun PreviewTopBar() {
             TopAppBar(
                 title = {
-                    Text(
-                        text = file?.name.orEmpty(),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Column {
+                        Text(
+                            text = file?.name.orEmpty(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "$previewFolderName · ${displayIndex + 1}/${state.files.size}",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 },
                 navigationIcon = {
                     TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = ::leavePreview) {
