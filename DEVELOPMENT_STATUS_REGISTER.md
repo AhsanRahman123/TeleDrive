@@ -299,3 +299,65 @@ The user fast-forwarded the clone to branch tip `7ac82d74cd4554a98535f3c56ac22f7
 Correction committed: `11e9669f6f6dbb8cd36dc256c9f9fa86329c2659`, changing the import to `androidx.compose.foundation.focusable`.
 
 **Status: FIX COMMITTED; NOT YET REBUILT.** The failed attempt did not execute the UI desktop tests. The user should fetch the latest branch tip and rerun `:ui:desktopTest` once to establish whether further compile errors remain. Do not rerun `:shared:desktopTest` for this UI-only import correction.
+
+
+### Consolidated Windows repair pass — November 13, 2026
+
+**Source baseline:** branch `work/desktop-feature-fixes-20261112`, starting from the user-tested build head `b99169ce6df996ec4daba4ea58d02ca2f8c683a4`. This section records additional changes made after that build. The new changes have not yet been compiled or run on Windows.
+
+#### Files mouse drag selection
+
+- Keep Files range-selection mode active for the complete mouse gesture, including the moment when dragging from an already-selected row temporarily removes every item in the range.
+- At gesture end, derive selection mode from the remaining selected file/folder IDs; Clear selection also cancels any stale range baseline/gesture state.
+- Apply the same invariant to direct file/folder toggles.
+- Gallery code is untouched.
+- Added a focused selection-mode test and a Compose desktop pointer-input test that drags across a real lazy grid and asserts the selected IDs/count and final mode.
+
+**Status: SOURCE-PRESENT + REGRESSION TESTS ADDED; NOT YET BUILT / RUNTIME-VERIFIED.**
+
+#### Keyboard and clipboard
+
+- Collection-level Ctrl+A/N/T/C/X/V handling in `KeyboardCollectionState` now runs only when the collection item itself owns focus. A nested text editor can therefore handle its own Ctrl+A/C/X/V rather than having the collection preview handler intercept it first.
+- Added tests for all six collection shortcuts on a focused row and for Ctrl+A inside a nested editable text field.
+- Existing outer workspace command handler and app-level clipboard lifecycle remain in place.
+
+**Status: SOURCE-PRESENT + REGRESSION TESTS ADDED; NOT YET BUILT / RUNTIME-VERIFIED.**
+
+#### VLC playback and media switching
+
+- Both local-file and streamed-file preview sources now feed one stable `DesktopMediaPlayer` call site in `DesktopPreviewScreen`. Previously the LocalMedia branch instantiated the player directly while StreamedMedia went through `InlineStreamPlayer`; switching source types could dispose one Compose player subtree and mount another. The player now stays mounted while its MRL changes.
+- VLC native callbacks no longer mutate Compose state directly. Playback state changes are dispatched to the Compose coroutine scope; high-frequency time updates and raw video frames use conflated channels.
+- Video pixel buffers remain independent copies so native VLC writes cannot overwrite pixels still being rendered. Skia bitmap conversion is deferred until after frame conflation, avoiding expensive bitmap conversion for frames the UI would immediately discard.
+- Stale callback gating suppresses updates from outgoing media while a new MRL is being attached. Media transitions, stop/play, transport, seeking and snapshot operations use the serialized vlcj player executor where audited.
+- The last complete frame remains visible under the buffering indicator while the next source prepares, avoiding an intentional blanking of the viewer during a same-player transition.
+
+**Status: SOURCE-PRESENT; existing frame-copy tests remain; no new VLC integration test or Windows runtime proof.** Actual decode stability, audio output and hardware-specific behaviour still require the Windows app.
+
+#### Audio/video and file formats
+
+- Audio already uses the built-in VLC player path when the file is classified as `AUDIO`; the new filename/MIME fallback ensures common audio files labelled by Telegram as generic `application/octet-stream` can reach that path.
+- Added deterministic MIME mappings for common audio, video, image, camera RAW, office/document, source-code/script and archive extensions rather than relying solely on the host Windows/Android MIME database.
+- Generic Telegram/manifest MIME values now fall back to meaningful Telegram MIME and then the filename extension. Legacy Room rows are normalized at the domain mapping boundary without a destructive database migration.
+- Extended category classification for the additional media/document/archive MIME values.
+- Added TAR and automatically detected compressed-TAR archive metadata preview (bounded to 5,000 entries); ZIP and 7Z preview remain unchanged.
+- Unsupported locally available formats now retain the preview-cache path and can be opened with the user's registered desktop application. This covers remote files after the user has downloaded them, not only files that already had a persistent localPath.
+- Added MIME and category regression tests covering audio, video, images, office formats, source code, camera RAW and additional archive types.
+
+**Status: SOURCE-PRESENT + UNIT TESTS ADDED; NOT YET BUILT.** MIME recognition is not a guarantee that every codec/container has an internal renderer. VLC handles supported audio/video codecs; unsupported image/document/archive formats use the desktop external-open fallback when available. RAR/CAB/CPIO and similar formats are recognized but are not claimed to have an internal archive browser.
+
+#### Download throughput investigation
+
+- Audited the desktop download path: regular downloads are delegated to TDLib's native download manager; `TransferQueueDrainer` limits the number of simultaneous app transfer jobs using the user preference (1–6), not bytes per second for an individual download.
+- No TeleDrive-side 3 MB/s throughput limiter was found in the audited code path. TDLib account-level speed-limit notifications are already surfaced in Transfers. The application cannot override a genuine Telegram/server/account limit or guarantee the full physical link speed.
+- No speculative change was made to TDLib native download concurrency or its resumable file handling because that would not establish a per-file bandwidth increase and could damage transfer stability.
+
+**Status: INVESTIGATED; NO CLIENT-SIDE SPEED CAP IDENTIFIED; NO SPEED CHANGE CLAIMED.** Compare the Transfers concurrency preference, Telegram speed-limit notification and a large test download before concluding whether the remaining limit is account-side or environmental.
+
+#### Build / CI status for this repair pass
+
+- The user previously reported `BUILD SUCCESSFUL` for `:ui:desktopTest`, `:desktop:test` and `:desktop:compileKotlin` on the prior branch head `b99169ce6df996ec4daba4ea58d02ca2f8c683a4` before this repair pass.
+- The code changes in this section are later than that successful build. They have **not** been compiled or tested in a local Windows checkout by the assistant.
+- GitHub returned zero commit statuses and zero check runs for the latest repair head at the time of this audit. No GitHub Actions success is claimed.
+- Keep PR #10 in draft and do not merge until the new branch head completes the consolidated Gradle task set and the Windows runtime checklist below.
+
+Latest code head when this section was written: `6e83aabf944798cef789b9f200991b98c67b50e1`. Documentation commits may advance the branch tip; always fetch and record the final branch SHA before building.
