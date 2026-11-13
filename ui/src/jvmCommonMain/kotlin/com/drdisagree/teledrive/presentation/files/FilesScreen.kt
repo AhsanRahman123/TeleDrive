@@ -1328,7 +1328,12 @@ private fun FilesContent(
             }
             viewModel.extendRangeSelection(fileIds, folderIds, shouldSelect)
         },
-        onEnd = viewModel::endRangeSelection
+        onEnd = viewModel::endRangeSelection,
+        // File-manager mouse drags should extend the current selection, not invert it
+        // when the gesture starts over an already-selected item. Resolve gaps and the
+        // padded viewport edge so auto-scroll continues extending the range.
+        mouseDragAddsToSelection = true,
+        resolveNearestVisibleItem = true
     )
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
