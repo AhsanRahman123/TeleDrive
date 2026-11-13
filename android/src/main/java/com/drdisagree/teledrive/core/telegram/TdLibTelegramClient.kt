@@ -1006,7 +1006,7 @@ class TdLibTelegramClient(
 
             val pending = paced {
                 send<TdApi.Messages>(
-                    TdApi.SendMessageAlbum(chatId, 0L, null, contents)
+                    TdApi.SendMessageAlbum(chatId, 0L, null, null, contents)
                 )
             }.messages.toList()
 
