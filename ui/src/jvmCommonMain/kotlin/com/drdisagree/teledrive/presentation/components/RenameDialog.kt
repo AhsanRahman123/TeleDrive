@@ -8,11 +8,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -32,7 +36,15 @@ fun RenameDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val nameFocusRequester = remember { FocusRequester() }
     var value by rememberSaveable(initialValue) { mutableStateOf(initialValue) }
+
+    // Focus the name field as soon as the dialog enters composition so keyboard
+    // shortcuts such as Ctrl+N can be followed immediately by typing.
+    LaunchedEffect(nameFocusRequester) {
+        nameFocusRequester.requestFocus()
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -42,7 +54,9 @@ fun RenameDialog(
                 onValueChange = { value = it },
                 singleLine = true,
                 label = { Text(stringResource(Res.string.common_name)) },
-                modifier = Modifier.onPreviewKeyEvent { event ->
+                modifier = Modifier
+                    .focusRequester(nameFocusRequester)
+                    .onPreviewKeyEvent { event ->
                     val valid = value.isNotBlank() && value.trim() != initialValue
                     if (
                         valid &&
