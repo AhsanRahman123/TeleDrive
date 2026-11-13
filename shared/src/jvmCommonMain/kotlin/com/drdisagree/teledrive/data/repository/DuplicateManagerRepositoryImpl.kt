@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.data.repository
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
+import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.Hashing
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
@@ -17,6 +18,8 @@ import com.drdisagree.teledrive.domain.repository.DuplicateScanQueueItem
 import com.drdisagree.teledrive.domain.repository.DuplicateScanStatus
 import com.drdisagree.teledrive.domain.repository.FileRepository
 import java.io.File
+import java.util.Properties
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +31,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,6 +47,7 @@ import kotlinx.coroutines.sync.withLock
  * Hashing is streamed from disk/TDLib downloads. Large files are never loaded into memory.
  */
 class DuplicateManagerRepositoryImpl(
+    private val storagePaths: AppStoragePaths,
     private val fileRepository: FileRepository,
     private val fileDao: FileDao,
     private val filePartDao: FilePartDao,
@@ -54,8 +59,12 @@ class DuplicateManagerRepositoryImpl(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val startMutex = Mutex()
+    private val persistenceMutex = Mutex()
+    private val persistenceVersion = AtomicLong(0L)
+    private var persistedVersion = 0L
     private val pausedFileIds = mutableSetOf<String>()
     private val cancelledFileIds = mutableSetOf<String>()
+    private val controlStateFile = File(storagePaths.filesDir, "duplicate-manager/queue.properties")
 
     private val _state = MutableStateFlow(DuplicateManagerState())
     override val state: StateFlow<DuplicateManagerState> = _state.asStateFlow()
@@ -66,7 +75,7 @@ class DuplicateManagerRepositoryImpl(
     @Volatile private var activeFileId: String? = null
     @Volatile private var cancelAllRequested = false
 
-    override suspend fun startScan(folderId: String) {
+    override suspend fun startScan(folderId: String, resetQueue: Boolean) {
         startMutex.withLock {
             scanGeneration++
             val generation = scanGeneration
@@ -74,8 +83,7 @@ class DuplicateManagerRepositoryImpl(
             workerJob?.cancelAndJoin()
             activeTask = null
             activeFileId = null
-            pausedFileIds.clear()
-            cancelledFileIds.clear()
+            val restoredPaused = restoreControlState(folderId, resetQueue)
             cancelAllRequested = false
 
             val ids = fileRepository.fileIdsInTree(folderId).distinct()
@@ -90,10 +98,11 @@ class DuplicateManagerRepositoryImpl(
                 val folderPath = folderPathResolver.pathOf(entity.folderId ?: entity.preTrashFolderId)
                 queue += DuplicateScanQueueItem(
                     file = entity.toScanFile(folderPath),
-                    status = if (entity.contentHash.isNullOrBlank()) {
-                        DuplicateScanStatus.WAITING
-                    } else {
-                        DuplicateScanStatus.SCANNED
+                    status = when {
+                        !entity.contentHash.isNullOrBlank() -> DuplicateScanStatus.SCANNED
+                        isFileCancelled(entity.id) -> DuplicateScanStatus.CANCELLED
+                        restoredPaused || isFilePaused(entity.id) -> DuplicateScanStatus.PAUSED
+                        else -> DuplicateScanStatus.WAITING
                     }
                 )
             }
@@ -102,12 +111,16 @@ class DuplicateManagerRepositoryImpl(
                 folderId = folderId,
                 queue = queue,
                 groups = buildGroups(queue),
-                isRunning = queue.any { it.status == DuplicateScanStatus.WAITING },
+                isRunning = !restoredPaused && queue.any { it.status == DuplicateScanStatus.WAITING },
+                isPaused = restoredPaused,
                 scannedFiles = queue.count { it.status == DuplicateScanStatus.SCANNED },
                 totalFiles = queue.size
             )
+            persistControlState()
 
-            if (generation == scanGeneration && queue.any { it.status == DuplicateScanStatus.WAITING }) {
+            if (generation == scanGeneration && !restoredPaused &&
+                queue.any { it.status == DuplicateScanStatus.WAITING }
+            ) {
                 launchWorker(generation)
             }
         }
@@ -127,6 +140,7 @@ class DuplicateManagerRepositoryImpl(
             )
         }
         activeTask?.cancel()
+        persistControlState()
     }
 
     override fun resumeAll() {
@@ -140,6 +154,7 @@ class DuplicateManagerRepositoryImpl(
                 }
             )
         }
+        persistControlState()
         launchWorkerIfNeeded()
     }
 
@@ -151,6 +166,13 @@ class DuplicateManagerRepositoryImpl(
         workerJob = null
         activeTask = null
         activeFileId = null
+        val unfinishedIds = _state.value.queue.filter {
+            it.status == DuplicateScanStatus.WAITING ||
+                it.status == DuplicateScanStatus.PAUSED ||
+                it.status == DuplicateScanStatus.GENERATING
+        }.map { it.file.id }
+        synchronized(cancelledFileIds) { cancelledFileIds.addAll(unfinishedIds) }
+        synchronized(pausedFileIds) { pausedFileIds.clear() }
         _state.update { current ->
             current.copy(
                 isRunning = false,
@@ -167,6 +189,7 @@ class DuplicateManagerRepositoryImpl(
                 }
             )
         }
+        persistControlState()
     }
 
     override fun pauseFiles(fileIds: Set<String>) {
@@ -184,6 +207,7 @@ class DuplicateManagerRepositoryImpl(
             })
         }
         if (activeFileId?.let { it in fileIds } == true) activeTask?.cancel()
+        persistControlState()
     }
 
     override fun resumeFiles(fileIds: Set<String>) {
@@ -196,6 +220,7 @@ class DuplicateManagerRepositoryImpl(
                 } else item
             })
         }
+        persistControlState()
         launchWorkerIfNeeded()
     }
 
@@ -214,6 +239,7 @@ class DuplicateManagerRepositoryImpl(
             })
         }
         if (activeFileId?.let { it in fileIds } == true) activeTask?.cancel()
+        persistControlState()
     }
 
     override fun retryFiles(fileIds: Set<String>) {
@@ -236,6 +262,7 @@ class DuplicateManagerRepositoryImpl(
                 }
             )
         }
+        persistControlState()
         launchWorkerIfNeeded()
     }
 
@@ -246,6 +273,78 @@ class DuplicateManagerRepositoryImpl(
                     it.status == DuplicateScanStatus.CANCELLED
             }.map { it.file.id }.toSet()
         )
+    }
+
+    private suspend fun restoreControlState(folderId: String, resetQueue: Boolean): Boolean {
+        if (resetQueue) {
+            synchronized(pausedFileIds) { pausedFileIds.clear() }
+            synchronized(cancelledFileIds) { cancelledFileIds.clear() }
+            withContext(Dispatchers.IO) { controlStateFile.delete() }
+            return false
+        }
+
+        val properties = withContext(Dispatchers.IO) {
+            if (!controlStateFile.isFile) return@withContext null
+            runCatching {
+                Properties().also { props ->
+                    controlStateFile.inputStream().buffered().use(props::load)
+                }
+            }.getOrNull()
+        }
+        if (properties?.getProperty("folderId") != folderId) {
+            synchronized(pausedFileIds) { pausedFileIds.clear() }
+            synchronized(cancelledFileIds) { cancelledFileIds.clear() }
+            return false
+        }
+
+        fun decodeIds(value: String?): Set<String> =
+            value.orEmpty().split(',').filter { it.isNotBlank() }.toSet()
+
+        synchronized(pausedFileIds) {
+            pausedFileIds.clear()
+            pausedFileIds.addAll(decodeIds(properties.getProperty("pausedIds")))
+        }
+        synchronized(cancelledFileIds) {
+            cancelledFileIds.clear()
+            cancelledFileIds.addAll(decodeIds(properties.getProperty("cancelledIds")))
+        }
+        return properties.getProperty("paused", "false").toBoolean()
+    }
+
+    /**
+     * Persist only queue controls. Completed hashes live in Room; unfinished work is recreated
+     * from the folder tree when the manager is reopened. This keeps the state file small even
+     * for folders containing tens of thousands of files.
+     */
+    private fun persistControlState() {
+        val folderId = _state.value.folderId ?: return
+        val version = persistenceVersion.incrementAndGet()
+        val paused = _state.value.isPaused
+        val pausedSnapshot = synchronized(pausedFileIds) { pausedFileIds.toList().sorted() }
+        val cancelledSnapshot = synchronized(cancelledFileIds) { cancelledFileIds.toList().sorted() }
+
+        scope.launch {
+            persistenceMutex.withLock {
+                if (version < persistedVersion) return@withLock
+                runCatching {
+                    val parent = controlStateFile.parentFile ?: return@runCatching
+                    if (!parent.exists() && !parent.mkdirs()) return@runCatching
+                    val properties = Properties().apply {
+                        setProperty("folderId", folderId)
+                        setProperty("paused", paused.toString())
+                        setProperty("pausedIds", pausedSnapshot.joinToString(","))
+                        setProperty("cancelledIds", cancelledSnapshot.joinToString(","))
+                    }
+                    val temporary = File(parent, "queue.properties.tmp")
+                    temporary.outputStream().buffered().use { properties.store(it, "TeleDrive duplicate scan queue") }
+                    if (!temporary.renameTo(controlStateFile)) {
+                        temporary.copyTo(controlStateFile, overwrite = true)
+                        temporary.delete()
+                    }
+                    persistedVersion = version
+                }
+            }
+        }
     }
 
     private fun launchWorkerIfNeeded() {
