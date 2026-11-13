@@ -207,10 +207,13 @@ internal fun DesktopMediaPlayer(
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
     val frameUpdates = remember(factory, isAudio) {
-        Channel<ImageBitmap>(capacity = Channel.CONFLATED)
+        Channel<VideoFramePixels>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(frameUpdates) {
-        for (nextFrame in frameUpdates) frame = nextFrame
+        for (nextFrame in frameUpdates) {
+            val image = nextFrame.toImageBitmap() ?: continue
+            frame = image
+        }
     }
     DisposableEffect(frameUpdates) {
         onDispose { frameUpdates.close() }
