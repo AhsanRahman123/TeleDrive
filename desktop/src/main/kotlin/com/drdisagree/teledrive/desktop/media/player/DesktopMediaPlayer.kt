@@ -445,13 +445,17 @@ internal fun DesktopMediaPlayer(
                     val stillCurrent = currentVideoFrameGeneration.get() == mediaGeneration
                     if (!started || !stillCurrent) {
                         acceptsCurrentMediaEvents.set(false)
-                        acceptsCurrentVideoFrames.set(false)
-                        expectedMediaGeneration.compareAndSet(mediaGeneration, -1L)
                         if (!stillCurrent) {
+                            acceptsCurrentVideoFrames.set(false)
+                            expectedMediaGeneration.compareAndSet(mediaGeneration, -1L)
                             // A newer MRL was requested while start() was waiting. Stop this
                             // stale source before the next queued command attaches its media.
                             runCatching { player.controls().stop() }
                         } else {
+                            // Keep this generation associated with the selected MRL so the
+                            // user can retry playback with the normal Play control. Its render
+                            // callbacks must remain accepted during that retry.
+                            acceptsCurrentVideoFrames.set(true)
                             playerScope.launch {
                                 playing = false
                                 finished = true
