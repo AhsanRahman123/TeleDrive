@@ -184,10 +184,11 @@ fun DuplicateManagerScreen(
     val sortedQueue = remember(state.queue, queueSearch, queueSort) {
         val needle = queueSearch.trim().lowercase()
         val matching = state.queue.filter { item ->
-            item.status != DuplicateScanStatus.CANCELLED &&
-            needle.isBlank() ||
-                item.file.name.lowercase().contains(needle) ||
-                item.file.folderPath.lowercase().contains(needle)
+            item.status != DuplicateScanStatus.CANCELLED && (
+                needle.isBlank() ||
+                    item.file.name.lowercase().contains(needle) ||
+                    item.file.folderPath.lowercase().contains(needle)
+                )
         }
         when (queueSort) {
             DuplicateFileSort.NAME_ASC -> matching.sortedBy { it.file.name.lowercase() }
@@ -212,11 +213,13 @@ fun DuplicateManagerScreen(
         onEnd = { queueSelectionBase = emptySet() }
     )
     val individuallyPausedCount = state.queue.count { it.status == DuplicateScanStatus.PAUSED }
-    val activeQueueCount = state.waitingCount + state.generatingCount + individuallyPausedCount + state.failedCount
+    val pendingQueueCount = state.waitingCount + state.generatingCount + individuallyPausedCount
+    val activeQueueCount = state.waitingCount + state.generatingCount
+    val visibleQueueCount = pendingQueueCount + state.failedCount
     val queueEta = when {
         state.isPaused -> "Estimated remaining: paused"
         activeQueueCount == 0 && individuallyPausedCount > 0 ->
-            "${individuallyPausedCount} file(s) paused · resume them to continue"
+            "Estimated remaining: ${individuallyPausedCount} individually paused"
         activeQueueCount == 0 && state.failedCount > 0 ->
             "${state.failedCount} file(s) failed · retry them to continue"
         activeQueueCount == 0 -> "Queue complete"
@@ -304,7 +307,7 @@ fun DuplicateManagerScreen(
                 )
             }
             TextButton(onClick = { showQueue = !showQueue }) {
-                Text(if (showQueue) "View results" else "View queue (" + activeQueueCount + ")")
+                Text(if (showQueue) "View results" else "View queue (" + visibleQueueCount + ")")
             }
             TooltipIconButton(tooltip = "Scan this folder again", onClick = {
                 selectedIds = emptySet()
@@ -425,7 +428,7 @@ fun DuplicateManagerScreen(
                     }
                 }
                 TextButton(
-                    enabled = state.queue.isNotEmpty(),
+                    enabled = sortedQueue.isNotEmpty(),
                     onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
                 ) { Text("Select all") }
                 TextButton(
@@ -456,10 +459,16 @@ fun DuplicateManagerScreen(
                 }
             }
 
-            if (state.queue.isEmpty()) {
-                Text("There are no files in this folder tree.")
-            } else if (sortedQueue.isEmpty()) {
-                Text("No queue items match this search.")
+            if (sortedQueue.isEmpty()) {
+                Text(
+                    when {
+                        state.queue.isEmpty() -> "There are no files in this folder tree."
+                        queueSearch.isNotBlank() -> "No queue items match this search."
+                        state.failedCount > 0 || state.cancelledCount > 0 ->
+                            "No active queue items. Failed/cancelled items can be retried above."
+                        else -> "Queue complete."
+                    }
+                )
             } else {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     LazyColumn(
