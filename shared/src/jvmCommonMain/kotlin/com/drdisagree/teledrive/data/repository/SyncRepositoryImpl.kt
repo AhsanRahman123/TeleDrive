@@ -485,18 +485,23 @@ class SyncRepositoryImpl(
         if (laterPart && existing != null) return ReconcileResult.UNCHANGED
 
         val local = existing?.takeIf { it.pendingPublish }
+        val hasPendingLocalMoveWithoutBaseline = local != null &&
+            existing?.remoteBase.isNullOrBlank() &&
+            manifest != null &&
+            local.folderId != manifest.folderId
         val choice = FieldChoice(
             local = local?.let { FileBase.of(it) },
             remote = manifest?.let { FileBase.of(it) },
             base = FileBase.fromText(existing?.remoteBase),
-            // Without a shared baseline, timestamps cannot safely arbitrate local vs remote:
-            // a pending local move can have an older clock than a stale remote manifest.
-            // Preserve local pending edits until they have been published successfully.
-            localIsNewer = local != null
+            localIsNewer = local != null &&
+                (manifest == null || local.modifiedAt >= manifest.modifiedAt)
         )
 
         val folderId = when {
-            local != null && choice.keepsLocal { it.folderId } ->
+            local != null && (
+                hasPendingLocalMoveWithoutBaseline ||
+                    choice.keepsLocal { it.folderId }
+                ) ->
                 local.folderId ?: local.preTrashFolderId
 
             manifest == null -> existing?.folderId
