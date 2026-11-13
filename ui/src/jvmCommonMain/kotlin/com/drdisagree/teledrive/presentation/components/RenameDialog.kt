@@ -22,6 +22,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.runtime.withFrameNanos
 import org.jetbrains.compose.resources.stringResource
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_cancel
@@ -39,9 +40,10 @@ fun RenameDialog(
     val nameFocusRequester = remember { FocusRequester() }
     var value by rememberSaveable(initialValue) { mutableStateOf(initialValue) }
 
-    // Focus the name field as soon as the dialog enters composition so keyboard
-    // shortcuts such as Ctrl+N can be followed immediately by typing.
+    // AlertDialog content lives in its own window. Wait until that window has
+    // completed a frame and the text field is attached before requesting focus.
     LaunchedEffect(nameFocusRequester) {
+        withFrameNanos { }
         nameFocusRequester.requestFocus()
     }
 
