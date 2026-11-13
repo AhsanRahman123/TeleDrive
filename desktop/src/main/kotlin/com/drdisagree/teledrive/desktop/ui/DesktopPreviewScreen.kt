@@ -1272,13 +1272,28 @@ private fun PreviewPane(
                 onDownload = { viewModel.download(file) }
             )
 
-            is PreviewContent.Unsupported -> EmptyState(
-                icon = Icons.Outlined.Description,
-                title = stringResource(Res.string.preview_no_preview),
-                description = stringResource(current.reasonRes),
-                actionLabel = if (file.hasLocalCopy) null else stringResource(Res.string.common_download),
-                onAction = if (file.hasLocalCopy) null else ({ viewModel.download(file) })
-            )
+            is PreviewContent.Unsupported -> {
+                // Keep broad desktop file support useful even when TeleDrive has no native
+                // renderer for a particular document/container. The original local file remains
+                // untouched and is opened with the user's registered Windows application.
+                val localPath = file.localPath?.takeIf { File(it).isFile }
+                if (localPath != null) {
+                    OpenExternallyState(
+                        icon = Icons.Outlined.Description,
+                        file = file,
+                        path = localPath,
+                        snackbarHostState = snackbarHostState
+                    )
+                } else {
+                    EmptyState(
+                        icon = Icons.Outlined.Description,
+                        title = stringResource(Res.string.preview_no_preview),
+                        description = stringResource(current.reasonRes),
+                        actionLabel = stringResource(Res.string.common_download),
+                        onAction = { viewModel.download(file) }
+                    )
+                }
+            }
 
             is PreviewContent.Failed -> ErrorState(message = stringResource(current.messageRes))
         }
