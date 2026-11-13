@@ -80,6 +80,7 @@ fun DuplicateManagerScreen(
 
     var showQueue by remember { mutableStateOf(false) }
     var showCheckedQueue by remember(folderId) { mutableStateOf(false) }
+    var showFailedQueue by remember(folderId) { mutableStateOf(false) }
     var selectedIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
     var selectedQueueIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
     var queueSearch by remember(folderId) { mutableStateOf("") }
@@ -117,6 +118,7 @@ fun DuplicateManagerScreen(
         selectedQueueIds = emptySet()
         showQueue = false
         showCheckedQueue = false
+        showFailedQueue = false
         repository.startScan(folderId)
     }
     fun matchesType(file: DuplicateScanFile): Boolean = when (typeFilter) {
@@ -185,14 +187,20 @@ fun DuplicateManagerScreen(
     }.toSet()
 
     val checkedQueueCount = state.queue.count { it.status == DuplicateScanStatus.SCANNED }
-    val sortedQueue = remember(state.queue, queueSearch, queueSort, showCheckedQueue) {
+    val failedQueueCount = state.queue.count {
+        it.status == DuplicateScanStatus.FAILED ||
+            it.status == DuplicateScanStatus.CANCELLED
+    }
+    val sortedQueue = remember(state.queue, queueSearch, queueSort, showCheckedQueue, showFailedQueue) {
         val needle = queueSearch.trim().lowercase()
         val matching = state.queue.filter { item ->
-            val belongsToSelectedView = if (showCheckedQueue) {
-                item.status == DuplicateScanStatus.SCANNED
-            } else {
-                item.status != DuplicateScanStatus.SCANNED &&
-                    item.status != DuplicateScanStatus.CANCELLED
+            val belongsToSelectedView = when {
+                showCheckedQueue -> item.status == DuplicateScanStatus.SCANNED
+                showFailedQueue -> item.status == DuplicateScanStatus.FAILED ||
+                    item.status == DuplicateScanStatus.CANCELLED
+                else -> item.status == DuplicateScanStatus.WAITING ||
+                    item.status == DuplicateScanStatus.GENERATING ||
+                    item.status == DuplicateScanStatus.PAUSED
             }
             belongsToSelectedView && (
                 needle.isBlank() ||
@@ -209,21 +217,23 @@ fun DuplicateManagerScreen(
             DuplicateFileSort.NEWEST_FIRST -> matching.sortedByDescending { it.file.addedAt }
         }
     }
-    LaunchedEffect(state.queue, showCheckedQueue) {
+    LaunchedEffect(state.queue, showCheckedQueue, showFailedQueue) {
         val visibleQueueIds = state.queue
             .filter { item ->
-                if (showCheckedQueue) {
-                    item.status == DuplicateScanStatus.SCANNED
-                } else {
-                    item.status != DuplicateScanStatus.SCANNED &&
-                        item.status != DuplicateScanStatus.CANCELLED
+                when {
+                    showCheckedQueue -> item.status == DuplicateScanStatus.SCANNED
+                    showFailedQueue -> item.status == DuplicateScanStatus.FAILED ||
+                        item.status == DuplicateScanStatus.CANCELLED
+                    else -> item.status == DuplicateScanStatus.WAITING ||
+                        item.status == DuplicateScanStatus.GENERATING ||
+                        item.status == DuplicateScanStatus.PAUSED
                 }
             }
             .map { it.file.id }
             .toSet()
         selectedQueueIds = selectedQueueIds.intersect(visibleQueueIds)
     }
-    LaunchedEffect(showCheckedQueue) {
+    LaunchedEffect(showCheckedQueue, showFailedQueue) {
         selectedQueueIds = emptySet()
         queueListState.scrollToItem(0)
     }
@@ -243,9 +253,10 @@ fun DuplicateManagerScreen(
     val individuallyPausedCount = state.queue.count { it.status == DuplicateScanStatus.PAUSED }
     val pendingQueueCount = state.waitingCount + state.generatingCount + individuallyPausedCount
     val activeQueueCount = state.waitingCount + state.generatingCount
-    val visibleQueueCount = pendingQueueCount + state.failedCount
+    val visibleQueueCount = pendingQueueCount
     val queueEta = when {
         showCheckedQueue -> "$checkedQueueCount file(s) checked · duplicate matches are shown in View results"
+        showFailedQueue -> "$failedQueueCount file(s) failed or cancelled · select and retry them"
         state.isPaused -> "Estimated remaining: paused"
         activeQueueCount == 0 && individuallyPausedCount > 0 ->
             "Estimated remaining: ${individuallyPausedCount} individually paused"
@@ -340,6 +351,9 @@ fun DuplicateManagerScreen(
             }
             TooltipIconButton(tooltip = "Scan this folder again", onClick = {
                 selectedIds = emptySet()
+                selectedQueueIds = emptySet()
+                showCheckedQueue = false
+                showFailedQueue = false
                 scope.launch { repository.startScan(folderId, resetQueue = true) }
             }) {
                 androidx.compose.material3.Icon(Icons.Filled.Refresh, contentDescription = "Rescan")
@@ -374,7 +388,7 @@ fun DuplicateManagerScreen(
         }
 
         if (showQueue) {
-            if (!showCheckedQueue) {
+            if (!showCheckedQueue && !showFailedQueue) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -398,10 +412,19 @@ fun DuplicateManagerScreen(
                             selectedQueueIds = emptySet()
                         }
                     ) { Text("Cancel all") }
+                }
+            } else if (showFailedQueue) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     OutlinedButton(
-                        enabled = state.failedCount > 0 || state.cancelledCount > 0,
-                        onClick = repository::retryFailed
-                    ) { Text("Retry failed/cancelled") }
+                        enabled = failedQueueCount > 0,
+                        onClick = {
+                            repository.retryFailed()
+                            selectedQueueIds = emptySet()
+                        }
+                    ) { Text("Retry all failed") }
                 }
             }
 
@@ -414,11 +437,23 @@ fun DuplicateManagerScreen(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedButton(onClick = { showCheckedQueue = false }) {
-                    Text((if (!showCheckedQueue) "● " else "") + "Current (" + visibleQueueCount + ")")
+                OutlinedButton(onClick = {
+                    showCheckedQueue = false
+                    showFailedQueue = false
+                }) {
+                    Text((if (!showCheckedQueue && !showFailedQueue) "● " else "") + "Current (" + visibleQueueCount + ")")
                 }
-                OutlinedButton(onClick = { showCheckedQueue = true }) {
+                OutlinedButton(onClick = {
+                    showCheckedQueue = true
+                    showFailedQueue = false
+                }) {
                     Text((if (showCheckedQueue) "● " else "") + "Checked (" + checkedQueueCount + ")")
+                }
+                OutlinedButton(onClick = {
+                    showCheckedQueue = false
+                    showFailedQueue = true
+                }) {
+                    Text((if (showFailedQueue) "● " else "") + "Failed (" + failedQueueCount + ")")
                 }
             }
             OutlinedTextField(
@@ -428,8 +463,11 @@ fun DuplicateManagerScreen(
                 singleLine = true,
                 label = {
                     Text(
-                        if (showCheckedQueue) "Search checked files"
-                        else "Search current queue by filename or folder"
+                        when {
+                            showCheckedQueue -> "Search checked files"
+                            showFailedQueue -> "Search failed files"
+                            else -> "Search current queue by filename or folder"
+                        }
                     )
                 }
             )
@@ -438,7 +476,11 @@ fun DuplicateManagerScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    if (showCheckedQueue) "$checkedQueueCount checked" else selectedQueueIds.size.toString() + " selected",
+                    when {
+                        showCheckedQueue -> "$checkedQueueCount checked"
+                        showFailedQueue -> selectedQueueIds.size.toString() + " failed selected"
+                        else -> selectedQueueIds.size.toString() + " selected"
+                    },
                     modifier = Modifier.weight(1f)
                 )
                 Box {
@@ -494,20 +536,25 @@ fun DuplicateManagerScreen(
             }
             if (!showCheckedQueue && selectedQueueIds.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { repository.pauseFiles(selectedQueueIds) }) {
-                        Text("Pause selected")
+                    if (showFailedQueue) {
+                        OutlinedButton(
+                            onClick = {
+                                repository.retryFiles(selectedQueueIds)
+                                selectedQueueIds = emptySet()
+                            }
+                        ) { Text("Retry selected") }
+                    } else {
+                        OutlinedButton(onClick = { repository.pauseFiles(selectedQueueIds) }) {
+                            Text("Pause selected")
+                        }
+                        OutlinedButton(onClick = { repository.resumeFiles(selectedQueueIds) }) {
+                            Text("Resume selected")
+                        }
+                        OutlinedButton(onClick = {
+                            repository.cancelFiles(selectedQueueIds)
+                            selectedQueueIds = emptySet()
+                        }) { Text("Cancel selected") }
                     }
-                    OutlinedButton(onClick = { repository.resumeFiles(selectedQueueIds) }) {
-                        Text("Resume selected")
-                    }
-                    OutlinedButton(onClick = {
-                        repository.cancelFiles(selectedQueueIds)
-                        selectedQueueIds = emptySet()
-                    }) { Text("Cancel selected") }
-                    OutlinedButton(onClick = {
-                        repository.retryFiles(selectedQueueIds)
-                        selectedQueueIds = emptySet()
-                    }) { Text("Retry selected") }
                 }
             }
 
@@ -516,13 +563,15 @@ fun DuplicateManagerScreen(
                     when {
                         queueSearch.isNotBlank() && showCheckedQueue ->
                             "No checked files match this search."
+                        queueSearch.isNotBlank() && showFailedQueue ->
+                            "No failed files match this search."
                         queueSearch.isNotBlank() ->
                             "No current queue items match this search."
                         showCheckedQueue ->
                             "No files have been checked yet. They will appear here as the scan progresses."
+                        showFailedQueue ->
+                            "No failed or cancelled files. Great—nothing needs retrying."
                         state.queue.isEmpty() -> "There are no files in this folder tree."
-                        state.failedCount > 0 || state.cancelledCount > 0 ->
-                            "No active queue items. Failed/cancelled items can be retried above."
                         else -> "Queue complete."
                     }
                 )
