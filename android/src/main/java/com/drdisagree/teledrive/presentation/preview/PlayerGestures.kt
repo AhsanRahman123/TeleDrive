@@ -336,8 +336,8 @@ private fun applyBrightness(activity: Activity?, value: Float) {
 private const val DRAG_RANGE = 0.7f
 private const val MIN_SUBTITLE_VERTICAL_POSITION = 0.08f
 private const val MAX_SUBTITLE_VERTICAL_POSITION = 0.92f
-private const val MIN_SUBTITLE_HIT_WIDTH_FRACTION = 0.22f
-private const val MAX_SUBTITLE_HIT_WIDTH_FRACTION = 0.94f
+internal const val MIN_SUBTITLE_HIT_WIDTH_FRACTION = 0.22f
+internal const val MAX_SUBTITLE_HIT_WIDTH_FRACTION = 0.94f
 private val SUBTITLE_DRAG_TARGET_HEIGHT = 76.dp
 private val SUBTITLE_DRAG_HANDLE_HEIGHT = 64.dp
 private const val MIN_BRIGHTNESS = 0.01f
