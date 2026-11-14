@@ -217,6 +217,7 @@ internal fun DesktopMediaPlayer(
     val latestDurationMs = rememberUpdatedState(durationMs)
     val latestFinished = rememberUpdatedState(finished)
     val latestRepeatOne = rememberUpdatedState(repeatOne)
+    val latestRepeatAll = rememberUpdatedState(repeatAll)
     val latestSleepAtTrackEnd = rememberUpdatedState(sleepAtTrackEnd)
     val latestOnPlaybackFinished = rememberUpdatedState(onPlaybackFinished)
     val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
@@ -362,8 +363,12 @@ internal fun DesktopMediaPlayer(
                     playerScope.launch {
                         playing = true
                         finished = false
+                        val rateToRestore = latestRate.value
+                        val shouldRepeatCurrent = latestRepeatOne.value &&
+                            !latestRepeatAll.value && !latestSleepAtTrackEnd.value
                         player.submit {
-                            runCatching { mediaPlayer.controls().setRate(latestRate.value) }
+                            runCatching { mediaPlayer.controls().setRate(rateToRestore) }
+                            runCatching { mediaPlayer.controls().repeat = shouldRepeatCurrent }
                         }
                         if (!styleRestartWasPlaying) {
                             player.submit { runCatching { mediaPlayer.controls().pause() } }
@@ -518,6 +523,7 @@ internal fun DesktopMediaPlayer(
 
     val fullscreenController = LocalFullscreenController.current
     LaunchedEffect(player, mrl, mediaId) {
+        val mediaOptions = subtitleAppearance.toVlcMediaOptions(frame?.height ?: 1080)
         // Activate this media only after the outgoing player's queued native commands have
         // drained, stop() has completed, and its native resources have been released.
         acceptsCurrentMediaEvents.set(false)
@@ -537,10 +543,7 @@ internal fun DesktopMediaPlayer(
                         // its first opening/playing event.
                         acceptsCurrentMediaEvents.set(true)
                         runCatching {
-                            player.media().play(
-                                mrl,
-                                *subtitleAppearance.toVlcMediaOptions(frame?.height ?: 1080).toTypedArray()
-                            )
+                            player.media().play(mrl, *mediaOptions.toTypedArray())
                         }
                             .onFailure {
                                 acceptsCurrentMediaEvents.set(false)
