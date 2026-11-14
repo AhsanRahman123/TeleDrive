@@ -129,7 +129,7 @@ fun MediaPlayer(
     val player = holder.value
     val failedDecoders = remember(content) { mutableSetOf<String>() }
     val subtitleAppearance = session.subtitleAppearance
-    var resumeReady by remember(player) { mutableStateOf(false) }
+    var resumeReady by remember(player) { mutableStateOf(player?.playbackState == Player.STATE_READY) }
     val resumeReadyForListener by rememberUpdatedState(resumeReady)
 
     LaunchedEffect(holder, isActivePage) {
