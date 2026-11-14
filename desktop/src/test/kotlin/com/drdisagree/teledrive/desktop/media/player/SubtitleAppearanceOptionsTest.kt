@@ -7,12 +7,12 @@ import org.junit.Test
 class SubtitleAppearanceOptionsTest {
 
     @Test
-    fun `VLC defaults do not add custom style options at the default position`() {
-        assertTrue(SubtitleAppearance().toVlcMediaOptions(videoHeight = 1080).isEmpty())
+    fun `VLC defaults do not add custom renderer arguments at the default position`() {
+        assertTrue(SubtitleAppearance().toVlcFactoryArguments(videoHeight = 1080).isEmpty())
     }
 
     @Test
-    fun `custom appearance maps supported settings to VLC media options`() {
+    fun `custom appearance maps supported settings to VLC factory arguments`() {
         val options = SubtitleAppearance(
             useSystemDefaults = false,
             fontFamily = "Consolas",
@@ -25,19 +25,20 @@ class SubtitleAppearanceOptionsTest {
             edgeColor = 0xFFFFFFFF.toInt(),
             edgeOpacity = 0.8f,
             verticalPosition = 0.75f
-        ).toVlcMediaOptions(videoHeight = 1_000)
+        ).toVlcFactoryArguments(videoHeight = 1_000)
 
-        assertTrue(options.contains(":freetype-font=Consolas"))
-        assertTrue(options.contains(":freetype-rel-fontsize=24"))
-        assertTrue(options.contains(":freetype-color=0xFFFF00"))
-        assertTrue(options.contains(":freetype-opacity=128"))
-        assertTrue(options.contains(":freetype-outline-thickness=4"))
-        assertTrue(options.contains(":freetype-outline-opacity=204"))
-        assertTrue(options.contains(":sub-margin=-130"))
+        assertTrue(options.contains("--freetype-font=Consolas"))
+        assertTrue(options.contains("--freetype-rel-fontsize=24"))
+        assertTrue(options.contains("--freetype-color=16776960"))
+        assertTrue(options.contains("--freetype-opacity=128"))
+        assertTrue(options.contains("--freetype-background-opacity=128"))
+        assertTrue(options.contains("--freetype-outline-thickness=4"))
+        assertTrue(options.contains("--freetype-outline-opacity=204"))
+        assertTrue(options.contains("--sub-margin=-130"))
     }
 
     @Test
-    fun `appearance values are clamped before building media options`() {
+    fun `appearance values are clamped before building factory arguments`() {
         val normalized = SubtitleAppearance(
             textScale = 4f,
             textOpacity = -1f,
