@@ -1,6 +1,5 @@
 package com.drdisagree.teledrive.desktop.media.player
 
-import java.util.Locale
 import java.util.prefs.Preferences
 import kotlin.math.roundToInt
 
@@ -80,14 +79,6 @@ internal object SubtitleAppearanceStore {
     }
 }
 
-/**
- * VLC 3 applies Freetype subtitle appearance as per-media options. Changes therefore take
- * effect when the current media is safely recreated; the caller preserves its playback time.
- *
- * VLC has one text-background layer, so the Android text-background and window layers are
- * alpha-composited before being passed to Freetype. Raised/depressed edges are approximated
- * with the available outline/shadow renderer.
- */
 /**
  * VLC 3's Freetype text-renderer settings are LibVLC instance options, not reliable
  * per-media options. Build these arguments before creating the MediaPlayerFactory so
