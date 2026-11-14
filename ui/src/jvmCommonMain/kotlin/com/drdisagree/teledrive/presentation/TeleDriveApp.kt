@@ -82,6 +82,7 @@ import com.drdisagree.teledrive.domain.model.AppTheme
 import com.drdisagree.teledrive.presentation.applock.LockScreen
 import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.LocalCompactLayout
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.components.SessionBrokenDialog
 import com.drdisagree.teledrive.presentation.components.UpdateDialog
 import com.drdisagree.teledrive.presentation.navigation.AppNavHost
@@ -212,9 +213,14 @@ private fun MainScaffold(
         destination.matches(backStackEntry)
     }
     val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
-    val useRail = windowSizeClass.isWidthAtLeastBreakpoint(
-        WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND
-    )
+    // Android intentionally keeps the floating bottom navigation in both orientations.
+    // The adaptive width class can transiently report medium/expanded after the video
+    // player forces an orientation change; switching to a rail here creates a mixed
+    // portrait layout. Desktop retains its existing adaptive navigation rail.
+    val useRail = !LocalAndroidLayout.current &&
+            windowSizeClass.isWidthAtLeastBreakpoint(
+                WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND
+            )
 
     val startDestination: Route = if (onboardingComplete) Route.Home else Route.Onboarding
 
