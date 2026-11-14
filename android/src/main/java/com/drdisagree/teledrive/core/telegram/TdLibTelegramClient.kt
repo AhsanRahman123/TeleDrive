@@ -1238,6 +1238,24 @@ class TdLibTelegramClient(
     override suspend fun resolveFile(remoteFileId: String): TelegramFileInfo =
         remoteFile(remoteFileId).toInfo()
 
+    override suspend fun resolveFile(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ): TelegramFileInfo {
+        try {
+            return resolveFile(remoteFileId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (firstFailure: Exception) {
+            if (chatId == null || messageId == null) throw firstFailure
+            val refreshedId = getDocument(chatId, messageId)?.remoteFileId
+                ?.takeIf { it.isNotBlank() && it != remoteFileId }
+                ?: throw firstFailure
+            return resolveFile(refreshedId)
+        }
+    }
+
     override suspend fun getFileInfo(fileId: Int): TelegramFileInfo =
         send(TdApi.GetFile(fileId)).toInfo()
 
