@@ -33,7 +33,7 @@ class SubtitleAppearanceOptionsTest {
         assertTrue(options.contains(":freetype-opacity=128"))
         assertTrue(options.contains(":freetype-outline-thickness=4"))
         assertTrue(options.contains(":freetype-outline-opacity=204"))
-        assertTrue(options.contains(":sub-margin=130"))
+        assertTrue(options.contains(":sub-margin=-130"))
     }
 
     @Test
