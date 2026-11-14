@@ -1126,6 +1126,7 @@ fun FilesScreen(
                                 ),
                                 onOpenFolder = ::navigateToFolder,
                                 onOpenFile = onOpenFile,
+                                onSaveScrollPosition = { saveCurrentTabPosition() },
                                 onRequestTrash = { confirmTrash = true },
                                 onCreateFolder = { showCreateFolder = true },
                                 onCreateTab = ::createTab,
@@ -1414,6 +1415,7 @@ private fun FilesContent(
     padding: PaddingValues,
     onOpenFolder: (String) -> Unit,
     onOpenFile: (String, PreviewSequence) -> Unit,
+    onSaveScrollPosition: () -> Unit,
     onRequestTrash: () -> Unit,
     onCreateFolder: () -> Unit,
     onCreateTab: () -> Unit,
@@ -1586,7 +1588,7 @@ private fun FilesContent(
                         } else {
                             // Snapshot the exact visible item index and pixel offset before
                             // pushing the preview destination so Back returns to this row.
-                            saveCurrentTabPosition()
+                            onSaveScrollPosition()
                             onOpenFile(
                                 file.id,
                                 PreviewSequence(
@@ -1624,7 +1626,7 @@ private fun FilesContent(
                         } else {
                             // Snapshot the exact visible item index and pixel offset before
                             // pushing the preview destination so Back returns to this row.
-                            saveCurrentTabPosition()
+                            onSaveScrollPosition()
                             onOpenFile(
                                 file.id,
                                 PreviewSequence(
@@ -1661,7 +1663,7 @@ private fun FilesContent(
                         } else {
                             // Snapshot the exact visible item index and pixel offset before
                             // pushing the preview destination so Back returns to this row.
-                            saveCurrentTabPosition()
+                            onSaveScrollPosition()
                             onOpenFile(
                                 file.id,
                                 PreviewSequence(
