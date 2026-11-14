@@ -52,7 +52,8 @@ fun rememberDragSelect(
     edgeSize: Dp = EDGE_SIZE,
     scrollPerFrame: Dp = SCROLL_PER_FRAME,
     mouseDragAddsToSelection: Boolean = false,
-    resolveNearestVisibleItem: Boolean = false
+    resolveNearestVisibleItem: Boolean = false,
+    processReleasePosition: Boolean = false
 ): Modifier = dragSelect(
     scrollable = gridState,
     indexAt = { offset ->
@@ -82,7 +83,8 @@ fun rememberDragSelect(
     onEnd = onEnd,
     edgeSize = edgeSize,
     scrollPerFrame = scrollPerFrame,
-    mouseDragAddsToSelection = mouseDragAddsToSelection
+    mouseDragAddsToSelection = mouseDragAddsToSelection,
+    processReleasePosition = processReleasePosition
 )
 
 @Composable
@@ -95,7 +97,8 @@ fun rememberDragSelect(
     edgeSize: Dp = EDGE_SIZE,
     scrollPerFrame: Dp = SCROLL_PER_FRAME,
     mouseDragAddsToSelection: Boolean = false,
-    resolveNearestVisibleItem: Boolean = false
+    resolveNearestVisibleItem: Boolean = false,
+    processReleasePosition: Boolean = false
 ): Modifier = dragSelect(
     scrollable = listState,
     indexAt = { offset ->
@@ -129,7 +132,8 @@ private fun dragSelect(
     onEnd: () -> Unit,
     edgeSize: Dp,
     scrollPerFrame: Dp,
-    mouseDragAddsToSelection: Boolean
+    mouseDragAddsToSelection: Boolean,
+    processReleasePosition: Boolean
 ): Modifier {
     val density = LocalDensity.current
     val edgePx = with(density) { edgeSize.toPx() }
@@ -197,6 +201,10 @@ private fun dragSelect(
                 latestPointerPosition = initialPosition
                 val initialIndex = currentIndexAt(initialPosition)
                 val selectionAnchor = anchor ?: initialIndex
+                // Keep the resolved fallback anchor for the whole gesture. Without this,
+                // a drag that starts outside an item can re-anchor on its next event after
+                // the initial range has already changed the selection state.
+                if (selectionAnchor != null) anchor = selectionAnchor
                 val additiveMouseRange = down.type == PointerType.Mouse && mouseDragAddsToSelection
                 if (selectionAnchor != null) {
                     activeAnchor = selectionAnchor
@@ -229,8 +237,13 @@ private fun dragSelect(
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
-                    if (!change.pressed) break
-                    change.consume()
+                    val released = !change.pressed
+                    if (released && !processReleasePosition) break
+                    if (!released) change.consume()
+
+                    // The release event can carry the final pointer coordinate. Process it
+                    // before ending the gesture so the last row is included for both select
+                    // and deselect drags.
                     val position = clampPosition(change.position)
                     latestPointerPosition = position
                     val current = currentIndexAt(position)
@@ -243,6 +256,7 @@ private fun dragSelect(
                         }
                         currentOnRange(dragSelectionRange(start, current), activeShouldSelect)
                     }
+                    if (released) break
                     autoScroll = edgeScroll(change.position.y, size.height, edgePx, maxScrollPx)
                 }
             } finally {
