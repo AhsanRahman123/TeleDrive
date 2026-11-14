@@ -12,22 +12,27 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
-import androidx.compose.ui.draganddrop.DragAndDropTransferAction
 import androidx.compose.ui.draganddrop.DragAndDropTransferData
+import androidx.compose.ui.draganddrop.mimeTypes
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 
+/**
+ * Android's Compose drag-and-drop API exposes Android ClipData and platform flags;
+ * it does not expose the desktop Copy/Move action model. Android in-app tab drags
+ * therefore retain the existing move behaviour.
+ */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier =
-    dragAndDropSource { offset ->
-        DragAndDropTransferData(
-            ClipData.newPlainText("TeleDrive files", payload()),
-            supportedActions = listOf(
-                DragAndDropTransferAction.Move,
-                DragAndDropTransferAction.Copy
-            ),
-            dragDecorationOffset = offset
-        )
+    dragAndDropSource {
+        val encodedPayload = payload()
+        if (encodedPayload.isBlank()) {
+            null
+        } else {
+            DragAndDropTransferData(
+                clipData = ClipData.newPlainText("TeleDrive files", encodedPayload)
+            )
+        }
     }
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -45,8 +50,10 @@ actual fun FileTabDropTarget(
                     event.toAndroidDragEvent().clipData
                         ?.getItemAt(0)?.text?.toString()
                 }.getOrNull()?.takeIf { it.isNotBlank() } ?: return false
-                val copy = event.action == DragAndDropTransferAction.Copy
-                return latestOnDrop.value(payload, copy)
+
+                // Android DragEvent has no Copy/Move action field. Match the
+                // Android touch interaction's established default: move.
+                return latestOnDrop.value(payload, false)
             }
         }
     }
