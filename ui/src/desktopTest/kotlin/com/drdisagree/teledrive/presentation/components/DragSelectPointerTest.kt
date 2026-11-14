@@ -426,7 +426,7 @@ class DragSelectPointerTest {
         rule.onNodeWithTag("trash-selection-grid-add").performMouseInput {
             moveTo(Offset(90f, 150f))
             press()
-            moveTo(Offset(90f, 270f), delayMillis = 100)
+            moveTo(Offset(90f, 310f), delayMillis = 100)
             release()
         }
         rule.waitForIdle()
