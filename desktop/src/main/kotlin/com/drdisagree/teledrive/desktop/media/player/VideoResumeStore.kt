@@ -97,7 +97,8 @@ internal fun videoResumeTarget(savedPositionMs: Long, durationMs: Long): Long? {
 
 internal fun isVideoResumePositionConfirmed(actualPositionMs: Long, expectedPositionMs: Long): Boolean =
     expectedPositionMs > 0L &&
-        abs(actualPositionMs - expectedPositionMs) <= RESUME_POSITION_CONFIRMATION_MS
+        // The exact boundary is rejected so an opening timestamp cannot masquerade as a seek.
+        abs(actualPositionMs - expectedPositionMs) < RESUME_POSITION_CONFIRMATION_MS
 
 private const val MIN_RESUME_POSITION_MS = 2_000L
 private const val VIDEO_RESUME_END_MARGIN_MS = 1_500L
