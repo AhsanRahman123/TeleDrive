@@ -16,7 +16,8 @@ android {
         applicationId = "com.drdisagree.teledrive.preview2"
         minSdk = 26
         targetSdk = 37
-        versionCode = libs.versions.appVersionCode.get().toInt()
+        versionCode = libs.versions.appVersionCode.get().toInt() +
+            (System.getenv("ANDROID_PREVIEW_BUILD_NUMBER")?.toIntOrNull() ?: 0)
         versionName = libs.versions.appVersion.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

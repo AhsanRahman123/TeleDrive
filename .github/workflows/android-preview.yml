@@ -64,6 +64,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.TELEDRIVE_PREVIEW_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEY_PASSWORD }}
+          ANDROID_PREVIEW_BUILD_NUMBER: ${{ github.run_number }}
         run: ./gradlew :android:assembleDebug -PwithFfmpegDecoder -PsplitAbis=false
 
       - name: Verify isolated package ID and persistent signing certificate
