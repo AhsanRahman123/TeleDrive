@@ -25,7 +25,7 @@ object VlcPlayback {
      * VLC 3 reads Freetype options when its text-renderer module is initialized, so each
      * appearance revision gets a factory configured before its media player is created.
      */
-    fun createFactory(appearance: SubtitleAppearance): MediaPlayerFactory? =
+    internal fun createFactory(appearance: SubtitleAppearance): MediaPlayerFactory? =
         runCatching {
             createFactory(LIBVLC_ARGS + appearance.toVlcFactoryArguments())
         }.onFailure {
