@@ -9,6 +9,7 @@ import com.drdisagree.teledrive.BuildConfig
 import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.domain.model.Country
 import com.drdisagree.teledrive.domain.model.LinkMetadata
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DelicateCoroutinesApi
@@ -1006,7 +1007,7 @@ class TdLibTelegramClient(
 
             val pending = paced {
                 send<TdApi.Messages>(
-                    TdApi.SendMessageAlbum(chatId, 0L, null, null, contents)
+                    TdApi.SendMessageAlbum(chatId, null, null, null, contents)
                 )
             }.messages.toList()
 
