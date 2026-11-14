@@ -88,7 +88,12 @@ internal object SubtitleAppearanceStore {
  * alpha-composited before being passed to Freetype. Raised/depressed edges are approximated
  * with the available outline/shadow renderer.
  */
-internal fun SubtitleAppearance.toVlcMediaOptions(videoHeight: Int): List<String> {
+/**
+ * VLC 3's Freetype text-renderer settings are LibVLC instance options, not reliable
+ * per-media options. Build these arguments before creating the MediaPlayerFactory so
+ * the text renderer receives them when its module is instantiated.
+ */
+internal fun SubtitleAppearance.toVlcFactoryArguments(videoHeight: Int = 1080): List<String> {
     val value = normalized()
     val options = mutableListOf<String>()
 
@@ -99,33 +104,33 @@ internal fun SubtitleAppearance.toVlcMediaOptions(videoHeight: Int): List<String
             backgroundColor = value.windowColor,
             backgroundOpacity = value.windowOpacity
         )
-        options += ":freetype-font=${value.fontFamily}"
-        options += ":freetype-rel-fontsize=${(16f * value.textScale).roundToInt().coerceIn(8, 40)}"
-        options += ":freetype-color=${vlcRgb(value.textColor)}"
-        options += ":freetype-opacity=${(value.textOpacity * 255f).roundToInt()}"
-        options += ":freetype-background-color=${vlcRgb(backgroundRgb)}"
-        options += ":freetype-background-opacity=${backgroundAlpha}"
+        options += "--freetype-font=${value.fontFamily}"
+        options += "--freetype-rel-fontsize=${(16f * value.textScale).roundToInt().coerceIn(8, 40)}"
+        options += "--freetype-color=${value.textColor and 0xFFFFFF}"
+        options += "--freetype-opacity=${(value.textOpacity * 255f).roundToInt()}"
+        options += "--freetype-background-color=$backgroundRgb"
+        options += "--freetype-background-opacity=$backgroundAlpha"
 
         val hasOutline = value.edgeType == EDGE_OUTLINE ||
             value.edgeType == EDGE_RAISED || value.edgeType == EDGE_DEPRESSED
         val hasShadow = value.edgeType == EDGE_SHADOW ||
             value.edgeType == EDGE_RAISED || value.edgeType == EDGE_DEPRESSED
-        options += ":freetype-outline-thickness=${if (hasOutline) 4 else 0}"
-        options += ":freetype-outline-color=${vlcRgb(value.edgeColor)}"
-        options += ":freetype-outline-opacity=${if (hasOutline) (value.edgeOpacity * 255f).roundToInt() else 0}"
-        options += ":freetype-shadow-color=${vlcRgb(value.edgeColor)}"
-        options += ":freetype-shadow-opacity=${if (hasShadow) (value.edgeOpacity * 160f).roundToInt() else 0}"
+        options += "--freetype-outline-thickness=${if (hasOutline) 4 else 0}"
+        options += "--freetype-outline-color=${value.edgeColor and 0xFFFFFF}"
+        options += "--freetype-outline-opacity=${if (hasOutline) (value.edgeOpacity * 255f).roundToInt() else 0}"
+        options += "--freetype-shadow-color=${value.edgeColor and 0xFFFFFF}"
+        options += "--freetype-shadow-opacity=${if (hasShadow) (value.edgeOpacity * 160f).roundToInt() else 0}"
     }
 
     if (videoHeight > 0 &&
         kotlin.math.abs(value.verticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) > 0.001f
     ) {
-        // VLC's primary sub-margin is an absolute pixel offset from its default subtitle
-        // placement. Positive values move the text lower; negative values move it higher.
+        // sub-margin is a LibVLC instance option. Keep the default height as a
+        // reference scale; VLC applies the margin to the active video's subtitle area.
         val margin = (
             (value.verticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) * videoHeight
         ).roundToInt().coerceIn(-videoHeight / 2, videoHeight * 4 / 5)
-        options += ":sub-margin=$margin"
+        options += "--sub-margin=$margin"
     }
 
     return options
@@ -153,9 +158,6 @@ internal fun compositeSubtitleBackground(
     val rgb = (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
     return rgb to (outputAlpha * 255f).roundToInt().coerceIn(0, 255)
 }
-
-private fun vlcRgb(color: Int): String =
-    String.format(Locale.ROOT, "0x%06X", color and 0xFFFFFF)
 
 internal const val EDGE_NONE = 0
 internal const val EDGE_OUTLINE = 1
