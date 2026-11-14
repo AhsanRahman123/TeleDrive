@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Deselect
-import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.DriveFolderUpload
@@ -73,7 +72,6 @@ import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
-import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -272,7 +270,6 @@ fun FilesScreen(
     viewModel: FilesViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val androidLayout = LocalAndroidLayout.current
     val selectionSnapshot by viewModel.selectionSnapshot.collectAsStateWithLifecycle()
     val selectedFileIds = selectionSnapshot.fileIds
     val selectedFolderIds = selectionSnapshot.folderIds
@@ -301,11 +298,6 @@ fun FilesScreen(
     var showEmptyItems by remember { mutableStateOf(false) }
     var selectingAllFromShortcut by remember { mutableStateOf(false) }
     var deleteAfterSelectAll by remember { mutableStateOf(false) }
-    var touchRangeSelectionMode by rememberSaveable { mutableStateOf(false) }
-
-    LaunchedEffect(selectionMode, androidLayout) {
-        if (!selectionMode || !androidLayout) touchRangeSelectionMode = false
-    }
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -657,28 +649,6 @@ fun FilesScreen(
                                             stringResource(Res.string.common_select_all)
                                         }
                                     )
-                                }
-                                if (androidLayout) {
-                                    TooltipIconButton(
-                                        tooltip = if (touchRangeSelectionMode) {
-                                            "Swipe range selection is on"
-                                        } else {
-                                            "Swipe to select a range of files and folders"
-                                        },
-                                        onClick = {
-                                            touchRangeSelectionMode = !touchRangeSelectionMode
-                                        }
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.DragIndicator,
-                                            contentDescription = "Swipe range selection",
-                                            tint = if (touchRangeSelectionMode) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
-                                        )
-                                    }
                                 }
                                 if (selectedCount > 0) {
                                     TooltipIconButton(tooltip = stringResource(Res.string.files_move), onClick = { showMovePicker = true }) {
@@ -1121,7 +1091,6 @@ fun FilesScreen(
                     RefreshableContent(
                         isRefreshing = refreshing,
                         onRefresh = viewModel::refresh,
-                        enabled = !touchRangeSelectionMode,
                         modifier = Modifier
                             .fillMaxSize()
                             .onDesktopEmptySpaceContextClick(
@@ -1147,8 +1116,6 @@ fun FilesScreen(
                                 gridState = gridState,
                                 state = state,
                                 selectionMode = selectionMode,
-                                androidLayout = androidLayout,
-                                touchRangeSelectionMode = touchRangeSelectionMode,
                                 selectedFileIds = selectedFileIds,
                                 selectedFolderIds = selectedFolderIds,
                                 onShowContextMenu = { showSelectionOverflow = true },
@@ -1440,8 +1407,6 @@ private fun FilesContent(
     gridState: LazyGridState,
     state: FilesUiState,
     selectionMode: Boolean,
-    androidLayout: Boolean,
-    touchRangeSelectionMode: Boolean,
     selectedFileIds: Set<String>,
     selectedFolderIds: Set<String>,
     onShowContextMenu: () -> Unit,
@@ -1526,14 +1491,9 @@ private fun FilesContent(
         // The starting row determines the gesture: selected anchor = deselect range;
         // unselected anchor = select range. Do not force every mouse drag to be additive.
         mouseDragAddsToSelection = false,
-        resolveNearestVisibleItem = true,
-        touchDragEnabled = androidLayout && touchRangeSelectionMode
+        resolveNearestVisibleItem = true
     )
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .then(if (androidLayout) dragSelect else Modifier)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(columns),
@@ -1547,7 +1507,7 @@ private fun FilesContent(
                 label = stringResource(Res.string.nav_files)
             )
             .pinchZoom(onZoomIn = viewModel::zoomIn, onZoomOut = viewModel::zoomOut)
-            .then(if (androidLayout) Modifier else dragSelect),
+            .then(dragSelect),
         contentPadding = padding.add(horizontal = 12.dp, top = 12.dp, bottom = 100.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)

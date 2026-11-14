@@ -53,9 +53,7 @@ fun rememberDragSelect(
     scrollPerFrame: Dp = SCROLL_PER_FRAME,
     mouseDragAddsToSelection: Boolean = false,
     resolveNearestVisibleItem: Boolean = false,
-    processReleasePosition: Boolean = false,
-    touchDragEnabled: Boolean = false,
-    touchOnly: Boolean = false
+    processReleasePosition: Boolean = false
 ): Modifier = dragSelect(
     scrollable = gridState,
     indexAt = { offset ->
@@ -86,9 +84,7 @@ fun rememberDragSelect(
     edgeSize = edgeSize,
     scrollPerFrame = scrollPerFrame,
     mouseDragAddsToSelection = mouseDragAddsToSelection,
-    processReleasePosition = processReleasePosition,
-    touchDragEnabled = touchDragEnabled,
-    touchOnly = touchOnly
+    processReleasePosition = processReleasePosition
 )
 
 @Composable
@@ -102,9 +98,7 @@ fun rememberDragSelect(
     scrollPerFrame: Dp = SCROLL_PER_FRAME,
     mouseDragAddsToSelection: Boolean = false,
     resolveNearestVisibleItem: Boolean = false,
-    processReleasePosition: Boolean = false,
-    touchDragEnabled: Boolean = false,
-    touchOnly: Boolean = false
+    processReleasePosition: Boolean = false
 ): Modifier = dragSelect(
     scrollable = listState,
     indexAt = { offset ->
@@ -126,9 +120,7 @@ fun rememberDragSelect(
     edgeSize = edgeSize,
     scrollPerFrame = scrollPerFrame,
     mouseDragAddsToSelection = mouseDragAddsToSelection,
-    processReleasePosition = processReleasePosition,
-    touchDragEnabled = touchDragEnabled,
-    touchOnly = touchOnly
+    processReleasePosition = processReleasePosition
 )
 
 @Composable
@@ -142,9 +134,7 @@ private fun dragSelect(
     edgeSize: Dp,
     scrollPerFrame: Dp,
     mouseDragAddsToSelection: Boolean,
-    processReleasePosition: Boolean,
-    touchDragEnabled: Boolean,
-    touchOnly: Boolean
+    processReleasePosition: Boolean
 ): Modifier {
     val density = LocalDensity.current
     val edgePx = with(density) { edgeSize.toPx() }
@@ -182,34 +172,24 @@ private fun dragSelect(
         }
     }
 
-    return Modifier.pointerInput(scrollable, touchDragEnabled, touchOnly) {
+    return Modifier.pointerInput(scrollable) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            // Android range selection is hosted on the collection container. Ignore pointer
-            // downs unless that explicit touch mode is active; item long-press remains intact.
-            if (touchOnly && !touchDragEnabled) return@awaitEachGesture
             val mouseDragStart = if (down.type == PointerType.Mouse) {
                 awaitMouseDragStart(down)
             } else {
                 null
             }
-            val touchDragStart = if (down.type != PointerType.Mouse && touchDragEnabled) {
-                awaitTouchDragStart(down)
+            val shouldStart = if (down.type == PointerType.Mouse) {
+                mouseDragStart != null
             } else {
-                null
-            }
-            val shouldStart = when {
-                touchOnly -> touchDragStart != null
-                down.type == PointerType.Mouse -> mouseDragStart != null
-                touchDragEnabled -> touchDragStart != null
-                else -> awaitLongPress(down)
+                awaitLongPress(down)
             }
             if (!shouldStart) return@awaitEachGesture
 
             var selectionStarted = false
             try {
                 var anchor = currentIndexAt(down.position)
-                val includeReleasePosition = processReleasePosition || touchDragStart != null
                 currentOnStart()
                 selectionStarted = true
                 val clampPosition: (Offset) -> Offset = { point ->
@@ -218,16 +198,14 @@ private fun dragSelect(
                         y = point.y.coerceIn(0f, (size.height - 1).coerceAtLeast(0).toFloat())
                     )
                 }
-                val initialPosition = clampPosition(
-                    mouseDragStart?.position ?: touchDragStart?.position ?: down.position
-                )
+                val initialPosition = clampPosition(mouseDragStart?.position ?: down.position)
                 latestPointerPosition = initialPosition
                 val initialIndex = currentIndexAt(initialPosition)
                 val selectionAnchor = anchor ?: initialIndex
                 // Keep the resolved fallback anchor for the whole gesture. Without this,
                 // a drag that starts outside an item can re-anchor on its next event after
                 // the initial range has already changed the selection state.
-                if (selectionAnchor != null && includeReleasePosition) {
+                if (selectionAnchor != null && processReleasePosition) {
                     anchor = selectionAnchor
                 }
                 val additiveMouseRange = down.type == PointerType.Mouse && mouseDragAddsToSelection
@@ -236,8 +214,7 @@ private fun dragSelect(
                     // Desktop drag-to-select is always additive when opted in. Starting on an
                     // already-selected row must not invert the gesture and erase the range.
                     // Touch long-press keeps its previous selected/unselected toggle semantics.
-                    activeShouldSelect = additiveMouseRange || touchDragStart != null ||
-                            !currentIsSelected(selectionAnchor)
+                    activeShouldSelect = additiveMouseRange || !currentIsSelected(selectionAnchor)
                     val current = initialIndex ?: selectionAnchor
                     currentOnRange(
                         dragSelectionRange(selectionAnchor, current),
@@ -251,7 +228,7 @@ private fun dragSelect(
                 // The pointer movement that crosses mouse drag-slop is consumed by
                 // awaitMouseDragStart(). It may be the last movement before release,
                 // so initialize edge scrolling here rather than waiting for another event.
-                if (mouseDragStart != null || touchDragStart != null) {
+                if (mouseDragStart != null) {
                     autoScroll = edgeScroll(
                         initialPosition.y,
                         size.height,
@@ -264,7 +241,7 @@ private fun dragSelect(
                     val event = awaitPointerEvent(PointerEventPass.Initial)
                     val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
                     val released = !change.pressed
-                    if (released && !includeReleasePosition) break
+                    if (released && !processReleasePosition) break
                     if (!released) change.consume()
 
                     // The release event can carry the final pointer coordinate. Process it
@@ -277,8 +254,8 @@ private fun dragSelect(
                         val start = anchor ?: current.also {
                             anchor = it
                             activeAnchor = it
-                            activeShouldSelect = additiveMouseRange || touchDragStart != null ||
-                                !currentIsSelected(it)
+                            activeShouldSelect =
+                                additiveMouseRange || !currentIsSelected(it)
                         }
                         currentOnRange(dragSelectionRange(start, current), activeShouldSelect)
                     }
@@ -336,25 +313,6 @@ private suspend fun AwaitPointerEventScope.awaitMouseDragStart(
         // primary-button drags belong to the shared range-selection gesture.
         if (event.keyboardModifiers.isShiftPressed) return null
         if (!event.buttons.isPrimaryPressed) return null
-        val change = event.changes.fastFirstOrNull { it.id == down.id } ?: return null
-        if (!change.pressed) return null
-        if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
-            change.consume()
-            return change
-        }
-    }
-}
-
-/**
- * In explicit Android range-selection mode, a finger drag takes over after touch slop.
- * Until then the event is left untouched, so a tap remains a tap and normal scrolling is
- * unaffected whenever the mode is off.
- */
-private suspend fun AwaitPointerEventScope.awaitTouchDragStart(
-    down: PointerInputChange
-): PointerInputChange? {
-    while (true) {
-        val event = awaitPointerEvent(PointerEventPass.Initial)
         val change = event.changes.fastFirstOrNull { it.id == down.id } ?: return null
         if (!change.pressed) return null
         if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {

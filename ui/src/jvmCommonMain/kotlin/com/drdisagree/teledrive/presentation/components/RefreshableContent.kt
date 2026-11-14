@@ -14,10 +14,9 @@ fun RefreshableContent(
     isRefreshing: Boolean,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
-    enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    if (enabled && LocalPlatformCapabilities.current.supportsPullToRefresh) {
+    if (LocalPlatformCapabilities.current.supportsPullToRefresh) {
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = onRefresh,
