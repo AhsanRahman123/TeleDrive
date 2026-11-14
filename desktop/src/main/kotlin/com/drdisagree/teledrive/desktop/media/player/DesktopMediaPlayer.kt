@@ -341,7 +341,7 @@ internal fun DesktopMediaPlayer(
     // command per input event. Intermediate values are coalesced before reaching VLCJ.
     val audioStateDispatcher = remember(player) {
         LatestAudioStateDispatcher(
-            enqueue = { task -> player.submit(task) },
+            enqueue = { task -> player.submit { task() } },
             apply = { requestedVolume, requestedMuted ->
                 player.audio().setVolume(requestedVolume)
                 player.audio().isMute = requestedMuted
