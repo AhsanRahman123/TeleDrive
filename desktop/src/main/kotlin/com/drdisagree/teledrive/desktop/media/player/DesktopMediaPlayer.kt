@@ -212,6 +212,7 @@ internal fun DesktopMediaPlayer(
     // a play/resume event always reapplies the current remembered volume and mute state.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
+    val latestRate = rememberUpdatedState(rate)
     val latestTimeMs = rememberUpdatedState(timeMs)
     val latestDurationMs = rememberUpdatedState(durationMs)
     val latestFinished = rememberUpdatedState(finished)
@@ -361,6 +362,9 @@ internal fun DesktopMediaPlayer(
                     playerScope.launch {
                         playing = true
                         finished = false
+                        player.submit {
+                            runCatching { mediaPlayer.controls().setRate(latestRate.value) }
+                        }
                         if (!styleRestartWasPlaying) {
                             player.submit { runCatching { mediaPlayer.controls().pause() } }
                         }
@@ -600,13 +604,12 @@ internal fun DesktopMediaPlayer(
         }
     }
 
-    LaunchedEffect(player, repeatAll, sleepAtTrackEnd) {
+    LaunchedEffect(player, repeatOne, repeatAll, sleepAtTrackEnd) {
         // Repeat-current and repeat-all are mutually exclusive. End-of-track sleep
         // must override VLC's native repeat flag so the timer can stop playback.
-        if (repeatAll || sleepAtTrackEnd) {
-            repeatOne = false
-            player.submit { runCatching { player.controls().repeat = false } }
-        }
+        if ((repeatAll || sleepAtTrackEnd) && repeatOne) repeatOne = false
+        val shouldRepeatCurrent = repeatOne && !repeatAll && !sleepAtTrackEnd
+        player.submit { runCatching { player.controls().repeat = shouldRepeatCurrent } }
     }
 
     // Volume/mute restoration is submitted to vlcj's serialized player executor.
