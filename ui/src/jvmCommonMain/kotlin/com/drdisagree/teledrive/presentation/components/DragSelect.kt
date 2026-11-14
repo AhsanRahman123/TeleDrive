@@ -337,10 +337,6 @@ private suspend fun AwaitPointerEventScope.awaitMouseDragStart(
 }
 
 /**
- * Consumes nothing while waiting, so the item still gets its long press; moving past touch slop
- * means a scroll.
- */
-/**
  * In explicit Android range-selection mode, a finger drag takes over after touch slop.
  * Until then the event is left untouched, so a tap remains a tap and normal scrolling is
  * unaffected whenever the mode is off.
@@ -359,6 +355,10 @@ private suspend fun AwaitPointerEventScope.awaitTouchDragStart(
     }
 }
 
+/**
+ * Consumes nothing while waiting, so the item still gets its long press; moving past touch slop
+ * means a scroll.
+ */
 private suspend fun AwaitPointerEventScope.awaitLongPress(down: PointerInputChange): Boolean =
     try {
         withTimeout(viewConfiguration.longPressTimeoutMillis) {
