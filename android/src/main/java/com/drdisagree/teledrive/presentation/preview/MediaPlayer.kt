@@ -113,6 +113,11 @@ fun MediaPlayer(
     val audioLanguage by rememberUpdatedState(preferredAudioLanguage)
     val subtitleLanguage by rememberUpdatedState(preferredSubtitleLanguage)
 
+    var subtitleAppearance by remember(context) {
+        mutableStateOf(SubtitleAppearanceStore.load(context))
+    }
+    var showSubtitleAppearance by remember { mutableStateOf(false) }
+
     val holder = remember(content) { mutableStateOf<ExoPlayer?>(null) }
     val player = holder.value
     val failedDecoders = remember(content) { mutableSetOf<String>() }
@@ -297,6 +302,7 @@ fun MediaPlayer(
                         this.player = player
                         setBackgroundColor(Color.TRANSPARENT)
                         setShutterBackgroundColor(Color.TRANSPARENT)
+                        applySubtitleAppearance(this, subtitleAppearance)
                     }
                 },
                 update = { view ->
@@ -306,6 +312,7 @@ fun MediaPlayer(
                         PlayerResizeMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         PlayerResizeMode.FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                     }
+                    applySubtitleAppearance(view, subtitleAppearance)
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -404,7 +411,19 @@ fun MediaPlayer(
                     notifyControls(false)
                 },
                 onPreferredAudioLanguage = onPreferredAudioLanguage,
-                onPreferredSubtitleLanguage = onPreferredSubtitleLanguage
+                onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
+                onOpenSubtitleAppearance = { showSubtitleAppearance = true }
+            )
+        }
+        if (showSubtitleAppearance) {
+            SubtitleAppearanceDialog(
+                appearance = subtitleAppearance,
+                onDismiss = { showSubtitleAppearance = false },
+                onApply = { next ->
+                    subtitleAppearance = next.normalized()
+                    SubtitleAppearanceStore.save(context, next)
+                    showSubtitleAppearance = false
+                }
             )
         }
         if (locked) {
