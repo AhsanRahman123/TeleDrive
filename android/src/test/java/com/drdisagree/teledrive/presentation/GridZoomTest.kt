@@ -50,17 +50,10 @@ class GridZoomTest {
             level = level.zoomedOut()
             out += level
         }
-        assertEquals(
-            listOf(
-                GridZoomLevel(ViewMode.GRID, 2),
-                GridZoomLevel(ViewMode.GRID, 3),
-                GridZoomLevel(ViewMode.GRID, 4),
-                GridZoomLevel(ViewMode.GRID, 5),
-                GridZoomLevel(ViewMode.GRID, 6),
-                GridZoomLevel(ViewMode.LIST, 6)
-            ),
-            out
-        )
+        val expectedOut = (MIN_GRID_COLUMNS..MAX_GRID_COLUMNS)
+            .map { columns -> GridZoomLevel(ViewMode.GRID, columns) } +
+            GridZoomLevel(ViewMode.LIST, MAX_GRID_COLUMNS)
+        assertEquals(expectedOut, out)
 
         var back = out.last()
         val inward = mutableListOf(back)
