@@ -894,7 +894,7 @@ fun GalleryScreen(
                                 )
                             )
                         }
-                        if (state.viewMode == ViewMode.GRID) {
+                        if (state.viewMode == ViewMode.GRID && !androidLayout) {
                             TooltipIconButton(
                                 tooltip = "Increase gallery thumbnail size",
                                 onClick = {
