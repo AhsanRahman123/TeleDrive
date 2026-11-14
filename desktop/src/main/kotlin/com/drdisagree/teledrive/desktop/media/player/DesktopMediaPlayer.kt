@@ -444,14 +444,6 @@ internal fun DesktopMediaPlayer(
                     acceptsCurrentVideoFrames.set(true)
                     val started = runCatching { player.media().start(mrl) }.getOrDefault(false)
                     val stillCurrent = currentVideoFrameGeneration.get() == mediaGeneration
-                    if (started && stillCurrent) {
-                        // The embedded VLC instance is intentionally reused between media.
-                        // Its native rate/audio-delay state can outlive the previous MRL even
-                        // though the Compose state is reset for the new one. Start every item
-                        // from neutral audio timing and 1x speed before later user adjustments.
-                        runCatching { player.controls().setRate(DEFAULT_PLAYBACK_RATE) }
-                        runCatching { player.audio().setDelay(DEFAULT_AUDIO_DELAY_US) }
-                    }
                     if (!started || !stillCurrent) {
                         acceptsCurrentMediaEvents.set(false)
                         if (!stillCurrent) {
@@ -1969,8 +1961,6 @@ private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_500L
 private const val BRIGHTNESS_READ_GUARD_MS = 1_800L
 private const val AUDIO_OUTPUT_REAPPLY_INTERVAL_MS = 250L
 private const val AUDIO_OUTPUT_REAPPLY_ATTEMPTS = 3
-private const val DEFAULT_PLAYBACK_RATE = 1.0f
-private const val DEFAULT_AUDIO_DELAY_US = 0L
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 
