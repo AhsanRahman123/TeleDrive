@@ -84,12 +84,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.listSaver
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -120,6 +117,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -357,34 +357,13 @@ fun FilesScreen(
 
     val gridState = rememberLazyGridState()
     val filesCommandFocusRequester = rememberCollectionCommandFocusRequester()
-    val tabPositions by rememberSaveable(
-        stateSaver = listSaver<MutableMap<Pair<Int, String?>, Pair<Int, Int>>, String>(
-            save = { positions ->
-                positions.flatMap { (key, value) ->
-                    listOf(
-                        key.first.toString(),
-                        key.second.orEmpty(),
-                        value.first.toString(),
-                        value.second.toString()
-                    )
-                }
-            },
-            restore = { encoded ->
-                encoded.chunked(4).mapNotNull { fields ->
-                    if (fields.size != 4) null
-                    else {
-                        val tabId = fields[0].toIntOrNull() ?: return@mapNotNull null
-                        val itemIndex = fields[2].toIntOrNull() ?: return@mapNotNull null
-                        val scrollOffset = fields[3].toIntOrNull() ?: return@mapNotNull null
-                        (tabId to fields[1].ifEmpty { null }) to (itemIndex to scrollOffset)
-                    }
-                }.toMap().toMutableMap()
-            }
-        )
-    ) { mutableStateOf(mutableMapOf()) }
     fun saveCurrentTabPosition() {
-        tabPositions[selectedTabId to state.folderId] =
-            gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+        viewModel.saveFileListPosition(
+            tabId = selectedTabId,
+            folderId = state.folderId,
+            firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+            firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset
+        )
     }
     fun navigateToFolder(folderId: String?) {
         saveCurrentTabPosition()
@@ -420,11 +399,11 @@ fun FilesScreen(
     }
     fun closeTab(tab: FilesTabState) {
         if (tabs.size <= 1) return
-        tabPositions.keys.removeAll { it.first == tab.id }
+        viewModel.clearFileListPositionsForTab(tab.id)
         viewModel.closeWorkspaceTab(tab.id)
     }
     fun closeAllTabs() {
-        tabPositions.clear()
+        viewModel.clearAllFileListPositions()
         viewModel.closeAllWorkspaceTabs()
     }
     val activeFolderLabel = if (activeFolderId == null) {
@@ -438,17 +417,40 @@ fun FilesScreen(
     val selectedWorkspaceTabFolderId =
         tabs.firstOrNull { it.id == selectedTabId }?.folderId
 
+    // Files remains on the navigation back stack while Preview is shown. Re-run the
+    // position restore when that entry becomes active again, even though the tab/folder
+    // keys themselves have not changed.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var returnFromPreviewTick by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        var hasLeftFiles = false
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> hasLeftFiles = true
+                Lifecycle.Event.ON_RESUME -> {
+                    if (hasLeftFiles) {
+                        hasLeftFiles = false
+                        returnFromPreviewTick++
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Restore a tab/folder position only when navigation changes. Do not key this effect
     // to Paging itemCount: every appended page changes that count, and re-running
     // scrollToItem(0) was snapping the user back to the top while they scrolled.
-    LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId) {
+    LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId, returnFromPreviewTick) {
         val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
         if (currentTab.folderId != state.folderId) return@LaunchedEffect
 
         snapshotFlow { files.loadState.refresh }
             .first { it !is LoadState.Loading }
 
-        val target = tabPositions[selectedTabId to state.folderId] ?: (0 to 0)
+        val target = viewModel.fileListPosition(selectedTabId, state.folderId) ?: (0 to 0)
         val targetIndex = target.first.coerceAtLeast(0)
         val targetFileIndex = targetIndex - state.folders.size
 
