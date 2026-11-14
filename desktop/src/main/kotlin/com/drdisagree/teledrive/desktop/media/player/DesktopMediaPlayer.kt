@@ -202,17 +202,17 @@ internal fun DesktopMediaPlayer(
     val playerScope = rememberCoroutineScope()
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
-    val acceptsCurrentMediaEvents = remember(factory, isAudio) { AtomicBoolean(false) }
+    val acceptsCurrentMediaEvents = remember(factory, mrl, isAudio) { AtomicBoolean(false) }
     // Render callbacks can finish copying/decoding after a media switch. Tag each accepted
     // frame with the active generation so an outgoing frame can never replace the new one.
-    val currentVideoFrameGeneration = remember(factory, isAudio) { AtomicLong(0L) }
-    val expectedMediaGeneration = remember(factory, isAudio) { AtomicLong(-1L) }
-    val acceptsCurrentVideoFrames = remember(factory, isAudio) { AtomicBoolean(false) }
+    val currentVideoFrameGeneration = remember(factory, mrl, isAudio) { AtomicLong(0L) }
+    val expectedMediaGeneration = remember(factory, mrl, isAudio) { AtomicLong(-1L) }
+    val acceptsCurrentVideoFrames = remember(factory, mrl, isAudio) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
-    val frameUpdates = remember(factory, isAudio) {
+    val frameUpdates = remember(factory, mrl, isAudio) {
         Channel<Pair<Long, VideoFramePixels>>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(frameUpdates, currentVideoFrameGeneration) {
@@ -234,7 +234,7 @@ internal fun DesktopMediaPlayer(
     }
 
     // Keep high-frequency playback position notifications bounded as well.
-    val timeUpdates = remember(factory, isAudio) {
+    val timeUpdates = remember(factory, mrl, isAudio) {
         Channel<Long>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(timeUpdates) {
@@ -244,9 +244,9 @@ internal fun DesktopMediaPlayer(
         onDispose { timeUpdates.close() }
     }
 
-    // One native VLC instance is retained for the lifetime of this media viewer. The
-    // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
-    val player = remember(factory, isAudio) {
+    // Give every MRL an isolated native VLC player. Reusing one decoder/audio-output
+    // instance across unrelated media caused corrupted frames and unstable audio on switches.
+    val player = remember(factory, mrl, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
