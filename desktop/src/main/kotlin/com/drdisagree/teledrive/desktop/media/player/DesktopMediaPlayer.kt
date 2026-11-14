@@ -214,18 +214,21 @@ internal fun DesktopMediaPlayer(
     val savedResumePositionMs = remember(mediaId, isAudio) {
         if (isAudio) 0L else VideoResumeStore.loadPosition(mediaId)
     }
+    val resumeRestoreAttempted = remember(mediaId, mrl, isAudio) {
+        AtomicBoolean(false)
+    }
     val resumeInitializationComplete = remember(mediaId, mrl, isAudio) {
         AtomicBoolean(false)
     }
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
-    val acceptsCurrentMediaEvents = remember(mrl, isAudio) { AtomicBoolean(false) }
-    val playerDisposed = remember(mrl, isAudio) { AtomicBoolean(false) }
+    val acceptsCurrentMediaEvents = remember(mrl, mediaId, isAudio) { AtomicBoolean(false) }
+    val playerDisposed = remember(mrl, mediaId, isAudio) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
-    val frameUpdates = remember(mrl, isAudio) {
+    val frameUpdates = remember(mrl, mediaId, isAudio) {
         Channel<VideoFramePixels>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(frameUpdates) {
@@ -243,7 +246,7 @@ internal fun DesktopMediaPlayer(
     }
 
     // Keep high-frequency playback position notifications bounded as well.
-    val timeUpdates = remember(mrl, isAudio) {
+    val timeUpdates = remember(mrl, mediaId, isAudio) {
         Channel<Long>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(timeUpdates, mediaId, isAudio) {
@@ -260,7 +263,7 @@ internal fun DesktopMediaPlayer(
 
     fun initializeVideoResume(mediaPlayer: MediaPlayer, mediaDurationMs: Long) {
         if (isAudio || mediaDurationMs <= 0L ||
-            !resumeInitializationComplete.compareAndSet(false, true)
+            !resumeRestoreAttempted.compareAndSet(false, true)
         ) return
 
         val resumeAt = videoResumeTarget(savedResumePositionMs, mediaDurationMs)
