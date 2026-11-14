@@ -63,6 +63,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -216,6 +217,15 @@ fun MediaPlayer(
     var playbackErrorDetails by remember(player) { mutableStateOf<String?>(null) }
     var seekFeedback by remember(player) { mutableStateOf<String?>(null) }
     var speedBoostActive by remember(player) { mutableStateOf(false) }
+    var hasActiveSubtitles by remember(player) {
+        mutableStateOf(
+            player?.currentCues?.cues?.any { !it.text.isNullOrBlank() } == true
+        )
+    }
+    var subtitleHitWidthFraction by remember(player) {
+        mutableFloatStateOf(DEFAULT_SUBTITLE_HIT_WIDTH_FRACTION)
+    }
+    val subtitleVerticalPosition = session.subtitleVerticalPosition
 
     DisposableEffect(player) {
         if (player == null) return@DisposableEffect onDispose { }
@@ -238,6 +248,22 @@ fun MediaPlayer(
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 sized = videoSize.width > 0 && videoSize.height > 0
                 videoRatio = videoSize.toRational()
+            }
+
+            override fun onCues(cueGroup: CueGroup) {
+                val textCues = cueGroup.cues.mapNotNull { it.text?.toString() }
+                    .filter { it.isNotBlank() }
+                hasActiveSubtitles = textCues.isNotEmpty()
+                if (textCues.isNotEmpty()) {
+                    val longestLine = textCues.maxOfOrNull { text ->
+                        text.lineSequence().maxOfOrNull { it.length } ?: 0
+                    } ?: 0
+                    subtitleHitWidthFraction =
+                        (0.12f + longestLine * 0.018f).coerceIn(
+                            MIN_SUBTITLE_HIT_WIDTH_FRACTION,
+                            MAX_SUBTITLE_HIT_WIDTH_FRACTION
+                        )
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -347,10 +373,18 @@ fun MediaPlayer(
                         this.player = player
                         setBackgroundColor(Color.TRANSPARENT)
                         setShutterBackgroundColor(Color.TRANSPARENT)
+                        addOnLayoutChangeListener { changed, _, _, _, _, _, _, _, _ ->
+                            val host = changed as PlayerView
+                            host.subtitleView?.translationY =
+                                (session.subtitleVerticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) *
+                                    host.height
+                        }
                     }
                 },
                 update = { view ->
                     view.player = player
+                    view.subtitleView?.translationY =
+                        (subtitleVerticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) * view.height
                     val targetResizeMode = when (resizeMode) {
                         PlayerResizeMode.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                         PlayerResizeMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -477,6 +511,10 @@ fun MediaPlayer(
                 onAdjustStart = { if (visibleControls) notifyControls(false) },
                 dragEnabled = !locked && !audioOnly,
                 chromeVisible = controlsVisible,
+                subtitleDragEnabled = hasActiveSubtitles && !locked && !audioOnly && !inPipMode,
+                subtitlePosition = subtitleVerticalPosition,
+                subtitleHitWidthFraction = subtitleHitWidthFraction,
+                onSubtitlePositionChange = { session.subtitleVerticalPosition = it },
                 modifier = Modifier.matchParentSize()
             )
         }
