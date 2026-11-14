@@ -1581,16 +1581,22 @@ private fun FilesContent(
                     prominentSelectionCheckbox = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
-                        if (selectionMode) viewModel.toggleSelection(file.id)
-                        else onOpenFile(
-                            file.id,
-                            PreviewSequence(
-                                folderId = state.folderId,
-                                filterByFolder = true,
-                                sortField = state.sortField,
-                                sortDirection = state.sortDirection
+                        if (selectionMode) {
+                            viewModel.toggleSelection(file.id)
+                        } else {
+                            // Snapshot the exact visible item index and pixel offset before
+                            // pushing the preview destination so Back returns to this row.
+                            saveCurrentTabPosition()
+                            onOpenFile(
+                                file.id,
+                                PreviewSequence(
+                                    folderId = state.folderId,
+                                    filterByFolder = true,
+                                    sortField = state.sortField,
+                                    sortDirection = state.sortDirection
+                                )
                             )
-                        )
+                        }
                     },
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
@@ -1613,16 +1619,22 @@ private fun FilesContent(
                     prominent = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
-                        if (selectionMode) viewModel.toggleSelection(file.id)
-                        else onOpenFile(
-                            file.id,
-                            PreviewSequence(
-                                folderId = state.folderId,
-                                filterByFolder = true,
-                                sortField = state.sortField,
-                                sortDirection = state.sortDirection
+                        if (selectionMode) {
+                            viewModel.toggleSelection(file.id)
+                        } else {
+                            // Snapshot the exact visible item index and pixel offset before
+                            // pushing the preview destination so Back returns to this row.
+                            saveCurrentTabPosition()
+                            onOpenFile(
+                                file.id,
+                                PreviewSequence(
+                                    folderId = state.folderId,
+                                    filterByFolder = true,
+                                    sortField = state.sortField,
+                                    sortDirection = state.sortDirection
+                                )
                             )
-                        )
+                        }
                     },
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
@@ -1644,16 +1656,22 @@ private fun FilesContent(
                     selectionMode = selectionMode,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
-                        if (selectionMode) viewModel.toggleSelection(file.id)
-                        else onOpenFile(
-                            file.id,
-                            PreviewSequence(
-                                folderId = state.folderId,
-                                filterByFolder = true,
-                                sortField = state.sortField,
-                                sortDirection = state.sortDirection
+                        if (selectionMode) {
+                            viewModel.toggleSelection(file.id)
+                        } else {
+                            // Snapshot the exact visible item index and pixel offset before
+                            // pushing the preview destination so Back returns to this row.
+                            saveCurrentTabPosition()
+                            onOpenFile(
+                                file.id,
+                                PreviewSequence(
+                                    folderId = state.folderId,
+                                    filterByFolder = true,
+                                    sortField = state.sortField,
+                                    sortDirection = state.sortDirection
+                                )
                             )
-                        )
+                        }
                     },
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
