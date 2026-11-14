@@ -180,7 +180,7 @@ internal fun DesktopMediaPlayer(
     var volume by remember(mrl) {
         mutableIntStateOf(
             if (controlPreferences.rememberVolume) {
-                controlPreferences.volume.coerceIn(0, MAX_VOLUME)
+                RememberedPlayerVolume.currentVolume()
             } else {
                 MAX_VOLUME
             }
@@ -337,6 +337,18 @@ internal fun DesktopMediaPlayer(
         }
     }.also(DesktopVlcPlaybackLifecycle::register)
 
+    // The slider and arrow keys update this dispatcher instead of enqueuing one native
+    // command per input event. Intermediate values are coalesced before reaching VLCJ.
+    val audioStateDispatcher = remember(player) {
+        LatestAudioStateDispatcher(
+            enqueue = { task -> player.submit(task) },
+            apply = { requestedVolume, requestedMuted ->
+                player.audio().setVolume(requestedVolume)
+                player.audio().isMute = requestedMuted
+            }
+        )
+    }
+
     // Render the physical brightness control immediately for video. A successful DDC/CI
     // read will synchronize its value, but an initial transient read failure must not hide it.
     var brightnessAvailable by remember(mrl, isAudio) { mutableStateOf(!isAudio) }
@@ -473,7 +485,7 @@ internal fun DesktopMediaPlayer(
             repeat(AUDIO_OUTPUT_REAPPLY_ATTEMPTS) {
                 delay(AUDIO_OUTPUT_REAPPLY_INTERVAL_MS)
                 if (!playing) return@LaunchedEffect
-                player.submitAudioState(
+                audioStateDispatcher.submit(
                     latestVolume.value.coerceIn(0, MAX_VOLUME),
                     latestMuted.value
                 )
@@ -506,7 +518,7 @@ internal fun DesktopMediaPlayer(
     }
     val toggleMute: () -> Unit = {
         muted = !muted
-        player.submitAudioState(volume, muted)
+        audioStateDispatcher.submit(volume, muted)
     }
     val toggleControlsVisibility: () -> Unit = {
         val showControls = !(controlsVisible || seekFeedbackVisible)
@@ -538,14 +550,13 @@ internal fun DesktopMediaPlayer(
         } else if (unmute) {
             muted = false
         }
-        // Keep the preference model in sync with the live slider/key value. Persist it
-        // only when volume memory is enabled; otherwise the next media starts at MAX_VOLUME.
-        val updatedPreferences = controlPreferences.copy(volume = nextVolume)
-        controlPreferences = updatedPreferences
-        if (updatedPreferences.rememberVolume) {
-            PlayerControlPreferencesStore.save(updatedPreferences)
-        }
-        player.submitAudioState(nextVolume, muted)
+        // Update shared in-memory volume immediately so a fast media switch uses the
+        // latest value; disk persistence is debounced on an IO thread.
+        RememberedPlayerVolume.update(
+            nextVolume,
+            persist = controlPreferences.rememberVolume
+        )
+        audioStateDispatcher.submit(nextVolume, muted)
     }
     fun adjustPlayerVolume(delta: Int) {
         setPlayerVolume(volume + delta, unmute = delta > 0)
@@ -1147,11 +1158,14 @@ internal fun DesktopMediaPlayer(
                 onScaling = { scaling = it },
                 controlPreferences = controlPreferences,
                 onControlPreferencesChange = { updated ->
-                    // When enabling volume memory, capture the current live slider value
-                    // immediately so the next media item and app launch restore this value.
+                    // Setting changes are infrequent, so persist them normally. Enabling
+                    // memory captures the current slider value for future media/app launches.
                     val withCurrentVolume = updated.copy(volume = volume)
                     controlPreferences = withCurrentVolume
                     PlayerControlPreferencesStore.save(withCurrentVolume)
+                    if (withCurrentVolume.rememberVolume) {
+                        RememberedPlayerVolume.update(volume, persist = true)
+                    }
                     interactionTick++
                 }
             )
@@ -1920,19 +1934,6 @@ private val PLAYBACK_RATE_PRESETS = listOf(
     1.0f, 1.15f, 1.2f, 1.25f, 1.3f, 1.4f, 1.5f, 1.75f,
     2.0f, 2.5f, 3.0f, 4.0f
 )
-
-private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
-    val requestedVolume = volume.coerceIn(0, MAX_VOLUME)
-    val requestedMute = muted || requestedVolume <= 0
-    runCatching {
-        submit {
-            runCatching {
-                audio().setVolume(requestedVolume)
-                audio().isMute = requestedMute
-            }
-        }
-    }
-}
 
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f
