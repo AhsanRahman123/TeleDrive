@@ -124,7 +124,7 @@ fun PlayerControls(
     onEnterPip: (() -> Unit)? = null,
     onPreferredAudioLanguage: (String) -> Unit = {},
     onPreferredSubtitleLanguage: (String) -> Unit = {},
-    onOpenSubtitleAppearance: () -> Unit = {},
+    onOpenAndroidSubtitleStyle: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var playing by remember(player) { mutableStateOf(player.isPlaying) }
@@ -370,11 +370,11 @@ fun PlayerControls(
                                 ExtraControl(expanded || textTracks.isNotEmpty()) {
                                     ControlButton(
                                         icon = Icons.Filled.Settings,
-                                        description = "Subtitle appearance",
+                                        description = "Android subtitle appearance",
                                         enabled = textTracks.isNotEmpty(),
                                         onClick = {
                                             onInteraction()
-                                            onOpenSubtitleAppearance()
+                                            onOpenAndroidSubtitleStyle()
                                         }
                                     )
                                 }
