@@ -59,6 +59,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.FolderOff
 import androidx.compose.material.icons.outlined.Info
@@ -72,6 +74,7 @@ import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -271,6 +274,7 @@ fun FilesScreen(
     viewModel: FilesViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val androidLayout = LocalAndroidLayout.current
     val selectionSnapshot by viewModel.selectionSnapshot.collectAsStateWithLifecycle()
     val selectedFileIds = selectionSnapshot.fileIds
     val selectedFolderIds = selectionSnapshot.folderIds
@@ -891,6 +895,26 @@ fun FilesScreen(
                                                 showViewMenu = false
                                                 viewModel.setViewMode(ViewMode.DETAILS)
                                             }
+                                        )
+                                    }
+                                }
+                                if (androidLayout && state.viewMode == ViewMode.GRID) {
+                                    TooltipIconButton(
+                                        tooltip = "Increase file and folder size",
+                                        onClick = viewModel::zoomIn
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ZoomIn,
+                                            contentDescription = "Increase file and folder size"
+                                        )
+                                    }
+                                    TooltipIconButton(
+                                        tooltip = "Decrease file and folder size",
+                                        onClick = viewModel::zoomOut
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.ZoomOut,
+                                            contentDescription = "Decrease file and folder size"
                                         )
                                     }
                                 }
