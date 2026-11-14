@@ -8,6 +8,9 @@ import android.os.StatFs
 import android.provider.MediaStore
 import androidx.annotation.RequiresApi
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.domain.repository.SettingsRepository
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.OutputStream
 
@@ -16,7 +19,8 @@ import java.io.OutputStream
  * 10, older releases write directly.
  */
 class MediaStoreDownloadWriter(
-    private val context: Context
+    private val context: Context,
+    private val settingsRepository: SettingsRepository
 ) : DownloadWriter {
 
     /**
@@ -29,7 +33,7 @@ class MediaStoreDownloadWriter(
         folderPath: String?,
         body: (OutputStream) -> Unit
     ): String? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isOnPrimaryStorage(downloadBaseDirectory())) {
             writeThroughMediaStore(fileName, mimeType, folderPath, body)
         } else {
             writeDirectly(fileName, folderPath, body)
@@ -41,7 +45,7 @@ class MediaStoreDownloadWriter(
         folderPath: String?,
         token: String?
     ): PartialDownload? = runCatching {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isOnPrimaryStorage(downloadBaseDirectory())) {
             MediaStorePartialDownload.open(
                 context.contentResolver,
                 fileName,
@@ -55,7 +59,7 @@ class MediaStoreDownloadWriter(
     }.onFailure { SafeLog.w(TAG, "Could not open a partial download", it) }.getOrNull()
 
     override fun freeBytes(folderPath: String?): Long? = runCatching {
-        StatFs(Environment.getExternalStorageDirectory().path).availableBytes
+        StatFs(directoryFor(folderPath).absolutePath).availableBytes
     }.getOrNull()
 
     @RequiresApi(Build.VERSION_CODES.Q)
@@ -125,22 +129,59 @@ class MediaStoreDownloadWriter(
         }
     }
 
-    private fun directoryFor(folderPath: String?): File {
-        val root = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            FOLDER_NAME
-        )
-        return folderPath?.takeIf { it.isNotBlank() }?.let { File(root, it) } ?: root
+    /**
+     * The selected directory is the parent of TeleDrive's own folder, matching the desktop
+     * behaviour. With no custom value, downloads remain in Downloads/TeleDrive.
+     */
+    private fun downloadBaseDirectory(): File {
+        val configured = runBlocking { settingsRepository.preferences.first() }.downloadDirectory
+            ?.takeIf { it.isNotBlank() }
+        return configured?.let(::File)
+            ?: Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
     }
 
-    private fun relativePath(folderPath: String?): String {
-        val suffix = folderPath?.trim('/')?.takeIf { it.isNotBlank() } ?: return RELATIVE_PATH
-        return "$RELATIVE_PATH/$suffix"
+    private fun directoryFor(folderPath: String?): File {
+        val root = File(downloadBaseDirectory(), FOLDER_NAME)
+        return folderPath
+            ?.split('/')
+            ?.filter { it.isNotBlank() }
+            ?.fold(root) { parent, segment -> File(parent, FileNameUtils.sanitize(segment)) }
+            ?: root
     }
+
+    /**
+     * MediaStore RELATIVE_PATH is relative to primary shared storage. The Android folder picker
+     * starts there; folders on other mounted volumes use direct file I/O instead.
+     */
+    private fun relativePath(folderPath: String?): String {
+        val storageRoot = Environment.getExternalStorageDirectory().canonicalFile
+        val basePath = downloadBaseDirectory().canonicalFile.path
+        val rootPath = storageRoot.path.trimEnd(File.separatorChar)
+        require(
+            basePath == rootPath || basePath.startsWith(rootPath + File.separator)
+        ) { "Selected download directory is outside primary shared storage" }
+
+        val baseRelative = basePath.removePrefix(rootPath)
+            .trimStart(File.separatorChar)
+            .replace(File.separatorChar, '/')
+        val segments = buildList {
+            if (baseRelative.isNotBlank()) add(baseRelative)
+            add(FOLDER_NAME)
+            folderPath?.split('/')?.filter { it.isNotBlank() }
+                ?.mapTo(this) { FileNameUtils.sanitize(it) }
+        }
+        return segments.joinToString("/")
+    }
+
+    private fun isOnPrimaryStorage(directory: File): Boolean = runCatching {
+        val rootPath = Environment.getExternalStorageDirectory().canonicalFile.path
+            .trimEnd(File.separatorChar)
+        val path = directory.canonicalFile.path
+        path == rootPath || path.startsWith(rootPath + File.separator)
+    }.getOrDefault(false)
 
     private companion object {
         const val TAG = "DownloadWriter"
         const val FOLDER_NAME = "TeleDrive"
-        val RELATIVE_PATH = "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER_NAME"
     }
 }
