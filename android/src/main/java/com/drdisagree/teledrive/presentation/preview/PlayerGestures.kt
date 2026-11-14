@@ -7,12 +7,19 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +35,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.onClick
@@ -66,6 +75,10 @@ fun PlayerGestureArea(
     onAdjustStart: () -> Unit,
     dragEnabled: Boolean,
     chromeVisible: Boolean,
+    subtitleDragEnabled: Boolean = false,
+    subtitlePosition: Float = DEFAULT_SUBTITLE_VERTICAL_POSITION,
+    subtitleHitWidthFraction: Float = DEFAULT_SUBTITLE_HIT_WIDTH_FRACTION,
+    onSubtitlePositionChange: (Float) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -75,6 +88,10 @@ fun PlayerGestureArea(
     val longPressStart by rememberUpdatedState(onLongPressStart)
     val longPressEnd by rememberUpdatedState(onLongPressEnd)
     val adjustStart by rememberUpdatedState(onAdjustStart)
+    val currentSubtitlePosition by rememberUpdatedState(subtitlePosition)
+    val currentSubtitleHitWidth by rememberUpdatedState(subtitleHitWidthFraction)
+    val updateSubtitlePosition by rememberUpdatedState(onSubtitlePositionChange)
+    var subtitleDragging by remember { mutableStateOf(false) }
 
     val audioManager = remember(context) { context.getSystemService(AudioManager::class.java) }
     val maxVolume = remember(audioManager) {
@@ -103,10 +120,61 @@ fun PlayerGestureArea(
     }
 
     val toggleControlsLabel = stringResource(Res.string.player_toggle_controls)
-    Box(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .matchParentSize()
+                // This runs in the Initial pass, ahead of the general tap/long-press detector.
+                // Only a touch on the visible subtitle band is claimed; all other touches continue
+                // to the regular player gestures, including the 2x long-press speed boost.
+                .pointerInput(subtitleDragEnabled) {
+                    if (!subtitleDragEnabled) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Initial
+                        )
+                        val hitWidth = size.width * currentSubtitleHitWidth.coerceIn(
+                            MIN_SUBTITLE_HIT_WIDTH_FRACTION,
+                            MAX_SUBTITLE_HIT_WIDTH_FRACTION
+                        )
+                        val hitCenterY = size.height * currentSubtitlePosition.coerceIn(
+                            MIN_SUBTITLE_VERTICAL_POSITION,
+                            MAX_SUBTITLE_VERTICAL_POSITION
+                        )
+                        val hitHeight = SUBTITLE_DRAG_TARGET_HEIGHT.toPx()
+                        val insideSubtitleBand =
+                            kotlin.math.abs(down.position.x - size.width / 2f) <= hitWidth / 2f &&
+                            kotlin.math.abs(down.position.y - hitCenterY) <= hitHeight / 2f
+
+                        if (insideSubtitleBand) {
+                            down.consume()
+                            subtitleDragging = true
+                            try {
+                                var finished = false
+                                while (!finished) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: break
+                                    if (change.position != change.previousPosition) {
+                                        change.consume()
+                                        if (size.height > 0) {
+                                            updateSubtitlePosition(
+                                                (change.position.y / size.height).coerceIn(
+                                                    MIN_SUBTITLE_VERTICAL_POSITION,
+                                                    MAX_SUBTITLE_VERTICAL_POSITION
+                                                )
+                                            )
+                                        }
+                                    }
+                                    if (!change.pressed) finished = true
+                                }
+                            } finally {
+                                subtitleDragging = false
+                            }
+                        }
+                    }
+                }
                 .semantics {
                     onClick(label = toggleControlsLabel) {
                         tap()
@@ -161,6 +229,30 @@ fun PlayerGestureArea(
                     )
                 }
         )
+        if (subtitleDragging) {
+            val handleShape = RoundedCornerShape(10.dp)
+            val handleHeight = SUBTITLE_DRAG_HANDLE_HEIGHT
+            val handleTop = (
+                maxHeight * currentSubtitlePosition - handleHeight / 2
+            ).coerceIn(0.dp, (maxHeight - handleHeight).coerceAtLeast(0.dp))
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = handleTop)
+                    .fillMaxWidth(
+                        currentSubtitleHitWidth.coerceIn(
+                            MIN_SUBTITLE_HIT_WIDTH_FRACTION,
+                            MAX_SUBTITLE_HIT_WIDTH_FRACTION
+                        )
+                    )
+                    .height(handleHeight)
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.07f),
+                        handleShape
+                    )
+                    .border(1.5.dp, MaterialTheme.colorScheme.primary, handleShape)
+            )
+        }
         AnimatedVisibility(
             visible = adjustment != null,
             enter = fadeIn(),
@@ -242,6 +334,12 @@ private fun applyBrightness(activity: Activity?, value: Float) {
 }
 
 private const val DRAG_RANGE = 0.7f
+private const val MIN_SUBTITLE_VERTICAL_POSITION = 0.08f
+private const val MAX_SUBTITLE_VERTICAL_POSITION = 0.92f
+private const val MIN_SUBTITLE_HIT_WIDTH_FRACTION = 0.22f
+private const val MAX_SUBTITLE_HIT_WIDTH_FRACTION = 0.94f
+private val SUBTITLE_DRAG_TARGET_HEIGHT = 76.dp
+private val SUBTITLE_DRAG_HANDLE_HEIGHT = 64.dp
 private const val MIN_BRIGHTNESS = 0.01f
 private const val DEFAULT_BRIGHTNESS = 0.5f
 private const val MAX_SYSTEM_BRIGHTNESS = 255f
