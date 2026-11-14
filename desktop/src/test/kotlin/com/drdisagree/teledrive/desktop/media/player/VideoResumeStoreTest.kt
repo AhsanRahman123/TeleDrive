@@ -27,6 +27,18 @@ class VideoResumeStoreTest {
     }
 
     @Test
+    fun `opening time does not falsely confirm a later resume seek`() {
+        assertEquals(false, isVideoResumePositionConfirmed(0L, 45_000L))
+        assertEquals(false, isVideoResumePositionConfirmed(1_000L, 2_500L))
+    }
+
+    @Test
+    fun `VLC time event confirms a restored position within tolerance`() {
+        assertEquals(true, isVideoResumePositionConfirmed(45_800L, 45_000L))
+        assertEquals(false, isVideoResumePositionConfirmed(47_000L, 45_000L))
+    }
+
+    @Test
     fun `resume position remains bounded before the end margin`() {
         assertEquals(98_000L, videoResumeTarget(98_000L, 100_000L))
     }
