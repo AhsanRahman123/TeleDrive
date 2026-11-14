@@ -330,6 +330,18 @@ fun PreviewScreen(
                             previewScope.launch { pagerState.animateScrollToPage(index) }
                         }
                     },
+                    onPlaybackFinished = onNextFileForPage@{
+                        val target = when {
+                            playerSession.shuffle && state.files.size > 1 -> {
+                                val candidate = Random.nextInt(state.files.size - 1)
+                                if (candidate >= page) candidate + 1 else candidate
+                            }
+                            page < state.files.lastIndex -> page + 1
+                            playerSession.repeatAll -> 0
+                            else -> null
+                        }
+                        if (target != null) previewScope.launch { pagerState.animateScrollToPage(target) }
+                    },
                     chromeVisible = chromeVisible,
                     allowBackgroundPlayback = backgroundPlayback,
                     preferredAudioLanguage = preferredAudioLanguage,
@@ -588,6 +600,7 @@ private fun PreviewPage(
     queueItems: List<String>,
     currentQueueIndex: Int,
     onSelectQueueItem: (Int) -> Unit,
+    onPlaybackFinished: () -> Unit,
     chromeVisible: Boolean,
     allowBackgroundPlayback: Boolean,
     preferredAudioLanguage: String,
@@ -682,9 +695,7 @@ private fun PreviewPage(
                 queueItems = queueItems,
                 currentQueueIndex = currentQueueIndex,
                 onSelectQueueItem = onSelectQueueItem,
-                onPlaybackFinished = {
-                    if (page < state.files.lastIndex || playerSession.shuffle || playerSession.repeatAll) onNextFile()
-                },
+                onPlaybackFinished = onPlaybackFinished,
                 controlsVisible = chromeVisible,
                 allowBackgroundPlayback = allowBackgroundPlayback,
                 preferredAudioLanguage = preferredAudioLanguage,
