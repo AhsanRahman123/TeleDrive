@@ -7,7 +7,7 @@ package com.drdisagree.teledrive.core.telegram
  * DownloadFile may have a completed cache entry without a managed-list row, so DeleteFile must
  * also be issued even when RemoveFileFromDownloads returns successfully.
  */
-internal suspend fun evictManagedDownloadCache(
+suspend fun evictManagedDownloadCache(
     removeFromDownloadList: suspend () -> Unit,
     deleteFromCache: suspend () -> Unit,
     cacheStillPresent: suspend () -> Boolean
