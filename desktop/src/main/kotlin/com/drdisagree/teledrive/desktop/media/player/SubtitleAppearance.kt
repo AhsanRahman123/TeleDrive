@@ -121,10 +121,10 @@ internal fun SubtitleAppearance.toVlcMediaOptions(videoHeight: Int): List<String
         kotlin.math.abs(value.verticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) > 0.001f
     ) {
         // VLC's primary sub-margin is an absolute pixel offset from its default subtitle
-        // placement. Negative values move the text lower; positive values move it higher.
+        // placement. Positive values move the text lower; negative values move it higher.
         val margin = (
-            (DEFAULT_SUBTITLE_VERTICAL_POSITION - value.verticalPosition) * videoHeight
-        ).roundToInt().coerceIn(-videoHeight / 2, videoHeight / 2)
+            (value.verticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) * videoHeight
+        ).roundToInt().coerceIn(-videoHeight / 2, videoHeight * 4 / 5)
         options += ":sub-margin=$margin"
     }
 
