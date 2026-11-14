@@ -209,6 +209,9 @@ internal fun DesktopMediaPlayer(
     val startPausedForThisRevision = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
         styleRestartPositionMs != null && !styleRestartWasPlaying
     }
+    val initialStartPausedPending = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
+        AtomicBoolean(startPausedForThisRevision)
+    }
     val factory = remember(subtitleAppearance) {
         VlcPlayback.createFactory(subtitleAppearance)
     } ?: return
@@ -366,10 +369,10 @@ internal fun DesktopMediaPlayer(
                 override fun playing(mediaPlayer: MediaPlayer) {
                     acceptsCurrentMediaEvents.set(true)
                     playerScope.launch {
-                        // A subtitle-style restart of a paused video is opened with VLC's
-                        // :start-paused media option. Keep Compose's transport state aligned
-                        // with that native state instead of issuing a racing pause() toggle.
-                        playing = !startPausedForThisRevision
+                        // Consume the one initial start-paused event only. Later playing
+                        // events (after the user presses Play) must restore the normal UI state.
+                        val initialPauseEvent = initialStartPausedPending.compareAndSet(true, false)
+                        playing = !initialPauseEvent
                         finished = false
                         val rateToRestore = latestRate.value
                         val shouldRepeatCurrent = latestRepeatOne.value &&
@@ -413,6 +416,7 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun paused(mediaPlayer: MediaPlayer) {
+                    initialStartPausedPending.compareAndSet(true, false)
                     if (acceptsCurrentMediaEvents.get()) {
                         playerScope.launch { playing = false }
                     }
@@ -675,10 +679,14 @@ internal fun DesktopMediaPlayer(
         when {
             finished -> {
                 finished = false
+                initialStartPausedPending.set(false)
                 player.submit { runCatching { player.controls().play() } }
             }
             playing -> player.submit { runCatching { player.controls().pause() } }
-            else -> player.submit { runCatching { player.controls().play() } }
+            else -> {
+                initialStartPausedPending.set(false)
+                player.submit { runCatching { player.controls().play() } }
+            }
         }
     }
     val toggleMute: () -> Unit = {
@@ -929,6 +937,7 @@ internal fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.MediaPlay -> {
+                        initialStartPausedPending.set(false)
                         player.submit { runCatching { player.controls().play() } }
                         interactionTick++
                         true
