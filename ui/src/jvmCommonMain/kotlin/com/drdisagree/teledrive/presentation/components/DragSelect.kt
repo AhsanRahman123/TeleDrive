@@ -119,7 +119,8 @@ fun rememberDragSelect(
     onEnd = onEnd,
     edgeSize = edgeSize,
     scrollPerFrame = scrollPerFrame,
-    mouseDragAddsToSelection = mouseDragAddsToSelection
+    mouseDragAddsToSelection = mouseDragAddsToSelection,
+    processReleasePosition = processReleasePosition
 )
 
 @Composable
