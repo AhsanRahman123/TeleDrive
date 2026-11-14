@@ -102,6 +102,10 @@ fun MediaPlayer(
     onNextFile: () -> Unit = {},
     hasPreviousFile: Boolean = false,
     hasNextFile: Boolean = false,
+    queueItems: List<String> = emptyList(),
+    currentQueueIndex: Int = 0,
+    onSelectQueueItem: (Int) -> Unit = {},
+    onPlaybackFinished: () -> Unit = {},
     controlsVisible: Boolean = true,
     allowBackgroundPlayback: Boolean = false,
     preferredAudioLanguage: String = "",
@@ -117,6 +121,7 @@ fun MediaPlayer(
     val notifyControls by rememberUpdatedState(onControlsVisibilityChanged)
     val audioLanguage by rememberUpdatedState(preferredAudioLanguage)
     val subtitleLanguage by rememberUpdatedState(preferredSubtitleLanguage)
+    val playbackFinished by rememberUpdatedState(onPlaybackFinished)
 
     val holder = remember(content) { mutableStateOf<ExoPlayer?>(null) }
     val player = holder.value
@@ -210,6 +215,17 @@ fun MediaPlayer(
     DisposableEffect(player) {
         if (player == null) return@DisposableEffect onDispose { }
         val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    if (session.repeatAll && queueItems.size == 1) {
+                        player.seekTo(0)
+                        player.play()
+                    } else {
+                        playbackFinished()
+                    }
+                }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 playing = isPlaying
             }
@@ -220,7 +236,15 @@ fun MediaPlayer(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                playbackErrorDetails = "Media3 error ${error.errorCode}: ${error.message ?: error.cause?.message ?: error.javaClass.simpleName}"
+                playbackErrorDetails = buildString {
+                    append("Media3 error ${error.errorCode}: ${error.message ?: error.javaClass.simpleName}")
+                    error.cause?.let { cause ->
+                        append("\nCause: ${cause.javaClass.simpleName}: ${cause.message ?: "no details"}")
+                    }
+                    error.failedDecoderName()?.let { decoder ->
+                        append("\nDecoder: $decoder")
+                    }
+                }
                 Log.e("TeleDriveMediaPlayer", "Playback failed: ${playbackErrorDetails}", error)
                 when (error.errorCode) {
                     PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
@@ -454,6 +478,9 @@ fun MediaPlayer(
                 onNextFile = onNextFile,
                 hasPreviousFile = hasPreviousFile,
                 hasNextFile = hasNextFile,
+                queueItems = queueItems,
+                currentQueueIndex = currentQueueIndex,
+                onSelectQueueItem = onSelectQueueItem,
                 visible = controlsVisible &&
                         !locked &&
                         !inPipMode &&

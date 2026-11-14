@@ -7,6 +7,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +49,10 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SlowMotionVideo
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Subtitles
@@ -63,12 +70,14 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -80,10 +89,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalContext
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import android.provider.Settings
+import android.view.WindowManager
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -112,6 +124,7 @@ import com.drdisagree.teledrive.resources.preview_playback_speed
 import com.drdisagree.teledrive.presentation.common.Formatters
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -127,6 +140,9 @@ fun PlayerControls(
     onNextFile: () -> Unit = {},
     hasPreviousFile: Boolean = false,
     hasNextFile: Boolean = false,
+    queueItems: List<String> = emptyList(),
+    currentQueueIndex: Int = 0,
+    onSelectQueueItem: (Int) -> Unit = {},
     visible: Boolean,
     audioOnly: Boolean,
     resizeMode: PlayerResizeMode,
@@ -148,6 +164,10 @@ fun PlayerControls(
     var pendingSeek by remember(player) { mutableStateOf<Long?>(null) }
     var speed by session::speed
     var seekStepSeconds by session::seekStepSeconds
+    var shuffle by session::shuffle
+    var repeatAll by session::repeatAll
+    var sleepTimerDeadlineMillis by session::sleepTimerDeadlineMillis
+    var volume by remember(player) { mutableFloatStateOf(player.volume) }
     var muted by remember(player) { mutableStateOf(player.volume == 0f) }
     var repeatOne by remember(player) {
         mutableStateOf(player.repeatMode == Player.REPEAT_MODE_ONE)
@@ -158,10 +178,22 @@ fun PlayerControls(
     var showSpeeds by remember { mutableStateOf(false) }
     var showSeekSteps by remember { mutableStateOf(false) }
     var showResizeHint by remember { mutableStateOf(false) }
+    var showAdjustments by remember { mutableStateOf(false) }
+    var showSleepTimer by remember { mutableStateOf(false) }
+    var showQueue by remember { mutableStateOf(false) }
     var showAudioTracks by remember { mutableStateOf(false) }
     var showTextTracks by remember { mutableStateOf(false) }
 
     val activity = LocalActivity.current
+    val context = LocalContext.current
+    var brightness by remember(activity) {
+        mutableFloatStateOf(
+            activity?.window?.attributes?.screenBrightness?.takeIf { it >= 0f }
+                ?: runCatching {
+                    Settings.System.getInt(context.contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
+                }.getOrDefault(0.5f)
+        )
+    }
     var rotation by remember(activity) {
         mutableStateOf(PlayerRotation.of(activity?.requestedOrientation))
     }
@@ -211,6 +243,11 @@ fun PlayerControls(
                 tracks = current
                 subtitlesOn = current.groups.any { it.type == C.TRACK_TYPE_TEXT && it.isSelected }
             }
+
+            override fun onVolumeChanged(volumeNow: Float) {
+                volume = volumeNow.coerceIn(0f, 1f)
+                muted = volumeNow <= 0.001f
+            }
         }
         player.addListener(listener)
         onDispose { player.removeListener(listener) }
@@ -231,6 +268,17 @@ fun PlayerControls(
 
     LaunchedEffect(visible) {
         if (!visible) expanded = false
+    }
+    LaunchedEffect(sleepTimerDeadlineMillis, player) {
+        val deadline = sleepTimerDeadlineMillis
+        if (deadline > 0L) {
+            val remaining = (deadline - System.currentTimeMillis()).coerceAtLeast(0L)
+            if (remaining > 0L) delay(remaining)
+            if (session.sleepTimerDeadlineMillis == deadline) {
+                player.pause()
+                session.sleepTimerDeadlineMillis = 0L
+            }
+        }
     }
     LaunchedEffect(showResizeHint) {
         if (showResizeHint) {
@@ -344,6 +392,60 @@ fun PlayerControls(
                                     onClick = {
                                         onInteraction()
                                         showSeekSteps = true
+                                    }
+                                )
+                            }
+                            ExtraControl(expanded) {
+                                ControlButton(
+                                    icon = Icons.Filled.Tune,
+                                    description = "Volume and brightness",
+                                    onClick = {
+                                        onInteraction()
+                                        showAdjustments = true
+                                    }
+                                )
+                            }
+                            ExtraControl(expanded) {
+                                ControlButton(
+                                    icon = Icons.Filled.Shuffle,
+                                    description = if (shuffle) "Shuffle on" else "Shuffle off",
+                                    active = shuffle,
+                                    onClick = {
+                                        onInteraction()
+                                        shuffle = !shuffle
+                                    }
+                                )
+                            }
+                            ExtraControl(expanded) {
+                                ControlButton(
+                                    icon = Icons.Filled.Repeat,
+                                    description = if (repeatAll) "Repeat all on" else "Repeat all off",
+                                    active = repeatAll,
+                                    onClick = {
+                                        onInteraction()
+                                        repeatAll = !repeatAll
+                                    }
+                                )
+                            }
+                            ExtraControl(expanded) {
+                                ControlButton(
+                                    icon = Icons.Filled.Timer,
+                                    description = if (sleepTimerDeadlineMillis > 0L) "Sleep timer active" else "Sleep timer",
+                                    active = sleepTimerDeadlineMillis > 0L,
+                                    onClick = {
+                                        onInteraction()
+                                        showSleepTimer = true
+                                    }
+                                )
+                            }
+                            ExtraControl(expanded || queueItems.isNotEmpty()) {
+                                ControlButton(
+                                    icon = Icons.Filled.QueueMusic,
+                                    description = "Preview queue",
+                                    enabled = queueItems.isNotEmpty(),
+                                    onClick = {
+                                        onInteraction()
+                                        showQueue = true
                                     }
                                 )
                             }
@@ -540,6 +642,131 @@ fun PlayerControls(
             }
         }
       }
+    }
+
+    if (showAdjustments) {
+        ModalBottomSheet(onDismissRequest = { showAdjustments = false }) {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .navigationBarsPadding()
+            ) {
+                Text("Playback adjustments", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Volume", modifier = Modifier.weight(1f))
+                    Text("${(volume * 100).roundToInt()}%")
+                }
+                Slider(
+                    value = volume,
+                    onValueChange = {
+                        volume = it.coerceIn(0f, 1f)
+                        player.volume = volume
+                        muted = volume <= 0.001f
+                        onInteraction()
+                    },
+                    valueRange = 0f..1f
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Brightness", modifier = Modifier.weight(1f))
+                    Text("${(brightness * 100).roundToInt()}%")
+                }
+                Slider(
+                    value = brightness.coerceIn(0.01f, 1f),
+                    onValueChange = { value ->
+                        brightness = value.coerceIn(0.01f, 1f)
+                        activity?.window?.let { window ->
+                            window.attributes = window.attributes.apply {
+                                screenBrightness = brightness
+                            }
+                        }
+                        onInteraction()
+                    },
+                    valueRange = 0.01f..1f
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+
+    if (showSleepTimer) {
+        ModalBottomSheet(onDismissRequest = { showSleepTimer = false }) {
+            Column(
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                    .padding(bottom = 12.dp)
+            ) {
+                Text(
+                    "Sleep timer",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+                listOf(15, 30, 45, 60, 90, 120).forEach { minutes ->
+                    TextButton(
+                        onClick = {
+                            sleepTimerDeadlineMillis = System.currentTimeMillis() + minutes * 60_000L
+                            showSleepTimer = false
+                            onInteraction()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("$minutes minutes")
+                    }
+                }
+                if (sleepTimerDeadlineMillis > 0L) {
+                    TextButton(
+                        onClick = {
+                            sleepTimerDeadlineMillis = 0L
+                            showSleepTimer = false
+                            onInteraction()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Turn off timer")
+                    }
+                }
+            }
+        }
+    }
+
+    if (showQueue) {
+        ModalBottomSheet(onDismissRequest = { showQueue = false }) {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+                    .navigationBarsPadding()
+            ) {
+                Text(
+                    "Preview queue",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+                LazyColumn {
+                    itemsIndexed(queueItems) { index, name ->
+                        TextButton(
+                            onClick = {
+                                showQueue = false
+                                onSelectQueueItem(index)
+                                onInteraction()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (index == currentQueueIndex) "▶  $name" else name,
+                                modifier = Modifier.fillMaxWidth(),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                color = if (index == currentQueueIndex) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if (showSpeeds) {

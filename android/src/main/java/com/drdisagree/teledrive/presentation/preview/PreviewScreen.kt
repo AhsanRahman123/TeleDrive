@@ -91,6 +91,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import androidx.core.view.WindowInsetsCompat
@@ -242,6 +243,7 @@ fun PreviewScreen(
             currentFile.category == FileCategory.VIDEO
     var chromeVisible by remember { mutableStateOf(true) }
     val playerSession = remember { PlayerSession() }
+    val previewQueue = remember(state.files) { state.files.map { it.name } }
     val inPipMode by koinInject<PipController>().inPipMode.collectAsStateWithLifecycle()
     val chromeShown = (chromeVisible || !immersive) && !inPipMode
 
@@ -298,13 +300,36 @@ fun PreviewScreen(
                     dataSourceFactory = dataSourceFactory,
                     onDownload = { viewModel.download(file) },
                     onPreviousFile = {
-                        if (page > 0) previewScope.launch { pagerState.animateScrollToPage(page - 1) }
+                        val target = when {
+                            page > 0 -> page - 1
+                            playerSession.repeatAll -> state.files.lastIndex
+                            else -> null
+                        }
+                        if (target != null) previewScope.launch { pagerState.animateScrollToPage(target) }
                     },
                     onNextFile = {
-                        if (page < state.files.lastIndex) previewScope.launch { pagerState.animateScrollToPage(page + 1) }
+                        val target = when {
+                            playerSession.shuffle && state.files.size > 1 -> {
+                                val candidate = Random.nextInt(state.files.size - 1)
+                                if (candidate >= page) candidate + 1 else candidate
+                            }
+                            page < state.files.lastIndex -> page + 1
+                            playerSession.repeatAll -> 0
+                            else -> null
+                        }
+                        if (target != null) previewScope.launch { pagerState.animateScrollToPage(target) }
                     },
-                    hasPreviousFile = page > 0,
-                    hasNextFile = page < state.files.lastIndex,
+                    hasPreviousFile = page > 0 || playerSession.repeatAll,
+                    hasNextFile = page < state.files.lastIndex ||
+                            (playerSession.shuffle && state.files.size > 1) ||
+                            playerSession.repeatAll,
+                    queueItems = previewQueue,
+                    currentQueueIndex = page,
+                    onSelectQueueItem = { index ->
+                        if (index in state.files.indices) {
+                            previewScope.launch { pagerState.animateScrollToPage(index) }
+                        }
+                    },
                     chromeVisible = chromeVisible,
                     allowBackgroundPlayback = backgroundPlayback,
                     preferredAudioLanguage = preferredAudioLanguage,
@@ -560,6 +585,9 @@ private fun PreviewPage(
     onNextFile: () -> Unit,
     hasPreviousFile: Boolean,
     hasNextFile: Boolean,
+    queueItems: List<String>,
+    currentQueueIndex: Int,
+    onSelectQueueItem: (Int) -> Unit,
     chromeVisible: Boolean,
     allowBackgroundPlayback: Boolean,
     preferredAudioLanguage: String,
@@ -651,6 +679,12 @@ private fun PreviewPage(
                 onNextFile = onNextFile,
                 hasPreviousFile = hasPreviousFile,
                 hasNextFile = hasNextFile,
+                queueItems = queueItems,
+                currentQueueIndex = currentQueueIndex,
+                onSelectQueueItem = onSelectQueueItem,
+                onPlaybackFinished = {
+                    if (page < state.files.lastIndex || playerSession.shuffle || playerSession.repeatAll) onNextFile()
+                },
                 controlsVisible = chromeVisible,
                 allowBackgroundPlayback = allowBackgroundPlayback,
                 preferredAudioLanguage = preferredAudioLanguage,
