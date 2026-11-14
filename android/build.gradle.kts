@@ -34,13 +34,6 @@ android {
 
     val ciKeystore = System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
     signingConfigs {
-        // Stable preview-only signing identity; never use for production releases.
-        create("preview") {
-            storeFile = rootProject.file(".github/keys/teledrive-preview.keystore")
-            storePassword = "preview-only-2026"
-            keyAlias = "teledrive-preview"
-            keyPassword = "preview-only-2026"
-        }
         create("release") {
             if (ciKeystore != null) {
                 storeFile = file(ciKeystore)
@@ -52,8 +45,11 @@ android {
     }
     buildTypes {
         debug {
-            // Reuse the same preview certificate across CI runs so preview APKs update in place.
-            signingConfig = signingConfigs.getByName("preview")
+            // CI supplies the persistent preview signing key through repository secrets.
+            // Local builds without KEYSTORE_FILE continue to use the normal local debug key.
+            if (ciKeystore != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         release {
             isMinifyEnabled = true

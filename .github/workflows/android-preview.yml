@@ -4,6 +4,15 @@ on:
   push:
     branches:
       - android/touch-preview-20261114
+    paths:
+      - 'android/src/**'
+      - 'ui/src/**'
+      - 'shared/src/**'
+      - '.github/actions/build-ffmpeg-decoder/**'
+      - 'gradle/**'
+      - 'gradle.properties'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
   workflow_dispatch:
 
 permissions:
@@ -30,6 +39,19 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
 
+      - name: Restore stable preview signing key
+        shell: bash
+        env:
+          PREVIEW_KEYSTORE_BASE64: ${{ secrets.TELEDRIVE_PREVIEW_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PREVIEW_KEYSTORE_BASE64:-}" ]]; then
+            echo "::error::Missing TELEDRIVE_PREVIEW_KEYSTORE_BASE64. Run Install-Preview-Signing-Secrets.ps1 once."
+            exit 1
+          fi
+          printf '%s' "$PREVIEW_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/teledrive-preview-keystore.p12"
+          test -s "$RUNNER_TEMP/teledrive-preview-keystore.p12"
+
       - name: Run Android unit tests
         run: ./gradlew testDebugUnitTest
 
@@ -37,10 +59,19 @@ jobs:
         uses: ./.github/actions/build-ffmpeg-decoder
 
       - name: Assemble universal debug APK
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/teledrive-preview-keystore.p12
+          KEYSTORE_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TELEDRIVE_PREVIEW_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEY_PASSWORD }}
         run: ./gradlew :android:assembleDebug -PwithFfmpegDecoder -PsplitAbis=false
 
-      - name: Verify isolated preview package ID
+      - name: Verify isolated package ID and persistent signing certificate
         shell: bash
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/teledrive-preview-keystore.p12
+          KEYSTORE_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TELEDRIVE_PREVIEW_KEY_ALIAS }}
         run: |
           set -euo pipefail
           apk="$(find android/build/outputs/apk/debug -name '*-universal-debug.apk' -print -quit)"
@@ -49,21 +80,20 @@ jobs:
           package="$("$aapt" dump badging "$apk" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p")"
           echo "Built Android package ID: $package"
           test "$package" = "com.drdisagree.teledrive.preview2"
-          echo "Verified separate preview package: $package" >> "$GITHUB_STEP_SUMMARY"
+          keytool_cert="$(keytool -exportcert -keystore "$KEYSTORE_FILE" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" | sha256sum | awk '{print tolower($1)}')"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          keytool_cert="$(keytool -exportcert -keystore .github/keys/teledrive-preview.keystore -storepass preview-only-2026 -alias teledrive-preview | sha256sum | awk '{print tolower($1)}')"
-          apk_cert="$("$apksigner" verify --print-certs "$apk" 2>&1 | grep -Eo '[[:xdigit:]]{64}' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+          apk_cert="$("$apksigner" verify --print-certs "$apk" 2>&1 | awk -F': ' '/certificate SHA-256 digest/ {print $NF; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           echo "Keystore certificate SHA-256: $keytool_cert"
           echo "APK certificate SHA-256: $apk_cert"
           test -n "$apk_cert"
           test "$apk_cert" = "$keytool_cert"
-          echo "Verified APK uses the persistent preview signing certificate." >> "$GITHUB_STEP_SUMMARY"
-
+          echo "Verified package: $package" >> "$GITHUB_STEP_SUMMARY"
+          echo "Verified persistent signer: $apk_cert" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v7
         with:
-          name: TeleDrive-Android-Preview
+          name: TeleDrive-Android-Preview-2
           path: android/build/outputs/apk/debug/*-universal-debug.apk
           if-no-files-found: error
           retention-days: 14
