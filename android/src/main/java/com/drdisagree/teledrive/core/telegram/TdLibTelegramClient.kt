@@ -1215,15 +1215,9 @@ class TdLibTelegramClient(
         return document.minithumbnail?.data
     }
 
-    private suspend fun remoteFile(remoteFileId: String): TdApi.File = try {
-        send(TdApi.GetRemoteFile(remoteFileId, TdApi.FileTypeDocument()))
-    } catch (documentFailure: TelegramException) {
-        try {
-            send(TdApi.GetRemoteFile(remoteFileId, TdApi.FileTypePhoto()))
-        } catch (_: TelegramException) {
-            throw documentFailure
-        }
-    }
+    /** Telegram remote ids can identify documents, audio, video, stickers or photos. */
+    private suspend fun remoteFile(remoteFileId: String): TdApi.File =
+        send(TdApi.GetRemoteFile(remoteFileId, null))
 
     override suspend fun resolveFile(remoteFileId: String): TelegramFileInfo =
         remoteFile(remoteFileId).toInfo()
@@ -1468,6 +1462,14 @@ class TdLibTelegramClient(
             miniThumbnail = body.audio.albumCoverMinithumbnail?.data
         )
 
+        is TdApi.MessageVoiceNote -> remoteDocument(
+            file = body.voiceNote.voice,
+            fileName = "voice_note_$id.ogg",
+            mimeType = body.voiceNote.mimeType,
+            caption = "",
+            miniThumbnail = null
+        )
+
         is TdApi.MessageVideo -> remoteDocument(
             file = body.video.video,
             fileName = body.video.fileName,
@@ -1475,6 +1477,38 @@ class TdLibTelegramClient(
             caption = body.caption?.text.orEmpty(),
             miniThumbnail = body.video.minithumbnail?.data
         )
+
+        is TdApi.MessageVideoNote -> remoteDocument(
+            file = body.videoNote.video,
+            fileName = "video_note_$id.mp4",
+            mimeType = "video/mp4",
+            caption = "",
+            miniThumbnail = body.videoNote.minithumbnail?.data
+        )
+
+        is TdApi.MessageAnimation -> remoteDocument(
+            file = body.animation.animation,
+            fileName = body.animation.fileName,
+            mimeType = body.animation.mimeType,
+            caption = body.caption?.text.orEmpty(),
+            miniThumbnail = body.animation.minithumbnail?.data
+        )
+
+        is TdApi.MessageSticker -> {
+            val sticker = body.sticker
+            val (extension, mimeType) = when (sticker.format) {
+                is TdApi.StickerFormatTgs -> "tgs" to "application/x-tgsticker"
+                is TdApi.StickerFormatWebm -> "webm" to "video/webm"
+                else -> "webp" to "image/webp"
+            }
+            remoteDocument(
+                file = sticker.sticker,
+                fileName = "sticker_$id.$extension",
+                mimeType = mimeType,
+                caption = "",
+                miniThumbnail = null
+            )
+        }
 
         is TdApi.MessagePhoto -> body.photo.sizes.maxByOrNull { it.photo.size }?.let { size ->
             remoteDocument(
