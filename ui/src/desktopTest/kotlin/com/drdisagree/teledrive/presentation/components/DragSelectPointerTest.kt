@@ -28,6 +28,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -441,4 +442,111 @@ class DragSelectPointerTest {
 
         assertEquals(setOf(0, 1, 2, 3, 4), selected)
     }
+    @Test
+    fun `touch range mode selects a range by dragging without long pressing`() {
+        var selected by mutableStateOf(setOf(0))
+        var rangeBase by mutableStateOf(setOf(0))
+        var rangeActive by mutableStateOf(false)
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = {
+                    rangeBase = selected
+                    rangeActive = true
+                },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) rangeBase + range else rangeBase - range.toSet()
+                },
+                onEnd = { rangeActive = false },
+                resolveNearestVisibleItem = true,
+                touchDragEnabled = true
+            )
+            Column {
+                Text(
+                    text = selected.size.toString(),
+                    modifier = Modifier.testTag("touch-range-selected-count")
+                )
+                LazyVerticalGrid(
+                    state = gridState,
+                    columns = GridCells.Fixed(1),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .size(width = 180.dp, height = 260.dp)
+                        .testTag("touch-range-grid")
+                        .then(dragSelect)
+                ) {
+                    items((0 until 6).toList()) { index ->
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(60.dp)
+                                .background(if (index in selected) Color.Blue else Color.Gray)
+                        )
+                    }
+                }
+            }
+        }
+
+        rule.onNodeWithTag("touch-range-grid").performTouchInput {
+            down(Offset(90f, 30f))
+            moveTo(Offset(90f, 90f), delayMillis = 80)
+            moveTo(Offset(90f, 155f), delayMillis = 80)
+            up()
+        }
+        rule.waitForIdle()
+
+        rule.onNodeWithTag("touch-range-selected-count").assertTextEquals("3")
+        assertEquals(setOf(0, 1, 2), selected)
+        assertFalse(rangeActive)
+    }
+
+    @Test
+    fun `touch range mode extends an existing selection from a selected anchor`() {
+        var selected by mutableStateOf(setOf(0, 1))
+        var rangeBase by mutableStateOf(setOf(0, 1))
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) rangeBase + range else rangeBase - range.toSet()
+                },
+                onEnd = {},
+                touchDragEnabled = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 260.dp)
+                    .testTag("touch-range-add-grid")
+                    .then(dragSelect)
+            ) {
+                items((0 until 6).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("touch-range-add-grid").performTouchInput {
+            down(Offset(90f, 30f))
+            moveTo(Offset(90f, 155f), delayMillis = 80)
+            up()
+        }
+        rule.waitForIdle()
+
+        assertEquals(setOf(0, 1, 2), selected)
+    }
+
 }

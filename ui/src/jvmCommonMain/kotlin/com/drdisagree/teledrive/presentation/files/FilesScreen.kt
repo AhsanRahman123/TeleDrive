@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Deselect
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.DriveFolderUpload
@@ -72,6 +73,7 @@ import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
@@ -270,6 +272,7 @@ fun FilesScreen(
     viewModel: FilesViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val androidLayout = LocalAndroidLayout.current
     val selectionSnapshot by viewModel.selectionSnapshot.collectAsStateWithLifecycle()
     val selectedFileIds = selectionSnapshot.fileIds
     val selectedFolderIds = selectionSnapshot.folderIds
@@ -298,6 +301,11 @@ fun FilesScreen(
     var showEmptyItems by remember { mutableStateOf(false) }
     var selectingAllFromShortcut by remember { mutableStateOf(false) }
     var deleteAfterSelectAll by remember { mutableStateOf(false) }
+    var touchRangeSelectionMode by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(selectionMode, androidLayout) {
+        if (!selectionMode || !androidLayout) touchRangeSelectionMode = false
+    }
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -649,6 +657,28 @@ fun FilesScreen(
                                             stringResource(Res.string.common_select_all)
                                         }
                                     )
+                                }
+                                if (androidLayout) {
+                                    TooltipIconButton(
+                                        tooltip = if (touchRangeSelectionMode) {
+                                            "Swipe range selection is on"
+                                        } else {
+                                            "Swipe to select a range of files and folders"
+                                        },
+                                        onClick = {
+                                            touchRangeSelectionMode = !touchRangeSelectionMode
+                                        }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.DragIndicator,
+                                            contentDescription = "Swipe range selection",
+                                            tint = if (touchRangeSelectionMode) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
                                 }
                                 if (selectedCount > 0) {
                                     TooltipIconButton(tooltip = stringResource(Res.string.files_move), onClick = { showMovePicker = true }) {
@@ -1491,7 +1521,8 @@ private fun FilesContent(
         // The starting row determines the gesture: selected anchor = deselect range;
         // unselected anchor = select range. Do not force every mouse drag to be additive.
         mouseDragAddsToSelection = false,
-        resolveNearestVisibleItem = true
+        resolveNearestVisibleItem = true,
+        touchDragEnabled = androidLayout && touchRangeSelectionMode
     )
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
