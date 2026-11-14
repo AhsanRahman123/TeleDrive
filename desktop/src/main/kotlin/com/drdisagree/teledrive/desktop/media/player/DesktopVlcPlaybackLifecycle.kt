@@ -68,15 +68,19 @@ internal object DesktopVlcPlaybackLifecycle {
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val coordinator = SingleActivePlaybackCoordinator<MediaPlayer> { player ->
-        player.submitAndAwait {
-            try {
-                // ControlsApi.stop() waits for the native stopped event. Do not start another
-                // media item until this has completed and the old player has been released.
-                runCatching { player.controls().stop() }
-            } finally {
-                player.release()
-            }
-        }
+        stopThenReleaseOutsidePlayerExecutor(
+            stopOnPlayerExecutor = {
+                // VLCJ requires calls into LibVLC to be serialized on the player's own
+                // executor. Await the stop command, but let that executor task return before
+                // releasing the player from another thread.
+                player.submitAndAwait {
+                    runCatching { player.controls().stop() }
+                }.onFailure {
+                    SafeLog.w(TAG, "Could not stop outgoing VLC player cleanly", it)
+                }
+            },
+            releasePlayer = { player.release() }
+        )
     }
 
     fun register(player: MediaPlayer) {
@@ -95,6 +99,26 @@ internal object DesktopVlcPlaybackLifecycle {
     }
 
     private const val TAG = "DesktopVlcLifecycle"
+}
+
+/**
+ * Run native stop on the player's serialized executor, then release the player from IO.
+ *
+ * MediaPlayer.release() shuts down its own TaskExecutor and waits for that executor to
+ * terminate. Calling release from inside a submitted task makes the worker wait for itself,
+ * delaying teardown until the executor's shutdown timeout. Keep release outside that worker.
+ */
+internal suspend fun stopThenReleaseOutsidePlayerExecutor(
+    stopOnPlayerExecutor: suspend () -> Unit,
+    releasePlayer: () -> Unit
+) {
+    try {
+        stopOnPlayerExecutor()
+    } finally {
+        withContext(NonCancellable + Dispatchers.IO) {
+            releasePlayer()
+        }
+    }
 }
 
 internal suspend fun <T> MediaPlayer.submitAndAwait(block: () -> T): T {
