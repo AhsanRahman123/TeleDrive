@@ -14,7 +14,7 @@ const val DEFAULT_SUBTITLE_HIT_WIDTH_FRACTION = 0.62f
 @Stable
 class PlayerSession {
     var speed by mutableFloatStateOf(1f)
-    var subtitleVerticalPosition by mutableFloatStateOf(DEFAULT_SUBTITLE_VERTICAL_POSITION)
+    var subtitleAppearance by mutableStateOf(SubtitleAppearance())
     var resizeMode by mutableStateOf(PlayerResizeMode.FIT)
     var seekStepSeconds by mutableIntStateOf(10)
     var shuffle by mutableStateOf(false)
