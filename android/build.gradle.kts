@@ -13,7 +13,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.drdisagree.teledrive.preview"
+        applicationId = "com.drdisagree.teledrive.preview2"
         minSdk = 26
         targetSdk = 37
         versionCode = libs.versions.appVersionCode.get().toInt()
@@ -34,6 +34,13 @@ android {
 
     val ciKeystore = System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
     signingConfigs {
+        // Stable preview-only signing identity; never use for production releases.
+        create("preview") {
+            storeFile = rootProject.file(".github/keys/teledrive-preview.keystore")
+            storePassword = "preview-only-2026"
+            keyAlias = "teledrive-preview"
+            keyPassword = "preview-only-2026"
+        }
         create("release") {
             if (ciKeystore != null) {
                 storeFile = file(ciKeystore)
@@ -45,10 +52,8 @@ android {
     }
     buildTypes {
         debug {
-            // Preview uses an explicit application ID in defaultConfig.
-            if (ciKeystore != null) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            // Reuse the same preview certificate across CI runs so preview APKs update in place.
+            signingConfig = signingConfigs.getByName("preview")
         }
         release {
             isMinifyEnabled = true

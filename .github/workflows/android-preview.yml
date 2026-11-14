@@ -48,8 +48,13 @@ jobs:
           aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           package="$("$aapt" dump badging "$apk" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p")"
           echo "Built Android package ID: $package"
-          test "$package" = "com.drdisagree.teledrive.preview"
+          test "$package" = "com.drdisagree.teledrive.preview2"
           echo "Verified separate preview package: $package" >> "$GITHUB_STEP_SUMMARY"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          certificate="$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          echo "Preview signing certificate SHA-256: $certificate"
+          test "$certificate" = "b517ff6fe383494da66d717bd4088b89276b96455a161b38abd6b158e399fab8"
+          echo "Verified stable preview signing certificate." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v7
