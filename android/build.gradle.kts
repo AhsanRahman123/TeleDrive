@@ -13,7 +13,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.drdisagree.teledrive"
+        applicationId = "com.drdisagree.teledrive.preview"
         minSdk = 26
         targetSdk = 37
         versionCode = libs.versions.appVersionCode.get().toInt()
@@ -45,8 +45,7 @@ android {
     }
     buildTypes {
         debug {
-            // Keep the preview install separate from the regular TeleDrive app and its data.
-            applicationIdSuffix = ".preview"
+            // Preview uses an explicit application ID in defaultConfig.
             if (ciKeystore != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
