@@ -128,6 +128,9 @@ fun MediaPlayer(
     val holder = remember(content) { mutableStateOf<ExoPlayer?>(null) }
     val player = holder.value
     val failedDecoders = remember(content) { mutableSetOf<String>() }
+    val subtitleAppearance = session.subtitleAppearance
+    var resumeReady by remember(player) { mutableStateOf(false) }
+    val resumeReadyForListener by rememberUpdatedState(resumeReady)
 
     LaunchedEffect(holder, isActivePage) {
         if (!isActivePage || holder.value != null) return@LaunchedEffect
@@ -170,6 +173,8 @@ fun MediaPlayer(
 
                 else -> Unit
             }
+            val resumePosition = PlaybackResumeStore.load(context, fileId)
+            if (resumePosition > 0L) seekTo(resumePosition)
             prepare()
             playWhenReady = true
         }
@@ -179,17 +184,48 @@ fun MediaPlayer(
         onDispose { holder.value?.release() }
     }
 
-    DisposableEffect(player, isActivePage) {
-        if (!isActivePage) player?.pause()
-        onDispose { }
+    DisposableEffect(player, isActivePage, resumeReady) {
+        if (!isActivePage) {
+            if (player != null && resumeReady) {
+                PlaybackResumeStore.save(context, fileId, player.currentPosition, player.duration)
+            }
+            player?.pause()
+        }
+        onDispose {
+            if (player != null && resumeReady) {
+                PlaybackResumeStore.save(context, fileId, player.currentPosition, player.duration)
+            }
+        }
+    }
+
+    LaunchedEffect(player, isActivePage, resumeReady, fileId) {
+        val activePlayer = player ?: return@LaunchedEffect
+        if (!isActivePage || !resumeReady) return@LaunchedEffect
+        while (true) {
+            delay(1_000L)
+            PlaybackResumeStore.save(
+                context,
+                fileId,
+                activePlayer.currentPosition,
+                activePlayer.duration
+            )
+        }
+    }
+
+    LaunchedEffect(subtitleAppearance) {
+        delay(220L)
+        SubtitleAppearanceStore.save(context, subtitleAppearance)
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val backgroundAllowed by rememberUpdatedState(allowBackgroundPlayback)
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && !backgroundAllowed) {
-                player?.pause()
+            if (event == Lifecycle.Event.ON_STOP) {
+                if (resumeReadyForListener && player != null) {
+                    PlaybackResumeStore.save(context, fileId, player.currentPosition, player.duration)
+                }
+                if (!backgroundAllowed) player?.pause()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -232,7 +268,9 @@ fun MediaPlayer(
         if (player == null) return@DisposableEffect onDispose { }
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) resumeReady = true
                 if (playbackState == Player.STATE_ENDED) {
+                    PlaybackResumeStore.clear(context, fileId)
                     if (session.repeatAll && queueItems.size == 1) {
                         player.seekTo(0)
                         player.play()
@@ -244,6 +282,9 @@ fun MediaPlayer(
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 playing = isPlaying
+                if (!isPlaying && resumeReadyForListener) {
+                    PlaybackResumeStore.save(context, fileId, player.currentPosition, player.duration)
+                }
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -376,16 +417,22 @@ fun MediaPlayer(
                         setShutterBackgroundColor(Color.TRANSPARENT)
                         addOnLayoutChangeListener { changed, _, _, _, _, _, _, _, _ ->
                             val host = changed as PlayerView
-                            host.subtitleView?.translationY =
-                                (session.subtitleVerticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) *
-                                    host.height
+                            host.subtitleView?.let { subtitleView ->
+                                subtitleView.translationY =
+                                    (session.subtitleAppearance.verticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) *
+                                        host.height
+                                applySubtitleAppearance(subtitleView, viewContext, session.subtitleAppearance)
+                            }
                         }
                     }
                 },
                 update = { view ->
                     view.player = player
-                    view.subtitleView?.translationY =
-                        (subtitleVerticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) * view.height
+                    view.subtitleView?.let { subtitleView ->
+                        subtitleView.translationY =
+                            (subtitleAppearance.verticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) * view.height
+                        applySubtitleAppearance(subtitleView, view.context, subtitleAppearance)
+                    }
                     val targetResizeMode = when (resizeMode) {
                         PlayerResizeMode.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                         PlayerResizeMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
@@ -513,9 +560,11 @@ fun MediaPlayer(
                 dragEnabled = !locked && !audioOnly,
                 chromeVisible = controlsVisible,
                 subtitleDragEnabled = hasActiveSubtitles && !locked && !audioOnly && !inPipMode,
-                subtitlePosition = subtitleVerticalPosition,
+                subtitlePosition = subtitleAppearance.verticalPosition,
                 subtitleHitWidthFraction = subtitleHitWidthFraction,
-                onSubtitlePositionChange = { session.subtitleVerticalPosition = it },
+                onSubtitlePositionChange = {
+                    session.subtitleAppearance = session.subtitleAppearance.copy(verticalPosition = it)
+                },
                 modifier = Modifier.matchParentSize()
             )
         }
