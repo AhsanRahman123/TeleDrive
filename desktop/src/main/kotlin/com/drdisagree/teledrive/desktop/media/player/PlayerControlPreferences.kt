@@ -7,7 +7,9 @@ internal data class PlayerControlPreferences(
     val autoHideBrightnessSlider: Boolean = false,
     val autoHidePlayerControls: Boolean = false,
     val showPlayerControls: Boolean = true,
-    val hideDelayMillis: Long = 3_000L
+    val hideDelayMillis: Long = 3_000L,
+    val rememberVolume: Boolean = true,
+    val volume: Int = DEFAULT_VOLUME
 )
 
 internal object PlayerControlPreferencesStore {
@@ -16,25 +18,33 @@ internal object PlayerControlPreferencesStore {
         Preferences.userRoot().node("com/drdisagree/teledrive/player-controls")
     }
 
-    fun load(): PlayerControlPreferences = runCatching {
+    fun load(): PlayerControlPreferences = load(preferences)
+
+    internal fun load(source: Preferences): PlayerControlPreferences = runCatching {
         PlayerControlPreferences(
-            autoHideVolumeSlider = preferences.getBoolean(KEY_AUTO_HIDE_VOLUME, false),
-            autoHideBrightnessSlider = preferences.getBoolean(KEY_AUTO_HIDE_BRIGHTNESS, false),
-            autoHidePlayerControls = preferences.getBoolean(KEY_AUTO_HIDE_PLAYER_CONTROLS, false),
-            showPlayerControls = preferences.getBoolean(KEY_SHOW_PLAYER_CONTROLS, true),
-            hideDelayMillis = preferences.getLong(KEY_HIDE_DELAY, 3_000L)
-                .coerceIn(500L, 10_000L)
+            autoHideVolumeSlider = source.getBoolean(KEY_AUTO_HIDE_VOLUME, false),
+            autoHideBrightnessSlider = source.getBoolean(KEY_AUTO_HIDE_BRIGHTNESS, false),
+            autoHidePlayerControls = source.getBoolean(KEY_AUTO_HIDE_PLAYER_CONTROLS, false),
+            showPlayerControls = source.getBoolean(KEY_SHOW_PLAYER_CONTROLS, true),
+            hideDelayMillis = source.getLong(KEY_HIDE_DELAY, 3_000L)
+                .coerceIn(500L, 10_000L),
+            rememberVolume = source.getBoolean(KEY_REMEMBER_VOLUME, true),
+            volume = source.getInt(KEY_VOLUME, DEFAULT_VOLUME).coerceIn(0, MAX_VOLUME)
         )
     }.getOrDefault(PlayerControlPreferences())
 
-    fun save(value: PlayerControlPreferences) {
+    fun save(value: PlayerControlPreferences) = save(preferences, value)
+
+    internal fun save(target: Preferences, value: PlayerControlPreferences) {
         runCatching {
-            preferences.putBoolean(KEY_AUTO_HIDE_VOLUME, value.autoHideVolumeSlider)
-            preferences.putBoolean(KEY_AUTO_HIDE_BRIGHTNESS, value.autoHideBrightnessSlider)
-            preferences.putBoolean(KEY_AUTO_HIDE_PLAYER_CONTROLS, value.autoHidePlayerControls)
-            preferences.putBoolean(KEY_SHOW_PLAYER_CONTROLS, value.showPlayerControls)
-            preferences.putLong(KEY_HIDE_DELAY, value.hideDelayMillis.coerceIn(500L, 10_000L))
-            preferences.flush()
+            target.putBoolean(KEY_AUTO_HIDE_VOLUME, value.autoHideVolumeSlider)
+            target.putBoolean(KEY_AUTO_HIDE_BRIGHTNESS, value.autoHideBrightnessSlider)
+            target.putBoolean(KEY_AUTO_HIDE_PLAYER_CONTROLS, value.autoHidePlayerControls)
+            target.putBoolean(KEY_SHOW_PLAYER_CONTROLS, value.showPlayerControls)
+            target.putLong(KEY_HIDE_DELAY, value.hideDelayMillis.coerceIn(500L, 10_000L))
+            target.putBoolean(KEY_REMEMBER_VOLUME, value.rememberVolume)
+            target.putInt(KEY_VOLUME, value.volume.coerceIn(0, MAX_VOLUME))
+            target.flush()
         }
     }
 
@@ -43,4 +53,8 @@ internal object PlayerControlPreferencesStore {
     private const val KEY_AUTO_HIDE_PLAYER_CONTROLS = "auto_hide_player_controls_v2"
     private const val KEY_SHOW_PLAYER_CONTROLS = "show_player_controls"
     private const val KEY_HIDE_DELAY = "slider_hide_delay_ms"
+    private const val KEY_REMEMBER_VOLUME = "remember_volume_across_media"
+    private const val KEY_VOLUME = "last_player_volume"
+    private const val DEFAULT_VOLUME = 200
+    private const val MAX_VOLUME = 200
 }
