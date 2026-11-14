@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import java.util.concurrent.ConcurrentHashMap
 
@@ -66,6 +67,9 @@ internal class SingleActivePlaybackCoordinator<T : Any>(
 
 internal object DesktopVlcPlaybackLifecycle {
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val factoryLock = Any()
+    private val playerFactories = mutableMapOf<MediaPlayer, MediaPlayerFactory>()
+    private val retiredFactories = mutableSetOf<MediaPlayerFactory>()
 
     private val coordinator = SingleActivePlaybackCoordinator<MediaPlayer> { player ->
         stopThenReleaseOutsidePlayerExecutor(
@@ -79,12 +83,60 @@ internal object DesktopVlcPlaybackLifecycle {
                     SafeLog.w(TAG, "Could not stop outgoing VLC player cleanly", it)
                 }
             },
-            releasePlayer = { player.release() }
+            releasePlayer = {
+                try {
+                    player.release()
+                } finally {
+                    releaseFactoryFor(player)
+                }
+            }
         )
     }
 
-    fun register(player: MediaPlayer) {
+    fun register(player: MediaPlayer, factory: MediaPlayerFactory) {
+        synchronized(factoryLock) {
+            playerFactories[player] = factory
+        }
         coordinator.register(player)
+    }
+
+    /**
+     * A factory is shared by successive media items while one preview surface remains mounted.
+     * Retire it only when that surface changes subtitle appearance or is disposed, then release
+     * it after every player created from it has completed native teardown.
+     */
+    fun retireFactory(factory: MediaPlayerFactory) {
+        val releaseNow = synchronized(factoryLock) {
+            retiredFactories.add(factory)
+            if (playerFactories.values.none { it === factory }) {
+                retiredFactories.remove(factory)
+                factory
+            } else {
+                null
+            }
+        }
+        releaseNow?.let(::releaseFactory)
+    }
+
+    private fun releaseFactoryFor(player: MediaPlayer) {
+        val releaseAfterPlayer = synchronized(factoryLock) {
+            val factory = playerFactories.remove(player)
+            if (factory != null &&
+                retiredFactories.contains(factory) &&
+                playerFactories.values.none { it === factory }
+            ) {
+                retiredFactories.remove(factory)
+                factory
+            } else {
+                null
+            }
+        }
+        releaseAfterPlayer?.let(::releaseFactory)
+    }
+
+    private fun releaseFactory(factory: MediaPlayerFactory) {
+        runCatching { factory.release() }
+            .onFailure { SafeLog.w(TAG, "Could not release retired VLC factory cleanly", it) }
     }
 
     suspend fun activate(player: MediaPlayer, start: suspend () -> Unit) {
