@@ -204,9 +204,9 @@ internal fun DesktopMediaPlayer(
     var hKeyPressed by remember { mutableStateOf(false) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
-    var subtitleAppearanceRevision by remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { mutableIntStateOf(0) }
-    var styleRestartPositionMs by remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { mutableLongStateOf(0L) }
-    var subtitleTrackActive by remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { mutableStateOf(false) }
+    var subtitleAppearanceRevision by remember(mrl, mediaId, isAudio) { mutableIntStateOf(0) }
+    var styleRestartPositionMs by remember(mrl, mediaId, isAudio) { mutableLongStateOf(0L) }
+    var subtitleTrackActive by remember(mrl, mediaId, isAudio) { mutableStateOf(false) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
     // a play/resume event always reapplies the current remembered volume and mute state.
     val latestVolume = rememberUpdatedState(volume)
@@ -771,8 +771,8 @@ internal fun DesktopMediaPlayer(
         }
     }
 
-    var languagesApplied by remember(mrl) { mutableStateOf(false) }
-    LaunchedEffect(mrl, trackTick, preferredAudioLanguage, preferredSubtitleLanguage) {
+    var languagesApplied by remember(mrl, subtitleAppearanceRevision) { mutableStateOf(false) }
+    LaunchedEffect(player, mrl, trackTick, preferredAudioLanguage, preferredSubtitleLanguage) {
         if (languagesApplied || trackTick == 0) return@LaunchedEffect
         val applied = CompletableDeferred<Boolean>()
         runCatching {
