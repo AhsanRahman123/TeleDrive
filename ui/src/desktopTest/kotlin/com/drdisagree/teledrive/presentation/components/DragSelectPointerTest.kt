@@ -403,7 +403,8 @@ class DragSelectPointerTest {
                 },
                 onEnd = {},
                 mouseDragAddsToSelection = false,
-                resolveNearestVisibleItem = true
+                resolveNearestVisibleItem = true,
+                processReleasePosition = true
             )
             LazyVerticalGrid(
                 state = gridState,
