@@ -35,6 +35,17 @@ internal object PlayerControlPreferencesStore {
 
     fun save(value: PlayerControlPreferences) = save(preferences, value)
 
+    /**
+     * Persist only the last volume value. Called by the debounced IO writer, never by
+     * the slider callback or keyboard handler.
+     */
+    fun saveVolume(value: Int) {
+        runCatching {
+            preferences.putInt(KEY_VOLUME, value.coerceIn(0, MAX_VOLUME))
+            preferences.flush()
+        }
+    }
+
     internal fun save(target: Preferences, value: PlayerControlPreferences) {
         runCatching {
             target.putBoolean(KEY_AUTO_HIDE_VOLUME, value.autoHideVolumeSlider)
