@@ -17,6 +17,7 @@ import com.drdisagree.teledrive.presentation.files.FilesScreen
 import com.drdisagree.teledrive.presentation.gallery.GalleryScreen
 import com.drdisagree.teledrive.presentation.home.HomeScreen
 import com.drdisagree.teledrive.presentation.platform.LocalPlatformScreens
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.presentation.navigation.NavigationTransitions.isPeerSwitch
 import com.drdisagree.teledrive.presentation.navigation.NavigationTransitions.movesForward
 import com.drdisagree.teledrive.presentation.note.NoteEditorScreen
@@ -39,6 +40,7 @@ fun AppNavHost(
     modifier: Modifier = Modifier,
     verticalTabMotion: Boolean = false
 ) {
+    val savesCollectionScrollOnPreview = LocalPlatformCapabilities.current.savesCollectionScrollOnPreview
     CompositionLocalProvider(
         LocalOpenTransfers provides { navController.navigateOnce(Route.Transfers) }
     ) {
@@ -98,6 +100,7 @@ fun AppNavHost(
                 val isRoot = filesRoute.folderId == null
                 FilesScreen(
                     focusFileId = filesRoute.focusFileId,
+                    savePositionBeforeOpeningPreview = savesCollectionScrollOnPreview,
                     onOpenFolder = { navController.navigateOnce(Route.Files(it)) },
                     onOpenCrumb = { folderId ->
                         val route = Route.Files(folderId)
