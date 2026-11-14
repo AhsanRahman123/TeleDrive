@@ -71,6 +71,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.drdisagree.teledrive.core.common.SafeLog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -400,15 +401,15 @@ internal fun DesktopMediaPlayer(
                             // Accept opening/length/time callbacks before play(): VLC may emit
                             // lengthChanged before the playing event.
                             acceptsCurrentMediaEvents.set(true)
-                            val started = player.media().play(mrl)
-                            if (!started) {
-                                acceptsCurrentMediaEvents.set(false)
-                                playerScope.launch {
-                                    playing = false
-                                    finished = true
-                                    buffering = false
+                            runCatching { player.media().play(mrl) }
+                                .onFailure {
+                                    acceptsCurrentMediaEvents.set(false)
+                                    playerScope.launch {
+                                        playing = false
+                                        finished = true
+                                        buffering = false
+                                    }
                                 }
-                            }
                         }
                     }
                 }
