@@ -366,12 +366,12 @@ internal fun DesktopMediaPlayer(
                         val rateToRestore = latestRate.value
                         val shouldRepeatCurrent = latestRepeatOne.value &&
                             !latestRepeatAll.value && !latestSleepAtTrackEnd.value
-                        player.submit {
+                        mediaPlayer.submit {
                             runCatching { mediaPlayer.controls().setRate(rateToRestore) }
                             runCatching { mediaPlayer.controls().repeat = shouldRepeatCurrent }
                         }
                         if (!styleRestartWasPlaying) {
-                            player.submit { runCatching { mediaPlayer.controls().pause() } }
+                            mediaPlayer.submit { runCatching { mediaPlayer.controls().pause() } }
                         }
                         resumeFinished.set(false)
                         buffering = false
