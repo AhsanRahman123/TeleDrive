@@ -46,6 +46,8 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SlowMotionVideo
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -121,6 +123,10 @@ import kotlin.time.Duration.Companion.milliseconds
 fun PlayerControls(
     player: Player,
     session: PlayerSession,
+    onPreviousFile: () -> Unit = {},
+    onNextFile: () -> Unit = {},
+    hasPreviousFile: Boolean = false,
+    hasNextFile: Boolean = false,
     visible: Boolean,
     audioOnly: Boolean,
     resizeMode: PlayerResizeMode,
@@ -444,6 +450,10 @@ fun PlayerControls(
                     ended = ended,
                     waiting = waitingForData,
                     onInteraction = onInteraction,
+                    onPreviousFile = onPreviousFile,
+                    onNextFile = onNextFile,
+                    hasPreviousFile = hasPreviousFile,
+                    hasNextFile = hasNextFile,
                     modifier = Modifier.align(Alignment.Center)
                 )
             }
@@ -470,6 +480,10 @@ fun PlayerControls(
                         ended = ended,
                         waiting = waitingForData,
                         onInteraction = onInteraction,
+                        onPreviousFile = onPreviousFile,
+                        onNextFile = onNextFile,
+                        hasPreviousFile = hasPreviousFile,
+                        hasNextFile = hasNextFile,
                         modifier = Modifier
                             .align(Alignment.CenterHorizontally)
                             .padding(bottom = 8.dp)
@@ -678,13 +692,27 @@ private fun TransportRow(
     ended: Boolean,
     waiting: Boolean,
     onInteraction: () -> Unit,
+    onPreviousFile: () -> Unit,
+    onNextFile: () -> Unit,
+    hasPreviousFile: Boolean,
+    hasNextFile: Boolean,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(24.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        IconButton(
+            enabled = hasPreviousFile,
+            onClick = { onInteraction(); onPreviousFile() },
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = playerSurfaceColor().copy(alpha = TRANSPORT_ALPHA),
+                contentColor = playerContentColor()
+            )
+        ) {
+            Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous file")
+        }
         IconButton(
             onClick = {
                 onInteraction()
@@ -755,6 +783,16 @@ private fun TransportRow(
                 Icons.Filled.Forward10,
                 contentDescription = stringResource(Res.string.preview_forward_10_seconds)
             )
+        }
+        IconButton(
+            enabled = hasNextFile,
+            onClick = { onInteraction(); onNextFile() },
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = playerSurfaceColor().copy(alpha = TRANSPORT_ALPHA),
+                contentColor = playerContentColor()
+            )
+        ) {
+            Icon(Icons.Filled.SkipNext, contentDescription = "Next file")
         }
     }
 }

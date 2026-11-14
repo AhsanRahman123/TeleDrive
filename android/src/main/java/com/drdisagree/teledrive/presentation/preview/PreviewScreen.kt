@@ -75,6 +75,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,6 +90,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import androidx.core.view.WindowInsetsCompat
@@ -218,6 +220,7 @@ fun PreviewScreen(
         return
     }
 
+    val previewScope = rememberCoroutineScope()
     val pagerState = rememberPagerState(
         initialPage = state.initialIndex.coerceAtMost(state.files.lastIndex),
         pageCount = { state.files.size }
@@ -294,6 +297,14 @@ fun PreviewScreen(
                     isActivePage = pagerState.currentPage == page,
                     dataSourceFactory = dataSourceFactory,
                     onDownload = { viewModel.download(file) },
+                    onPreviousFile = {
+                        if (page > 0) previewScope.launch { pagerState.animateScrollToPage(page - 1) }
+                    },
+                    onNextFile = {
+                        if (page < state.files.lastIndex) previewScope.launch { pagerState.animateScrollToPage(page + 1) }
+                    },
+                    hasPreviousFile = page > 0,
+                    hasNextFile = page < state.files.lastIndex,
                     chromeVisible = chromeVisible,
                     allowBackgroundPlayback = backgroundPlayback,
                     preferredAudioLanguage = preferredAudioLanguage,
@@ -545,6 +556,10 @@ private fun PreviewPage(
     isActivePage: Boolean,
     dataSourceFactory: TelegramDataSourceFactory,
     onDownload: () -> Unit,
+    onPreviousFile: () -> Unit,
+    onNextFile: () -> Unit,
+    hasPreviousFile: Boolean,
+    hasNextFile: Boolean,
     chromeVisible: Boolean,
     allowBackgroundPlayback: Boolean,
     preferredAudioLanguage: String,
@@ -632,6 +647,10 @@ private fun PreviewPage(
                 fileId = file.id,
                 dataSourceFactory = dataSourceFactory,
                 isActivePage = isActivePage,
+                onPreviousFile = onPreviousFile,
+                onNextFile = onNextFile,
+                hasPreviousFile = hasPreviousFile,
+                hasNextFile = hasNextFile,
                 controlsVisible = chromeVisible,
                 allowBackgroundPlayback = allowBackgroundPlayback,
                 preferredAudioLanguage = preferredAudioLanguage,

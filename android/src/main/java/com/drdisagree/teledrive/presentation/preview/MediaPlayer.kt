@@ -98,6 +98,10 @@ fun MediaPlayer(
     fileId: String,
     dataSourceFactory: TelegramDataSourceFactory,
     isActivePage: Boolean,
+    onPreviousFile: () -> Unit = {},
+    onNextFile: () -> Unit = {},
+    hasPreviousFile: Boolean = false,
+    hasNextFile: Boolean = false,
     controlsVisible: Boolean = true,
     allowBackgroundPlayback: Boolean = false,
     preferredAudioLanguage: String = "",
@@ -446,6 +450,10 @@ fun MediaPlayer(
             PlayerControls(
                 player = player,
                 session = session,
+                onPreviousFile = onPreviousFile,
+                onNextFile = onNextFile,
+                hasPreviousFile = hasPreviousFile,
+                hasNextFile = hasNextFile,
                 visible = controlsVisible &&
                         !locked &&
                         !inPipMode &&
