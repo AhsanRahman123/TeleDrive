@@ -322,22 +322,22 @@ fun CacheManagerScreen(
                 FilterChip(
                     selected = selectedTool == "CACHE",
                     onClick = { selectedTool = "CACHE" },
-                    label = { Text("Cache cleanup") }
+                    label = { Text("Cache cleanup", maxLines = 1, softWrap = false) }
                 )
                 FilterChip(
                     selected = selectedTool == "THUMBNAILS",
                     onClick = { selectedTool = "THUMBNAILS" },
-                    label = { Text("Thumbnail manager") }
+                    label = { Text("Thumbnail manager", maxLines = 1, softWrap = false) }
                 )
                 FilterChip(
                     selected = selectedTool == "QUEUE",
                     onClick = { selectedTool = "QUEUE" },
-                    label = { Text("View queue") }
+                    label = { Text("View queue", maxLines = 1, softWrap = false) }
                 )
                 FilterChip(
                     selected = selectedTool == "LOCAL_COPIES",
                     onClick = { selectedTool = "LOCAL_COPIES" },
-                    label = { Text("Local copies") }
+                    label = { Text("Local copies", maxLines = 1, softWrap = false) }
                 )
             }
             when (selectedTool) {
@@ -388,27 +388,36 @@ fun CacheManagerScreen(
                             ),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Card(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().then(
+                    if (androidLayout) Modifier.horizontalScroll(rememberScrollState()) else Modifier
+                ),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Card(modifier = if (androidLayout) Modifier.width(220.dp) else Modifier.weight(1f)) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("Total cache footprint", style = MaterialTheme.typography.labelMedium)
+                        Text("Total cache footprint", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(Formatters.bytes(summary.totalBytes), style = MaterialTheme.typography.headlineSmall)
                         Text(
                             "Tracked entries plus temporary and Telegram-managed cache",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (androidLayout) 2 else Int.MAX_VALUE,
+                            overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
                         )
                     }
                 }
-                Card(modifier = Modifier.weight(1f)) {
+                Card(modifier = if (androidLayout) Modifier.width(220.dp) else Modifier.weight(1f)) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("Individually selectable", style = MaterialTheme.typography.labelMedium)
+                        Text("Individually selectable", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(Formatters.bytes(summary.previewBytes + summary.streamBytes + summary.tempBytes + summary.thumbnailBytes),
                             style = MaterialTheme.typography.headlineSmall)
                         Text(
                             "${summary.entryCount} entries · thumbnails, previews, streams and temporary files",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (androidLayout) 2 else Int.MAX_VALUE,
+                            overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
                         )
                     }
                 }
@@ -416,15 +425,19 @@ fun CacheManagerScreen(
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Thumbnail preparation queue", style = MaterialTheme.typography.labelMedium)
+                    Text("Thumbnail preparation queue", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
                         "$thumbnailQueueCount queued + running",
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         thumbnailQueueEstimate,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -432,14 +445,19 @@ fun CacheManagerScreen(
             Text(
                 "Thumbnail previews are included here for selective cleanup. Use the tabs above for thumbnail generation rules, sorting, bulk actions and every queue control.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = if (androidLayout) 2 else Int.MAX_VALUE,
+                overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.then(if (androidLayout) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedButton(onClick = { confirmClearAllCache = true }) {
-                    Text("Clear all app cache")
+                    Text("Clear all app cache", maxLines = 1, softWrap = false)
                 }
                 OutlinedButton(onClick = { confirmClearThumbnailCache = true }) {
-                    Text("Clear thumbnail cache")
+                    Text("Clear thumbnail cache", maxLines = 1, softWrap = false)
                 }
             }
 
@@ -558,7 +576,9 @@ fun CacheManagerScreen(
                 Text(
                     "${selectedPaths.size} entries · ${selectedFolderIds.size} folders selected",
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelLarge
+                    style = MaterialTheme.typography.labelLarge,
+                    maxLines = if (androidLayout) 1 else Int.MAX_VALUE,
+                    overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
                 )
                 TextButton(
                     enabled = !loading && (entries.isNotEmpty() || folders.isNotEmpty()),
