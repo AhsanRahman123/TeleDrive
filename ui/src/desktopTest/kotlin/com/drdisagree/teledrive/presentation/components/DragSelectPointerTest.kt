@@ -8,9 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items as listItems
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -332,14 +329,14 @@ class DragSelectPointerTest {
     }
 
     @Test
-    fun `Trash drag from a selected anchor deselects the same range as Files`() {
+    fun `Trash grid drag from a selected anchor deselects the crossed range like Files`() {
         var selected by mutableStateOf(setOf(0, 1, 2))
         var rangeBase by mutableStateOf(setOf(0, 1, 2))
 
         rule.setContent {
-            val listState = rememberLazyListState()
+            val gridState = rememberLazyGridState()
             val dragSelect = rememberDragSelect(
-                listState = listState,
+                gridState = gridState,
                 onStart = { rangeBase = selected },
                 isSelected = { it in selected },
                 onRange = { range, shouldSelect ->
@@ -353,14 +350,16 @@ class DragSelectPointerTest {
                 mouseDragAddsToSelection = false,
                 resolveNearestVisibleItem = true
             )
-            LazyColumn(
-                state = listState,
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
                     .size(width = 180.dp, height = 220.dp)
-                    .testTag("trash-selection-list")
+                    .testTag("trash-selection-grid")
                     .then(dragSelect)
             ) {
-                listItems((0 until 5).toList()) { index ->
+                items((0 until 5).toList()) { index ->
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -371,10 +370,10 @@ class DragSelectPointerTest {
             }
         }
 
-        rule.onNodeWithTag("trash-selection-list").performMouseInput {
+        rule.onNodeWithTag("trash-selection-grid").performMouseInput {
             moveTo(Offset(90f, 30f))
             press()
-            moveTo(Offset(90f, 150f), delayMillis = 100)
+            moveTo(Offset(90f, 170f), delayMillis = 100)
             release()
         }
         rule.waitForIdle()
@@ -383,14 +382,14 @@ class DragSelectPointerTest {
     }
 
     @Test
-    fun `Trash drag from an unselected anchor adds the crossed range like Files`() {
+    fun `Trash grid drag from an unselected anchor adds the crossed range like Files`() {
         var selected by mutableStateOf(setOf(0, 1))
         var rangeBase by mutableStateOf(setOf(0, 1))
 
         rule.setContent {
-            val listState = rememberLazyListState()
+            val gridState = rememberLazyGridState()
             val dragSelect = rememberDragSelect(
-                listState = listState,
+                gridState = gridState,
                 onStart = { rangeBase = selected },
                 isSelected = { it in selected },
                 onRange = { range, shouldSelect ->
@@ -404,14 +403,16 @@ class DragSelectPointerTest {
                 mouseDragAddsToSelection = false,
                 resolveNearestVisibleItem = true
             )
-            LazyColumn(
-                state = listState,
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
                     .size(width = 180.dp, height = 360.dp)
-                    .testTag("trash-selection-list-add")
+                    .testTag("trash-selection-grid-add")
                     .then(dragSelect)
             ) {
-                listItems((0 until 5).toList()) { index ->
+                items((0 until 5).toList()) { index ->
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -422,7 +423,7 @@ class DragSelectPointerTest {
             }
         }
 
-        rule.onNodeWithTag("trash-selection-list-add").performMouseInput {
+        rule.onNodeWithTag("trash-selection-grid-add").performMouseInput {
             moveTo(Offset(90f, 150f))
             press()
             moveTo(Offset(90f, 270f), delayMillis = 100)
@@ -432,5 +433,4 @@ class DragSelectPointerTest {
 
         assertEquals(setOf(0, 1, 2, 3, 4), selected)
     }
-
 }
