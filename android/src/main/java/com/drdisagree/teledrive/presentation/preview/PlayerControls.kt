@@ -185,6 +185,8 @@ fun PlayerControls(
     var showQueue by remember { mutableStateOf(false) }
     var showAudioTracks by remember { mutableStateOf(false) }
     var showTextTracks by remember { mutableStateOf(false) }
+    var showSubtitleSettings by remember { mutableStateOf(false) }
+    var subtitleAppearance by session::subtitleAppearance
 
     val activity = LocalActivity.current
     val context = LocalContext.current
@@ -498,7 +500,7 @@ fun PlayerControls(
                                             stringResource(Res.string.player_show_subtitles)
                                         },
                                         active = subtitlesOn,
-                                        enabled = textTracks.isNotEmpty(),
+                                        enabled = true,
                                         onClick = {
                                             onInteraction()
                                             showTextTracks = true
@@ -908,7 +910,23 @@ fun PlayerControls(
                 subtitlesOn = true
                 onPreferredSubtitleLanguage(track.language)
             },
-            onDismiss = { showTextTracks = false }
+            onDismiss = { showTextTracks = false },
+            customizeLabel = "Subtitle appearance and position",
+            onCustomize = {
+                showTextTracks = false
+                showSubtitleSettings = true
+            }
+        )
+    }
+
+    if (showSubtitleSettings) {
+        SubtitleSettingsSheet(
+            appearance = subtitleAppearance,
+            onAppearanceChange = {
+                subtitleAppearance = it
+                onInteraction()
+            },
+            onDismiss = { showSubtitleSettings = false }
         )
     }
 }
