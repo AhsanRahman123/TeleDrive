@@ -247,7 +247,11 @@ fun PreviewScreen(
     val immersive = currentFile.category == FileCategory.IMAGE ||
             currentFile.category == FileCategory.VIDEO
     var chromeVisible by remember { mutableStateOf(true) }
-    val playerSession = remember { PlayerSession() }
+    val playerSession = remember {
+        PlayerSession().apply {
+            subtitleAppearance = SubtitleAppearanceStore.load(context)
+        }
+    }
     val previewQueue = remember(state.files) { state.files.map { it.name } }
     val inPipMode by koinInject<PipController>().inPipMode.collectAsStateWithLifecycle()
     val chromeShown = (chromeVisible || !immersive) && !inPipMode
