@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,7 +100,9 @@ fun TrackPickerSheet(
     offSelected: Boolean,
     onSelectOff: () -> Unit,
     onSelect: (PlayerTrack) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    customizeLabel: String? = null,
+    onCustomize: (() -> Unit)? = null
 ) {
     val unsupported = stringResource(Res.string.player_track_unsupported)
 
@@ -117,6 +120,14 @@ fun TrackPickerSheet(
                 onClick = onSelectOff
             )
         }
+        if (tracks.isEmpty() && offLabel != null) {
+            Text(
+                "No subtitle tracks are available in this video.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
+            )
+        }
         tracks.forEach { track ->
             TrackRow(
                 label = track.label,
@@ -124,6 +135,16 @@ fun TrackPickerSheet(
                 selected = track.selected,
                 onClick = { onSelect(track) }
             )
+        }
+        if (customizeLabel != null && onCustomize != null) {
+            TextButton(
+                onClick = onCustomize,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Text(customizeLabel)
+            }
         }
         Box(
             modifier = Modifier
