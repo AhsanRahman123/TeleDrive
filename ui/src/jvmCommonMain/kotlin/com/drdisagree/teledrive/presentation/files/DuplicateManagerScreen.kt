@@ -7,11 +7,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -48,6 +50,9 @@ import com.drdisagree.teledrive.domain.repository.DuplicateScanStatus
 import com.drdisagree.teledrive.domain.repository.TrashRepository
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
@@ -74,7 +79,15 @@ fun DuplicateManagerScreen(
     val state by repository.state.collectAsState()
 
     var showQueue by remember { mutableStateOf(false) }
+    var showCheckedQueue by remember(folderId) { mutableStateOf(false) }
+    var showFailedQueue by remember(folderId) { mutableStateOf(false) }
     var selectedIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
+    var selectedQueueIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
+    var queueSearch by remember(folderId) { mutableStateOf("") }
+    var queueSort by remember(folderId) { mutableStateOf(DuplicateFileSort.OLDEST_FIRST) }
+    var showQueueSortMenu by remember { mutableStateOf(false) }
+    var queueSelectionBase by remember(folderId) { mutableStateOf(emptySet<String>()) }
+    val queueListState = rememberLazyListState()
     var search by remember { mutableStateOf("") }
     var typeFilter by remember { mutableStateOf(DuplicateTypeFilter.ALL) }
     var groupSort by remember { mutableStateOf(DuplicateGroupSort.LARGEST_WASTED) }
@@ -84,10 +97,28 @@ fun DuplicateManagerScreen(
     var showFileSortMenu by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var previousScanSample by remember(folderId) {
+        mutableStateOf(state.scannedFiles to System.currentTimeMillis())
+    }
+    var scanFilesPerSecond by remember(folderId) { mutableStateOf(0.0) }
+
+    LaunchedEffect(state.scannedFiles) {
+        val now = System.currentTimeMillis()
+        val (previousCount, previousAt) = previousScanSample
+        val delta = state.scannedFiles - previousCount
+        val elapsed = now - previousAt
+        if (delta > 0 && elapsed > 0L) {
+            scanFilesPerSecond = delta * 1_000.0 / elapsed.toDouble()
+        }
+        previousScanSample = state.scannedFiles to now
+    }
 
     LaunchedEffect(folderId) {
         selectedIds = emptySet()
+        selectedQueueIds = emptySet()
         showQueue = false
+        showCheckedQueue = false
+        showFailedQueue = false
         repository.startScan(folderId)
     }
     fun matchesType(file: DuplicateScanFile): Boolean = when (typeFilter) {
@@ -155,15 +186,93 @@ fun DuplicateManagerScreen(
         orderedFiles(group).map { it.id }
     }.toSet()
 
-    val sortedQueue = remember(state.queue, fileSort) {
-        when (fileSort) {
-            DuplicateFileSort.NAME_ASC -> state.queue.sortedBy { it.file.name.lowercase() }
-            DuplicateFileSort.NAME_DESC -> state.queue.sortedByDescending { it.file.name.lowercase() }
-            DuplicateFileSort.SIZE_LARGEST -> state.queue.sortedByDescending { it.file.sizeBytes }
-            DuplicateFileSort.SIZE_SMALLEST -> state.queue.sortedBy { it.file.sizeBytes }
-            DuplicateFileSort.OLDEST_FIRST -> state.queue.sortedBy { it.file.addedAt }
-            DuplicateFileSort.NEWEST_FIRST -> state.queue.sortedByDescending { it.file.addedAt }
+    val checkedQueueCount = state.queue.count { it.status == DuplicateScanStatus.SCANNED }
+    val failedQueueCount = state.queue.count {
+        it.status == DuplicateScanStatus.FAILED ||
+            it.status == DuplicateScanStatus.CANCELLED
+    }
+    val sortedQueue = remember(state.queue, queueSearch, queueSort, showCheckedQueue, showFailedQueue) {
+        val needle = queueSearch.trim().lowercase()
+        val matching = state.queue.filter { item ->
+            val belongsToSelectedView = when {
+                showCheckedQueue -> item.status == DuplicateScanStatus.SCANNED
+                showFailedQueue -> item.status == DuplicateScanStatus.FAILED ||
+                    item.status == DuplicateScanStatus.CANCELLED
+                else -> item.status == DuplicateScanStatus.WAITING ||
+                    item.status == DuplicateScanStatus.GENERATING ||
+                    item.status == DuplicateScanStatus.PAUSED
+            }
+            belongsToSelectedView && (
+                needle.isBlank() ||
+                    item.file.name.lowercase().contains(needle) ||
+                    item.file.folderPath.lowercase().contains(needle)
+                )
         }
+        when (queueSort) {
+            DuplicateFileSort.NAME_ASC -> matching.sortedBy { it.file.name.lowercase() }
+            DuplicateFileSort.NAME_DESC -> matching.sortedByDescending { it.file.name.lowercase() }
+            DuplicateFileSort.SIZE_LARGEST -> matching.sortedByDescending { it.file.sizeBytes }
+            DuplicateFileSort.SIZE_SMALLEST -> matching.sortedBy { it.file.sizeBytes }
+            DuplicateFileSort.OLDEST_FIRST -> matching.sortedBy { it.file.addedAt }
+            DuplicateFileSort.NEWEST_FIRST -> matching.sortedByDescending { it.file.addedAt }
+        }
+    }
+    LaunchedEffect(state.queue, showCheckedQueue, showFailedQueue) {
+        val visibleQueueIds = state.queue
+            .filter { item ->
+                when {
+                    showCheckedQueue -> item.status == DuplicateScanStatus.SCANNED
+                    showFailedQueue -> item.status == DuplicateScanStatus.FAILED ||
+                        item.status == DuplicateScanStatus.CANCELLED
+                    else -> item.status == DuplicateScanStatus.WAITING ||
+                        item.status == DuplicateScanStatus.GENERATING ||
+                        item.status == DuplicateScanStatus.PAUSED
+                }
+            }
+            .map { it.file.id }
+            .toSet()
+        selectedQueueIds = selectedQueueIds.intersect(visibleQueueIds)
+    }
+    LaunchedEffect(showCheckedQueue, showFailedQueue) {
+        selectedQueueIds = emptySet()
+        queueListState.scrollToItem(0)
+    }
+    val queueDragSelect = rememberDragSelect(
+        listState = queueListState,
+        onStart = { queueSelectionBase = selectedQueueIds },
+        isSelected = { index ->
+            sortedQueue.getOrNull(index)?.file?.id?.let(selectedQueueIds::contains) == true
+        },
+        onRange = { range, shouldSelect ->
+            val ids = range.mapNotNull { sortedQueue.getOrNull(it)?.file?.id }.toSet()
+            selectedQueueIds = if (shouldSelect) queueSelectionBase + ids
+            else queueSelectionBase - ids
+        },
+        onEnd = { queueSelectionBase = emptySet() }
+    )
+    val individuallyPausedCount = state.queue.count { it.status == DuplicateScanStatus.PAUSED }
+    val pendingQueueCount = state.waitingCount + state.generatingCount + individuallyPausedCount
+    val activeQueueCount = state.waitingCount + state.generatingCount
+    val visibleQueueCount = pendingQueueCount
+    val queueEta = when {
+        showCheckedQueue -> "$checkedQueueCount file(s) checked · duplicate matches are shown in View results"
+        showFailedQueue -> "$failedQueueCount file(s) failed or cancelled · select and retry them"
+        state.isPaused -> "Estimated remaining: paused"
+        activeQueueCount == 0 && individuallyPausedCount > 0 ->
+            "Estimated remaining: ${individuallyPausedCount} individually paused"
+        activeQueueCount == 0 && state.failedCount > 0 ->
+            "${state.failedCount} file(s) failed · retry them to continue"
+        activeQueueCount == 0 -> "Queue complete"
+        scanFilesPerSecond > 0.0 -> {
+            val seconds = (activeQueueCount / scanFilesPerSecond).toLong().coerceAtLeast(1L)
+            val eta = Formatters.duration(seconds * 1_000L)
+            if (individuallyPausedCount > 0) {
+                "Estimated remaining: ${eta} · ${individuallyPausedCount} paused"
+            } else {
+                "Estimated remaining: ${eta}"
+            }
+        }
+        else -> "Estimated remaining: calculating…"
     }
 
     fun selectAllMatches() {
@@ -196,6 +305,8 @@ fun DuplicateManagerScreen(
                         when (val result = trashRepository.moveFilesToTrash(ids)) {
                             is AppResult.Success -> {
                                 selectedIds = emptySet()
+                                selectedQueueIds = selectedQueueIds - ids.toSet()
+                                repository.removeTrashedFiles(ids.toSet())
                                 message = "Moved " + ids.size + " file(s) to Trash."
                                 repository.startScan(folderId)
                             }
@@ -236,10 +347,13 @@ fun DuplicateManagerScreen(
                 )
             }
             TextButton(onClick = { showQueue = !showQueue }) {
-                Text(if (showQueue) "View results" else "View queue (" + state.totalFiles + ")")
+                Text(if (showQueue) "View results" else "View queue (" + visibleQueueCount + ")")
             }
             TooltipIconButton(tooltip = "Scan this folder again", onClick = {
                 selectedIds = emptySet()
+                selectedQueueIds = emptySet()
+                showCheckedQueue = false
+                showFailedQueue = false
                 scope.launch { repository.startScan(folderId, resetQueue = true) }
             }) {
                 androidx.compose.material3.Icon(Icons.Filled.Refresh, contentDescription = "Rescan")
@@ -274,153 +388,292 @@ fun DuplicateManagerScreen(
         }
 
         if (showQueue) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    enabled = state.isRunning && !state.isPaused,
-                    onClick = repository::pauseAll
-                ) { Text("Pause all") }
-                OutlinedButton(
-                    enabled = state.isPaused,
-                    onClick = repository::resumeAll
-                ) { Text("Resume all") }
-                OutlinedButton(
-                    enabled = state.queue.any {
-                        it.status == DuplicateScanStatus.WAITING ||
-                            it.status == DuplicateScanStatus.GENERATING ||
-                            it.status == DuplicateScanStatus.PAUSED
-                    },
-                    onClick = repository::cancelAll
-                ) { Text("Cancel all") }
-                OutlinedButton(
-                    enabled = state.failedCount > 0 || state.cancelledCount > 0,
-                    onClick = repository::retryFailed
-                ) { Text("Retry failed/cancelled") }
+            if (!showCheckedQueue && !showFailedQueue) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        enabled = state.isRunning && !state.isPaused,
+                        onClick = repository::pauseAll
+                    ) { Text("Pause all") }
+                    OutlinedButton(
+                        enabled = state.isPaused,
+                        onClick = repository::resumeAll
+                    ) { Text("Resume all") }
+                    OutlinedButton(
+                        enabled = state.queue.any {
+                            it.status == DuplicateScanStatus.WAITING ||
+                                it.status == DuplicateScanStatus.GENERATING ||
+                                it.status == DuplicateScanStatus.PAUSED
+                        },
+                        onClick = {
+                            repository.cancelAll()
+                            selectedQueueIds = emptySet()
+                        }
+                    ) { Text("Cancel all") }
+                }
+            } else if (showFailedQueue) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        enabled = failedQueueCount > 0,
+                        onClick = {
+                            repository.retryFailed()
+                            selectedQueueIds = emptySet()
+                        }
+                    ) { Text("Retry all failed") }
+                }
             }
 
-            var selectedQueueIds by remember(folderId) { mutableStateOf(emptySet<String>()) }
+            Text(
+                queueEta,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(onClick = {
+                    showCheckedQueue = false
+                    showFailedQueue = false
+                }) {
+                    Text((if (!showCheckedQueue && !showFailedQueue) "● " else "") + "Current (" + visibleQueueCount + ")")
+                }
+                OutlinedButton(onClick = {
+                    showCheckedQueue = true
+                    showFailedQueue = false
+                }) {
+                    Text((if (showCheckedQueue) "● " else "") + "Checked (" + checkedQueueCount + ")")
+                }
+                OutlinedButton(onClick = {
+                    showCheckedQueue = false
+                    showFailedQueue = true
+                }) {
+                    Text((if (showFailedQueue) "● " else "") + "Failed (" + failedQueueCount + ")")
+                }
+            }
+            OutlinedTextField(
+                value = queueSearch,
+                onValueChange = { queueSearch = it },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                singleLine = true,
+                label = {
+                    Text(
+                        when {
+                            showCheckedQueue -> "Search checked files"
+                            showFailedQueue -> "Search failed files"
+                            else -> "Search current queue by filename or folder"
+                        }
+                    )
+                }
+            )
             Row(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(selectedQueueIds.size.toString() + " selected", modifier = Modifier.weight(1f))
-                TextButton(
-                    enabled = state.queue.isNotEmpty(),
-                    onClick = { selectedQueueIds = state.queue.map { it.file.id }.toSet() }
-                ) { Text("Select all") }
-                TextButton(
-                    enabled = state.queue.isNotEmpty(),
-                    onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
-                ) { Text("Select visible") }
-                TextButton(
-                    enabled = selectedQueueIds.isNotEmpty(),
-                    onClick = { selectedQueueIds = emptySet() }
-                ) { Text("Clear") }
+                Text(
+                    when {
+                        showCheckedQueue -> "$checkedQueueCount checked"
+                        showFailedQueue -> selectedQueueIds.size.toString() + " failed selected"
+                        else -> selectedQueueIds.size.toString() + " selected"
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                Box {
+                    OutlinedButton(onClick = { showQueueSortMenu = true }) {
+                        Text(
+                            "Sort: " + when (queueSort) {
+                                DuplicateFileSort.NAME_ASC -> "Name A–Z"
+                                DuplicateFileSort.NAME_DESC -> "Name Z–A"
+                                DuplicateFileSort.SIZE_LARGEST -> "Largest"
+                                DuplicateFileSort.SIZE_SMALLEST -> "Smallest"
+                                DuplicateFileSort.OLDEST_FIRST -> "Oldest"
+                                DuplicateFileSort.NEWEST_FIRST -> "Newest"
+                            }
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showQueueSortMenu,
+                        onDismissRequest = { showQueueSortMenu = false }
+                    ) {
+                        DuplicateFileSort.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        when (option) {
+                                            DuplicateFileSort.NAME_ASC -> "Name A–Z"
+                                            DuplicateFileSort.NAME_DESC -> "Name Z–A"
+                                            DuplicateFileSort.SIZE_LARGEST -> "Largest file"
+                                            DuplicateFileSort.SIZE_SMALLEST -> "Smallest file"
+                                            DuplicateFileSort.OLDEST_FIRST -> "Oldest first"
+                                            DuplicateFileSort.NEWEST_FIRST -> "Newest first"
+                                        }
+                                    )
+                                },
+                                onClick = { queueSort = option; showQueueSortMenu = false }
+                            )
+                        }
+                    }
+                }
+                if (!showCheckedQueue) {
+                    TextButton(
+                        enabled = sortedQueue.isNotEmpty(),
+                        onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
+                    ) { Text("Select all") }
+                    TextButton(
+                        enabled = sortedQueue.isNotEmpty(),
+                        onClick = { selectedQueueIds = sortedQueue.map { it.file.id }.toSet() }
+                    ) { Text("Select visible") }
+                    TextButton(
+                        enabled = selectedQueueIds.isNotEmpty(),
+                        onClick = { selectedQueueIds = emptySet() }
+                    ) { Text("Clear") }
+                }
             }
-            if (selectedQueueIds.isNotEmpty()) {
+            if (!showCheckedQueue && selectedQueueIds.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { repository.pauseFiles(selectedQueueIds) }) {
-                        Text("Pause selected")
+                    if (showFailedQueue) {
+                        OutlinedButton(
+                            onClick = {
+                                repository.retryFiles(selectedQueueIds)
+                                selectedQueueIds = emptySet()
+                            }
+                        ) { Text("Retry selected") }
+                    } else {
+                        OutlinedButton(onClick = { repository.pauseFiles(selectedQueueIds) }) {
+                            Text("Pause selected")
+                        }
+                        OutlinedButton(onClick = { repository.resumeFiles(selectedQueueIds) }) {
+                            Text("Resume selected")
+                        }
+                        OutlinedButton(onClick = {
+                            repository.cancelFiles(selectedQueueIds)
+                            selectedQueueIds = emptySet()
+                        }) { Text("Cancel selected") }
                     }
-                    OutlinedButton(onClick = { repository.resumeFiles(selectedQueueIds) }) {
-                        Text("Resume selected")
-                    }
-                    OutlinedButton(onClick = {
-                        repository.cancelFiles(selectedQueueIds)
-                        selectedQueueIds = emptySet()
-                    }) { Text("Cancel selected") }
-                    OutlinedButton(onClick = {
-                        repository.retryFiles(selectedQueueIds)
-                        selectedQueueIds = emptySet()
-                    }) { Text("Retry selected") }
                 }
             }
 
-            if (state.queue.isEmpty()) {
-                Text("There are no files in this folder tree.")
+            if (sortedQueue.isEmpty()) {
+                Text(
+                    when {
+                        queueSearch.isNotBlank() && showCheckedQueue ->
+                            "No checked files match this search."
+                        queueSearch.isNotBlank() && showFailedQueue ->
+                            "No failed files match this search."
+                        queueSearch.isNotBlank() ->
+                            "No current queue items match this search."
+                        showCheckedQueue ->
+                            "No files have been checked yet. They will appear here as the scan progresses."
+                        showFailedQueue ->
+                            "No failed or cancelled files. Great—nothing needs retrying."
+                        state.queue.isEmpty() -> "There are no files in this folder tree."
+                        else -> "Queue complete."
+                    }
+                )
             } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(sortedQueue, key = { it.file.id }) { item ->
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerLow
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        state = queueListState,
+                        modifier = Modifier.fillMaxSize().then(
+                            if (showCheckedQueue) Modifier else queueDragSelect
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(sortedQueue, key = { it.file.id }) { item ->
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLow
                             ) {
-                                Checkbox(
-                                    checked = item.file.id in selectedQueueIds,
-                                    onCheckedChange = { checked ->
-                                        selectedQueueIds = if (checked) {
-                                            selectedQueueIds + item.file.id
-                                        } else selectedQueueIds - item.file.id
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (!showCheckedQueue) {
+                                        Checkbox(
+                                            checked = item.file.id in selectedQueueIds,
+                                            onCheckedChange = { checked ->
+                                                selectedQueueIds = if (checked) {
+                                                    selectedQueueIds + item.file.id
+                                                } else selectedQueueIds - item.file.id
+                                            }
+                                        )
                                     }
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(item.file.name, maxLines = 1)
-                                    Text(
-                                        Formatters.bytes(item.file.sizeBytes) + " · " + item.file.folderPath,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2
-                                    )
-                                    Text(
-                                        when (item.status) {
-                                            DuplicateScanStatus.WAITING -> "Waiting"
-                                            DuplicateScanStatus.GENERATING -> "Checking content"
-                                            DuplicateScanStatus.SCANNED -> "Checked"
-                                            DuplicateScanStatus.FAILED -> "Failed"
-                                            DuplicateScanStatus.PAUSED -> "Paused"
-                                            DuplicateScanStatus.CANCELLED -> "Cancelled"
-                                        },
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = when (item.status) {
-                                            DuplicateScanStatus.FAILED -> MaterialTheme.colorScheme.error
-                                            DuplicateScanStatus.GENERATING -> MaterialTheme.colorScheme.primary
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(item.file.name, maxLines = 1)
+                                        Text(
+                                            Formatters.bytes(item.file.sizeBytes) + " · " + item.file.folderPath,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2
+                                        )
+                                        Text(
+                                            when (item.status) {
+                                                DuplicateScanStatus.WAITING -> "Waiting"
+                                                DuplicateScanStatus.GENERATING -> "Checking content"
+                                                DuplicateScanStatus.SCANNED -> "Checked"
+                                                DuplicateScanStatus.FAILED -> "Failed"
+                                                DuplicateScanStatus.PAUSED -> "Paused"
+                                                DuplicateScanStatus.CANCELLED -> "Cancelled"
+                                            },
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = when (item.status) {
+                                                DuplicateScanStatus.FAILED -> MaterialTheme.colorScheme.error
+                                                DuplicateScanStatus.GENERATING -> MaterialTheme.colorScheme.primary
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                        item.error?.let {
+                                            Text(
+                                                it,
+                                                color = MaterialTheme.colorScheme.error,
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
                                         }
-                                    )
-                                    item.error?.let {
-                                        Text(it, color = MaterialTheme.colorScheme.error,
-                                            style = MaterialTheme.typography.labelSmall)
                                     }
-                                }
-                                when (item.status) {
-                                    DuplicateScanStatus.WAITING,
-                                    DuplicateScanStatus.GENERATING -> {
-                                        TextButton(onClick = {
-                                            repository.pauseFiles(setOf(item.file.id))
-                                        }) { Text("Pause") }
-                                        TextButton(onClick = {
-                                            repository.cancelFiles(setOf(item.file.id))
-                                        }) { Text("Cancel") }
+                                    when (item.status) {
+                                        DuplicateScanStatus.WAITING,
+                                        DuplicateScanStatus.GENERATING -> {
+                                            TextButton(onClick = {
+                                                repository.pauseFiles(setOf(item.file.id))
+                                            }) { Text("Pause") }
+                                            TextButton(onClick = {
+                                                repository.cancelFiles(setOf(item.file.id))
+                                            }) { Text("Cancel") }
+                                        }
+                                        DuplicateScanStatus.PAUSED -> {
+                                            TextButton(onClick = {
+                                                repository.resumeFiles(setOf(item.file.id))
+                                            }) { Text("Resume") }
+                                            TextButton(onClick = {
+                                                repository.cancelFiles(setOf(item.file.id))
+                                            }) { Text("Cancel") }
+                                        }
+                                        DuplicateScanStatus.FAILED,
+                                        DuplicateScanStatus.CANCELLED -> {
+                                            TextButton(onClick = {
+                                                repository.retryFiles(setOf(item.file.id))
+                                            }) { Text("Retry") }
+                                        }
+                                        DuplicateScanStatus.SCANNED -> Unit
                                     }
-                                    DuplicateScanStatus.PAUSED -> {
-                                        TextButton(onClick = {
-                                            repository.resumeFiles(setOf(item.file.id))
-                                        }) { Text("Resume") }
-                                        TextButton(onClick = {
-                                            repository.cancelFiles(setOf(item.file.id))
-                                        }) { Text("Cancel") }
-                                    }
-                                    DuplicateScanStatus.FAILED,
-                                    DuplicateScanStatus.CANCELLED -> {
-                                        TextButton(onClick = {
-                                            repository.retryFiles(setOf(item.file.id))
-                                        }) { Text("Retry") }
-                                    }
-                                    DuplicateScanStatus.SCANNED -> Unit
                                 }
                             }
                         }
                     }
+                    DesktopVerticalScrollbar(
+                        state = queueListState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(12.dp)
+                    )
+                    DesktopScrollEdgeControls(
+                        state = queueListState,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
+                    )
                 }
             }
         } else {

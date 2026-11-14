@@ -445,6 +445,13 @@ fun GalleryScreen(
             state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
         },
         onSelectAll = viewModel::selectAll,
+        onDelete = { index ->
+            val folderId = state.albums.getOrNull(index)?.folderId
+            if (folderId != null) {
+                if (!selectionMode) viewModel.toggleAlbumSelection(folderId)
+                if (viewModel.hasSelection()) confirmTrash = true
+            }
+        },
         onCopy = { index ->
             if (!selectionMode) state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
             viewModel.copyToClipboardSelected()
@@ -579,6 +586,7 @@ fun GalleryScreen(
             message = stringResource(Res.string.common_restore_trash_emptied),
             confirmLabel = stringResource(Res.string.common_move_trash),
             destructive = true,
+            confirmOnEnter = true,
             onConfirm = {
                 confirmTrash = false
                 viewModel.trashSelected()
@@ -665,6 +673,15 @@ fun GalleryScreen(
                             )
                         }
                         if (state.selectionCount > 0) {
+                            TooltipIconButton(
+                                tooltip = stringResource(Res.string.common_move_trash),
+                                onClick = { confirmTrash = true }
+                            ) {
+                                Icon(
+                                    Icons.Filled.DeleteOutline,
+                                    contentDescription = stringResource(Res.string.common_move_trash)
+                                )
+                            }
                             Box {
                                 TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                 Icon(
@@ -1117,6 +1134,12 @@ fun GalleryScreen(
                         .collectionCommandShortcuts(
                             focusRequester = albumCommandFocusRequester,
                             onSelectAll = { viewModel.selectAll(); true },
+                            onDelete = {
+                                if (viewModel.hasSelection()) {
+                                    confirmTrash = true
+                                    true
+                                } else false
+                            },
                             onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
                             onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
                             onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false },
@@ -1206,6 +1229,12 @@ fun GalleryScreen(
                     .collectionCommandShortcuts(
                         focusRequester = mediaCommandFocusRequester,
                         onSelectAll = { viewModel.selectAll(); true },
+                        onDelete = {
+                            if (viewModel.hasSelection()) {
+                                confirmTrash = true
+                                true
+                            } else false
+                        },
                         onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
                         onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
                         onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false }

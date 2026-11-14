@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -36,6 +37,9 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
@@ -50,6 +54,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
@@ -57,6 +62,7 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Rotate90DegreesCw
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.outlined.Description
@@ -97,6 +103,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -176,6 +183,7 @@ import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
+import me.saket.telephoto.ExperimentalTelephotoApi
 import me.saket.telephoto.zoomable.ZoomSpec
 import me.saket.telephoto.zoomable.rememberZoomableState
 import me.saket.telephoto.zoomable.zoomable
@@ -210,6 +218,12 @@ fun DesktopPreviewScreen(
         mutableStateOf(state.initialIndex.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
+
+    val displayIndex = if (state.files.isEmpty()) 0 else index.coerceIn(0, state.files.lastIndex)
+    var previewFolderName by remember { mutableStateOf("Files") }
+    LaunchedEffect(file?.id, file?.folderId) {
+        previewFolderName = file?.let { viewModel.parentFolderName(it) } ?: "Files"
+    }
     var imageRotationDegrees by remember(file?.id) { mutableIntStateOf(0) }
     var mirrorImageHorizontally by remember(file?.id) { mutableStateOf(false) }
     var mirrorImageVertically by remember(file?.id) { mutableStateOf(false) }
@@ -352,11 +366,28 @@ fun DesktopPreviewScreen(
     var copyTarget by remember { mutableStateOf<DriveFile?>(null) }
     var moveTarget by remember { mutableStateOf<DriveFile?>(null) }
     var playerChromeVisible by remember { mutableStateOf(true) }
+    // Keep the image-toolbar preference for the whole preview session, including when
+    // moving between image files. H restores hidden controls; the visible toolbar icon hides them.
+    var imageChromeVisible by remember { mutableStateOf(true) }
+    val previewChromeVisible = when {
+        mediaCategory != null -> playerChromeVisible
+        file?.category == FileCategory.IMAGE -> imageChromeVisible
+        else -> true
+    }
     val viewerFocusRequester = remember { FocusRequester() }
-    LaunchedEffect(file?.id) {
-        // Do not reveal the preview chrome on every queue item change. The player owns
-        // the user's hidden/visible preference and reports it through the callback below.
-        viewerFocusRequester.requestFocus()
+    val windowInfo = LocalWindowInfo.current
+    var imageHKeyPressed by remember { mutableStateOf(false) }
+    LaunchedEffect(file?.id, mediaCategory) {
+        // Images/documents use this preview shortcut target. The VLC surface owns focus
+        // for audio/video and must not have its keyboard controls stolen by the parent.
+        if (mediaCategory == null) viewerFocusRequester.requestFocus()
+    }
+    LaunchedEffect(windowInfo.isWindowFocused, mediaCategory) {
+        if (!windowInfo.isWindowFocused) {
+            imageHKeyPressed = false
+        } else if (mediaCategory == null) {
+            viewerFocusRequester.requestFocus()
+        }
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -366,12 +397,31 @@ fun DesktopPreviewScreen(
         modifier = Modifier
             .focusRequester(viewerFocusRequester)
             .onPreviewKeyEvent { event ->
+                // Match the video player's key lifecycle: consume H key-up to reset the
+                // repeat guard, and toggle only once for a physical key press.
+                if (event.key == Key.H && event.type == KeyEventType.KeyUp) {
+                    imageHKeyPressed = false
+                    return@onPreviewKeyEvent file?.category == FileCategory.IMAGE
+                }
                 if (event.type != KeyEventType.KeyDown ||
                     event.isCtrlPressed || event.isAltPressed || event.isShiftPressed
                 ) {
                     return@onPreviewKeyEvent false
                 }
                 when {
+                    // Video keeps ownership of its own H toggle; this avoids two toggles
+                    // fighting when the preview and VLC surface are both in the key path.
+                    event.key == Key.H && file?.category == FileCategory.IMAGE -> {
+                        if (!imageHKeyPressed) {
+                            imageHKeyPressed = true
+                            imageChromeVisible = !imageChromeVisible
+                        }
+                        true
+                    }
+                    event.key == Key.Delete && file != null && mediaCategory == null -> {
+                        if (trashTarget == null) trashTarget = file
+                        true
+                    }
                     event.key == Key.W -> {
                         if (index > 0) index--
                         true
@@ -383,18 +433,45 @@ fun DesktopPreviewScreen(
                     else -> false
                 }
             }
-            .focusable(),
+            .focusable()
+            .pointerInput(viewerFocusRequester) {
+                // A toolbar button can lose focus when H removes its own row. Reclaim the
+                // stable preview target after pointer dispatch so H/W/E remain available.
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Final)
+                        if (
+                            event.type == PointerEventType.Press &&
+                            mediaCategory == null
+                        ) {
+                            viewerFocusRequester.requestFocus()
+                        }
+                    }
+                }
+            },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         @Composable
         fun PreviewTopBar() {
             TopAppBar(
                 title = {
-                    Text(
-                        text = file?.name.orEmpty(),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Column {
+                        Text(
+                            text = file?.name.orEmpty(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        if (file != null && state.files.isNotEmpty()) {
+                            Text(
+                                text = "$previewFolderName · ${displayIndex + 1}/${state.files.size}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 },
                 navigationIcon = {
                     TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = ::leavePreview) {
@@ -407,6 +484,15 @@ fun DesktopPreviewScreen(
                 actions = {
                     file?.let { currentFile ->
                         if (currentFile.category == FileCategory.IMAGE) {
+                            TooltipIconButton(
+                                tooltip = "Toggle image controls",
+                                onClick = { imageChromeVisible = !imageChromeVisible }
+                            ) {
+                                Icon(
+                                    Icons.Filled.VisibilityOff,
+                                    contentDescription = "Toggle image controls"
+                                )
+                            }
                             TooltipIconButton(
                                 tooltip = "Rotate counter-clockwise",
                                 onClick = {
@@ -451,6 +537,15 @@ fun DesktopPreviewScreen(
                                     else MaterialTheme.colorScheme.onSurface
                                 )
                             }
+                        }
+                        TooltipIconButton(
+                            tooltip = stringResource(Res.string.common_move_trash),
+                            onClick = { if (trashTarget == null) trashTarget = currentFile }
+                        ) {
+                            Icon(
+                                Icons.Filled.DeleteOutline,
+                                contentDescription = stringResource(Res.string.common_move_trash)
+                            )
                         }
                         TooltipIconButton(tooltip = stringResource(Res.string.preview_file_info), onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
@@ -529,6 +624,8 @@ fun DesktopPreviewScreen(
                     sleepAtTrackEnd = false
                 },
                 onPlaybackFinished = ::handlePlaybackFinished,
+                onDelete = { if (trashTarget == null) trashTarget = pageFile },
+                onToggleImageChrome = { imageChromeVisible = !imageChromeVisible },
                 onPlayerControlsVisibilityChange = { playerChromeVisible = it }
             )
         }
@@ -570,7 +667,7 @@ fun DesktopPreviewScreen(
                 }
             }
             AnimatedVisibility(
-                visible = playerChromeVisible,
+                visible = previewChromeVisible,
                 enter = fadeIn(),
                 exit = fadeOut(),
                 modifier = Modifier.align(Alignment.TopCenter)
@@ -579,7 +676,7 @@ fun DesktopPreviewScreen(
             }
             if (
                 state.files.size > 1 &&
-                playerChromeVisible &&
+                previewChromeVisible &&
                 file?.category !in setOf(FileCategory.AUDIO, FileCategory.VIDEO)
             ) {
                 PreviewPagerButton(
@@ -619,6 +716,7 @@ fun DesktopPreviewScreen(
             message = stringResource(Res.string.preview_confirm_trash_file_message, target.name),
             confirmLabel = stringResource(Res.string.common_move_trash),
             destructive = true,
+            confirmOnEnter = true,
             onConfirm = {
                 viewModel.moveToTrash(target)
                 trashTarget = null
@@ -817,7 +915,7 @@ private fun VerticalZoomSlider(
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val event = awaitPointerEvent()
                         if (event.type == PointerEventType.Scroll) {
                             val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
                             if (delta != 0f) {
@@ -895,7 +993,7 @@ private fun PreviewPagerButton(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalTelephotoApi::class)
 @Composable
 private fun PreviewPane(
     viewModel: PreviewViewModel,
@@ -922,6 +1020,8 @@ private fun PreviewPane(
     onSleepAtTrackEnd: () -> Unit,
     onClearSleepTimer: () -> Unit,
     onPlaybackFinished: () -> Unit,
+    onDelete: () -> Unit,
+    onToggleImageChrome: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val content by viewModel.contentFor(file).collectAsState()
@@ -1085,8 +1185,198 @@ private fun PreviewPane(
                             contentDescription = file.name,
                             modifier = Modifier
                                 .fillMaxSize()
+                                // Left mouse is reserved for vertical zoom. Right mouse
+                                // handles horizontal image navigation at fit zoom and pans the
+                                // image in any direction when zoomed. A plain left click is left
+                                // untouched so the existing header/control toggle still works.
+                                .pointerInput(zoomableState, onPrevious, onNext) {
+                                    awaitEachGesture {
+                                        var downEvent = awaitPointerEvent(PointerEventPass.Initial)
+                                        var down = downEvent.changes.firstOrNull { it.pressed }
+                                        while (
+                                            downEvent.type != PointerEventType.Press ||
+                                            down == null
+                                        ) {
+                                            downEvent = awaitPointerEvent(PointerEventPass.Initial)
+                                            down = downEvent.changes.firstOrNull { it.pressed }
+                                        }
+
+                                        val mouseDown = down ?: return@awaitEachGesture
+                                        if (mouseDown.type != PointerType.Mouse) {
+                                            return@awaitEachGesture
+                                        }
+                                        val isLeftButton = downEvent.buttons.isPrimaryPressed
+                                        val isRightButton = downEvent.buttons.isSecondaryPressed
+                                        if (!isLeftButton && !isRightButton) {
+                                            return@awaitEachGesture
+                                        }
+
+                                        val initialZoomFraction =
+                                            (zoomableState.zoomFraction ?: 0f).coerceIn(0f, 1f)
+                                        var lastPosition = mouseDown.position
+                                        var totalX = 0f
+                                        var totalY = 0f
+                                        var leftZoomStarted = false
+                                        var leftDragConsumed = false
+                                        var rightSwipeStarted = false
+                                        var rightPanStarted = false
+                                        var rightDragConsumed = false
+                                        var lastAppliedZoomFraction = initialZoomFraction
+
+                                        fun updateZoomFromVerticalDrag(force: Boolean = false) {
+                                            val dragRange = (size.height * 0.65f).coerceAtLeast(1f)
+                                            val targetFraction =
+                                                (initialZoomFraction - totalY / dragRange)
+                                                    .coerceIn(0f, 1f)
+
+                                            // Snap small residual zoom back to the exact fit state.
+                                            // This also resets any pan offset left over from zooming.
+                                            if (targetFraction <= IMAGE_FIT_SNAP_FRACTION) {
+                                                if (lastAppliedZoomFraction > IMAGE_FIT_SNAP_FRACTION || force) {
+                                                    lastAppliedZoomFraction = 0f
+                                                    zoomScope.launch {
+                                                        zoomableState.resetZoom(animationSpec = SnapSpec())
+                                                    }
+                                                } else {
+                                                    lastAppliedZoomFraction = 0f
+                                                }
+                                                return
+                                            }
+
+                                            if (
+                                                !force &&
+                                                kotlin.math.abs(targetFraction - lastAppliedZoomFraction) < 0.012f
+                                            ) {
+                                                return
+                                            }
+
+                                            lastAppliedZoomFraction = targetFraction
+                                            zoomScope.launch {
+                                                zoomableState.zoomTo(
+                                                    zoomFactor = 1f + 3f * targetFraction,
+                                                    animationSpec = SnapSpec()
+                                                )
+                                            }
+                                        }
+
+                                        // Consume the right-button press immediately so it cannot
+                                        // be interpreted as the normal left-click header toggle.
+                                        if (isRightButton) mouseDown.consume()
+
+                                        while (true) {
+                                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                                            val change = event.changes.firstOrNull { it.id == mouseDown.id }
+                                                ?: break
+                                            val delta = change.position - lastPosition
+                                            lastPosition = change.position
+                                            totalX += delta.x
+                                            totalY += delta.y
+
+                                            if (!change.pressed) {
+                                                if (leftZoomStarted) {
+                                                    updateZoomFromVerticalDrag(force = true)
+                                                }
+                                                if (
+                                                    leftZoomStarted || leftDragConsumed ||
+                                                    rightSwipeStarted || rightPanStarted || rightDragConsumed
+                                                ) {
+                                                    change.consume()
+                                                }
+                                                break
+                                            }
+
+                                            val slop = viewConfiguration.touchSlop
+                                            val horizontalDistance = kotlin.math.abs(totalX)
+                                            val verticalDistance = kotlin.math.abs(totalY)
+
+                                            if (isLeftButton) {
+                                                if (!leftZoomStarted && !leftDragConsumed) {
+                                                    when {
+                                                        verticalDistance > slop &&
+                                                            verticalDistance > horizontalDistance * 1.2f -> {
+                                                            leftZoomStarted = true
+                                                            change.consume()
+                                                            updateZoomFromVerticalDrag()
+                                                        }
+                                                        horizontalDistance > slop &&
+                                                            horizontalDistance > verticalDistance * 1.2f -> {
+                                                            // Prevent the default zoomable gesture from
+                                                            // using the left button to pan the image.
+                                                            leftDragConsumed = true
+                                                            change.consume()
+                                                        }
+                                                    }
+                                                } else if (leftZoomStarted) {
+                                                    change.consume()
+                                                    updateZoomFromVerticalDrag()
+                                                } else if (leftDragConsumed) {
+                                                    change.consume()
+                                                }
+                                            } else if (isRightButton) {
+                                                if (initialZoomFraction > IMAGE_FIT_SNAP_FRACTION) {
+                                                    // At non-fit zoom, right-drag pans the image in
+                                                    // both axes using Telephoto's own pan constraints.
+                                                    val distance = kotlin.math.sqrt(
+                                                        totalX * totalX + totalY * totalY
+                                                    )
+                                                    if (!rightPanStarted && distance > slop) {
+                                                        rightPanStarted = true
+                                                        change.consume()
+                                                        val panDelta = androidx.compose.ui.geometry.Offset(totalX, totalY)
+                                                        zoomScope.launch {
+                                                            zoomableState.panBy(
+                                                                panDelta,
+                                                                animationSpec = SnapSpec()
+                                                            )
+                                                        }
+                                                    } else if (rightPanStarted) {
+                                                        change.consume()
+                                                        val panDelta = delta
+                                                        zoomScope.launch {
+                                                            zoomableState.panBy(
+                                                                panDelta,
+                                                                animationSpec = SnapSpec()
+                                                            )
+                                                        }
+                                                    }
+                                                } else if (!rightSwipeStarted && !rightDragConsumed) {
+                                                    when {
+                                                        horizontalDistance > slop &&
+                                                            horizontalDistance > verticalDistance * 1.2f -> {
+                                                            rightSwipeStarted = true
+                                                            change.consume()
+                                                        }
+                                                        verticalDistance > slop &&
+                                                            verticalDistance > horizontalDistance * 1.2f -> {
+                                                            // A vertical right-drag at fit zoom is
+                                                            // intentionally ignored, not treated as zoom.
+                                                            rightDragConsumed = true
+                                                            change.consume()
+                                                        }
+                                                    }
+                                                } else if (rightSwipeStarted || rightDragConsumed) {
+                                                    change.consume()
+                                                }
+                                            }
+                                        }
+
+                                        if (rightSwipeStarted && initialZoomFraction <= IMAGE_FIT_SNAP_FRACTION) {
+                                            val swipeThreshold = maxOf(
+                                                72.dp.toPx(),
+                                                size.width * 0.12f
+                                            )
+                                            when {
+                                                totalX >= swipeThreshold -> onPrevious()
+                                                totalX <= -swipeThreshold -> onNext()
+                                            }
+                                        }
+                                    }
+                                }
                                 .zoomable(
                                     state = zoomableState,
+                                    // Telephoto routes clicks through this callback so its
+                                    // own double-click zoom and pan/pinch gestures remain intact.
+                                    onClick = { _ -> onToggleImageChrome() },
                                     onDoubleClick = { state, centroid ->
                                         zoomScope.launch {
                                             if ((state.zoomFraction ?: 0f) > 0f) {
@@ -1305,6 +1595,7 @@ private fun PreviewPane(
         if (VlcPlayback.available && mediaMrl != null) {
             DesktopMediaPlayer(
                 mrl = mediaMrl,
+                mediaId = file?.id ?: mediaMrl,
                 isAudio = mediaIsAudio,
                 preferredAudioLanguage = preferredAudioLanguage,
                 preferredSubtitleLanguage = preferredSubtitleLanguage,
@@ -1328,11 +1619,14 @@ private fun PreviewPane(
                 onSleepAtTrackEnd = onSleepAtTrackEnd,
                 onClearSleepTimer = onClearSleepTimer,
                 onPlaybackFinished = onPlaybackFinished,
-                onControlsVisibilityChange = onPlayerControlsVisibilityChange
+                onControlsVisibilityChange = onPlayerControlsVisibilityChange,
+                onDelete = onDelete
             )
         }
     }
 }
+
+private const val IMAGE_FIT_SNAP_FRACTION = 0.05f
 
 private val TOP_BAR_INSET = 72.dp
 

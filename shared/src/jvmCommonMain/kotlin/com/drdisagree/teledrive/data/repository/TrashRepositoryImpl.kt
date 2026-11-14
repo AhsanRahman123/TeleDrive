@@ -81,8 +81,9 @@ class TrashRepositoryImpl(
     }
 
     override suspend fun moveFilesToTrash(ids: List<String>): AppResult<Unit> {
-        fileDao.moveToTrash(ids, System.currentTimeMillis())
-        markFilesDirty(ids)
+        if (ids.isEmpty()) return AppResult.Success(Unit)
+        fileDao.moveToTrashAndMarkPendingPublish(ids, System.currentTimeMillis())
+        publishScheduler.kick()
         return AppResult.Success(Unit)
     }
 
@@ -91,7 +92,9 @@ class TrashRepositoryImpl(
         val chatId = activeChannel.id()
         val fileIds = descendants.flatMap { fileDao.filesInFolder(it, chatId) }.map { it.id }
         val trashedAt = System.currentTimeMillis()
-        fileIds.chunked(SQL_BATCH).forEach { fileDao.moveToTrash(it, trashedAt) }
+        fileIds.chunked(SQL_BATCH).forEach {
+            fileDao.moveToTrashAndMarkPendingPublish(it, trashedAt)
+        }
         descendants.reversed().forEach { folderDao.moveToTrash(it, trashedAt) }
         markFolderStateDirty()
         return AppResult.Success(Unit)

@@ -289,7 +289,8 @@ class DragSelectPointerTest {
                 },
                 onEnd = {},
                 mouseDragAddsToSelection = true,
-                resolveNearestVisibleItem = true
+                resolveNearestVisibleItem = true,
+                processReleasePosition = true
             )
             LazyVerticalGrid(
                 state = gridState,
@@ -328,4 +329,116 @@ class DragSelectPointerTest {
         assertTrue("the selection should grow with the scroll", selected.size > 3)
     }
 
+    @Test
+    fun `Trash grid drag from a selected anchor deselects the crossed range like Files`() {
+        var selected by mutableStateOf(setOf(0, 1, 2))
+        var rangeBase by mutableStateOf(setOf(0, 1, 2))
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                mouseDragAddsToSelection = false,
+                resolveNearestVisibleItem = true,
+                processReleasePosition = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 220.dp)
+                    .testTag("trash-selection-grid")
+                    .then(dragSelect)
+            ) {
+                items((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("trash-selection-grid").performMouseInput {
+            moveTo(Offset(90f, 30f))
+            press()
+            // Move inside the range, then change to the last row without sending a move
+            // event. The release event itself must include that final endpoint.
+            moveTo(Offset(90f, 90f), delayMillis = 100)
+            updatePointerTo(Offset(90f, 170f))
+            release()
+        }
+        rule.waitForIdle()
+
+        assertEquals(emptySet<Int>(), selected)
+    }
+
+    @Test
+    fun `Trash grid drag from an unselected anchor adds the crossed range like Files`() {
+        var selected by mutableStateOf(setOf(0, 1))
+        var rangeBase by mutableStateOf(setOf(0, 1))
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                mouseDragAddsToSelection = false,
+                resolveNearestVisibleItem = true,
+                processReleasePosition = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 360.dp)
+                    .testTag("trash-selection-grid-add")
+                    .then(dragSelect)
+            ) {
+                items((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("trash-selection-grid-add").performMouseInput {
+            moveTo(Offset(90f, 150f))
+            press()
+            moveTo(Offset(90f, 230f), delayMillis = 100)
+            // The final row is delivered by mouse-up, not by a move event.
+            updatePointerTo(Offset(90f, 310f))
+            release()
+        }
+        rule.waitForIdle()
+
+        assertEquals(setOf(0, 1, 2, 3, 4), selected)
+    }
 }

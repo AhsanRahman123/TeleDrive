@@ -87,6 +87,7 @@ interface DuplicateManagerRepository {
     fun pauseFiles(fileIds: Set<String>)
     fun resumeFiles(fileIds: Set<String>)
     fun cancelFiles(fileIds: Set<String>)
+    fun removeTrashedFiles(fileIds: Set<String>)
     fun retryFiles(fileIds: Set<String>)
     fun retryFailed()
 }

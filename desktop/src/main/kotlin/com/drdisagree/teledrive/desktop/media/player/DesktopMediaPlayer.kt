@@ -5,6 +5,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -71,6 +73,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.drdisagree.teledrive.core.common.SafeLog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -120,6 +123,7 @@ import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -133,6 +137,7 @@ import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -140,6 +145,7 @@ import kotlin.time.Duration.Companion.milliseconds
 @Composable
 internal fun DesktopMediaPlayer(
     mrl: String,
+    mediaId: String,
     isAudio: Boolean,
     modifier: Modifier = Modifier,
     preferredAudioLanguage: String = "",
@@ -164,9 +170,9 @@ internal fun DesktopMediaPlayer(
     onSleepAtTrackEnd: () -> Unit = {},
     onClearSleepTimer: () -> Unit = {},
     onPlaybackFinished: () -> Unit = {},
-    onControlsVisibilityChange: (Boolean) -> Unit = {}
+    onControlsVisibilityChange: (Boolean) -> Unit = {},
+    onDelete: () -> Unit = {}
 ) {
-    val factory = VlcPlayback.factory ?: return
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var playing by remember { mutableStateOf(false) }
     var finished by remember { mutableStateOf(false) }
@@ -174,7 +180,16 @@ internal fun DesktopMediaPlayer(
     var timeMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
-    var volume by remember(mrl) { mutableIntStateOf(100) }
+    var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
+    var volume by remember(mrl) {
+        mutableIntStateOf(
+            if (controlPreferences.rememberVolume) {
+                RememberedPlayerVolume.currentVolume()
+            } else {
+                MAX_VOLUME
+            }
+        )
+    }
     var brightness by remember { mutableIntStateOf(100) }
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
@@ -186,25 +201,72 @@ internal fun DesktopMediaPlayer(
     var seekFeedbackVisible by remember { mutableStateOf(false) }
     var seekFeedbackTick by remember { mutableIntStateOf(0) }
     var hKeyPressed by remember { mutableStateOf(false) }
-    var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
+    var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
+    var subtitleAppearanceRevision by remember(mrl, mediaId, isAudio) { mutableIntStateOf(0) }
+    var styleRestartPositionMs by remember(mrl, mediaId, isAudio) { mutableStateOf<Long?>(null) }
+    var styleRestartWasPlaying by remember(mrl, mediaId, isAudio) { mutableStateOf(true) }
+    val startPausedForThisRevision = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
+        styleRestartPositionMs != null && !styleRestartWasPlaying
+    }
+    val initialStartPausedPending = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
+        AtomicBoolean(startPausedForThisRevision)
+    }
+    val factory = remember(subtitleAppearance) {
+        VlcPlayback.createFactory(subtitleAppearance)
+    } ?: return
+    var subtitleTrackActive by remember(mrl, mediaId, isAudio) { mutableStateOf(false) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
-    // a play/resume event cannot reapply the initial 100% / unmuted values.
+    // a play/resume event always reapplies the current remembered volume and mute state.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
+    val latestRate = rememberUpdatedState(rate)
+    val latestTimeMs = rememberUpdatedState(timeMs)
+    val latestDurationMs = rememberUpdatedState(durationMs)
+    val latestFinished = rememberUpdatedState(finished)
     val latestRepeatOne = rememberUpdatedState(repeatOne)
+    val latestRepeatAll = rememberUpdatedState(repeatAll)
     val latestSleepAtTrackEnd = rememberUpdatedState(sleepAtTrackEnd)
     val latestOnPlaybackFinished = rememberUpdatedState(onPlaybackFinished)
     val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
     val playerScope = rememberCoroutineScope()
+    val savedResumePositionMs = remember(mediaId, isAudio, subtitleAppearanceRevision, styleRestartPositionMs) {
+        when {
+            isAudio -> 0L
+            styleRestartPositionMs != null -> styleRestartPositionMs ?: 0L
+            else -> VideoResumeStore.loadPosition(mediaId)
+        }
+    }
+    fun applySubtitleAppearance(next: SubtitleAppearance) {
+        val normalized = next.normalized()
+        if (normalized == subtitleAppearance) return
+        styleRestartPositionMs = timeMs.coerceAtLeast(0L)
+        styleRestartWasPlaying = playing
+        if ((styleRestartPositionMs ?: 0L) > 0L && !isAudio) {
+            VideoResumeStore.savePosition(mediaId, styleRestartPositionMs ?: 0L, durationMs, force = true)
+        }
+        subtitleAppearance = normalized
+        SubtitleAppearanceStore.save(normalized)
+        subtitleAppearanceRevision++
+        interactionTick++
+    }
+    val resumeRestoreAttempted = remember(mediaId, mrl, isAudio, subtitleAppearanceRevision) {
+        AtomicBoolean(false)
+    }
+    val resumeInitializationComplete = remember(mediaId, mrl, isAudio, subtitleAppearanceRevision) {
+        AtomicBoolean(false)
+    }
+    val pendingResumeTargetMs = remember(mediaId, mrl, isAudio, subtitleAppearanceRevision) { AtomicLong(0L) }
+    val resumeFinished = remember(mediaId, mrl, isAudio, subtitleAppearanceRevision) { AtomicBoolean(false) }
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
-    val acceptsCurrentMediaEvents = remember(mrl, isAudio) { AtomicBoolean(false) }
+    val acceptsCurrentMediaEvents = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { AtomicBoolean(false) }
+    val playerDisposed = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
-    val frameUpdates = remember(mrl, isAudio) {
+    val frameUpdates = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
         Channel<VideoFramePixels>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(frameUpdates) {
@@ -222,19 +284,79 @@ internal fun DesktopMediaPlayer(
     }
 
     // Keep high-frequency playback position notifications bounded as well.
-    val timeUpdates = remember(mrl, isAudio) {
+    val timeUpdates = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
         Channel<Long>(capacity = Channel.CONFLATED)
     }
-    LaunchedEffect(timeUpdates) {
-        for (position in timeUpdates) timeMs = position
+    LaunchedEffect(timeUpdates, mediaId, isAudio, subtitleAppearanceRevision) {
+        for (position in timeUpdates) {
+            timeMs = position
+            if (!isAudio && resumeInitializationComplete.get() && !resumeFinished.get()) {
+                val pendingResume = pendingResumeTargetMs.get()
+                if (pendingResume > 0L) {
+                    // Ignore opening-time events until VLC reports the restored seek position.
+                    if (isVideoResumePositionConfirmed(position, pendingResume) &&
+                        pendingResumeTargetMs.compareAndSet(pendingResume, 0L)
+                    ) {
+                        VideoResumeStore.savePosition(mediaId, position, durationMs)
+                    }
+                } else {
+                    VideoResumeStore.savePosition(mediaId, position, durationMs)
+                }
+            }
+        }
     }
     DisposableEffect(timeUpdates) {
         onDispose { timeUpdates.close() }
     }
 
-    // One native VLC instance is retained for the lifetime of this media viewer. The
-    // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
-    val player = remember(mrl, isAudio) {
+    fun markManualVideoSeek() {
+        if (isAudio) return
+        // An intentional user seek takes precedence over the saved resume point, including
+        // when it happens while VLC is still reporting the initial opening position.
+        resumeRestoreAttempted.set(true)
+        pendingResumeTargetMs.set(0L)
+        resumeInitializationComplete.set(true)
+    }
+
+    fun initializeVideoResume(mediaPlayer: MediaPlayer, mediaDurationMs: Long) {
+        if (isAudio || mediaDurationMs <= 0L ||
+            !resumeRestoreAttempted.compareAndSet(false, true)
+        ) return
+
+        val styleOverride = styleRestartPositionMs
+        val resumeAt = if (styleOverride != null) {
+            styleOverride.takeIf {
+                it >= 2_000L && mediaDurationMs - it > 1_500L
+            }
+        } else {
+            videoResumeTarget(savedResumePositionMs, mediaDurationMs)
+        }
+        if (resumeAt == null) {
+            if (savedResumePositionMs > 0L) VideoResumeStore.clear(mediaId)
+            pendingResumeTargetMs.set(0L)
+            resumeInitializationComplete.set(true)
+            return
+        }
+
+        // Seek only after VLC has opened the media and reported a valid duration. Keep position
+        // persistence gated until the native seek has completed so an initial 0:00 time event
+        // cannot overwrite the saved resume point while restoration is still in flight.
+        pendingResumeTargetMs.set(resumeAt)
+        mediaPlayer.submit {
+            val restored = runCatching {
+                mediaPlayer.controls().setTime(resumeAt)
+            }.isSuccess
+            if (restored) {
+                resumeInitializationComplete.set(true)
+            } else {
+                pendingResumeTargetMs.set(0L)
+            }
+        }
+    }
+
+    // Give every MRL an isolated native VLC player. Reusing one decoder/audio-output
+    // instance across unrelated media caused corrupted frames and unstable audio on switches.
+    val player = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
@@ -247,8 +369,19 @@ internal fun DesktopMediaPlayer(
                 override fun playing(mediaPlayer: MediaPlayer) {
                     acceptsCurrentMediaEvents.set(true)
                     playerScope.launch {
-                        playing = true
+                        // Consume the one initial start-paused event only. Later playing
+                        // events (after the user presses Play) must restore the normal UI state.
+                        val initialPauseEvent = initialStartPausedPending.compareAndSet(true, false)
+                        playing = !initialPauseEvent
                         finished = false
+                        val rateToRestore = latestRate.value
+                        val shouldRepeatCurrent = latestRepeatOne.value &&
+                            !latestRepeatAll.value && !latestSleepAtTrackEnd.value
+                        mediaPlayer.submit {
+                            runCatching { mediaPlayer.controls().setRate(rateToRestore) }
+                            runCatching { mediaPlayer.controls().repeat = shouldRepeatCurrent }
+                        }
+                        resumeFinished.set(false)
                         buffering = false
                         // VLC can report the media length before the first playing event. Read
                         // the status here as a fallback so the remaining-time label and seekbar
@@ -257,6 +390,7 @@ internal fun DesktopMediaPlayer(
                             .getOrNull()
                         if (reportedLength != null && reportedLength > 0L) {
                             durationMs = reportedLength
+                            initializeVideoResume(mediaPlayer, reportedLength)
                         }
                         val reportedTime = runCatching { mediaPlayer.status().time() }
                             .getOrNull()
@@ -282,6 +416,7 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun paused(mediaPlayer: MediaPlayer) {
+                    initialStartPausedPending.compareAndSet(true, false)
                     if (acceptsCurrentMediaEvents.get()) {
                         playerScope.launch { playing = false }
                     }
@@ -292,6 +427,8 @@ internal fun DesktopMediaPlayer(
                     playerScope.launch {
                         playing = false
                         finished = true
+                        if (!isAudio) VideoResumeStore.clear(mediaId)
+                        resumeFinished.set(true)
                         if (!latestRepeatOne.value || latestSleepAtTrackEnd.value) {
                             latestOnPlaybackFinished.value()
                         }
@@ -310,7 +447,10 @@ internal fun DesktopMediaPlayer(
 
                 override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
                     if (acceptsCurrentMediaEvents.get()) {
-                        playerScope.launch { durationMs = newLength }
+                        playerScope.launch {
+                            durationMs = newLength
+                            initializeVideoResume(mediaPlayer, newLength)
+                        }
                     }
                 }
 
@@ -324,6 +464,24 @@ internal fun DesktopMediaPlayer(
                 }
             })
         }
+    }.also { createdPlayer ->
+        DesktopVlcPlaybackLifecycle.register(createdPlayer, factory)
+    }
+
+    DisposableEffect(factory) {
+        onDispose { DesktopVlcPlaybackLifecycle.retireFactory(factory) }
+    }
+
+    // The slider and arrow keys update this dispatcher instead of enqueuing one native
+    // command per input event. Intermediate values are coalesced before reaching VLCJ.
+    val audioStateDispatcher = remember(player) {
+        LatestAudioStateDispatcher(
+            enqueue = { task -> player.submit { task() } },
+            apply = { requestedVolume, requestedMuted ->
+                player.audio().setVolume(requestedVolume)
+                player.audio().isMute = requestedMuted
+            }
+        )
     }
 
     // Render the physical brightness control immediately for video. A successful DDC/CI
@@ -379,10 +537,12 @@ internal fun DesktopMediaPlayer(
     }
 
     val fullscreenController = LocalFullscreenController.current
-    LaunchedEffect(player, mrl) {
-        // Each MRL owns its own VLC player and event channels. This prevents late callbacks
-        // from a previous video from mutating the next video's frame/time state while VLC is
-        // switching sources. Commands still run on vlcj's serialized player executor.
+    LaunchedEffect(player, mrl, mediaId) {
+        // VLC 3 exposes :start-paused as an input option. It avoids racing a manual
+        // pause() command against the initial playing event during a style-only restart.
+        val mediaOptions = if (startPausedForThisRevision) listOf(":start-paused") else emptyList()
+        // Activate this media only after the outgoing player's queued native commands have
+        // drained, stop() has completed, and its native resources have been released.
         acceptsCurrentMediaEvents.set(false)
         playing = false
         finished = false
@@ -390,35 +550,66 @@ internal fun DesktopMediaPlayer(
         timeMs = 0L
         durationMs = 0L
         trackTick++
-        player.submit {
-            runCatching { player.controls().stop() }
-            // Accept opening/length/time callbacks from this player before play(): VLC may
-            // emit lengthChanged before playing. The old player's independent token remains
-            // false after disposal, so its late events cannot leak into this media item.
-            acceptsCurrentMediaEvents.set(true)
-            runCatching { player.media().play(mrl) }
-                .onFailure {
-                    acceptsCurrentMediaEvents.set(false)
-                    playerScope.launch {
-                        playing = false
-                        finished = true
-                        buffering = false
+        try {
+            DesktopVlcPlaybackLifecycle.activate(player) {
+                player.submitAndAwait {
+                    if (!playerDisposed.get()) {
+                        // This is a fresh VLC player with no previous media to stop. The
+                        // lifecycle coordinator has already stopped/released the outgoing
+                        // player, so calling stop() here can leave a new player stuck before
+                        // its first opening/playing event.
+                        acceptsCurrentMediaEvents.set(true)
+                        runCatching {
+                            player.media().play(mrl, *mediaOptions.toTypedArray())
+                        }
+                            .onFailure {
+                                acceptsCurrentMediaEvents.set(false)
+                                playerScope.launch {
+                                    playing = false
+                                    finished = true
+                                    buffering = false
+                                }
+                            }
                     }
                 }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            acceptsCurrentMediaEvents.set(false)
+            playerScope.launch {
+                playing = false
+                finished = true
+                buffering = false
+            }
+            SafeLog.w("DesktopMediaPlayer", "Could not activate VLC media source", error)
         }
     }
 
-    DisposableEffect(player) {
+    DisposableEffect(player, mediaId, isAudio) {
         onDispose {
-            acceptsCurrentMediaEvents.set(false)
-            // Keep teardown serialized with pending play/seek/track commands. Disposing the
-            // composable must not race a queued media replacement against native player release.
-            runCatching {
-                player.submit {
-                    runCatching { player.controls().stop() }
-                    runCatching { player.release() }
-                }
+            // Save the most recent known video position before navigating to another file or
+            // leaving the viewer. Periodic time updates already persist progress while playing.
+            if (
+                !isAudio &&
+                resumeInitializationComplete.get() &&
+                pendingResumeTargetMs.get() == 0L &&
+                !resumeFinished.get() &&
+                !latestFinished.value
+            ) {
+                VideoResumeStore.savePosition(
+                    mediaId = mediaId,
+                    positionMs = latestTimeMs.value,
+                    durationMs = latestDurationMs.value,
+                    force = true
+                )
             }
+            // Close the event gate immediately. The shared lifecycle coordinator then waits for
+            // this player's queued work and synchronously stops/releases it before another
+            // media player's start is allowed to proceed.
+            playerDisposed.set(true)
+            acceptsCurrentMediaEvents.set(false)
+            DesktopVlcPlaybackLifecycle.dispose(player)
         }
     }
 
@@ -433,13 +624,12 @@ internal fun DesktopMediaPlayer(
         }
     }
 
-    LaunchedEffect(player, repeatAll, sleepAtTrackEnd) {
+    LaunchedEffect(player, repeatOne, repeatAll, sleepAtTrackEnd) {
         // Repeat-current and repeat-all are mutually exclusive. End-of-track sleep
         // must override VLC's native repeat flag so the timer can stop playback.
-        if (repeatAll || sleepAtTrackEnd) {
-            repeatOne = false
-            player.submit { runCatching { player.controls().repeat = false } }
-        }
+        if ((repeatAll || sleepAtTrackEnd) && repeatOne) repeatOne = false
+        val shouldRepeatCurrent = repeatOne && !repeatAll && !sleepAtTrackEnd
+        player.submit { runCatching { player.controls().repeat = shouldRepeatCurrent } }
     }
 
     // Volume/mute restoration is submitted to vlcj's serialized player executor.
@@ -450,7 +640,7 @@ internal fun DesktopMediaPlayer(
             repeat(AUDIO_OUTPUT_REAPPLY_ATTEMPTS) {
                 delay(AUDIO_OUTPUT_REAPPLY_INTERVAL_MS)
                 if (!playing) return@LaunchedEffect
-                player.submitAudioState(
+                audioStateDispatcher.submit(
                     latestVolume.value.coerceIn(0, MAX_VOLUME),
                     latestMuted.value
                 )
@@ -459,6 +649,20 @@ internal fun DesktopMediaPlayer(
     }
 
     val trackWord = stringResource(Res.string.player_track)
+    LaunchedEffect(player, trackTick, trackWord) {
+        val selected = CompletableDeferred<Boolean>()
+        runCatching {
+            player.submit {
+                selected.complete(
+                    runCatching { player.textTracks(trackWord).any { it.selected } }
+                        .getOrDefault(false)
+                )
+            }
+        }.onFailure { selected.complete(false) }
+        withTimeoutOrNull(PLAYER_NATIVE_CALL_TIMEOUT_MS) { selected.await() }?.let {
+            subtitleTrackActive = it
+        }
+    }
     val playerFocusRequester = remember { FocusRequester() }
     val windowInfo = LocalWindowInfo.current
     LaunchedEffect(mrl) { playerFocusRequester.requestFocus() }
@@ -475,15 +679,19 @@ internal fun DesktopMediaPlayer(
         when {
             finished -> {
                 finished = false
+                initialStartPausedPending.set(false)
                 player.submit { runCatching { player.controls().play() } }
             }
             playing -> player.submit { runCatching { player.controls().pause() } }
-            else -> player.submit { runCatching { player.controls().play() } }
+            else -> {
+                initialStartPausedPending.set(false)
+                player.submit { runCatching { player.controls().play() } }
+            }
         }
     }
     val toggleMute: () -> Unit = {
         muted = !muted
-        player.submitAudioState(volume, muted)
+        audioStateDispatcher.submit(volume, muted)
     }
     val toggleControlsVisibility: () -> Unit = {
         val showControls = !(controlsVisible || seekFeedbackVisible)
@@ -496,6 +704,9 @@ internal fun DesktopMediaPlayer(
         latestOnControlsVisibilityChange.value(showControls)
         interactionTick++
         lastVisibilityInteractionTick = interactionTick
+        // The surface tap is also a keyboard interaction point. Keep the stable player
+        // target focused after the chrome visibility state changes.
+        playerFocusRequester.requestFocus()
     }
     val revealControlsForSeek: () -> Unit = {
         seekFeedbackVisible = true
@@ -512,7 +723,13 @@ internal fun DesktopMediaPlayer(
         } else if (unmute) {
             muted = false
         }
-        player.submitAudioState(nextVolume, muted)
+        // Update shared in-memory volume immediately so a fast media switch uses the
+        // latest value; disk persistence is debounced on an IO thread.
+        RememberedPlayerVolume.update(
+            nextVolume,
+            persist = controlPreferences.rememberVolume
+        )
+        audioStateDispatcher.submit(nextVolume, muted)
     }
     fun adjustPlayerVolume(delta: Int) {
         setPlayerVolume(volume + delta, unmute = delta > 0)
@@ -564,6 +781,7 @@ internal fun DesktopMediaPlayer(
                 val next = tracks[nextIndex]
                 runCatching { player.subpictures().setTrack(next.id) }
                 playerScope.launch {
+                    subtitleTrackActive = true
                     onPreferredSubtitleLanguage(next.language)
                     trackTick++
                 }
@@ -577,19 +795,23 @@ internal fun DesktopMediaPlayer(
                 val selected = tracks.firstOrNull { it.selected }
                 if (selected != null) {
                     runCatching { player.subpictures().setTrack(VLC_TRACK_DISABLED) }
+                    playerScope.launch { subtitleTrackActive = false }
                 } else {
                     val next = tracks.firstOrNull { it.language == preferredSubtitleLanguage }
                         ?: tracks.first()
                     runCatching { player.subpictures().setTrack(next.id) }
-                    playerScope.launch { onPreferredSubtitleLanguage(next.language) }
+                    playerScope.launch {
+                        subtitleTrackActive = true
+                        onPreferredSubtitleLanguage(next.language)
+                    }
                 }
                 playerScope.launch { trackTick++ }
             }
         }
     }
 
-    var languagesApplied by remember(mrl) { mutableStateOf(false) }
-    LaunchedEffect(mrl, trackTick, preferredAudioLanguage, preferredSubtitleLanguage) {
+    var languagesApplied by remember(mrl, subtitleAppearanceRevision) { mutableStateOf(false) }
+    LaunchedEffect(player, mrl, trackTick, preferredAudioLanguage, preferredSubtitleLanguage) {
         if (languagesApplied || trackTick == 0) return@LaunchedEffect
         val applied = CompletableDeferred<Boolean>()
         runCatching {
@@ -689,6 +911,7 @@ internal fun DesktopMediaPlayer(
                         hKeyPressed = false
                         return@onPreviewKeyEvent true
                     }
+                    if (event.key == Key.Delete) return@onPreviewKeyEvent true
                     return@onPreviewKeyEvent false
                 }
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -698,6 +921,11 @@ internal fun DesktopMediaPlayer(
                 val shift = event.isShiftPressed
 
                 when {
+                    key == Key.Delete && !ctrl && !alt && !shift -> {
+                        onDelete()
+                        interactionTick++
+                        true
+                    }
                     key == Key.Spacebar && !ctrl && !alt && !shift -> {
                         togglePlayback()
                         interactionTick++
@@ -709,6 +937,7 @@ internal fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.MediaPlay -> {
+                        initialStartPausedPending.set(false)
                         player.submit { runCatching { player.controls().play() } }
                         interactionTick++
                         true
@@ -810,21 +1039,25 @@ internal fun DesktopMediaPlayer(
                     }
                     // Short, dedicated seek shortcuts requested for keyboard users.
                     key == Key.P && !ctrl && !alt && !shift -> {
+                        markManualVideoSeek()
                         player.submit { runCatching { player.controls().skipTime(-SHORT_KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.N && !ctrl && !alt && !shift -> {
+                        markManualVideoSeek()
                         player.submit { runCatching { player.controls().skipTime(SHORT_KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionLeft && !ctrl && !alt && !shift -> {
+                        markManualVideoSeek()
                         player.submit { runCatching { player.controls().skipTime(-KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionRight && !ctrl && !alt && !shift -> {
+                        markManualVideoSeek()
                         player.submit { runCatching { player.controls().skipTime(KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
@@ -841,6 +1074,7 @@ internal fun DesktopMediaPlayer(
                             false
                         } else {
                             val direction = if (key == Key.DirectionRight) 1L else -1L
+                            markManualVideoSeek()
                             player.submit {
                                 runCatching { player.controls().skipTime(direction * jumpMs) }
                             }
@@ -971,7 +1205,10 @@ internal fun DesktopMediaPlayer(
                 var lastPosition = Offset.Unspecified
                 awaitPointerEventScope {
                     while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        // Final pass runs after child buttons/sliders process the
+                        // click. Reclaim focus here so Space and the player's other shortcuts
+                        // continue working even when a control was just clicked.
+                        val event = awaitPointerEvent(PointerEventPass.Final)
                         val position = event.changes.firstOrNull()?.position ?: continue
                         when (event.type) {
                             PointerEventType.Press -> {
@@ -1006,7 +1243,51 @@ internal fun DesktopMediaPlayer(
                 Image(
                     bitmap = current,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(
+                            isAudio,
+                            subtitleTrackActive,
+                            subtitleAppearance.verticalPosition,
+                            subtitleAppearanceRevision
+                        ) {
+                            if (isAudio || !subtitleTrackActive) return@pointerInput
+                            awaitEachGesture {
+                                val down = awaitFirstDown(
+                                    requireUnconsumed = false,
+                                    pass = PointerEventPass.Initial
+                                )
+                                val hitWidth = size.width * 0.62f
+                                val centerY = size.height * subtitleAppearance.verticalPosition
+                                val hitHeight = 42.dp.toPx()
+                                val insideSubtitleBand =
+                                    abs(down.position.x - size.width / 2f) <= hitWidth / 2f &&
+                                    abs(down.position.y - centerY) <= hitHeight / 2f
+                                if (insideSubtitleBand) {
+                                    down.consume()
+                                    var targetPosition = subtitleAppearance.verticalPosition
+                                    var dragging = true
+                                    while (dragging) {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                            ?: break
+                                        if (change.position != change.previousPosition) {
+                                            change.consume()
+                                            if (size.height > 0) {
+                                                targetPosition = (change.position.y / size.height)
+                                                    .coerceIn(0.08f, 0.92f)
+                                            }
+                                        }
+                                        if (!change.pressed) dragging = false
+                                    }
+                                    if (abs(targetPosition - subtitleAppearance.verticalPosition) > 0.004f) {
+                                        applySubtitleAppearance(
+                                            subtitleAppearance.copy(verticalPosition = targetPosition)
+                                        )
+                                    }
+                                }
+                            }
+                        },
                     contentScale = scaling.contentScale
                 )
             }
@@ -1047,6 +1328,8 @@ internal fun DesktopMediaPlayer(
                 sleepTimerLabel = sleepTimerLabel,
                 trackTick = trackTick,
                 scaling = scaling,
+                subtitleAppearance = subtitleAppearance,
+                onApplySubtitleAppearance = ::applySubtitleAppearance,
                 onPrevious = onPrevious,
                 onNext = onNext,
                 hasPrevious = hasPrevious,
@@ -1059,12 +1342,14 @@ internal fun DesktopMediaPlayer(
                 onSelectTextTrack = { track ->
                     val trackId = track?.id ?: VLC_TRACK_DISABLED
                     player.submit { runCatching { player.subpictures().setTrack(trackId) } }
+                    subtitleTrackActive = track != null
                     onPreferredSubtitleLanguage(track?.language.orEmpty())
                     trackTick++
                 },
                 onInteraction = { interactionTick++ },
                 onPlayPause = togglePlayback,
                 onSeekTo = { millis ->
+                    markManualVideoSeek()
                     player.submit { runCatching { player.controls().setTime(millis) } }
                 },
                 onToggleMute = toggleMute,
@@ -1105,8 +1390,14 @@ internal fun DesktopMediaPlayer(
                 onScaling = { scaling = it },
                 controlPreferences = controlPreferences,
                 onControlPreferencesChange = { updated ->
-                    controlPreferences = updated
-                    PlayerControlPreferencesStore.save(updated)
+                    // Setting changes are infrequent, so persist them normally. Enabling
+                    // memory captures the current slider value for future media/app launches.
+                    val withCurrentVolume = updated.copy(volume = volume)
+                    controlPreferences = withCurrentVolume
+                    PlayerControlPreferencesStore.save(withCurrentVolume)
+                    if (withCurrentVolume.rememberVolume) {
+                        RememberedPlayerVolume.update(volume, persist = true)
+                    }
                     interactionTick++
                 }
             )
@@ -1137,6 +1428,8 @@ private fun PlayerControlsBar(
     sleepTimerLabel: String,
     trackTick: Int,
     scaling: VideoScaling,
+    subtitleAppearance: SubtitleAppearance,
+    onApplySubtitleAppearance: (SubtitleAppearance) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     hasPrevious: Boolean,
@@ -1167,6 +1460,7 @@ private fun PlayerControlsBar(
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
     var showSubtitleMenu by remember { mutableStateOf(false) }
+    var showSubtitleSettings by remember { mutableStateOf(false) }
     var showQueueMenu by remember { mutableStateOf(false) }
     var showSleepMenu by remember { mutableStateOf(false) }
     var showCustomSleepDialog by remember { mutableStateOf(false) }
@@ -1302,6 +1596,7 @@ private fun PlayerControlsBar(
             showRateMenu,
             showAudioMenu,
             showSubtitleMenu,
+            showSubtitleSettings,
             showQueueMenu,
             showSleepMenu,
             showCustomSleepDialog,
@@ -1310,7 +1605,7 @@ private fun PlayerControlsBar(
         ) {
             onControlsKeepVisible(
                 showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
-                    showQueueMenu || showSleepMenu || showCustomSleepDialog ||
+                    showSubtitleSettings || showQueueMenu || showSleepMenu || showCustomSleepDialog ||
                     volumeSliderActive || brightnessSliderActive
             )
         }
@@ -1398,6 +1693,23 @@ private fun PlayerControlsBar(
                             onControlPreferencesChange(
                                 controlPreferences.copy(
                                     autoHideVolumeSlider = !controlPreferences.autoHideVolumeSlider
+                                )
+                            )
+                            onInteraction()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Remember volume across media and restarts") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.rememberVolume,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    rememberVolume = !controlPreferences.rememberVolume
                                 )
                             )
                             onInteraction()
@@ -1754,8 +2066,29 @@ private fun PlayerControlsBar(
                                     }
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text("Subtitle appearance and position") },
+                                onClick = {
+                                    showSubtitleMenu = false
+                                    showSubtitleSettings = true
+                                    onInteraction()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Settings, contentDescription = null)
+                                }
+                            )
                         }
                     }
+                }
+                if (showSubtitleSettings) {
+                    SubtitleAppearanceDialog(
+                        appearance = subtitleAppearance,
+                        onDismiss = { showSubtitleSettings = false },
+                        onApply = { next ->
+                            showSubtitleSettings = false
+                            onApplySubtitleAppearance(next)
+                        }
+                    )
                 }
                 Box {
                     TooltipIconButton(
@@ -1858,19 +2191,6 @@ private val PLAYBACK_RATE_PRESETS = listOf(
     1.0f, 1.15f, 1.2f, 1.25f, 1.3f, 1.4f, 1.5f, 1.75f,
     2.0f, 2.5f, 3.0f, 4.0f
 )
-
-private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
-    val requestedVolume = volume.coerceIn(0, MAX_VOLUME)
-    val requestedMute = muted || requestedVolume <= 0
-    runCatching {
-        submit {
-            runCatching {
-                audio().setVolume(requestedVolume)
-                audio().isMute = requestedMute
-            }
-        }
-    }
-}
 
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f

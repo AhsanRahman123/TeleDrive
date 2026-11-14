@@ -20,15 +20,29 @@ object VlcPlayback {
 
     val available: Boolean get() = factory != null
 
-    private fun createFactory(): MediaPlayerFactory {
+    /**
+     * Create an isolated LibVLC instance with the requested subtitle renderer settings.
+     * VLC 3 reads Freetype options when its text-renderer module is initialized, so each
+     * appearance revision gets a factory configured before its media player is created.
+     */
+    internal fun createFactory(appearance: SubtitleAppearance): MediaPlayerFactory? =
+        runCatching {
+            createFactory(LIBVLC_ARGS + appearance.toVlcFactoryArguments())
+        }.onFailure {
+            SafeLog.w(TAG, "Could not create VLC with the requested subtitle appearance", it)
+        }.getOrNull()
+
+    private fun createFactory(): MediaPlayerFactory = createFactory(LIBVLC_ARGS)
+
+    private fun createFactory(arguments: List<String>): MediaPlayerFactory {
         val bundle = bundled()
         return if (bundle != null) {
             bundle.plugins?.let { setPluginPath(it) }
             NativeLibrary.addSearchPath("libvlc", bundle.libraries.absolutePath)
             NativeLibrary.addSearchPath("libvlccore", bundle.libraries.absolutePath)
-            MediaPlayerFactory(null as NativeDiscovery?, LIBVLC_ARGS)
+            MediaPlayerFactory(null as NativeDiscovery?, arguments)
         } else {
-            MediaPlayerFactory(NativeDiscovery(), LIBVLC_ARGS)
+            MediaPlayerFactory(NativeDiscovery(), arguments)
         }
     }
 

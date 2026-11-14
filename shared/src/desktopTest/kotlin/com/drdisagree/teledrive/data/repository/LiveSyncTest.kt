@@ -45,6 +45,123 @@ class LiveSyncTest {
     }
 
     @Test
+    fun `a pending local move survives a stale remote manifest when the local clock is behind`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        database.folderDao().upsert(
+            com.drdisagree.teledrive.data.local.entity.FolderEntity(
+                id = "destination",
+                chatId = TEST_CHAT,
+                parentId = null,
+                name = "Destination",
+                createdAt = 1_000,
+                modifiedAt = 1_000,
+                changedAt = 1_000
+            )
+        )
+        val files = database.fileDao()
+        files.moveAndMarkPendingPublish(listOf("f1"), "destination", modifiedAt = 1_000)
+
+        // Legacy rows may not have a remote merge baseline. In that case timestamps alone
+        // must not let a stale remote folderId overwrite a locally-pending move.
+        files.byId("f1")!!.let { files.upsert(it.copy(remoteBase = null)) }
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
+        val moved = files.byId("f1")!!
+        assertEquals("destination", moved.folderId)
+        assertTrue(moved.pendingPublish)
+    }
+
+    @Test
+    fun `a local file move is recovered when its pending publish marker was missed`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        database.folderDao().upsert(
+            com.drdisagree.teledrive.data.local.entity.FolderEntity(
+                id = "destination",
+                chatId = TEST_CHAT,
+                parentId = null,
+                name = "Destination",
+                createdAt = 1_000,
+                modifiedAt = 1_000,
+                changedAt = 1_000
+            )
+        )
+        val files = database.fileDao()
+        // Simulate the old race: folderId changed, but sync observed the row before it
+        // was marked pendingPublish.
+        files.move(listOf("f1"), "destination", modifiedAt = 100_000)
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
+        val moved = files.byId("f1")!!
+        assertEquals("destination", moved.folderId)
+        assertTrue(moved.pendingPublish)
+    }
+
+    @Test
+    fun `a local trash mutation is recovered when its pending publish marker was missed`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        val files = database.fileDao()
+        // Simulate a row changed just before its old non-atomic pendingPublish update.
+        files.moveToTrash(listOf("f1"), trashedAt = 100_000)
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
+        val trashed = files.byId("f1")!!
+        assertEquals(100_000L, trashed.trashedAt)
+        assertEquals(null, trashed.folderId)
+        assertTrue(trashed.pendingPublish)
+    }
+
+    @Test
+    fun `a stale manifest after successful publish cannot revert a local folder move`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        database.folderDao().upsert(
+            com.drdisagree.teledrive.data.local.entity.FolderEntity(
+                id = "destination",
+                chatId = TEST_CHAT,
+                parentId = null,
+                name = "Destination",
+                createdAt = 1_000,
+                modifiedAt = 1_000,
+                changedAt = 1_000
+            )
+        )
+        val files = database.fileDao()
+        files.moveAndMarkPendingPublish(listOf("f1"), "destination", modifiedAt = 100_000)
+
+        // Simulate the outbox accepting the new manifest: the published baseline now records
+        // the destination folder and pendingPublish has been cleared, but a delayed old
+        // Telegram event still returns the original manifest.
+        val published = files.byId("f1")!!
+        files.setRemoteBase("f1", FileBase.of(published).toText())
+        files.clearPendingPublish("f1")
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
+        val unchanged = files.byId("f1")!!
+        assertEquals("destination", unchanged.folderId)
+        assertEquals(100_000L, unchanged.modifiedAt)
+        assertFalse(unchanged.pendingPublish)
+    }
+
+    @Test
     fun `an upload from another device appears`() = runBlocking {
         telegram.documents = listOf(document(30, harness.caption(manifest("new", "new.jpg"))))
 

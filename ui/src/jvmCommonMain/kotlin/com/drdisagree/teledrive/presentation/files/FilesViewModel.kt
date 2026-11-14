@@ -166,6 +166,65 @@ class FilesViewModel(
     )
     val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
 
+    // Scroll positions belong to the Files back-stack entry, not only to the current
+    // composition. Keeping them in SavedStateHandle lets them survive Preview navigation,
+    // screen recreation, and process restoration.
+    private fun restoreFileListPositions(): MutableMap<Pair<Int, String?>, Pair<Int, Int>> =
+        savedStateHandle.get<ArrayList<String>>(KEY_FILE_LIST_POSITIONS).orEmpty()
+            .chunked(4)
+            .mapNotNull { fields ->
+                if (fields.size != 4) return@mapNotNull null
+                val tabId = fields[0].toIntOrNull() ?: return@mapNotNull null
+                val itemIndex = fields[2].toIntOrNull() ?: return@mapNotNull null
+                val scrollOffset = fields[3].toIntOrNull() ?: return@mapNotNull null
+                (tabId to fields[1].ifEmpty { null }) to
+                    (itemIndex.coerceAtLeast(0) to scrollOffset.coerceAtLeast(0))
+            }
+            .toMap()
+            .toMutableMap()
+
+    private val fileListPositions = restoreFileListPositions()
+
+    private fun persistFileListPositions() {
+        savedStateHandle[KEY_FILE_LIST_POSITIONS] = ArrayList(
+            fileListPositions.flatMap { (key, position) ->
+                listOf(
+                    key.first.toString(),
+                    key.second.orEmpty(),
+                    position.first.toString(),
+                    position.second.toString()
+                )
+            }
+        )
+    }
+
+    fun fileListPosition(tabId: Int, folderId: String?): Pair<Int, Int>? =
+        fileListPositions[tabId to folderId]
+
+    fun saveFileListPosition(
+        tabId: Int,
+        folderId: String?,
+        firstVisibleItemIndex: Int,
+        firstVisibleItemScrollOffset: Int
+    ) {
+        fileListPositions[tabId to folderId] =
+            firstVisibleItemIndex.coerceAtLeast(0) to firstVisibleItemScrollOffset.coerceAtLeast(0)
+        persistFileListPositions()
+    }
+
+    fun clearFileListPositionsForTab(tabId: Int) {
+        if (fileListPositions.keys.removeAll { it.first == tabId }) {
+            persistFileListPositions()
+        }
+    }
+
+    fun clearAllFileListPositions() {
+        if (fileListPositions.isNotEmpty()) {
+            fileListPositions.clear()
+            persistFileListPositions()
+        }
+    }
+
     private var nextWorkspaceTabId = maxOf(
         savedStateHandle.get<Int>(KEY_NEXT_WORKSPACE_TAB_ID) ?: 1,
         (_workspaceTabs.value.maxOfOrNull { it.id } ?: 0) + 1
@@ -486,14 +545,34 @@ class FilesViewModel(
         publishSelectionSnapshot()
     }
 
-    fun selectAll() {
+    /**
+     * Replaces the current selection with items discovered outside the visible folder listing,
+     * such as results from the Empty Items scanner. The normal Files toolbar then owns all actions.
+     */
+    fun selectItems(fileIds: List<String>, folderIds: List<String>) {
+        rangeBase = null
+        rangeSelectionActive = false
+        selection.value = fileIds.toSet()
+        folderSelection.value = folderIds.toSet()
+        _allSelected.value = false
+        _selectionModeEnabled.value = selection.value.isNotEmpty() || folderSelection.value.isNotEmpty()
+        publishSelectionSnapshot()
+    }
+
+    fun selectAll() = selectAll(onComplete = null)
+
+    fun selectAll(onComplete: (() -> Unit)?) {
         viewModelScope.launch {
-            val ids = fileRepository.fileIds(querySpec.first())
-            folderSelection.update { uiState.value.folders.map { folder -> folder.id }.toSet() }
-            selection.update { ids.toSet() }
-            _selectionModeEnabled.update { ids.isNotEmpty() || folderSelection.value.isNotEmpty() }
-            _allSelected.update { true }
-            publishSelectionSnapshot()
+            try {
+                val ids = fileRepository.fileIds(querySpec.first())
+                folderSelection.update { uiState.value.folders.map { folder -> folder.id }.toSet() }
+                selection.update { ids.toSet() }
+                _selectionModeEnabled.update { ids.isNotEmpty() || folderSelection.value.isNotEmpty() }
+                _allSelected.update { true }
+                publishSelectionSnapshot()
+            } finally {
+                onComplete?.invoke()
+            }
         }
     }
 
@@ -1397,5 +1476,6 @@ class FilesViewModel(
         private const val KEY_WORKSPACE_TABS = "files_workspace_tabs"
         private const val KEY_SELECTED_WORKSPACE_TAB_ID = "files_workspace_selected_tab_id"
         private const val KEY_NEXT_WORKSPACE_TAB_ID = "files_workspace_next_tab_id"
+        private const val KEY_FILE_LIST_POSITIONS = "files_list_scroll_positions"
     }
 }

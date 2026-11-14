@@ -71,6 +71,10 @@ class SyncRepositoryImpl(
     private val syncMutex = Mutex()
     private val captionRepairsQueued = mutableSetOf<String>()
 
+    // Remember how many pending rows this repository instance has already scheduled.
+    // A new instance starts at zero so work left pending across an app restart is kicked once.
+    private var lastScheduledPendingPublishCount = 0
+
     @Volatile
     private var lastFullSyncAt = 0L
 
@@ -106,6 +110,14 @@ class SyncRepositoryImpl(
                     if (!incremental && result is AppResult.Success) {
                         lastFullSyncAt = System.currentTimeMillis()
                     }
+                    val pendingNow = fileDao.pendingPublishCount()
+                    // Kick once when pending work first appears in this instance, including
+                    // work left over from a previous process. Do not re-kick unchanged rows
+                    // on every full resync.
+                    if (pendingNow > lastScheduledPendingPublishCount) {
+                        publishScheduler.kick()
+                    }
+                    lastScheduledPendingPublishCount = pendingNow
                 }
             } catch (e: TelegramException) {
                 AppResult.Failure(
@@ -156,7 +168,6 @@ class SyncRepositoryImpl(
         var inserted = fromSnapshot
         var updated = 0
         var locked = 0
-        val repairsBefore = captionRepairsQueued.size
         val seenMessageIds = mutableSetOf<Long>()
         val channelDocuments = mutableListOf<RemoteDocument>()
         val snapshots = mutableListOf<RemoteDocument>()
@@ -206,7 +217,6 @@ class SyncRepositoryImpl(
                 }
             }
             if (reachedKnown) {
-                if (captionRepairsQueued.size > repairsBefore) publishScheduler.kick()
                 return finishSync(
                     chatId, seenMessageIds, mappedBeforeScan, inserted, updated, locked,
                     partial = true
@@ -216,7 +226,6 @@ class SyncRepositoryImpl(
             fromMessageId = page.nextFromMessageId
         }
 
-        if (captionRepairsQueued.size > repairsBefore) publishScheduler.kick()
         val result = finishSync(
             chatId, seenMessageIds, mappedBeforeScan, inserted, updated, locked,
             partial = incremental
@@ -333,7 +342,12 @@ class SyncRepositoryImpl(
                 database.inImmediateTransaction {
                     files.forEach { reconcile(it, folderCache, known) }
                 }
-                if (captionRepairsQueued.size > repairsBefore) publishScheduler.kick()
+                if (
+                    captionRepairsQueued.size > repairsBefore ||
+                    fileDao.pendingPublishCount() > 0
+                ) {
+                    publishScheduler.kick()
+                }
             }
 
             val gone = deleted - pendingDeletes
@@ -470,6 +484,52 @@ class SyncRepositoryImpl(
             fileDao.byId(indexed.id) ?: indexed
         }
 
+        val publishedBase = FileBase.fromText(existing?.remoteBase)
+        val incomingBase = manifest?.let { FileBase.of(it) }
+        val currentBase = existing?.let { FileBase.of(it) }
+
+        // A local edit can land between a DB mutation and its pendingPublish marker (legacy
+        // move/trash paths did this in separate statements). If the remote baseline is unchanged
+        // but the local row differs from it, recover the dirty marker instead of rolling back.
+        // With no baseline, recognize the high-signal move/trash cases by their folder/trash
+        // fields and the local modification clock.
+        val localChangedSincePublishedBase =
+            existing != null &&
+                !existing.pendingPublish &&
+                publishedBase != null &&
+                currentBase != null &&
+                currentBase != publishedBase
+        val localMoveOrTrashWithoutBaseline =
+            existing != null &&
+                !existing.pendingPublish &&
+                publishedBase == null &&
+                incomingBase != null &&
+                currentBase != null &&
+                currentBase != incomingBase &&
+                (
+                    currentBase.folderId != incomingBase.folderId ||
+                        (currentBase.trashedAt != null && currentBase.trashedAt != incomingBase.trashedAt) ||
+                        existing.modifiedAt >= (manifest?.modifiedAt ?: Long.MAX_VALUE)
+                )
+        val recoveredLocalPublish =
+            localChangedSincePublishedBase || localMoveOrTrashWithoutBaseline
+
+        val stalePublishedManifest = existing != null &&
+            !existing.pendingPublish &&
+            publishedBase != null &&
+            incomingBase != null &&
+            incomingBase != publishedBase &&
+            manifest.modifiedAt < existing.modifiedAt
+        if (stalePublishedManifest) {
+            // A delayed Telegram update can deliver the pre-move caption after the local
+            // publish succeeded. Preserve any unqueued local delta and let the outbox publish
+            // it again; otherwise ignore the stale remote event.
+            if (recoveredLocalPublish) {
+                existing?.let { fileDao.markPendingPublish(listOf(it.id)) }
+            }
+            return ReconcileResult.UNCHANGED
+        }
+
         val damagedSplitCount = splitCountOfDamagedFirstPart(document, known)
         if (manifest != null && manifest.isPart) {
             recordPart(document, manifest)
@@ -484,17 +544,24 @@ class SyncRepositoryImpl(
         val laterPart = manifest != null && manifest.isPart && manifest.partIndex != 0
         if (laterPart && existing != null) return ReconcileResult.UNCHANGED
 
-        val local = existing?.takeIf { it.pendingPublish }
+        val local = existing?.takeIf { it.pendingPublish || recoveredLocalPublish }
+        val hasPendingLocalMoveWithoutBaseline = local != null &&
+            existing?.remoteBase.isNullOrBlank() &&
+            manifest != null &&
+            local.folderId != manifest.folderId
         val choice = FieldChoice(
             local = local?.let { FileBase.of(it) },
             remote = manifest?.let { FileBase.of(it) },
             base = FileBase.fromText(existing?.remoteBase),
             localIsNewer = local != null &&
-                    (manifest == null || local.modifiedAt >= manifest.modifiedAt)
+                (manifest == null || local.modifiedAt >= manifest.modifiedAt)
         )
 
         val folderId = when {
-            local != null && choice.keepsLocal { it.folderId } ->
+            local != null && (
+                hasPendingLocalMoveWithoutBaseline ||
+                    choice.keepsLocal { it.folderId }
+                ) ->
                 local.folderId ?: local.preTrashFolderId
 
             manifest == null -> existing?.folderId
@@ -554,13 +621,16 @@ class SyncRepositoryImpl(
             } else {
                 existing?.preTrashFolderId
             },
-            pendingPublish = existing?.pendingPublish == true || queueCaptionRepair,
+            pendingPublish = existing?.pendingPublish == true || recoveredLocalPublish || queueCaptionRepair,
             createdAt = manifest?.createdAt ?: existing?.createdAt
             ?: (document.dateSeconds * 1000L),
             modifiedAt = maxOf(
                 local?.modifiedAt ?: Long.MIN_VALUE,
-                manifest?.modifiedAt ?: existing?.modifiedAt ?: (document.dateSeconds * 1000L)
-            ),
+                manifest?.modifiedAt ?: Long.MIN_VALUE,
+                existing?.modifiedAt ?: Long.MIN_VALUE
+            ).let { latest ->
+                if (latest == Long.MIN_VALUE) document.dateSeconds * 1000L else latest
+            },
             addedAt = existing?.addedAt ?: now,
             partCount = damagedSplitCount ?: manifest?.partCount ?: existing?.partCount ?: 0,
             iconFileId = manifest?.iconFileId ?: existing?.iconFileId,

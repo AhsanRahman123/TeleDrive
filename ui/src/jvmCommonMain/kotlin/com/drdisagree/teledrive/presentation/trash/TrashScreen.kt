@@ -1,23 +1,26 @@
 package com.drdisagree.teledrive.presentation.trash
 
-import androidx.compose.foundation.layout.fillMaxHeight
-import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
-import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
+import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -68,6 +71,7 @@ import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.resolve
 import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
+import com.drdisagree.teledrive.presentation.components.ctrlClickSelect
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
@@ -133,12 +137,15 @@ fun TrashScreen(
 
     AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
-    val listState = rememberLazyListState()
-    val lifted by rememberToolbarLift(listState)
+    // Use the same one-column LazyVerticalGrid as Files LIST mode. This deliberately
+    // shares Files' x/y hit-testing, nearest-visible-item resolution and edge auto-scroll
+    // instead of Trash's former y-only LazyColumn drag path.
+    val gridState = rememberLazyGridState()
+    val lifted by rememberToolbarLift(gridState)
     val allSelected = state.rows.any { it.selectable } &&
             state.selection.size == state.rows.count { it.selectable }
     val dragSelect = rememberDragSelect(
-        listState = listState,
+        gridState = gridState,
         onStart = viewModel::startRangeSelection,
         isSelected = { index ->
             state.rows.getOrNull(index)?.takeIf { it.selectable }?.item?.id
@@ -152,9 +159,12 @@ fun TrashScreen(
                 shouldSelect
             )
         },
-        onEnd = viewModel::endRangeSelection
+        onEnd = viewModel::endRangeSelection,
+        mouseDragAddsToSelection = false,
+        resolveNearestVisibleItem = true,
+        processReleasePosition = true
     )
-    val keyboard = rememberKeyboardCollection(listState)
+    val keyboard = rememberKeyboardCollection(gridState, columns = 1)
     val selectableIdAt: (Int) -> String? = { index ->
         state.rows.getOrNull(index)?.takeIf { it.selectable }?.item?.id
     }
@@ -312,22 +322,29 @@ fun TrashScreen(
                 .fillMaxSize()
                 .collectionCommandShortcuts(
                     focusRequester = commandFocusRequester,
-                    onSelectAll = { viewModel.selectAll(); true }
+                    onSelectAll = {
+                        if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
+                        true
+                    }
                 )
         ) {
-                LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                        .padding(end = 10.dp)
-                .keyboardCollection(keyboard, state.rows.size, shortcuts)
-                .then(dragSelect),
-            contentPadding = padding.add(horizontal = 12.dp, top = 12.dp, bottom = 12.dp)
-        ) {
-            itemsIndexed(
-                state.rows,
-                key = { _, row -> row.key }
-            ) { index, row ->
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(end = 10.dp)
+                    .keyboardCollection(keyboard, state.rows.size, shortcuts)
+                    .then(dragSelect),
+                contentPadding = padding.add(horizontal = 12.dp, top = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(
+                    count = state.rows.size,
+                    key = { index -> state.rows[index].key },
+                    span = { GridItemSpan(maxLineSpan) }
+                ) { index ->
+                    val row = state.rows[index]
                 val item = row.item
                 val selected = row.selectable && item.id in state.selection
                 val expandLabel = stringResource(Res.string.common_expand)
@@ -335,6 +352,13 @@ fun TrashScreen(
                 Row(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
+                        .then(
+                            if (row.selectable) {
+                                Modifier.ctrlClickSelect { viewModel.toggleSelection(item.id) }
+                            } else {
+                                Modifier
+                            }
+                        )
                         .animateItem()
                         .fillMaxWidth()
                         .padding(start = (row.depth * 20).dp)
@@ -390,6 +414,7 @@ fun TrashScreen(
                         SelectionCheckbox(
                             checked = selected,
                             onClick = { viewModel.toggleSelection(item.id) },
+                            highContrast = true,
                             modifier = Modifier.padding(end = 4.dp)
                         )
                     }
@@ -449,11 +474,11 @@ fun TrashScreen(
             }
         }
                 DesktopScrollEdgeControls(
-                    state = listState,
+                    state = gridState,
                     modifier = Modifier.align(Alignment.TopEnd).padding(end = 14.dp, top = 8.dp)
                 )
                 DesktopVerticalScrollbar(
-                    state = listState,
+                    state = gridState,
                     modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                 )
             }

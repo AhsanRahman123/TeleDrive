@@ -43,6 +43,7 @@ class TrashViewModel(
     private val expanded = MutableStateFlow<Set<String>>(emptySet())
     private val cache = MutableStateFlow(TrashTreeCache())
     private var rangeBase: Set<String>? = null
+    private var rangeSelectionActive = false
 
     private val _messages = MutableSharedFlow<UiText>(extraBufferCapacity = 8)
     val messages = _messages.asSharedFlow()
@@ -156,21 +157,35 @@ class TrashViewModel(
         if (id !in selection.value) selection.update { setOf(id) }
     }
 
-    fun toggleSelection(id: String) = selection.update {
-        if (id in it) it - id else it + id
+    fun toggleSelection(id: String) {
+        selection.update { if (id in it) it - id else it + id }
+        if (!rangeSelectionActive) {
+            _selectionModeEnabled.value = selection.value.isNotEmpty()
+        }
     }
 
     fun clearSelection() {
-        _selectionModeEnabled.update { false }
+        rangeBase = null
+        rangeSelectionActive = false
+        _selectionModeEnabled.value = false
         selection.update { emptySet() }
     }
 
-    fun selectAll() = selection.update {
-        uiState.value.rows.filter { row -> row.selectable }.map { row -> row.item.id }.toSet()
+    fun selectAll() {
+        val ids = uiState.value.rows
+            .filter { row -> row.selectable }
+            .map { row -> row.item.id }
+            .toSet()
+        selection.value = ids
+        _selectionModeEnabled.value = ids.isNotEmpty()
     }
 
     fun startRangeSelection() {
         rangeBase = selection.value
+        rangeSelectionActive = true
+        // Keep the selection toolbar mounted even if the drag temporarily crosses an
+        // already-selected range and leaves the selection empty mid-gesture.
+        _selectionModeEnabled.value = true
     }
 
     fun extendRangeSelection(ids: List<String>, shouldSelect: Boolean) {
@@ -180,6 +195,8 @@ class TrashViewModel(
 
     fun endRangeSelection() {
         rangeBase = null
+        rangeSelectionActive = false
+        _selectionModeEnabled.value = selection.value.isNotEmpty()
     }
 
     fun restoreSelected() {

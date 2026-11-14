@@ -80,6 +80,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -88,8 +89,6 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.listSaver
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -120,6 +119,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
@@ -295,6 +297,9 @@ fun FilesScreen(
     var showSelectionOverflow by remember { mutableStateOf(false) }
     var confirmTrash by remember { mutableStateOf(false) }
     var showDuplicateManager by remember { mutableStateOf(false) }
+    var showEmptyItems by remember { mutableStateOf(false) }
+    var selectingAllFromShortcut by remember { mutableStateOf(false) }
+    var deleteAfterSelectAll by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectionMode) {
         if (!selectionMode) showSelectionOverflow = false
@@ -354,34 +359,13 @@ fun FilesScreen(
 
     val gridState = rememberLazyGridState()
     val filesCommandFocusRequester = rememberCollectionCommandFocusRequester()
-    val tabPositions by rememberSaveable(
-        stateSaver = listSaver<MutableMap<Pair<Int, String?>, Pair<Int, Int>>, String>(
-            save = { positions ->
-                positions.flatMap { (key, value) ->
-                    listOf(
-                        key.first.toString(),
-                        key.second.orEmpty(),
-                        value.first.toString(),
-                        value.second.toString()
-                    )
-                }
-            },
-            restore = { encoded ->
-                encoded.chunked(4).mapNotNull { fields ->
-                    if (fields.size != 4) null
-                    else {
-                        val tabId = fields[0].toIntOrNull() ?: return@mapNotNull null
-                        val itemIndex = fields[2].toIntOrNull() ?: return@mapNotNull null
-                        val scrollOffset = fields[3].toIntOrNull() ?: return@mapNotNull null
-                        (tabId to fields[1].ifEmpty { null }) to (itemIndex to scrollOffset)
-                    }
-                }.toMap().toMutableMap()
-            }
-        )
-    ) { mutableStateOf(mutableMapOf()) }
     fun saveCurrentTabPosition() {
-        tabPositions[selectedTabId to state.folderId] =
-            gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+        viewModel.saveFileListPosition(
+            tabId = selectedTabId,
+            folderId = state.folderId,
+            firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+            firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset
+        )
     }
     fun navigateToFolder(folderId: String?) {
         saveCurrentTabPosition()
@@ -397,10 +381,11 @@ fun FilesScreen(
     }
 
     AppBackHandler(
-        enabled = showDuplicateManager || selectionMode || state.folderId != null || onBack != null
+        enabled = showDuplicateManager || showEmptyItems || selectionMode || state.folderId != null || onBack != null
     ) {
         when {
             showDuplicateManager -> showDuplicateManager = false
+            showEmptyItems -> showEmptyItems = false
             selectionMode -> viewModel.clearSelection()
             else -> navigateBackOneStep()
         }
@@ -416,11 +401,11 @@ fun FilesScreen(
     }
     fun closeTab(tab: FilesTabState) {
         if (tabs.size <= 1) return
-        tabPositions.keys.removeAll { it.first == tab.id }
+        viewModel.clearFileListPositionsForTab(tab.id)
         viewModel.closeWorkspaceTab(tab.id)
     }
     fun closeAllTabs() {
-        tabPositions.clear()
+        viewModel.clearAllFileListPositions()
         viewModel.closeAllWorkspaceTabs()
     }
     val activeFolderLabel = if (activeFolderId == null) {
@@ -434,17 +419,48 @@ fun FilesScreen(
     val selectedWorkspaceTabFolderId =
         tabs.firstOrNull { it.id == selectedTabId }?.folderId
 
+    // Files remains on the navigation back stack while Preview is shown. Re-run the
+    // position restore when that entry becomes active again, even though the tab/folder
+    // keys themselves have not changed.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var returnFromPreviewTick by remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycleOwner, selectedTabId, state.folderId) {
+        var hasLeftFiles = false
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    hasLeftFiles = true
+                    viewModel.saveFileListPosition(
+                        tabId = selectedTabId,
+                        folderId = state.folderId,
+                        firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                        firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset
+                    )
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    if (hasLeftFiles) {
+                        hasLeftFiles = false
+                        returnFromPreviewTick++
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     // Restore a tab/folder position only when navigation changes. Do not key this effect
     // to Paging itemCount: every appended page changes that count, and re-running
     // scrollToItem(0) was snapping the user back to the top while they scrolled.
-    LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId) {
+    LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId, returnFromPreviewTick) {
         val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
         if (currentTab.folderId != state.folderId) return@LaunchedEffect
 
         snapshotFlow { files.loadState.refresh }
             .first { it !is LoadState.Loading }
 
-        val target = tabPositions[selectedTabId to state.folderId] ?: (0 to 0)
+        val target = viewModel.fileListPosition(selectedTabId, state.folderId) ?: (0 to 0)
         val targetIndex = target.first.coerceAtLeast(0)
         val targetFileIndex = targetIndex - state.folders.size
 
@@ -538,34 +554,62 @@ fun FilesScreen(
                 .collectionCommandShortcuts(
                     focusRequester = filesCommandFocusRequester,
                     onSelectAll = {
-                        if (showDuplicateManager) false else { viewModel.selectAll(); true }
+                        if (showDuplicateManager || showEmptyItems) {
+                            false
+                        } else {
+                            when {
+                                selectingAllFromShortcut -> Unit
+                                allSelected -> viewModel.clearSelection()
+                                else -> {
+                                    selectingAllFromShortcut = true
+                                    viewModel.selectAll {
+                                        selectingAllFromShortcut = false
+                                        if (deleteAfterSelectAll) {
+                                            deleteAfterSelectAll = false
+                                            if (
+                                                viewModel.selectionSnapshot.value.count > 0 &&
+                                                !showCreateFolder && renameTarget == null
+                                            ) {
+                                                confirmTrash = true
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            true
+                        }
                     },
                     onDelete = {
-                        if (
-                            !showDuplicateManager && selectedCount > 0 &&
-                            !showCreateFolder && renameTarget == null
-                        ) {
-                            confirmTrash = true
-                            true
-                        } else false
+                        when {
+                            showDuplicateManager || showEmptyItems || showCreateFolder || renameTarget != null -> false
+                            selectingAllFromShortcut -> {
+                                deleteAfterSelectAll = true
+                                true
+                            }
+                            selectedCount > 0 -> {
+                                confirmTrash = true
+                                true
+                            }
+                            else -> false
+                        }
                     },
                     onCopy = {
-                        if (showDuplicateManager) false else viewModel.copyToClipboardSelected()
+                        if (showDuplicateManager || showEmptyItems) false else viewModel.copyToClipboardSelected()
                     },
                     onCut = {
-                        if (showDuplicateManager) false else viewModel.cutSelected()
+                        if (showDuplicateManager || showEmptyItems) false else viewModel.cutSelected()
                     },
                     onPaste = {
-                        if (!showDuplicateManager && viewModel.hasClipboardItems()) {
+                        if (!showDuplicateManager && !showEmptyItems && viewModel.hasClipboardItems()) {
                             viewModel.paste()
                             true
                         } else false
                     },
                     onNewFolder = {
-                        if (showDuplicateManager) false else { showCreateFolder = true; true }
+                        if (showDuplicateManager || showEmptyItems) false else { showCreateFolder = true; true }
                     },
                     onNewTab = {
-                        if (showDuplicateManager) false else { createTab(); true }
+                        if (showDuplicateManager || showEmptyItems) false else { createTab(); true }
                     },
                     // Files has no inline text editor in this workspace (edit dialogs
                     // are separate windows), so handle shortcuts before row/button children.
@@ -575,8 +619,8 @@ fun FilesScreen(
             Scaffold(
                 snackbarHost = {},
                 topBar = {
-                    if (showDuplicateManager) {
-                        // DuplicateManagerScreen provides its own title and back control.
+                    if (showDuplicateManager || showEmptyItems) {
+                        // The active utility screen provides its own title and back control.
                     } else if (selectionMode) {
                         TopAppBar(
                             colors = liftedTopAppBarColors(lifted),
@@ -779,6 +823,15 @@ fun FilesScreen(
                                 }
                             },
                             actions = {
+                                TooltipIconButton(
+                                    tooltip = "Find empty files and folders",
+                                    onClick = { showEmptyItems = true }
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.FolderOff,
+                                        contentDescription = "Find empty files and folders"
+                                    )
+                                }
                                 TooltipIconButton(tooltip = stringResource(Res.string.common_select), onClick = viewModel::startSelectionMode) {
                                     Icon(
                                         Icons.Filled.CheckBoxOutlineBlank,
@@ -874,7 +927,7 @@ fun FilesScreen(
                 },
                 floatingActionButton = {
                     AnimatedVisibility(
-                        visible = !showDuplicateManager && !selectionMode && (fabVisible || showAddMenu),
+                        visible = !showDuplicateManager && !showEmptyItems && !selectionMode && (fabVisible || showAddMenu),
                         enter = scaleIn() + fadeIn(),
                         exit = scaleOut() + fadeOut()
                     ) {
@@ -954,10 +1007,32 @@ fun FilesScreen(
                         .padding(top = padding.calculateTopPadding())
                         .nestedScroll(fabScrollConnection)
                 ) {
-                    if (showDuplicateManager && state.folderId != null) {
+                    val duplicateManagerFolderId = state.folderId
+                    if (showDuplicateManager && duplicateManagerFolderId != null) {
                         DuplicateManagerScreen(
-                            folderId = state.folderId,
+                            folderId = duplicateManagerFolderId,
                             onBack = { showDuplicateManager = false },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (showEmptyItems) {
+                        EmptyItemsScreen(
+                            folderId = state.folderId,
+                            onBack = { showEmptyItems = false },
+                            onMoveSelected = { fileIds, folderIds ->
+                                viewModel.selectItems(fileIds, folderIds)
+                                showEmptyItems = false
+                                showMovePicker = true
+                            },
+                            onCopySelected = { fileIds, folderIds ->
+                                viewModel.selectItems(fileIds, folderIds)
+                                showEmptyItems = false
+                                showCopyPicker = true
+                            },
+                            onDeleteSelected = { fileIds, folderIds ->
+                                viewModel.selectItems(fileIds, folderIds)
+                                showEmptyItems = false
+                                confirmTrash = true
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -1063,6 +1138,7 @@ fun FilesScreen(
                                 ),
                                 onOpenFolder = ::navigateToFolder,
                                 onOpenFile = onOpenFile,
+                                onSaveScrollPosition = { saveCurrentTabPosition() },
                                 onRequestTrash = { confirmTrash = true },
                                 onCreateFolder = { showCreateFolder = true },
                                 onCreateTab = ::createTab,
@@ -1191,6 +1267,7 @@ fun FilesScreen(
             message = stringResource(Res.string.common_restore_trash_emptied),
             confirmLabel = stringResource(Res.string.common_move_trash),
             destructive = true,
+            confirmOnEnter = true,
             onConfirm = {
                 confirmTrash = false
                 viewModel.trashSelected()
@@ -1350,6 +1427,7 @@ private fun FilesContent(
     padding: PaddingValues,
     onOpenFolder: (String) -> Unit,
     onOpenFile: (String, PreviewSequence) -> Unit,
+    onSaveScrollPosition: () -> Unit,
     onRequestTrash: () -> Unit,
     onCreateFolder: () -> Unit,
     onCreateTab: () -> Unit,
@@ -1517,16 +1595,22 @@ private fun FilesContent(
                     prominentSelectionCheckbox = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
-                        if (selectionMode) viewModel.toggleSelection(file.id)
-                        else onOpenFile(
-                            file.id,
-                            PreviewSequence(
-                                folderId = state.folderId,
-                                filterByFolder = true,
-                                sortField = state.sortField,
-                                sortDirection = state.sortDirection
+                        if (selectionMode) {
+                            viewModel.toggleSelection(file.id)
+                        } else {
+                            // Snapshot the exact visible item index and pixel offset before
+                            // pushing the preview destination so Back returns to this row.
+                            onSaveScrollPosition()
+                            onOpenFile(
+                                file.id,
+                                PreviewSequence(
+                                    folderId = state.folderId,
+                                    filterByFolder = true,
+                                    sortField = state.sortField,
+                                    sortDirection = state.sortDirection
+                                )
                             )
-                        )
+                        }
                     },
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
@@ -1549,16 +1633,22 @@ private fun FilesContent(
                     prominent = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
-                        if (selectionMode) viewModel.toggleSelection(file.id)
-                        else onOpenFile(
-                            file.id,
-                            PreviewSequence(
-                                folderId = state.folderId,
-                                filterByFolder = true,
-                                sortField = state.sortField,
-                                sortDirection = state.sortDirection
+                        if (selectionMode) {
+                            viewModel.toggleSelection(file.id)
+                        } else {
+                            // Snapshot the exact visible item index and pixel offset before
+                            // pushing the preview destination so Back returns to this row.
+                            onSaveScrollPosition()
+                            onOpenFile(
+                                file.id,
+                                PreviewSequence(
+                                    folderId = state.folderId,
+                                    filterByFolder = true,
+                                    sortField = state.sortField,
+                                    sortDirection = state.sortDirection
+                                )
                             )
-                        )
+                        }
                     },
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
@@ -1580,16 +1670,22 @@ private fun FilesContent(
                     selectionMode = selectionMode,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
-                        if (selectionMode) viewModel.toggleSelection(file.id)
-                        else onOpenFile(
-                            file.id,
-                            PreviewSequence(
-                                folderId = state.folderId,
-                                filterByFolder = true,
-                                sortField = state.sortField,
-                                sortDirection = state.sortDirection
+                        if (selectionMode) {
+                            viewModel.toggleSelection(file.id)
+                        } else {
+                            // Snapshot the exact visible item index and pixel offset before
+                            // pushing the preview destination so Back returns to this row.
+                            onSaveScrollPosition()
+                            onOpenFile(
+                                file.id,
+                                PreviewSequence(
+                                    folderId = state.folderId,
+                                    filterByFolder = true,
+                                    sortField = state.sortField,
+                                    sortDirection = state.sortDirection
+                                )
                             )
-                        )
+                        }
                     },
                     onLongClick = { viewModel.toggleSelection(file.id) },
                     modifier = Modifier
