@@ -54,7 +54,8 @@ fun rememberDragSelect(
     mouseDragAddsToSelection: Boolean = false,
     resolveNearestVisibleItem: Boolean = false,
     processReleasePosition: Boolean = false,
-    touchDragEnabled: Boolean = false
+    touchDragEnabled: Boolean = false,
+    touchOnly: Boolean = false
 ): Modifier = dragSelect(
     scrollable = gridState,
     indexAt = { offset ->
@@ -86,7 +87,8 @@ fun rememberDragSelect(
     scrollPerFrame = scrollPerFrame,
     mouseDragAddsToSelection = mouseDragAddsToSelection,
     processReleasePosition = processReleasePosition,
-    touchDragEnabled = touchDragEnabled
+    touchDragEnabled = touchDragEnabled,
+    touchOnly = touchOnly
 )
 
 @Composable
@@ -101,7 +103,8 @@ fun rememberDragSelect(
     mouseDragAddsToSelection: Boolean = false,
     resolveNearestVisibleItem: Boolean = false,
     processReleasePosition: Boolean = false,
-    touchDragEnabled: Boolean = false
+    touchDragEnabled: Boolean = false,
+    touchOnly: Boolean = false
 ): Modifier = dragSelect(
     scrollable = listState,
     indexAt = { offset ->
@@ -124,7 +127,8 @@ fun rememberDragSelect(
     scrollPerFrame = scrollPerFrame,
     mouseDragAddsToSelection = mouseDragAddsToSelection,
     processReleasePosition = processReleasePosition,
-    touchDragEnabled = touchDragEnabled
+    touchDragEnabled = touchDragEnabled,
+    touchOnly = touchOnly
 )
 
 @Composable
@@ -139,7 +143,8 @@ private fun dragSelect(
     scrollPerFrame: Dp,
     mouseDragAddsToSelection: Boolean,
     processReleasePosition: Boolean,
-    touchDragEnabled: Boolean
+    touchDragEnabled: Boolean,
+    touchOnly: Boolean
 ): Modifier {
     val density = LocalDensity.current
     val edgePx = with(density) { edgeSize.toPx() }
@@ -177,9 +182,12 @@ private fun dragSelect(
         }
     }
 
-    return Modifier.pointerInput(scrollable, touchDragEnabled) {
+    return Modifier.pointerInput(scrollable, touchDragEnabled, touchOnly) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            // Android range selection is hosted on the collection container. Ignore pointer
+            // downs unless that explicit touch mode is active; item long-press remains intact.
+            if (touchOnly && !touchDragEnabled) return@awaitEachGesture
             val mouseDragStart = if (down.type == PointerType.Mouse) {
                 awaitMouseDragStart(down)
             } else {
@@ -191,6 +199,7 @@ private fun dragSelect(
                 null
             }
             val shouldStart = when {
+                touchOnly -> touchDragStart != null
                 down.type == PointerType.Mouse -> mouseDragStart != null
                 touchDragEnabled -> touchDragStart != null
                 else -> awaitLongPress(down)
