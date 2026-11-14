@@ -316,7 +316,7 @@ internal fun DesktopMediaPlayer(
         val styleOverride = styleRestartPositionMs
         val resumeAt = if (styleOverride != null) {
             styleOverride.takeIf {
-                it > 0L && mediaDurationMs - it > VIDEO_RESUME_END_MARGIN_MS
+                it > 0L && mediaDurationMs - it > 1_500L
             }
         } else {
             videoResumeTarget(savedResumePositionMs, mediaDurationMs)
