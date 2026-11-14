@@ -266,13 +266,18 @@ internal fun DesktopMediaPlayer(
         val resumeAt = videoResumeTarget(savedResumePositionMs, mediaDurationMs)
         if (resumeAt == null) {
             if (savedResumePositionMs > 0L) VideoResumeStore.clear(mediaId)
+            resumeInitializationComplete.set(true)
             return
         }
 
-        // Seek only after VLC has opened the media and reported a valid duration. This avoids
-        // sending a seek to an unprepared player and does not touch audio-only playback.
+        // Seek only after VLC has opened the media and reported a valid duration. Keep position
+        // persistence gated until the native seek has completed so an initial 0:00 time event
+        // cannot overwrite the saved resume point while restoration is still in flight.
         mediaPlayer.submit {
-            runCatching { mediaPlayer.controls().setTime(resumeAt) }
+            val restored = runCatching {
+                mediaPlayer.controls().setTime(resumeAt)
+            }.isSuccess
+            if (restored) resumeInitializationComplete.set(true)
         }
     }
 
