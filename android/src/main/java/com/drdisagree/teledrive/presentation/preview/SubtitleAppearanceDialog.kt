@@ -112,13 +112,13 @@ internal fun AndroidSubtitleStyleDialog(
                 SectionTitle("Style")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = current.useSystemDefaults,
-                        onClick = { draft = current.copy(useSystemDefaults = true) },
-                        label = { Text("Player defaults") }
+                        selected = current.useMedia3Defaults,
+                        onClick = { draft = current.copy(useMedia3Defaults = true) },
+                        label = { Text("Media3 defaults") }
                     )
                     FilterChip(
-                        selected = !current.useSystemDefaults,
-                        onClick = { draft = current.copy(useSystemDefaults = false) },
+                        selected = !current.useMedia3Defaults,
+                        onClick = { draft = current.copy(useMedia3Defaults = false) },
                         label = { Text("Custom") }
                     )
                 }
@@ -165,7 +165,7 @@ internal fun AndroidSubtitleStyleDialog(
                     valueRange = 0.08f..0.92f
                 )
 
-                if (!current.useSystemDefaults) {
+                if (!current.useMedia3Defaults) {
                     SectionTitle("Font")
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         subtitleFonts.forEach { (family, label) ->
