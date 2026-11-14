@@ -59,7 +59,7 @@ class MediaStoreDownloadWriter(
     }.onFailure { SafeLog.w(TAG, "Could not open a partial download", it) }.getOrNull()
 
     override fun freeBytes(folderPath: String?): Long? = runCatching {
-        StatFs(directoryFor(folderPath).absolutePath).availableBytes
+        StatFs(downloadBaseDirectory().absolutePath).availableBytes
     }.getOrNull()
 
     @RequiresApi(Build.VERSION_CODES.Q)
