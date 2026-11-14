@@ -1595,6 +1595,7 @@ private fun PreviewPane(
         if (VlcPlayback.available && mediaMrl != null) {
             DesktopMediaPlayer(
                 mrl = mediaMrl,
+                mediaId = file.id,
                 isAudio = mediaIsAudio,
                 preferredAudioLanguage = preferredAudioLanguage,
                 preferredSubtitleLanguage = preferredSubtitleLanguage,
