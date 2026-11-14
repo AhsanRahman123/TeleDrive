@@ -21,7 +21,7 @@ internal const val SUBTITLE_EDGE_DEPRESSED = 4
  * This model and its SharedPreferences store are intentionally independent of Windows/VLC.
  */
 internal data class AndroidSubtitleStyle(
-    val useMedia3Defaults: Boolean = true,
+    val useAndroidDefaults: Boolean = true,
     val fontFamily: String = "sans-serif",
     val textScale: Float = 1f,
     val textColor: Int = 0xFFFFFFFF.toInt(),
@@ -53,7 +53,7 @@ internal object AndroidSubtitleStyleStore {
     fun load(context: Context): AndroidSubtitleStyle = runCatching {
         val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
         AndroidSubtitleStyle(
-            useMedia3Defaults = preferences.getBoolean("use_player_defaults", true),
+            useAndroidDefaults = preferences.getBoolean("use_android_defaults", true),
             fontFamily = preferences.getString("font_family", "sans-serif") ?: "sans-serif",
             textScale = preferences.getFloat("text_scale", 1f),
             textColor = preferences.getInt("text_color", 0xFFFFFFFF.toInt()),
@@ -76,7 +76,7 @@ internal object AndroidSubtitleStyleStore {
         val value = appearance.normalized()
         runCatching {
             context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit()
-                .putBoolean("use_player_defaults", value.useMedia3Defaults)
+                .putBoolean("use_android_defaults", value.useAndroidDefaults)
                 .putString("font_family", value.fontFamily)
                 .putFloat("text_scale", value.textScale)
                 .putInt("text_color", value.textColor)
@@ -99,20 +99,25 @@ internal fun applyAndroidSubtitleStyle(playerView: PlayerView, appearance: Andro
     val subtitleView: SubtitleView = playerView.subtitleView ?: return
     val value = appearance.normalized()
 
-    // Use Android Media3's own styling API so embedded track styles cannot override the
-    // Android user's selected font, colours, size or position.
+    // Android's default mode follows the device's CaptioningManager preferences.
+    // Custom mode is rendered by Media3 with TeleDrive's Android-only style values.
     subtitleView.setApplyEmbeddedStyles(false)
     subtitleView.setApplyEmbeddedFontSizes(false)
-    subtitleView.setStyle(value.toCaptionStyle())
-    subtitleView.setFractionalTextSize(
-        (SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * value.textScale).coerceIn(0.01f, 0.2f)
-    )
-    subtitleView.setBottomPaddingFraction((1f - value.verticalPosition).coerceIn(0.02f, 0.5f))
+    if (value.useAndroidDefaults) {
+        subtitleView.setUserDefaultStyle()
+        subtitleView.setUserDefaultTextSize()
+    } else {
+        subtitleView.setStyle(value.toCaptionStyle())
+        subtitleView.setFractionalTextSize(
+            (SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * value.textScale).coerceIn(0.01f, 0.2f)
+        )
+    }
+    subtitleView.setBottomPaddingFraction((1f - value.verticalPosition).coerceIn(0.02f, 0.92f))
 }
 
 @OptIn(UnstableApi::class)
 private fun AndroidSubtitleStyle.toCaptionStyle(): CaptionStyleCompat {
-    if (useMedia3Defaults) return CaptionStyleCompat.DEFAULT
+    if (useAndroidDefaults) return CaptionStyleCompat.DEFAULT
 
     val value = normalized()
     return CaptionStyleCompat(
