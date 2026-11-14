@@ -274,6 +274,15 @@ internal fun DesktopMediaPlayer(
         onDispose { timeUpdates.close() }
     }
 
+    fun markManualVideoSeek() {
+        if (isAudio) return
+        // An intentional user seek takes precedence over the saved resume point, including
+        // when it happens while VLC is still reporting the initial opening position.
+        resumeRestoreAttempted.set(true)
+        pendingResumeTargetMs.set(0L)
+        resumeInitializationComplete.set(true)
+    }
+
     fun initializeVideoResume(mediaPlayer: MediaPlayer, mediaDurationMs: Long) {
         if (isAudio || mediaDurationMs <= 0L ||
             !resumeRestoreAttempted.compareAndSet(false, true)
@@ -943,21 +952,25 @@ internal fun DesktopMediaPlayer(
                     }
                     // Short, dedicated seek shortcuts requested for keyboard users.
                     key == Key.P && !ctrl && !alt && !shift -> {
+                        markManualVideoSeek()
                         player.submit { runCatching { player.controls().skipTime(-SHORT_KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.N && !ctrl && !alt && !shift -> {
+                        markManualVideoSeek()
                         player.submit { runCatching { player.controls().skipTime(SHORT_KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionLeft && !ctrl && !alt && !shift -> {
+                        markManualVideoSeek()
                         player.submit { runCatching { player.controls().skipTime(-KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
                     }
                     key == Key.DirectionRight && !ctrl && !alt && !shift -> {
+                        markManualVideoSeek()
                         player.submit { runCatching { player.controls().skipTime(KEY_SEEK_STEP_MS) } }
                         revealControlsForSeek()
                         true
@@ -1201,6 +1214,7 @@ internal fun DesktopMediaPlayer(
                 onInteraction = { interactionTick++ },
                 onPlayPause = togglePlayback,
                 onSeekTo = { millis ->
+                    markManualVideoSeek()
                     player.submit { runCatching { player.controls().setTime(millis) } }
                 },
                 onToggleMute = toggleMute,
