@@ -20,6 +20,7 @@ data class SubtitleAppearance(
     val windowOpacity: Float = 0f,
     val edgeType: Int = CaptionStyleCompat.EDGE_TYPE_OUTLINE,
     val edgeColor: Int = AndroidColor.BLACK,
+    val edgeOpacity: Float = 1f,
     val verticalPosition: Float = DEFAULT_SUBTITLE_VERTICAL_POSITION
 ) {
     fun normalized() = copy(
@@ -27,6 +28,7 @@ data class SubtitleAppearance(
         textOpacity = textOpacity.coerceIn(0f, 1f),
         backgroundOpacity = backgroundOpacity.coerceIn(0f, 1f),
         windowOpacity = windowOpacity.coerceIn(0f, 1f),
+        edgeOpacity = edgeOpacity.coerceIn(0f, 1f),
         verticalPosition = verticalPosition.coerceIn(0.08f, 0.92f)
     )
 }
@@ -48,6 +50,7 @@ object SubtitleAppearanceStore {
             windowOpacity = prefs.getFloat("window_opacity", 0f),
             edgeType = prefs.getInt("edge_type", CaptionStyleCompat.EDGE_TYPE_OUTLINE),
             edgeColor = prefs.getInt("edge_color", AndroidColor.BLACK),
+            edgeOpacity = prefs.getFloat("edge_opacity", 1f),
             verticalPosition = prefs.getFloat("vertical_position", DEFAULT_SUBTITLE_VERTICAL_POSITION)
         ).normalized()
     }
@@ -67,6 +70,7 @@ object SubtitleAppearanceStore {
             .putFloat("window_opacity", value.windowOpacity)
             .putInt("edge_type", value.edgeType)
             .putInt("edge_color", value.edgeColor)
+            .putFloat("edge_opacity", value.edgeOpacity)
             .putFloat("vertical_position", value.verticalPosition)
             .apply()
     }
@@ -99,7 +103,7 @@ fun applySubtitleAppearance(
         foregroundWithOpacity(style.backgroundColor, style.backgroundOpacity),
         foregroundWithOpacity(style.windowColor, style.windowOpacity),
         style.edgeType,
-        style.edgeColor,
+        foregroundWithOpacity(style.edgeColor, style.edgeOpacity),
         Typeface.create(style.fontFamily, Typeface.NORMAL)
     )
     subtitleView.setStyle(captionStyle)
