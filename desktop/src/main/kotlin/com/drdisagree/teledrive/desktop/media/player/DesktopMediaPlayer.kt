@@ -396,21 +396,20 @@ internal fun DesktopMediaPlayer(
             DesktopVlcPlaybackLifecycle.activate(player) {
                 player.submitAndAwait {
                     if (!playerDisposed.get()) {
-                        runCatching { player.controls().stop() }
-                        if (!playerDisposed.get()) {
-                            // Accept opening/length/time callbacks before play(): VLC may emit
-                            // lengthChanged before the playing event.
-                            acceptsCurrentMediaEvents.set(true)
-                            runCatching { player.media().play(mrl) }
-                                .onFailure {
-                                    acceptsCurrentMediaEvents.set(false)
-                                    playerScope.launch {
-                                        playing = false
-                                        finished = true
-                                        buffering = false
-                                    }
+                        // This is a fresh VLC player with no previous media to stop. The
+                        // lifecycle coordinator has already stopped/released the outgoing
+                        // player, so calling stop() here can leave a new player stuck before
+                        // its first opening/playing event.
+                        acceptsCurrentMediaEvents.set(true)
+                        runCatching { player.media().play(mrl) }
+                            .onFailure {
+                                acceptsCurrentMediaEvents.set(false)
+                                playerScope.launch {
+                                    playing = false
+                                    finished = true
+                                    buffering = false
                                 }
-                        }
+                            }
                     }
                 }
             }
