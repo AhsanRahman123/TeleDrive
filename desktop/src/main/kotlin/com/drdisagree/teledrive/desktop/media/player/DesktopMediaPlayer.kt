@@ -5,6 +5,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -135,6 +137,7 @@ import org.jetbrains.compose.resources.stringResource
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -200,6 +203,10 @@ internal fun DesktopMediaPlayer(
     var seekFeedbackTick by remember { mutableIntStateOf(0) }
     var hKeyPressed by remember { mutableStateOf(false) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
+    var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
+    var subtitleAppearanceRevision by remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { mutableIntStateOf(0) }
+    var styleRestartPositionMs by remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { mutableLongStateOf(0L) }
+    var subtitleTrackActive by remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { mutableStateOf(false) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
     // a play/resume event always reapplies the current remembered volume and mute state.
     val latestVolume = rememberUpdatedState(volume)
@@ -212,26 +219,42 @@ internal fun DesktopMediaPlayer(
     val latestOnPlaybackFinished = rememberUpdatedState(onPlaybackFinished)
     val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
     val playerScope = rememberCoroutineScope()
-    val savedResumePositionMs = remember(mediaId, isAudio) {
-        if (isAudio) 0L else VideoResumeStore.loadPosition(mediaId)
+    val savedResumePositionMs = remember(mediaId, isAudio, subtitleAppearanceRevision, styleRestartPositionMs) {
+        when {
+            isAudio -> 0L
+            styleRestartPositionMs > 0L -> styleRestartPositionMs
+            else -> VideoResumeStore.loadPosition(mediaId)
+        }
     }
-    val resumeRestoreAttempted = remember(mediaId, mrl, isAudio) {
+    fun applySubtitleAppearance(next: SubtitleAppearance) {
+        val normalized = next.normalized()
+        if (normalized == subtitleAppearance) return
+        styleRestartPositionMs = timeMs.coerceAtLeast(0L)
+        if (styleRestartPositionMs > 0L && !isAudio) {
+            VideoResumeStore.savePosition(mediaId, styleRestartPositionMs, durationMs, force = true)
+        }
+        subtitleAppearance = normalized
+        SubtitleAppearanceStore.save(normalized)
+        subtitleAppearanceRevision++
+        interactionTick++
+    }
+    val resumeRestoreAttempted = remember(mediaId, mrl, isAudio, subtitleAppearanceRevision) {
         AtomicBoolean(false)
     }
-    val resumeInitializationComplete = remember(mediaId, mrl, isAudio) {
+    val resumeInitializationComplete = remember(mediaId, mrl, isAudio, subtitleAppearanceRevision) {
         AtomicBoolean(false)
     }
-    val pendingResumeTargetMs = remember(mediaId, mrl, isAudio) { AtomicLong(0L) }
-    val resumeFinished = remember(mediaId, mrl, isAudio) { AtomicBoolean(false) }
+    val pendingResumeTargetMs = remember(mediaId, mrl, isAudio, subtitleAppearanceRevision) { AtomicLong(0L) }
+    val resumeFinished = remember(mediaId, mrl, isAudio, subtitleAppearanceRevision) { AtomicBoolean(false) }
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
-    val acceptsCurrentMediaEvents = remember(mrl, mediaId, isAudio) { AtomicBoolean(false) }
-    val playerDisposed = remember(mrl, mediaId, isAudio) { AtomicBoolean(false) }
+    val acceptsCurrentMediaEvents = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { AtomicBoolean(false) }
+    val playerDisposed = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
-    val frameUpdates = remember(mrl, mediaId, isAudio) {
+    val frameUpdates = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
         Channel<VideoFramePixels>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(frameUpdates) {
@@ -249,10 +272,10 @@ internal fun DesktopMediaPlayer(
     }
 
     // Keep high-frequency playback position notifications bounded as well.
-    val timeUpdates = remember(mrl, mediaId, isAudio) {
+    val timeUpdates = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
         Channel<Long>(capacity = Channel.CONFLATED)
     }
-    LaunchedEffect(timeUpdates, mediaId, isAudio) {
+    LaunchedEffect(timeUpdates, mediaId, isAudio, subtitleAppearanceRevision) {
         for (position in timeUpdates) {
             timeMs = position
             if (!isAudio && resumeInitializationComplete.get() && !resumeFinished.get()) {
@@ -314,7 +337,7 @@ internal fun DesktopMediaPlayer(
 
     // Give every MRL an isolated native VLC player. Reusing one decoder/audio-output
     // instance across unrelated media caused corrupted frames and unstable audio on switches.
-    val player = remember(mrl, mediaId, isAudio) {
+    val player = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
@@ -497,7 +520,12 @@ internal fun DesktopMediaPlayer(
                         // player, so calling stop() here can leave a new player stuck before
                         // its first opening/playing event.
                         acceptsCurrentMediaEvents.set(true)
-                        runCatching { player.media().play(mrl) }
+                        runCatching {
+                            player.media().play(
+                                mrl,
+                                *subtitleAppearance.toVlcMediaOptions(frame?.height ?: 1080).toTypedArray()
+                            )
+                        }
                             .onFailure {
                                 acceptsCurrentMediaEvents.set(false)
                                 playerScope.launch {
@@ -586,6 +614,20 @@ internal fun DesktopMediaPlayer(
     }
 
     val trackWord = stringResource(Res.string.player_track)
+    LaunchedEffect(player, trackTick, trackWord) {
+        val selected = CompletableDeferred<Boolean>()
+        runCatching {
+            player.submit {
+                selected.complete(
+                    runCatching { player.textTracks(trackWord).any { it.selected } }
+                        .getOrDefault(false)
+                )
+            }
+        }.onFailure { selected.complete(false) }
+        withTimeoutOrNull(PLAYER_NATIVE_CALL_TIMEOUT_MS) { selected.await() }?.let {
+            subtitleTrackActive = it
+        }
+    }
     val playerFocusRequester = remember { FocusRequester() }
     val windowInfo = LocalWindowInfo.current
     LaunchedEffect(mrl) { playerFocusRequester.requestFocus() }
@@ -700,6 +742,7 @@ internal fun DesktopMediaPlayer(
                 val next = tracks[nextIndex]
                 runCatching { player.subpictures().setTrack(next.id) }
                 playerScope.launch {
+                    subtitleTrackActive = true
                     onPreferredSubtitleLanguage(next.language)
                     trackTick++
                 }
@@ -713,11 +756,15 @@ internal fun DesktopMediaPlayer(
                 val selected = tracks.firstOrNull { it.selected }
                 if (selected != null) {
                     runCatching { player.subpictures().setTrack(VLC_TRACK_DISABLED) }
+                    playerScope.launch { subtitleTrackActive = false }
                 } else {
                     val next = tracks.firstOrNull { it.language == preferredSubtitleLanguage }
                         ?: tracks.first()
                     runCatching { player.subpictures().setTrack(next.id) }
-                    playerScope.launch { onPreferredSubtitleLanguage(next.language) }
+                    playerScope.launch {
+                        subtitleTrackActive = true
+                        onPreferredSubtitleLanguage(next.language)
+                    }
                 }
                 playerScope.launch { trackTick++ }
             }
@@ -1156,7 +1203,51 @@ internal fun DesktopMediaPlayer(
                 Image(
                     bitmap = current,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(
+                            isAudio,
+                            subtitleTrackActive,
+                            subtitleAppearance.verticalPosition,
+                            subtitleAppearanceRevision
+                        ) {
+                            if (isAudio || !subtitleTrackActive) return@pointerInput
+                            awaitEachGesture {
+                                val down = awaitFirstDown(
+                                    requireUnconsumed = false,
+                                    pass = PointerEventPass.Initial
+                                )
+                                val hitWidth = size.width * 0.62f
+                                val centerY = size.height * subtitleAppearance.verticalPosition
+                                val hitHeight = 42.dp.toPx()
+                                val insideSubtitleBand =
+                                    abs(down.position.x - size.width / 2f) <= hitWidth / 2f &&
+                                    abs(down.position.y - centerY) <= hitHeight / 2f
+                                if (insideSubtitleBand) {
+                                    down.consume()
+                                    var targetPosition = subtitleAppearance.verticalPosition
+                                    var dragging = true
+                                    while (dragging) {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                            ?: break
+                                        if (change.position != change.previousPosition) {
+                                            change.consume()
+                                            if (size.height > 0) {
+                                                targetPosition = (change.position.y / size.height)
+                                                    .coerceIn(0.08f, 0.92f)
+                                            }
+                                        }
+                                        if (!change.pressed) dragging = false
+                                    }
+                                    if (abs(targetPosition - subtitleAppearance.verticalPosition) > 0.004f) {
+                                        applySubtitleAppearance(
+                                            subtitleAppearance.copy(verticalPosition = targetPosition)
+                                        )
+                                    }
+                                }
+                            }
+                        },
                     contentScale = scaling.contentScale
                 )
             }
@@ -1197,6 +1288,8 @@ internal fun DesktopMediaPlayer(
                 sleepTimerLabel = sleepTimerLabel,
                 trackTick = trackTick,
                 scaling = scaling,
+                subtitleAppearance = subtitleAppearance,
+                onApplySubtitleAppearance = ::applySubtitleAppearance,
                 onPrevious = onPrevious,
                 onNext = onNext,
                 hasPrevious = hasPrevious,
@@ -1209,6 +1302,7 @@ internal fun DesktopMediaPlayer(
                 onSelectTextTrack = { track ->
                     val trackId = track?.id ?: VLC_TRACK_DISABLED
                     player.submit { runCatching { player.subpictures().setTrack(trackId) } }
+                    subtitleTrackActive = track != null
                     onPreferredSubtitleLanguage(track?.language.orEmpty())
                     trackTick++
                 },
@@ -1294,6 +1388,8 @@ private fun PlayerControlsBar(
     sleepTimerLabel: String,
     trackTick: Int,
     scaling: VideoScaling,
+    subtitleAppearance: SubtitleAppearance,
+    onApplySubtitleAppearance: (SubtitleAppearance) -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     hasPrevious: Boolean,
@@ -1324,6 +1420,7 @@ private fun PlayerControlsBar(
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
     var showSubtitleMenu by remember { mutableStateOf(false) }
+    var showSubtitleSettings by remember { mutableStateOf(false) }
     var showQueueMenu by remember { mutableStateOf(false) }
     var showSleepMenu by remember { mutableStateOf(false) }
     var showCustomSleepDialog by remember { mutableStateOf(false) }
@@ -1459,6 +1556,7 @@ private fun PlayerControlsBar(
             showRateMenu,
             showAudioMenu,
             showSubtitleMenu,
+            showSubtitleSettings,
             showQueueMenu,
             showSleepMenu,
             showCustomSleepDialog,
@@ -1467,7 +1565,7 @@ private fun PlayerControlsBar(
         ) {
             onControlsKeepVisible(
                 showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
-                    showQueueMenu || showSleepMenu || showCustomSleepDialog ||
+                    showSubtitleSettings || showQueueMenu || showSleepMenu || showCustomSleepDialog ||
                     volumeSliderActive || brightnessSliderActive
             )
         }
@@ -1928,8 +2026,29 @@ private fun PlayerControlsBar(
                                     }
                                 )
                             }
+                            DropdownMenuItem(
+                                text = { Text("Subtitle appearance and position") },
+                                onClick = {
+                                    showSubtitleMenu = false
+                                    showSubtitleSettings = true
+                                    onInteraction()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Settings, contentDescription = null)
+                                }
+                            )
                         }
                     }
+                }
+                if (showSubtitleSettings) {
+                    SubtitleAppearanceDialog(
+                        appearance = subtitleAppearance,
+                        onDismiss = { showSubtitleSettings = false },
+                        onApply = { next ->
+                            showSubtitleSettings = false
+                            onApplySubtitleAppearance(next)
+                        }
+                    )
                 }
                 Box {
                     TooltipIconButton(
