@@ -15,6 +15,9 @@ interface PlatformCapabilities {
     val supportsScreenCaptureBlocking: Boolean
 
     val supportsDynamicColor: Boolean
+
+    /** Whether returning from an item preview restores the previous collection scroll position. */
+    val savesCollectionScrollOnPreview: Boolean get() = false
 }
 
 val LocalPlatformCapabilities = staticCompositionLocalOf<PlatformCapabilities> {
