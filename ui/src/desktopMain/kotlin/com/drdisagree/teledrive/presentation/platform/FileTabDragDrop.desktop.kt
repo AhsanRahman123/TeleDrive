@@ -24,25 +24,29 @@ import java.awt.datatransfer.StringSelection
 actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier {
     val windowInfo = LocalWindowInfo.current
     val latestPayload = rememberUpdatedState(payload)
+
+    // Compose Desktop's default dragAndDropSource detector recognizes and consumes a mouse
+    // drag before it calls transferData. Returning null from transferData when Shift is not held
+    // prevents the tab transfer, but it does NOT give the pointer gesture back to our Files
+    // range-selection detector. Therefore do not install the native drag-source modifier at all
+    // during ordinary mouse use. WindowInfo.keyboardModifiers is snapshot-backed, so holding or
+    // releasing Shift recomposes the row and adds/removes this modifier before the drag starts.
+    val shiftDragEnabled = windowInfo.keyboardModifiers.isShiftPressed
+    if (!shiftDragEnabled) return this
+
     return dragAndDropSource { offset ->
-        // Keep ordinary left-drag available for range selection. Hold Shift
-        // to start the separate native file-to-tab transfer gesture.
-        if (!windowInfo.keyboardModifiers.isShiftPressed) {
+        val encodedPayload = latestPayload.value()
+        if (encodedPayload.isBlank()) {
             null
         } else {
-            val encodedPayload = latestPayload.value()
-            if (encodedPayload.isBlank()) {
-                null
-            } else {
-                DragAndDropTransferData(
-                    transferable = DragAndDropTransferable(StringSelection(encodedPayload)),
-                    supportedActions = listOf(
-                        DragAndDropTransferAction.Move,
-                        DragAndDropTransferAction.Copy
-                    ),
-                    dragDecorationOffset = offset
-                )
-            }
+            DragAndDropTransferData(
+                transferable = DragAndDropTransferable(StringSelection(encodedPayload)),
+                supportedActions = listOf(
+                    DragAndDropTransferAction.Move,
+                    DragAndDropTransferAction.Copy
+                ),
+                dragDecorationOffset = offset
+            )
         }
     }
 }

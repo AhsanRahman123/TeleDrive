@@ -78,15 +78,21 @@ interface ThumbnailJobDao {
                     j.fileId ASC
                 LIMIT :limit OFFSET :offset
            ),
-           folder_paths(fileId, parentId, path, depth) AS (
-               SELECT f.id, d.parentId, d.name, 0
+           folder_paths(fileId, parentId, path, depth, visited) AS (
+               SELECT f.id, d.parentId, d.name, 0, '|' || d.id || '|'
                  FROM queued_page q
                  JOIN files f ON f.id = q.fileId
                  JOIN folders d ON d.id = COALESCE(f.folderId, f.preTrashFolderId)
                UNION ALL
-               SELECT fp.fileId, d.parentId, d.name || ' / ' || fp.path, fp.depth + 1
+               SELECT fp.fileId,
+                      d.parentId,
+                      d.name || ' / ' || fp.path,
+                      fp.depth + 1,
+                      fp.visited || d.id || '|'
                  FROM folder_paths fp
                  JOIN folders d ON d.id = fp.parentId
+                WHERE fp.depth < 63
+                  AND instr(fp.visited, '|' || d.id || '|') = 0
            )
            SELECT j.fileId AS fileId,
                   COALESCE(f.name, j.fileId) AS name,

@@ -268,6 +268,63 @@ class KeyboardCollectionTest {
         assertEquals(1, newTab)
     }
 
+
+    @Test
+    fun `collection shortcuts remain active after focus moves between rows`() {
+        var selectedAll = 0
+        var copied = 0
+        var cut = 0
+
+        rule.setContent {
+            val listState = rememberLazyListState()
+            val keyboard = rememberKeyboardCollection(listState)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(300.dp, 240.dp)
+                    .keyboardCollection(
+                        keyboard,
+                        itemCount = 3,
+                        shortcuts = CollectionShortcuts(
+                            onSelectAll = { selectedAll++ },
+                            onCopy = { copied++ },
+                            onCut = { cut++ }
+                        )
+                    )
+            ) {
+                items(3) { index ->
+                    BasicText(
+                        "focus-row-$index",
+                        Modifier
+                            .keyboardCollectionItem(keyboard, index)
+                            .testTag("focus-row-$index")
+                            .size(200.dp, 60.dp)
+                            .clickable {}
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("focus-row-0").requestFocus()
+        rule.onNodeWithTag("focus-row-0").performKeyInput {
+            pressKey(Key.DirectionDown)
+        }
+        rule.onNodeWithTag("focus-row-1").assertIsFocused()
+
+        rule.onNodeWithTag("focus-row-1").performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.A)
+            pressKey(Key.C)
+            pressKey(Key.X)
+            keyUp(Key.CtrlLeft)
+        }
+        rule.waitForIdle()
+
+        assertEquals(1, selectedAll)
+        assertEquals(1, copied)
+        assertEquals(1, cut)
+    }
+
     @Test
     fun `collection select all does not intercept a nested text field shortcut`() {
         var selectedAll = 0

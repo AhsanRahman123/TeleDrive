@@ -2,9 +2,27 @@ package com.drdisagree.teledrive.core.telegram
 
 import com.drdisagree.teledrive.domain.model.Country
 import com.drdisagree.teledrive.domain.model.LinkMetadata
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.StateFlow
+
+/**
+ * Metadata needed to create a server-side copy of an existing Telegram document.
+ * The caption is the individual TeleDrive manifest for the new document.
+ */
+data class TelegramDocumentCopyRequest(
+    val remoteFileId: String,
+    val fileName: String,
+    val mimeType: String,
+    val caption: String
+)
+
+/** Individual result for a document in a possibly partially successful batch. */
+data class TelegramDocumentCopyResult(
+    val document: RemoteDocument? = null,
+    val error: TelegramException? = null
+)
 
 /** No TDLib types cross this boundary. */
 interface TelegramClient {
@@ -107,6 +125,32 @@ interface TelegramClient {
         mimeType: String,
         caption: String
     ): RemoteDocument
+
+    /**
+     * Copies a group of existing remote documents. Platform clients may batch this into an
+     * album; the default implementation preserves compatibility with simple/test clients.
+     * Results are returned in the same order as [documents].
+     */
+    suspend fun copyDocuments(
+        chatId: Long,
+        documents: List<TelegramDocumentCopyRequest>
+    ): List<TelegramDocumentCopyResult> = documents.map { request ->
+        try {
+            TelegramDocumentCopyResult(
+                document = copyDocument(
+                    chatId = chatId,
+                    remoteFileId = request.remoteFileId,
+                    fileName = request.fileName,
+                    mimeType = request.mimeType,
+                    caption = request.caption
+                )
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: TelegramException) {
+            TelegramDocumentCopyResult(error = error)
+        }
+    }
 
     /**
      * Downloads a Telegram message through TDLib's persistent download queue when the source

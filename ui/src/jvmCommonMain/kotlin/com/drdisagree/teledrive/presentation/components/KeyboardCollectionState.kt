@@ -71,10 +71,18 @@ class KeyboardCollectionState internal constructor(
     }
 
     internal fun onFocusChanged(index: Int, focused: Boolean, hasFocus: Boolean) {
-        focusOnItem = focused
-        focusInItem = hasFocus
-        if (hasFocus) focusedIndex = index else if (focusedIndex == index) focusedIndex = -1
-        if (hasFocus) current = index
+        if (hasFocus) {
+            // Several lazy rows observe focus changes through this shared state. Do not let a
+            // previous row's delayed blur callback overwrite the state of the newly focused row.
+            focusedIndex = index
+            focusOnItem = focused
+            focusInItem = true
+            current = index
+        } else if (focusedIndex == index) {
+            focusedIndex = -1
+            focusOnItem = false
+            focusInItem = false
+        }
     }
 
     internal fun handle(event: KeyEvent, shortcuts: CollectionShortcuts): Boolean {

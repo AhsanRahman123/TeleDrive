@@ -6,6 +6,7 @@ import com.drdisagree.teledrive.domain.repository.BackupRepository
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ChannelRepository
 import com.drdisagree.teledrive.domain.repository.ExclusionRepository
+import com.drdisagree.teledrive.domain.repository.DuplicateManagerRepository
 import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.KeyBackupRepository
 import com.drdisagree.teledrive.domain.repository.ProxyRepository
@@ -40,5 +41,6 @@ val repositoryModule = module {
     singleOf(::SyncRepositoryImpl) bind SyncRepository::class
     singleOf(::ChannelRepositoryImpl) bind ChannelRepository::class
     singleOf(::CacheRepositoryImpl) bind CacheRepository::class
+    singleOf(::DuplicateManagerRepositoryImpl) bind DuplicateManagerRepository::class
     singleOf(::KeyBackupRepositoryImpl) bind KeyBackupRepository::class
 }

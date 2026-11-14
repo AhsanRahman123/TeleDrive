@@ -756,22 +756,26 @@ class FilesViewModel(
         move(ids, folderIds, targetFolderId)
     }
 
-    fun cutSelected() {
+    fun cutSelected(): Boolean {
         val items = CutItems(selection.value.toList(), folderSelection.value.toList())
         val total = items.fileIds.size + items.folderIds.size
-        if (total == 0) return
-        clearSelection()
+        if (total == 0) return false
+        // Publish clipboard state before clearing selection so the action is immediately visible
+        // to a following Ctrl+V without waiting for Compose to recompose.
         clipboard.cut(items)
+        clearSelection()
         _messages.tryEmit(UiText.Resource(Res.string.files_cut_count, total))
+        return true
     }
 
-    fun copyToClipboardSelected() {
+    fun copyToClipboardSelected(): Boolean {
         val items = CutItems(selection.value.toList(), folderSelection.value.toList(), isCut = false)
         val total = items.fileIds.size + items.folderIds.size
-        if (total == 0) return
-        clearSelection()
+        if (total == 0) return false
         clipboard.copy(items)
+        clearSelection()
         _messages.tryEmit(UiText.Plain("Copied $total item(s). Navigate to a destination and press Ctrl+V."))
+        return true
     }
 
     fun dragPayloadForFile(fileId: String): String {

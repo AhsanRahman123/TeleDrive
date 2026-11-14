@@ -199,12 +199,12 @@ internal fun DesktopMediaPlayer(
     val playerScope = rememberCoroutineScope()
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
-    val acceptsCurrentMediaEvents = remember(factory, isAudio) { AtomicBoolean(false) }
+    val acceptsCurrentMediaEvents = remember(mrl, isAudio) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
-    val frameUpdates = remember(factory, isAudio) {
+    val frameUpdates = remember(mrl, isAudio) {
         Channel<VideoFramePixels>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(frameUpdates) {
@@ -222,7 +222,7 @@ internal fun DesktopMediaPlayer(
     }
 
     // Keep high-frequency playback position notifications bounded as well.
-    val timeUpdates = remember(factory, isAudio) {
+    val timeUpdates = remember(mrl, isAudio) {
         Channel<Long>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(timeUpdates) {
@@ -234,7 +234,7 @@ internal fun DesktopMediaPlayer(
 
     // One native VLC instance is retained for the lifetime of this media viewer. The
     // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
-    val player = remember(factory, isAudio) {
+    val player = remember(mrl, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
@@ -250,6 +250,19 @@ internal fun DesktopMediaPlayer(
                         playing = true
                         finished = false
                         buffering = false
+                        // VLC can report the media length before the first playing event. Read
+                        // the status here as a fallback so the remaining-time label and seekbar
+                        // are initialized even when lengthChanged arrived during opening.
+                        val reportedLength = runCatching { mediaPlayer.status().length() }
+                            .getOrNull()
+                        if (reportedLength != null && reportedLength > 0L) {
+                            durationMs = reportedLength
+                        }
+                        val reportedTime = runCatching { mediaPlayer.status().time() }
+                            .getOrNull()
+                        if (reportedTime != null && reportedTime >= 0L) {
+                            timeMs = reportedTime
+                        }
                         trackTick++
                     }
                 }
@@ -367,10 +380,9 @@ internal fun DesktopMediaPlayer(
 
     val fullscreenController = LocalFullscreenController.current
     LaunchedEffect(player, mrl) {
-        // Queue media replacement on vlcj's serialized player executor. Direct calls from the
-        // Compose thread can race native playback callbacks while the player is switching files.
-        // Keep the last completed frame visible under the buffering indicator until the incoming
-        // source produces its first accepted frame; late frames from the outgoing source are gated.
+        // Each MRL owns its own VLC player and event channels. This prevents late callbacks
+        // from a previous video from mutating the next video's frame/time state while VLC is
+        // switching sources. Commands still run on vlcj's serialized player executor.
         acceptsCurrentMediaEvents.set(false)
         playing = false
         finished = false
@@ -380,12 +392,19 @@ internal fun DesktopMediaPlayer(
         trackTick++
         player.submit {
             runCatching { player.controls().stop() }
+            // Accept opening/length/time callbacks from this player before play(): VLC may
+            // emit lengthChanged before playing. The old player's independent token remains
+            // false after disposal, so its late events cannot leak into this media item.
+            acceptsCurrentMediaEvents.set(true)
             runCatching { player.media().play(mrl) }
-                .onFailure { playerScope.launch {
-                    playing = false
-                    finished = true
-                    buffering = false
-                } }
+                .onFailure {
+                    acceptsCurrentMediaEvents.set(false)
+                    playerScope.launch {
+                        playing = false
+                        finished = true
+                        buffering = false
+                    }
+                }
         }
     }
 

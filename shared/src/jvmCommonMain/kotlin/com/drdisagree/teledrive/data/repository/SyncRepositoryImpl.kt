@@ -461,8 +461,14 @@ class SyncRepositoryImpl(
         known: KnownRows
     ): ReconcileResult {
         val manifest = known.manifests[document]
-        val existing = manifest?.let { known.byId[it.fileId] }
+        val indexedExisting = manifest?.let { known.byId[it.fileId] }
             ?: known.byUniqueId[document.uniqueFileId]
+        // existingForPage() is read before the page transaction begins. A user can move a
+        // file in that gap. Re-read the current row inside the transaction so pendingPublish
+        // and the latest folderId cannot be lost to the older sync snapshot.
+        val existing = indexedExisting?.let { indexed ->
+            fileDao.byId(indexed.id) ?: indexed
+        }
 
         val damagedSplitCount = splitCountOfDamagedFirstPart(document, known)
         if (manifest != null && manifest.isPart) {

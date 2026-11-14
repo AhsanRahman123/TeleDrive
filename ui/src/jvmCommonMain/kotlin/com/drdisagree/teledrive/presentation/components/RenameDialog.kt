@@ -12,6 +12,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import org.jetbrains.compose.resources.stringResource
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_cancel
@@ -35,7 +41,20 @@ fun RenameDialog(
                 value = value,
                 onValueChange = { value = it },
                 singleLine = true,
-                label = { Text(stringResource(Res.string.common_name)) }
+                label = { Text(stringResource(Res.string.common_name)) },
+                modifier = Modifier.onPreviewKeyEvent { event ->
+                    val valid = value.isNotBlank() && value.trim() != initialValue
+                    if (
+                        valid &&
+                        event.type == KeyEventType.KeyDown &&
+                        (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                    ) {
+                        onConfirm(value.trim())
+                        true
+                    } else {
+                        false
+                    }
+                }
             )
         },
         confirmButton = {

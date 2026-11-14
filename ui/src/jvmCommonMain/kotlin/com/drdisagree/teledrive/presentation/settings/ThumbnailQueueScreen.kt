@@ -51,6 +51,7 @@ import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControl
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -88,6 +89,7 @@ fun ThumbnailQueueScreen(
     var confirmCancelAll by remember { mutableStateOf(false) }
     var selectingAll by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
+    var queueLoadError by remember { mutableStateOf<String?>(null) }
     var sortOrder by remember { mutableStateOf(ThumbnailQueueSort.OLDEST_FIRST) }
     var throughputFilesPerMinute by remember { mutableStateOf(0.0) }
     var rangeSelectionBase by remember { mutableStateOf(emptySet<String>()) }
@@ -105,55 +107,80 @@ fun ThumbnailQueueScreen(
     )
 
     LaunchedEffect(offset, sortOrder) {
-        queueListState.scrollToItem(0)
+        // Do not scroll an unattached LazyColumn before its first page exists. The queue page
+        // is conditionally composed only when items are available; waiting for it here can
+        // leave the screen displaying its default zero/empty state forever.
         var previousCount = -1
         var previousFailedCount = 0
         var previousSampleAt = 0L
         throughputFilesPerMinute = 0.0
         while (true) {
             refreshing = true
-            val page = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
-            pendingCount = repository.thumbnailQueueCount()
-            failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
-            queuePaused = repository.thumbnailQueuePaused()
-            activeQueueIds = repository.thumbnailQueueActiveFileIds()
-            val remainingWork = (pendingCount - failedQueueIds.size).coerceAtLeast(0)
+            queueLoadError = null
+            try {
+                // Read the durable count first. Global pause/cancel must remain available even
+                // if building the detailed page (including folder paths) takes longer.
+                pendingCount = repository.thumbnailQueueCount()
+                failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
+                queuePaused = repository.thumbnailQueuePaused()
+                activeQueueIds = repository.thumbnailQueueActiveFileIds()
 
-            val sampleAt = System.currentTimeMillis()
-            if (queuePaused) {
-                throughputFilesPerMinute = 0.0
-            } else if (previousCount >= 0 && previousSampleAt > 0L) {
-                val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
-                val removed = previousCount - pendingCount
-                if (removed > 0) {
-                    val sampleRate = removed * 60_000.0 / elapsed
-                    throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
-                        sampleRate
-                    } else {
-                        throughputFilesPerMinute * 0.65 + sampleRate * 0.35
-                    }
-                } else if (pendingCount > previousCount || failedQueueIds.size != previousFailedCount) {
+                val page = repository.thumbnailQueue(
+                    offset,
+                    THUMBNAIL_QUEUE_PAGE_SIZE,
+                    sortOrder.name
+                )
+                val remainingWork = (pendingCount - failedQueueIds.size).coerceAtLeast(0)
+
+                val sampleAt = System.currentTimeMillis()
+                if (queuePaused) {
                     throughputFilesPerMinute = 0.0
+                } else if (previousCount >= 0 && previousSampleAt > 0L) {
+                    val elapsed = (sampleAt - previousSampleAt).coerceAtLeast(1L)
+                    val removed = previousCount - pendingCount
+                    if (removed > 0) {
+                        val sampleRate = removed * 60_000.0 / elapsed
+                        throughputFilesPerMinute = if (throughputFilesPerMinute <= 0.0) {
+                            sampleRate
+                        } else {
+                            throughputFilesPerMinute * 0.65 + sampleRate * 0.35
+                        }
+                    } else if (
+                        pendingCount > previousCount ||
+                        failedQueueIds.size != previousFailedCount
+                    ) {
+                        throughputFilesPerMinute = 0.0
+                    }
                 }
-            }
-            previousCount = pendingCount
-            previousFailedCount = failedQueueIds.size
-            previousSampleAt = sampleAt
+                previousCount = pendingCount
+                previousFailedCount = failedQueueIds.size
+                previousSampleAt = sampleAt
 
-            if (page.isEmpty() && offset > 0) {
-                // The live queue shrank while this page was open. Move to the last valid page,
-                // including page zero when the queue has become empty.
-                offset = if (pendingCount > 0) {
-                    ((pendingCount - 1) / THUMBNAIL_QUEUE_PAGE_SIZE) *
-                        THUMBNAIL_QUEUE_PAGE_SIZE
+                if (page.isEmpty() && offset > 0) {
+                    // The live queue shrank while this page was open. Move to the last valid page,
+                    // including page zero when the queue has become empty.
+                    offset = if (pendingCount > 0) {
+                        ((pendingCount - 1) / THUMBNAIL_QUEUE_PAGE_SIZE) *
+                            THUMBNAIL_QUEUE_PAGE_SIZE
+                    } else {
+                        0
+                    }
                 } else {
-                    0
+                    items = page
+                    if (pendingCount == 0) selectedIds = emptySet()
+                    if (page.isEmpty() && pendingCount > 0) {
+                        queueLoadError =
+                            "The queue contains $pendingCount jobs, but this page returned no rows. " +
+                            "Use Select all to manage the durable jobs, or refresh the list."
+                    }
                 }
-            } else {
-                items = page
-                if (pendingCount == 0) selectedIds = emptySet()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                queueLoadError = error.message ?: "Unable to load thumbnail jobs."
+            } finally {
+                refreshing = false
             }
-            refreshing = false
             delay(1_000L)
         }
     }
@@ -235,11 +262,30 @@ fun ThumbnailQueueScreen(
                 }
                 TooltipIconButton(tooltip = "Refresh queue", onClick = {
                     scope.launch {
-                        items = repository.thumbnailQueue(offset, THUMBNAIL_QUEUE_PAGE_SIZE, sortOrder.name)
-                        pendingCount = repository.thumbnailQueueCount()
-                        activeQueueIds = repository.thumbnailQueueActiveFileIds()
-                        failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
-                        queuePaused = repository.thumbnailQueuePaused()
+                        refreshing = true
+                        queueLoadError = null
+                        try {
+                            pendingCount = repository.thumbnailQueueCount()
+                            queuePaused = repository.thumbnailQueuePaused()
+                            failedQueueIds = repository.thumbnailQueueFailedFileIds().toSet()
+                            activeQueueIds = repository.thumbnailQueueActiveFileIds()
+                            items = repository.thumbnailQueue(
+                                offset,
+                                THUMBNAIL_QUEUE_PAGE_SIZE,
+                                sortOrder.name
+                            )
+                            if (items.isEmpty() && pendingCount > 0) {
+                                queueLoadError =
+                                    "The queue contains $pendingCount jobs, but this page returned no rows. " +
+                                    "Use Select all to manage the durable jobs."
+                            }
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            queueLoadError = error.message ?: "Unable to load thumbnail jobs."
+                        } finally {
+                            refreshing = false
+                        }
                     }
                 }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh queue")
@@ -423,8 +469,16 @@ fun ThumbnailQueueScreen(
 
                 if (items.isEmpty()) {
                     Text(
-                        if (refreshing) "Loading queue…" else "The thumbnail queue is empty.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        when {
+                            refreshing -> "Loading queue…"
+                            queueLoadError != null -> queueLoadError!!
+                            pendingCount > 0 ->
+                                "There are $pendingCount durable jobs in the queue, but no rows are visible. " +
+                                    "Use Select all and the batch controls above to pause, resume, or cancel them."
+                            else -> "The thumbnail queue is empty."
+                        },
+                        color = if (queueLoadError != null) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
                     Box(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
