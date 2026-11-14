@@ -24,7 +24,7 @@ import androidx.compose.ui.draganddrop.toAndroidDragEvent
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier =
-    dragAndDropSource {
+    dragAndDropSource(transferData = { _ ->
         val encodedPayload = payload()
         if (encodedPayload.isBlank()) {
             null
@@ -33,7 +33,7 @@ actual fun Modifier.fileTabDragSource(payload: () -> String): Modifier =
                 clipData = ClipData.newPlainText("TeleDrive files", encodedPayload)
             )
         }
-    }
+    })
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
