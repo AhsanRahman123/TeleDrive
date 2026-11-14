@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.drdisagree.teledrive.core.media.ThumbnailModel
@@ -1022,44 +1023,93 @@ fun ThumbnailManagerScreen(
                     }
                 }
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Unfiled thumbnails", style = MaterialTheme.typography.labelLarge)
-                        Text(
-                            "${Formatters.bytes(summary.unfiledBytes)} · ${summary.unfiledCachedFiles} cached",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                if (androidLayout) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Column {
+                            Text("Unfiled thumbnails", style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                "${Formatters.bytes(summary.unfiledBytes)} · ${summary.unfiledCachedFiles} cached",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        val result = cacheRepository.generateFolderThumbnails(null)
+                                        generationMessage = enqueueResultMessage(
+                                            result.newlyQueued,
+                                            result.alreadyQueued
+                                        )
+                                        summary = cacheRepository.thumbnailManagerSummary()
+                                    }
+                                }
+                            ) { Text("Prepare unfiled", maxLines = 1, softWrap = false) }
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        val result = cacheRepository.generateAllThumbnails()
+                                        generationMessage = enqueueResultMessage(
+                                            result.newlyQueued,
+                                            result.alreadyQueued
+                                        )
+                                        summary = cacheRepository.thumbnailManagerSummary()
+                                    }
+                                }
+                            ) { Text("Generate all missing", maxLines = 1, softWrap = false) }
+                            OutlinedButton(onClick = { confirmClearAll = true }) {
+                                Text("Delete all", maxLines = 1, softWrap = false)
+                            }
+                        }
                     }
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                val result = cacheRepository.generateFolderThumbnails(null)
-                                generationMessage = enqueueResultMessage(
-                                    result.newlyQueued,
-                                    result.alreadyQueued
-                                )
-                                summary = cacheRepository.thumbnailManagerSummary()
-                            }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Unfiled thumbnails", style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                "${Formatters.bytes(summary.unfiledBytes)} · ${summary.unfiledCachedFiles} cached",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                    ) { Text("Prepare unfiled") }
-                    OutlinedButton(
-                        onClick = {
-                            scope.launch {
-                                val result = cacheRepository.generateAllThumbnails()
-                                generationMessage = enqueueResultMessage(
-                                    result.newlyQueued,
-                                    result.alreadyQueued
-                                )
-                                summary = cacheRepository.thumbnailManagerSummary()
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    val result = cacheRepository.generateFolderThumbnails(null)
+                                    generationMessage = enqueueResultMessage(
+                                        result.newlyQueued,
+                                        result.alreadyQueued
+                                    )
+                                    summary = cacheRepository.thumbnailManagerSummary()
+                                }
                             }
-                        }
-                    ) { Text("Generate all missing") }
-                    OutlinedButton(onClick = { confirmClearAll = true }) { Text("Delete all") }
+                        ) { Text("Prepare unfiled") }
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    val result = cacheRepository.generateAllThumbnails()
+                                    generationMessage = enqueueResultMessage(
+                                        result.newlyQueued,
+                                        result.alreadyQueued
+                                    )
+                                    summary = cacheRepository.thumbnailManagerSummary()
+                                }
+                            }
+                        ) { Text("Generate all missing") }
+                        OutlinedButton(onClick = { confirmClearAll = true }) { Text("Delete all") }
+                    }
                 }
             }
 
@@ -1300,7 +1350,77 @@ private fun ThumbnailFolderRow(
     onGenerate: () -> Unit,
     onRemove: () -> Unit
 ) {
-    Row(
+    val androidLayout = LocalAndroidLayout.current
+    val folderBackground = if (selected) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow
+    if (androidLayout) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .background(folderBackground)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = selected, onCheckedChange = onSelectionChange)
+                TooltipIconButton(tooltip = "Open folder", onClick = onOpen) {
+                    Icon(Icons.Filled.Folder, contentDescription = "Open folder", tint = MaterialTheme.colorScheme.primary)
+                }
+                Column(modifier = Modifier.weight(1f).clickable(onClick = onOpen)) {
+                    Text(
+                        folder.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "${folder.eligibleFiles} image/video files · ${Formatters.bytes(folder.totalBytes)} cached",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "${folder.generatedFiles} generated",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                Text(
+                    "${folder.missingFiles} missing",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                Text(
+                    "Rule: ${policyLabel(currentPolicy)} · Effective: ${policyLabel(folder.effectivePolicy)}" +
+                        if (folder.isTrashed) " · In Trash" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                TooltipIconButton(tooltip = "Generate folder thumbnails", onClick = onGenerate) {
+                    Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate folder thumbnails")
+                }
+                TooltipIconButton(tooltip = "Delete folder thumbnails", onClick = onRemove) {
+                    Icon(Icons.Filled.Delete, contentDescription = "Delete folder thumbnails")
+                }
+                ThumbnailPolicyMenu(currentPolicy, allowInherit = true, onSelect = onPolicy)
+            }
+        }
+    } else {
+            Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
@@ -1351,6 +1471,7 @@ private fun ThumbnailFolderRow(
         }
         ThumbnailPolicyMenu(currentPolicy, allowInherit = true, onSelect = onPolicy)
     }
+    }
 }
 
 @Composable
@@ -1368,7 +1489,101 @@ private fun ThumbnailFileRow(
             if (change.fileId == file.fileId) thumbnailRevision++
         }
     }
-    Row(
+    val androidLayout = LocalAndroidLayout.current
+    val fileBackground = if (selected) MaterialTheme.colorScheme.secondaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow
+    if (androidLayout) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .background(fileBackground)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Checkbox(checked = selected, onCheckedChange = onSelectionChange)
+                Box(
+                    modifier = Modifier
+                        .size(58.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (file.isCached) {
+                        AsyncImage(
+                            model = ThumbnailModel(file.fileId, thumbnailRevision),
+                            contentDescription = file.name,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (file.category == "VIDEO") Icons.Filled.PlayArrow else Icons.Filled.Image,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        file.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        (if (file.isCached) {
+                            "Generated · ${Formatters.bytes(file.thumbnailSizeBytes ?: 0L)} thumbnail · ${Formatters.bytes(file.fileSizeBytes)} file"
+                        } else {
+                            "Not generated · ${Formatters.bytes(file.fileSizeBytes)} file"
+                        }) + if (file.isTrashed) " · In Trash" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Rule: ${policyLabel(file.policy)} · Effective: ${policyLabel(file.effectivePolicy)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false
+                )
+                file.generatedAt?.let { generated ->
+                    Text(
+                        "Generated " + Formatters.dateTime(generated) +
+                            (file.lastAccessAt?.let { " · Last viewed " + Formatters.dateTime(it) } ?: ""),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+                ThumbnailPolicyMenu(file.policy, allowInherit = true, onSelect = onPolicy)
+                if (file.isCached) {
+                    TooltipIconButton(tooltip = "Remove thumbnail", onClick = onRemove) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Remove thumbnail")
+                    }
+                } else {
+                    TooltipIconButton(tooltip = "Generate thumbnail", onClick = onGenerate) {
+                        Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate thumbnail")
+                    }
+                }
+            }
+        }
+    } else {
+            Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
@@ -1440,6 +1655,7 @@ private fun ThumbnailFileRow(
                 Icon(Icons.Filled.AutoAwesome, contentDescription = "Generate thumbnail")
             }
         }
+    }
     }
 }
 

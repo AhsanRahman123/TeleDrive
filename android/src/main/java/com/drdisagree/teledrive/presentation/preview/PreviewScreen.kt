@@ -83,6 +83,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
@@ -238,6 +239,10 @@ fun PreviewScreen(
     val liveFile by viewModel.observeFile(pagedFile.id)
         .collectAsStateWithLifecycle(initialValue = pagedFile)
     val currentFile = liveFile ?: pagedFile
+    var previewFolderName by remember { mutableStateOf("Files") }
+    LaunchedEffect(currentFile.id, currentFile.folderId) {
+        previewFolderName = viewModel.parentFolderName(currentFile)
+    }
 
     val immersive = currentFile.category == FileCategory.IMAGE ||
             currentFile.category == FileCategory.VIDEO
@@ -249,8 +254,9 @@ fun PreviewScreen(
 
     val view = LocalView.current
     val activity = LocalActivity.current
+    val configuration = LocalConfiguration.current
 
-    LaunchedEffect(chromeShown, activity) {
+    LaunchedEffect(chromeShown, activity, configuration.orientation) {
         val window = activity?.window ?: return@LaunchedEffect
         val controller = WindowInsetsControllerCompat(window, view)
         controller.systemBarsBehavior =
@@ -362,12 +368,21 @@ fun PreviewScreen(
             ) {
                 TopAppBar(
                     title = {
-                        Text(
-                            currentFile.name,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.titleMedium
-                        )
+                        Column {
+                            Text(
+                                currentFile.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                "$previewFolderName · ${pagerState.currentPage + 1}/${state.files.size}",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {

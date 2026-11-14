@@ -61,6 +61,8 @@ import org.jetbrains.compose.resources.stringResource
 fun PlayerGestureArea(
     onTap: () -> Unit,
     onDoubleTap: (forward: Boolean) -> Unit = {},
+    onLongPressStart: () -> Unit = {},
+    onLongPressEnd: () -> Unit = {},
     onAdjustStart: () -> Unit,
     dragEnabled: Boolean,
     chromeVisible: Boolean,
@@ -70,6 +72,8 @@ fun PlayerGestureArea(
     val activity = LocalActivity.current
     val tap by rememberUpdatedState(onTap)
     val doubleTap by rememberUpdatedState(onDoubleTap)
+    val longPressStart by rememberUpdatedState(onLongPressStart)
+    val longPressEnd by rememberUpdatedState(onLongPressEnd)
     val adjustStart by rememberUpdatedState(onAdjustStart)
 
     val audioManager = remember(context) { context.getSystemService(AudioManager::class.java) }
@@ -110,10 +114,20 @@ fun PlayerGestureArea(
                     }
                 }
                 .pointerInput(Unit) {
+                    var longPressStarted = false
                     detectTapGestures(
+                        onPress = {
+                            longPressStarted = false
+                            tryAwaitRelease()
+                            if (longPressStarted) longPressEnd()
+                        },
                         onTap = { tap() },
                         onDoubleTap = { offset ->
                             doubleTap(offset.x >= size.width / 2f)
+                        },
+                        onLongPress = {
+                            longPressStarted = true
+                            longPressStart()
                         }
                     )
                 }

@@ -10,7 +10,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 class TelegramMediaByteSource(
     private val telegramClient: TelegramClient,
-    private val remoteFileId: String
+    private val remoteFileId: String,
+    private val chatId: Long? = null,
+    private val messageId: Long? = null
 ) : MediaByteSource {
 
     private var fileId: Int = 0
@@ -40,7 +42,7 @@ class TelegramMediaByteSource(
 
     private suspend fun resolve() {
         if (totalSize >= 0) return
-        val info = telegramClient.resolveFile(remoteFileId)
+        val info = telegramClient.resolveFile(remoteFileId, chatId, messageId)
         fileId = info.fileId
         totalSize = info.sizeBytes
         if (!info.isDownloadingCompleted) {

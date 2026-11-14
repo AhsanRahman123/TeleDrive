@@ -95,7 +95,7 @@ class PartedMediaByteSource(
         open?.takeIf { it.index == index }?.let { return it }
 
         val remoteFileId = part.remoteFileId
-        val info = telegramClient.resolveFile(remoteFileId)
+        val info = telegramClient.resolveFile(remoteFileId, part.chatId, part.messageId)
         if (!info.isDownloadingCompleted) {
             telegramClient.requestFileRange(info.fileId, 0, 0)
         }
@@ -123,7 +123,7 @@ class PartedMediaByteSource(
 
         val remoteFileId = next.remoteFileId
         runCatching {
-            val info = telegramClient.resolveFile(remoteFileId)
+            val info = telegramClient.resolveFile(remoteFileId, next.chatId, next.messageId)
             telegramClient.requestFileRange(info.fileId, 0, 0)
             preloaded = nextIndex
         }

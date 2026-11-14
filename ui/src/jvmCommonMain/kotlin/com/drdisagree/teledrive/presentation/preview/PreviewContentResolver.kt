@@ -68,7 +68,9 @@ class PreviewContentResolver(
 
         if (prefs.streamBeforeDownload && isMedia && parts.isNotEmpty()) {
             val mediaParts = parts.mapNotNull { part ->
-                part.remoteFileId?.let { MediaPart(it, part.plainOffset, part.plainSize) }
+                part.remoteFileId?.let {
+                    MediaPart(it, part.plainOffset, part.plainSize, part.chatId, part.messageId)
+                }
             }
             if (mediaParts.size == parts.size &&
                 (!file.isEncrypted || wrappedKeyRepository.exists(CryptoKeys.CONTENT))
@@ -78,7 +80,9 @@ class PreviewContentResolver(
                         remoteFileId = remoteFileId,
                         isAudio = file.category == FileCategory.AUDIO,
                         parts = mediaParts,
-                        encrypted = file.isEncrypted
+                        encrypted = file.isEncrypted,
+                        chatId = file.chatId,
+                        messageId = file.messageId
                     )
                 )
                 return@flow
@@ -90,7 +94,9 @@ class PreviewContentResolver(
                 emit(
                     PreviewContent.StreamedMedia(
                         remoteFileId = remoteFileId,
-                        isAudio = file.category == FileCategory.AUDIO
+                        isAudio = file.category == FileCategory.AUDIO,
+                        chatId = file.chatId,
+                        messageId = file.messageId
                     )
                 )
                 return@flow
@@ -101,8 +107,18 @@ class PreviewContentResolver(
                     PreviewContent.StreamedMedia(
                         remoteFileId = remoteFileId,
                         isAudio = file.category == FileCategory.AUDIO,
-                        parts = listOf(MediaPart(remoteFileId, 0, file.sizeBytes)),
-                        encrypted = true
+                        parts = listOf(
+                            MediaPart(
+                                remoteFileId,
+                                0,
+                                file.sizeBytes,
+                                file.chatId,
+                                file.messageId
+                            )
+                        ),
+                        encrypted = true,
+                        chatId = file.chatId,
+                        messageId = file.messageId
                     )
                 )
                 return@flow

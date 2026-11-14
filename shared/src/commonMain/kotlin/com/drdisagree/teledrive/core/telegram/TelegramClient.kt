@@ -182,6 +182,28 @@ interface TelegramClient {
 
     suspend fun resolveFile(remoteFileId: String): TelegramFileInfo
 
+    /**
+     * Resolves a remote file and refreshes its session-specific ID from the original Telegram
+     * message when the stored ID is no longer valid on this TDLib session.
+     */
+    suspend fun resolveFile(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ): TelegramFileInfo {
+        try {
+            return resolveFile(remoteFileId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (firstFailure: Exception) {
+            if (chatId == null || messageId == null) throw firstFailure
+            val refreshedId = getDocument(chatId, messageId)?.remoteFileId
+                ?.takeIf { it.isNotBlank() && it != remoteFileId }
+                ?: throw firstFailure
+            return resolveFile(refreshedId)
+        }
+    }
+
     suspend fun getFileInfo(fileId: Int): TelegramFileInfo
 
     /** Non-blocking; re-targets a download already in progress. */

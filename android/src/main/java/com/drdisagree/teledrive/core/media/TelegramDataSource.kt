@@ -13,10 +13,14 @@ import kotlinx.coroutines.runBlocking
 @UnstableApi
 class TelegramDataSource(
     telegramClient: TelegramClient,
-    remoteFileId: String
+    remoteFileId: String,
+    chatId: Long? = null,
+    messageId: Long? = null
 ) : BaseDataSource(true) {
 
-    private val source = BufferedMediaByteSource(TelegramMediaByteSource(telegramClient, remoteFileId))
+    private val source = BufferedMediaByteSource(
+        TelegramMediaByteSource(telegramClient, remoteFileId, chatId, messageId)
+    )
 
     private var uri: Uri? = null
     private var position: Long = 0

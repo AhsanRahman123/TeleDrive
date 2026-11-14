@@ -14,8 +14,14 @@ class TelegramDataSourceFactory(
     private val wrappedKeyRepository: WrappedKeyRepository
 ) {
 
-    fun create(remoteFileId: String): DataSource.Factory =
-        DataSource.Factory { TelegramDataSource(telegramClient, remoteFileId) }
+    fun create(
+        remoteFileId: String,
+        chatId: Long? = null,
+        messageId: Long? = null
+    ): DataSource.Factory =
+        DataSource.Factory {
+            TelegramDataSource(telegramClient, remoteFileId, chatId, messageId)
+        }
 
     /**
      * The content key is read here rather than carried through the UI, keeping key material out of

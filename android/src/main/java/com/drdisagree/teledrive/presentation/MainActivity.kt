@@ -44,6 +44,11 @@ class MainActivity : FragmentActivity() {
      * The launch theme can only name a static color, so the window is repainted with the theme's
      * color to hide the seam.
      */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        window.decorView.requestApplyInsets()
+    }
+
     private fun applyWindowBackground() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         val nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK

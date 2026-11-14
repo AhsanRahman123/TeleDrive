@@ -1216,14 +1216,23 @@ class TdLibTelegramClient(
         return document.minithumbnail?.data
     }
 
-    private suspend fun remoteFile(remoteFileId: String): TdApi.File = try {
-        send(TdApi.GetRemoteFile(remoteFileId, TdApi.FileTypeDocument()))
-    } catch (documentFailure: TelegramException) {
-        try {
-            send(TdApi.GetRemoteFile(remoteFileId, TdApi.FileTypePhoto()))
-        } catch (_: TelegramException) {
-            throw documentFailure
+    private suspend fun remoteFile(remoteFileId: String): TdApi.File {
+        // A Telegram video/audio message can use a typed remote ID, not FileTypeDocument.
+        val fileTypes = listOf(
+            TdApi.FileTypeDocument(),
+            TdApi.FileTypeVideo(),
+            TdApi.FileTypeAudio(),
+            TdApi.FileTypePhoto()
+        )
+        var firstFailure: TelegramException? = null
+        for (fileType in fileTypes) {
+            try {
+                return send(TdApi.GetRemoteFile(remoteFileId, fileType))
+            } catch (failure: TelegramException) {
+                if (firstFailure == null) firstFailure = failure
+            }
         }
+        throw firstFailure ?: TelegramException(500, "Telegram remote file could not be resolved")
     }
 
     override suspend fun resolveFile(remoteFileId: String): TelegramFileInfo =

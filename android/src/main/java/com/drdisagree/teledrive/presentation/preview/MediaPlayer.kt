@@ -155,7 +155,11 @@ fun MediaPlayer(
                             encrypted = content.encrypted
                         )
                     } else {
-                        dataSourceFactory.create(content.remoteFileId)
+                        dataSourceFactory.create(
+                            content.remoteFileId,
+                            content.chatId,
+                            content.messageId
+                        )
                     }
                     val source = ProgressiveMediaSource.Factory(factory)
                         .createMediaSource(MediaItem.fromUri("telegram://stream"))
@@ -211,6 +215,7 @@ fun MediaPlayer(
     var playbackFailed by remember(player) { mutableStateOf(false) }
     var playbackErrorDetails by remember(player) { mutableStateOf<String?>(null) }
     var seekFeedback by remember(player) { mutableStateOf<String?>(null) }
+    var speedBoostActive by remember(player) { mutableStateOf(false) }
 
     DisposableEffect(player) {
         if (player == null) return@DisposableEffect onDispose { }
@@ -238,8 +243,12 @@ fun MediaPlayer(
             override fun onPlayerError(error: PlaybackException) {
                 playbackErrorDetails = buildString {
                     append("Media3 error ${error.errorCode}: ${error.message ?: error.javaClass.simpleName}")
-                    error.cause?.let { cause ->
-                        append("\nCause: ${cause.javaClass.simpleName}: ${cause.message ?: "no details"}")
+                    val causes = generateSequence<Throwable>(error.cause) { it.cause }
+                        .take(5)
+                        .map { "${it.javaClass.simpleName}: ${it.message ?: "no details"}" }
+                        .toList()
+                    if (causes.isNotEmpty()) {
+                        append("\nCause: ${causes.joinToString(" → ")}")
                     }
                     error.failedDecoderName()?.let { decoder ->
                         append("\nDecoder: $decoder")
@@ -342,10 +351,14 @@ fun MediaPlayer(
                 },
                 update = { view ->
                     view.player = player
-                    view.resizeMode = when (resizeMode) {
+                    val targetResizeMode = when (resizeMode) {
                         PlayerResizeMode.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                         PlayerResizeMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         PlayerResizeMode.FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    }
+                    if (view.resizeMode != targetResizeMode) {
+                        view.resizeMode = targetResizeMode
+                        view.requestLayout()
                     }
                 },
                 modifier = Modifier.fillMaxSize()
@@ -429,6 +442,23 @@ fun MediaPlayer(
                         notifyControls(!visibleControls)
                     }
                 },
+                onLongPressStart = {
+                    val activePlayer = player
+                    if (!locked && activePlayer != null) {
+                        speedBoostActive = true
+                        session.speed = 2f
+                        activePlayer.setPlaybackSpeed(2f)
+                        interactionTick++
+                    }
+                },
+                onLongPressEnd = {
+                    if (speedBoostActive) {
+                        speedBoostActive = false
+                        session.speed = 1f
+                        player?.setPlaybackSpeed(1f)
+                        interactionTick++
+                    }
+                },
                 onDoubleTap = { forward ->
                     val activePlayer = player
                     if (!locked && activePlayer != null) {
@@ -449,6 +479,20 @@ fun MediaPlayer(
                 chromeVisible = controlsVisible,
                 modifier = Modifier.matchParentSize()
             )
+        }
+        if (speedBoostActive) {
+            Surface(
+                modifier = Modifier.align(Alignment.Center),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = ComposeColor.Black.copy(alpha = 0.78f),
+                contentColor = ComposeColor.White
+            ) {
+                Text(
+                    "2× speed",
+                    modifier = Modifier.padding(horizontal = 22.dp, vertical = 14.dp),
+                    style = MaterialTheme.typography.titleLarge
+                )
+            }
         }
         seekFeedback?.let { feedback ->
             AnimatedVisibility(
