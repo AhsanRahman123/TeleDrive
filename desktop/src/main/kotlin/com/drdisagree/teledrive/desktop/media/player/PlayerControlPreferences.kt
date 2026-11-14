@@ -9,7 +9,7 @@ internal data class PlayerControlPreferences(
     val showPlayerControls: Boolean = true,
     val hideDelayMillis: Long = 3_000L,
     val rememberVolume: Boolean = true,
-    val volume: Int = DEFAULT_VOLUME
+    val volume: Int = 200
 )
 
 internal object PlayerControlPreferencesStore {
