@@ -39,6 +39,18 @@ jobs:
       - name: Assemble universal debug APK
         run: ./gradlew :android:assembleDebug -PwithFfmpegDecoder -PsplitAbis=false
 
+      - name: Verify isolated preview package ID
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find android/build/outputs/apk/debug -name '*-universal-debug.apk' -print -quit)"
+          test -n "$apk"
+          aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          package="$("$aapt" dump badging "$apk" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p")"
+          echo "Built Android package ID: $package"
+          test "$package" = "com.drdisagree.teledrive.preview"
+          echo "Verified separate preview package: $package" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload installable APK
         uses: actions/upload-artifact@v7
         with:
