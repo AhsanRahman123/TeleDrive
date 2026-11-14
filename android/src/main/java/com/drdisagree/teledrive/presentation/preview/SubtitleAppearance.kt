@@ -21,7 +21,7 @@ internal const val SUBTITLE_EDGE_DEPRESSED = 4
  * This model and its SharedPreferences store are intentionally independent of Windows/VLC.
  */
 internal data class AndroidSubtitleStyle(
-    val useSystemDefaults: Boolean = true,
+    val useMedia3Defaults: Boolean = true,
     val fontFamily: String = "sans-serif",
     val textScale: Float = 1f,
     val textColor: Int = 0xFFFFFFFF.toInt(),
@@ -53,7 +53,7 @@ internal object AndroidSubtitleStyleStore {
     fun load(context: Context): AndroidSubtitleStyle = runCatching {
         val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
         AndroidSubtitleStyle(
-            useSystemDefaults = preferences.getBoolean("use_player_defaults", true),
+            useMedia3Defaults = preferences.getBoolean("use_player_defaults", true),
             fontFamily = preferences.getString("font_family", "sans-serif") ?: "sans-serif",
             textScale = preferences.getFloat("text_scale", 1f),
             textColor = preferences.getInt("text_color", 0xFFFFFFFF.toInt()),
@@ -76,7 +76,7 @@ internal object AndroidSubtitleStyleStore {
         val value = appearance.normalized()
         runCatching {
             context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit()
-                .putBoolean("use_player_defaults", value.useSystemDefaults)
+                .putBoolean("use_player_defaults", value.useMedia3Defaults)
                 .putString("font_family", value.fontFamily)
                 .putFloat("text_scale", value.textScale)
                 .putInt("text_color", value.textColor)
@@ -112,7 +112,7 @@ internal fun applyAndroidSubtitleStyle(playerView: PlayerView, appearance: Andro
 
 @OptIn(UnstableApi::class)
 private fun AndroidSubtitleStyle.toCaptionStyle(): CaptionStyleCompat {
-    if (useSystemDefaults) return CaptionStyleCompat.DEFAULT
+    if (useMedia3Defaults) return CaptionStyleCompat.DEFAULT
 
     val value = normalized()
     return CaptionStyleCompat(
