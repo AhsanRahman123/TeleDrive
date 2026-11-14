@@ -113,10 +113,10 @@ fun MediaPlayer(
     val audioLanguage by rememberUpdatedState(preferredAudioLanguage)
     val subtitleLanguage by rememberUpdatedState(preferredSubtitleLanguage)
 
-    var subtitleAppearance by remember(context) {
-        mutableStateOf(SubtitleAppearanceStore.load(context))
+    var androidSubtitleStyle by remember(context) {
+        mutableStateOf(AndroidSubtitleStyleStore.load(context))
     }
-    var showSubtitleAppearance by remember { mutableStateOf(false) }
+    var showAndroidSubtitleStyle by remember { mutableStateOf(false) }
 
     val holder = remember(content) { mutableStateOf<ExoPlayer?>(null) }
     val player = holder.value
@@ -302,7 +302,7 @@ fun MediaPlayer(
                         this.player = player
                         setBackgroundColor(Color.TRANSPARENT)
                         setShutterBackgroundColor(Color.TRANSPARENT)
-                        applySubtitleAppearance(this, subtitleAppearance)
+                        applyAndroidSubtitleStyle(this, androidSubtitleStyle)
                     }
                 },
                 update = { view ->
@@ -312,7 +312,7 @@ fun MediaPlayer(
                         PlayerResizeMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         PlayerResizeMode.FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                     }
-                    applySubtitleAppearance(view, subtitleAppearance)
+                    applyAndroidSubtitleStyle(view, androidSubtitleStyle)
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -412,17 +412,17 @@ fun MediaPlayer(
                 },
                 onPreferredAudioLanguage = onPreferredAudioLanguage,
                 onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
-                onOpenSubtitleAppearance = { showSubtitleAppearance = true }
+                onOpenAndroidSubtitleStyle = { showAndroidSubtitleStyle = true }
             )
         }
-        if (showSubtitleAppearance) {
-            SubtitleAppearanceDialog(
-                appearance = subtitleAppearance,
-                onDismiss = { showSubtitleAppearance = false },
+        if (showAndroidSubtitleStyle) {
+            AndroidSubtitleStyleDialog(
+                appearance = androidSubtitleStyle,
+                onDismiss = { showAndroidSubtitleStyle = false },
                 onApply = { next ->
-                    subtitleAppearance = next.normalized()
-                    SubtitleAppearanceStore.save(context, next)
-                    showSubtitleAppearance = false
+                    androidSubtitleStyle = next.normalized()
+                    AndroidSubtitleStyleStore.save(context, next)
+                    showAndroidSubtitleStyle = false
                 }
             )
         }
