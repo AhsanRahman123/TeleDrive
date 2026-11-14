@@ -10,7 +10,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.jetbrains.annotations.VisibleForTesting
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import java.util.concurrent.ConcurrentHashMap
 
@@ -39,9 +38,12 @@ internal class SingleActivePlaybackCoordinator<T : Any>(
 
             val previous = active
             if (previous != null && previous !== player) {
-                active = null
-                registered.remove(previous)
+                // Do not clear the active reference until stop/release has actually completed.
+                // If native teardown fails, later activations must retry it rather than allowing
+                // another player to start alongside a possibly-live outgoing player.
                 stopAndRelease(previous)
+                registered.remove(previous)
+                if (active === previous) active = null
             }
 
             if (!registered.contains(player)) return
@@ -54,9 +56,10 @@ internal class SingleActivePlaybackCoordinator<T : Any>(
 
     suspend fun dispose(player: T) {
         mutex.withLock {
-            if (!registered.remove(player)) return
-            if (active === player) active = null
+            if (!registered.contains(player)) return
             stopAndRelease(player)
+            registered.remove(player)
+            if (active === player) active = null
         }
     }
 }
