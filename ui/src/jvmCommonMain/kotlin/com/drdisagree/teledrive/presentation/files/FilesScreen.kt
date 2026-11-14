@@ -267,6 +267,7 @@ fun FilesScreen(
     onNewNote: (String?) -> Unit,
     onEditNote: (String, String) -> Unit,
     onBack: (() -> Unit)?,
+    savePositionBeforeOpeningPreview: Boolean = false,
     viewModel: FilesViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -1126,7 +1127,7 @@ fun FilesScreen(
                                 ),
                                 onOpenFolder = ::navigateToFolder,
                                 onOpenFile = { fileId, sequence ->
-                                    saveCurrentTabPosition()
+                                    if (savePositionBeforeOpeningPreview) saveCurrentTabPosition()
                                     onOpenFile(fileId, sequence)
                                 },
                                 onRequestTrash = { confirmTrash = true },
