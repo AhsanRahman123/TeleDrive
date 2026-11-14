@@ -112,46 +112,48 @@ internal fun AndroidSubtitleStyleDialog(
                 SectionTitle("Style")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = current.useMedia3Defaults,
-                        onClick = { draft = current.copy(useMedia3Defaults = true) },
-                        label = { Text("Media3 defaults") }
+                        selected = current.useAndroidDefaults,
+                        onClick = { draft = current.copy(useAndroidDefaults = true) },
+                        label = { Text("Android defaults") }
                     )
                     FilterChip(
-                        selected = !current.useMedia3Defaults,
-                        onClick = { draft = current.copy(useMedia3Defaults = false) },
+                        selected = !current.useAndroidDefaults,
+                        onClick = { draft = current.copy(useAndroidDefaults = false) },
                         label = { Text("Custom") }
                     )
                 }
 
                 SectionTitle("Size and position")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Text size", modifier = Modifier.weight(1f))
-                    Text("${(current.textScale * 100).roundToInt()}%")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = {
-                            draft = current.copy(
-                                textScale = (current.textScale - 0.1f).coerceAtLeast(0.5f)
-                            )
-                        }
-                    ) {
-                        Icon(Icons.Filled.Remove, contentDescription = "Decrease subtitle size")
+                if (!current.useAndroidDefaults) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Text size", modifier = Modifier.weight(1f))
+                        Text("${(current.textScale * 100).roundToInt()}%")
                     }
-                    Slider(
-                        value = current.textScale,
-                        onValueChange = { draft = current.copy(textScale = it) },
-                        valueRange = 0.5f..2.5f,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = {
-                            draft = current.copy(
-                                textScale = (current.textScale + 0.1f).coerceAtMost(2.5f)
-                            )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                draft = current.copy(
+                                    textScale = (current.textScale - 0.1f).coerceAtLeast(0.5f)
+                                )
+                            }
+                        ) {
+                            Icon(Icons.Filled.Remove, contentDescription = "Decrease subtitle size")
                         }
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Increase subtitle size")
+                        Slider(
+                            value = current.textScale,
+                            onValueChange = { draft = current.copy(textScale = it) },
+                            valueRange = 0.5f..2.5f,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                draft = current.copy(
+                                    textScale = (current.textScale + 0.1f).coerceAtMost(2.5f)
+                                )
+                            }
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = "Increase subtitle size")
+                        }
                     }
                 }
 
@@ -165,7 +167,7 @@ internal fun AndroidSubtitleStyleDialog(
                     valueRange = 0.08f..0.92f
                 )
 
-                if (!current.useMedia3Defaults) {
+                if (!current.useAndroidDefaults) {
                     SectionTitle("Font")
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         subtitleFonts.forEach { (family, label) ->
