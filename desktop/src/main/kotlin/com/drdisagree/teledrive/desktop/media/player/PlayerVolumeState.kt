@@ -23,6 +23,17 @@ internal object RememberedPlayerVolume {
         save = PlayerControlPreferencesStore::saveVolume
     )
 
+    init {
+        // A normal application shutdown must not lose a volume change made just before exit,
+        // even when the 300 ms debounce window has not elapsed yet.
+        Runtime.getRuntime().addShutdownHook(
+            Thread(
+                { PlayerControlPreferencesStore.saveVolume(currentVolume()) },
+                "teledrive-volume-save"
+            )
+        )
+    }
+
     fun currentVolume(): Int = current.get().coerceIn(0, MAX_VOLUME)
 
     fun update(value: Int, persist: Boolean) {
