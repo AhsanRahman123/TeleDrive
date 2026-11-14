@@ -220,6 +220,7 @@ internal fun DesktopMediaPlayer(
     val resumeInitializationComplete = remember(mediaId, mrl, isAudio) {
         AtomicBoolean(false)
     }
+    val resumeFinished = remember(mediaId, mrl, isAudio) { AtomicBoolean(false) }
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
     val acceptsCurrentMediaEvents = remember(mrl, mediaId, isAudio) { AtomicBoolean(false) }
@@ -252,7 +253,7 @@ internal fun DesktopMediaPlayer(
     LaunchedEffect(timeUpdates, mediaId, isAudio) {
         for (position in timeUpdates) {
             timeMs = position
-            if (!isAudio && resumeInitializationComplete.get()) {
+            if (!isAudio && resumeInitializationComplete.get() && !resumeFinished.get()) {
                 VideoResumeStore.savePosition(mediaId, position, durationMs)
             }
         }
@@ -301,6 +302,7 @@ internal fun DesktopMediaPlayer(
                     playerScope.launch {
                         playing = true
                         finished = false
+                        resumeFinished.set(false)
                         buffering = false
                         // VLC can report the media length before the first playing event. Read
                         // the status here as a fallback so the remaining-time label and seekbar
@@ -346,7 +348,7 @@ internal fun DesktopMediaPlayer(
                         playing = false
                         finished = true
                         if (!isAudio) VideoResumeStore.clear(mediaId)
-                        resumeInitializationComplete.set(true)
+                        resumeFinished.set(true)
                         if (!latestRepeatOne.value || latestSleepAtTrackEnd.value) {
                             latestOnPlaybackFinished.value()
                         }
@@ -497,7 +499,12 @@ internal fun DesktopMediaPlayer(
         onDispose {
             // Save the most recent known video position before navigating to another file or
             // leaving the viewer. Periodic time updates already persist progress while playing.
-            if (!isAudio && resumeInitializationComplete.get() && !latestFinished.value) {
+            if (
+                !isAudio &&
+                resumeInitializationComplete.get() &&
+                !resumeFinished.get() &&
+                !latestFinished.value
+            ) {
                 VideoResumeStore.savePosition(
                     mediaId = mediaId,
                     positionMs = latestTimeMs.value,
