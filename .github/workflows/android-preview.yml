@@ -51,10 +51,14 @@ jobs:
           test "$package" = "com.drdisagree.teledrive.preview2"
           echo "Verified separate preview package: $package" >> "$GITHUB_STEP_SUMMARY"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          certificate="$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
-          echo "Preview signing certificate SHA-256: $certificate"
-          test "$certificate" = "b517ff6fe383494da66d717bd4088b89276b96455a161b38abd6b158e399fab8"
-          echo "Verified stable preview signing certificate." >> "$GITHUB_STEP_SUMMARY"
+          keytool_cert="$(keytool -exportcert -keystore .github/keys/teledrive-preview.keystore -storepass preview-only-2026 -alias teledrive-preview | sha256sum | awk '{print tolower($1)}')"
+          apk_cert="$("$apksigner" verify --print-certs "$apk" 2>&1 | grep -i 'certificate SHA-256 digest' | tail -n 1 | sed 's/.*: *//' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          echo "Keystore certificate SHA-256: $keytool_cert"
+          echo "APK certificate SHA-256: $apk_cert"
+          test -n "$apk_cert"
+          test "$apk_cert" = "$keytool_cert"
+          echo "Verified APK uses the persistent preview signing certificate." >> "$GITHUB_STEP_SUMMARY"
+
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v7
