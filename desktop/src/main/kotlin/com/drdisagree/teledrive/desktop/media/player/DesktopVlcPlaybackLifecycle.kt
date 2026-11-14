@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Each MediaPlayer has its own asynchronous submit queue. Disposing one player and starting
  * another without waiting allows the outgoing audio output/decoder to remain alive while the
  * incoming player starts. This coordinator enforces a single active player and waits for the
- * outgoing player's queued commands, synchronous stop, and release before starting the next.
+ * outgoing player's queued stop command and native release to finish before starting the next.
  */
 internal class SingleActivePlaybackCoordinator<T : Any>(
     private val stopAndRelease: suspend (T) -> Unit
