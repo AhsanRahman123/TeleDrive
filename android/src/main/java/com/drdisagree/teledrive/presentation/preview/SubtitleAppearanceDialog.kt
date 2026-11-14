@@ -71,10 +71,10 @@ private val subtitleEdges = listOf(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun SubtitleAppearanceDialog(
-    appearance: SubtitleAppearance,
+internal fun AndroidSubtitleStyleDialog(
+    appearance: AndroidSubtitleStyle,
     onDismiss: () -> Unit,
-    onApply: (SubtitleAppearance) -> Unit
+    onApply: (AndroidSubtitleStyle) -> Unit
 ) {
     var draft by remember(appearance) { mutableStateOf(appearance.normalized()) }
     val current = draft.normalized()
@@ -88,7 +88,7 @@ internal fun SubtitleAppearanceDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Subtitle settings", style = MaterialTheme.typography.titleLarge)
-                TextButton(onClick = { draft = SubtitleAppearance() }) {
+                TextButton(onClick = { draft = AndroidSubtitleStyle() }) {
                     Text("Reset")
                 }
             }
@@ -103,8 +103,8 @@ internal fun SubtitleAppearanceDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    "Use the same app-controlled subtitle style approach as the Windows player. " +
-                        "Changes apply immediately when you press Apply.",
+                    "These controls are for the Android player and are applied through Android Media3. " +
+                        "They are stored separately from Windows subtitle settings.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -112,13 +112,13 @@ internal fun SubtitleAppearanceDialog(
                 SectionTitle("Style")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = current.usePlayerDefaults,
-                        onClick = { draft = current.copy(usePlayerDefaults = true) },
+                        selected = current.useSystemDefaults,
+                        onClick = { draft = current.copy(useSystemDefaults = true) },
                         label = { Text("Player defaults") }
                     )
                     FilterChip(
-                        selected = !current.usePlayerDefaults,
-                        onClick = { draft = current.copy(usePlayerDefaults = false) },
+                        selected = !current.useSystemDefaults,
+                        onClick = { draft = current.copy(useSystemDefaults = false) },
                         label = { Text("Custom") }
                     )
                 }
@@ -165,7 +165,7 @@ internal fun SubtitleAppearanceDialog(
                     valueRange = 0.08f..0.92f
                 )
 
-                if (!current.usePlayerDefaults) {
+                if (!current.useSystemDefaults) {
                     SectionTitle("Font")
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         subtitleFonts.forEach { (family, label) ->
@@ -215,8 +215,7 @@ internal fun SubtitleAppearanceDialog(
                         draft = current.copy(edgeOpacity = it)
                     }
                     Text(
-                        "The selected style is applied by TeleDrive to the active subtitle renderer. " +
-                            "It does not require pausing or reopening the video.",
+                        "TeleDrive applies this style through Android Media3 without pausing or reopening the video.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
