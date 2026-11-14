@@ -95,5 +95,10 @@ internal fun videoResumeTarget(savedPositionMs: Long, durationMs: Long): Long? {
     return savedPositionMs.coerceAtMost(durationMs - VIDEO_RESUME_END_MARGIN_MS)
 }
 
+internal fun isVideoResumePositionConfirmed(actualPositionMs: Long, expectedPositionMs: Long): Boolean =
+    expectedPositionMs > 0L &&
+        abs(actualPositionMs - expectedPositionMs) <= RESUME_POSITION_CONFIRMATION_MS
+
 private const val MIN_RESUME_POSITION_MS = 2_000L
 private const val VIDEO_RESUME_END_MARGIN_MS = 1_500L
+private const val RESUME_POSITION_CONFIRMATION_MS = 1_500L
