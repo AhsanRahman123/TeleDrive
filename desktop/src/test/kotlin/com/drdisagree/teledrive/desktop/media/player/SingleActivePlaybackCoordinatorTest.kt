@@ -2,7 +2,11 @@ package com.drdisagree.teledrive.desktop.media.player
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.withContext
+import java.util.concurrent.Executors
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -76,4 +80,38 @@ class SingleActivePlaybackCoordinatorTest {
 
         assertEquals(listOf(neverStarted), released)
     }
+    @Test
+    fun `native release runs outside the player's submit executor`() = runBlocking {
+        val playerExecutor = Executors.newSingleThreadExecutor()
+        val playerDispatcher = playerExecutor.asCoroutineDispatcher()
+        var stopThread: Thread? = null
+        var releaseThread: Thread? = null
+        val events = mutableListOf<String>()
+
+        try {
+            stopThenReleaseOutsidePlayerExecutor(
+                stopOnPlayerExecutor = {
+                    withContext(playerDispatcher) {
+                        stopThread = Thread.currentThread()
+                        events += "stop"
+                    }
+                },
+                releasePlayer = {
+                    releaseThread = Thread.currentThread()
+                    events += "release"
+                }
+            )
+        } finally {
+            playerDispatcher.close()
+            playerExecutor.shutdown()
+        }
+
+        assertEquals(listOf("stop", "release"), events)
+        assertNotSame(
+            "MediaPlayer.release() must not run on the player's own submit executor",
+            stopThread,
+            releaseThread
+        )
+    }
+
 }
