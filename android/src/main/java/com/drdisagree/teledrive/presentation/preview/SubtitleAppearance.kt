@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.presentation.preview
 
 import android.content.Context
 import android.graphics.Typeface
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
@@ -93,6 +94,7 @@ internal object SubtitleAppearanceStore {
     }
 }
 
+@OptIn(UnstableApi::class)
 internal fun applySubtitleAppearance(playerView: PlayerView, appearance: SubtitleAppearance) {
     val subtitleView: SubtitleView = playerView.subtitleView ?: return
     val value = appearance.normalized()
@@ -108,6 +110,7 @@ internal fun applySubtitleAppearance(playerView: PlayerView, appearance: Subtitl
     subtitleView.setBottomPaddingFraction((1f - value.verticalPosition).coerceIn(0.02f, 0.5f))
 }
 
+@OptIn(UnstableApi::class)
 private fun SubtitleAppearance.toCaptionStyle(): CaptionStyleCompat {
     if (usePlayerDefaults) return CaptionStyleCompat.DEFAULT
 
