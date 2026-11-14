@@ -1125,7 +1125,10 @@ fun FilesScreen(
                                             LocalBottomBarInset.current
                                 ),
                                 onOpenFolder = ::navigateToFolder,
-                                onOpenFile = onOpenFile,
+                                onOpenFile = { fileId, sequence ->
+                                    saveCurrentTabPosition()
+                                    onOpenFile(fileId, sequence)
+                                },
                                 onRequestTrash = { confirmTrash = true },
                                 onCreateFolder = { showCreateFolder = true },
                                 onCreateTab = ::createTab,
