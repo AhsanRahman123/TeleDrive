@@ -214,6 +214,9 @@ fun SubtitleSettingsSheet(
                     selected = current.edgeColor,
                     onSelected = { onAppearanceChange(current.copy(edgeColor = it)) }
                 )
+                OpacityControl("Outline opacity", current.edgeOpacity) {
+                    onAppearanceChange(current.copy(edgeOpacity = it))
+                }
             }
 
             Spacer(Modifier.height(4.dp))
