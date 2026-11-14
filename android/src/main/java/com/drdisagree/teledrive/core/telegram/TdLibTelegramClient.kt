@@ -1202,25 +1202,45 @@ class TdLibTelegramClient(
     override suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray? {
         val message = runCatching { send(TdApi.GetMessage(chatId, messageId)) }.getOrNull()
             ?: return null
+
         val (thumbnailFile, miniThumbnail) = when (val content = message.content) {
             is TdApi.MessageDocument ->
                 content.document.thumbnail?.file to content.document.minithumbnail?.data
 
+            is TdApi.MessageAudio ->
+                content.audio.albumCoverThumbnail?.file to
+                    content.audio.albumCoverMinithumbnail?.data
+
+            is TdApi.MessageVideo ->
+                content.video.thumbnail?.file to content.video.minithumbnail?.data
+
+            is TdApi.MessageAnimation ->
+                content.animation.thumbnail?.file to content.animation.minithumbnail?.data
+
+            is TdApi.MessageVideoNote ->
+                content.videoNote.thumbnail?.file to content.videoNote.minithumbnail?.data
+
             is TdApi.MessagePhoto -> {
-                val size = content.photo.sizes.minByOrNull { photoSize ->
-                    kotlin.math.abs(maxOf(photoSize.width, photoSize.height) - THUMBNAIL_EDGE)
-                }
-                size?.photo to content.photo.minithumbnail?.data
+                val photo = content.photo
+                val preferredSize = photo.sizes
+                    .filter { size ->
+                        size.width > 0 && size.height > 0 &&
+                            maxOf(size.width, size.height) <= THUMBNAIL_EDGE
+                    }
+                    .maxByOrNull { size -> size.width.toLong() * size.height }
+                    ?: photo.sizes.minByOrNull { size -> size.width.toLong() * size.height }
+                preferredSize?.photo to photo.minithumbnail?.data
             }
 
             else -> return null
         }
 
-        thumbnailFile?.let { file ->
+        thumbnailFile?.let { thumbnail ->
             val downloaded = runCatching {
-                send(TdApi.DownloadFile(file.id, THUMBNAIL_PRIORITY, 0, 0, true))
+                send(TdApi.DownloadFile(thumbnail.id, THUMBNAIL_PRIORITY, 0, 0, true))
             }.getOrNull()
-            val path = downloaded?.local?.path?.takeIf { it.isNotEmpty() }
+            val path = downloaded?.readyPath()
+                ?: downloaded?.local?.path?.takeIf { it.isNotEmpty() && File(it).exists() }
             if (path != null) {
                 runCatching { File(path).readBytes() }.getOrNull()?.let { return it }
             }
@@ -1229,22 +1249,27 @@ class TdLibTelegramClient(
     }
 
     private suspend fun remoteFile(remoteFileId: String): TdApi.File {
-        // A Telegram video/audio message can use a typed remote ID, not FileTypeDocument.
-        val fileTypes = listOf(
-            TdApi.FileTypeDocument(),
-            TdApi.FileTypeVideo(),
-            TdApi.FileTypeAudio(),
-            TdApi.FileTypePhoto()
-        )
-        var firstFailure: TelegramException? = null
-        for (fileType in fileTypes) {
-            try {
-                return send(TdApi.GetRemoteFile(remoteFileId, fileType))
-            } catch (failure: TelegramException) {
-                if (firstFailure == null) firstFailure = failure
+        // Let TDLib resolve the typed remote ID first (document, audio, video, photo, sticker, etc.).
+        try {
+            return send(TdApi.GetRemoteFile(remoteFileId, null))
+        } catch (genericFailure: TelegramException) {
+            // Older TDLib paths may still require an explicit media type. Retain the typed
+            // fallbacks that were already used by the Android preview build.
+            val fileTypes = listOf(
+                TdApi.FileTypeDocument(),
+                TdApi.FileTypeVideo(),
+                TdApi.FileTypeAudio(),
+                TdApi.FileTypePhoto()
+            )
+            for (fileType in fileTypes) {
+                try {
+                    return send(TdApi.GetRemoteFile(remoteFileId, fileType))
+                } catch (_: TelegramException) {
+                    // Try the next known TDLib file type.
+                }
             }
+            throw genericFailure
         }
-        throw firstFailure ?: TelegramException(500, "Telegram remote file could not be resolved")
     }
 
     override suspend fun resolveFile(remoteFileId: String): TelegramFileInfo =
@@ -1277,7 +1302,11 @@ class TdLibTelegramClient(
     private fun TdApi.Message.mediaFile(): TdApi.File? = when (val body = content) {
         is TdApi.MessageDocument -> body.document.document
         is TdApi.MessageAudio -> body.audio.audio
+        is TdApi.MessageVoiceNote -> body.voiceNote.voice
         is TdApi.MessageVideo -> body.video.video
+        is TdApi.MessageVideoNote -> body.videoNote.video
+        is TdApi.MessageAnimation -> body.animation.animation
+        is TdApi.MessageSticker -> body.sticker.sticker
         is TdApi.MessagePhoto -> body.photo.sizes.maxByOrNull { it.photo.size }?.photo
         else -> null
     }
@@ -1535,6 +1564,46 @@ class TdLibTelegramClient(
             caption = body.caption?.text.orEmpty(),
             miniThumbnail = body.video.minithumbnail?.data
         )
+
+        is TdApi.MessageVoiceNote -> remoteDocument(
+            file = body.voiceNote.voice,
+            fileName = "voice_note_$id.ogg",
+            mimeType = body.voiceNote.mimeType,
+            caption = "",
+            miniThumbnail = null
+        )
+
+        is TdApi.MessageVideoNote -> remoteDocument(
+            file = body.videoNote.video,
+            fileName = "video_note_$id.mp4",
+            mimeType = "video/mp4",
+            caption = "",
+            miniThumbnail = body.videoNote.minithumbnail?.data
+        )
+
+        is TdApi.MessageAnimation -> remoteDocument(
+            file = body.animation.animation,
+            fileName = body.animation.fileName,
+            mimeType = body.animation.mimeType,
+            caption = body.caption?.text.orEmpty(),
+            miniThumbnail = body.animation.minithumbnail?.data
+        )
+
+        is TdApi.MessageSticker -> {
+            val sticker = body.sticker
+            val (extension, mimeType) = when (sticker.format) {
+                is TdApi.StickerFormatTgs -> "tgs" to "application/x-tgsticker"
+                is TdApi.StickerFormatWebm -> "webm" to "video/webm"
+                else -> "webp" to "image/webp"
+            }
+            remoteDocument(
+                file = sticker.sticker,
+                fileName = "sticker_$id.$extension",
+                mimeType = mimeType,
+                caption = "",
+                miniThumbnail = null
+            )
+        }
 
         is TdApi.MessagePhoto -> body.photo.sizes.maxByOrNull { it.photo.size }?.let { size ->
             remoteDocument(
