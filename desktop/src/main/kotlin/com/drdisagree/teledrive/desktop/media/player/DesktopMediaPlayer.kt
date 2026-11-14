@@ -259,7 +259,7 @@ internal fun DesktopMediaPlayer(
                 val pendingResume = pendingResumeTargetMs.get()
                 if (pendingResume > 0L) {
                     // Ignore opening-time events until VLC reports the restored seek position.
-                    if (kotlin.math.abs(position - pendingResume) <= RESUME_SEEK_CONFIRMATION_MS &&
+                    if (isVideoResumePositionConfirmed(position, pendingResume) &&
                         pendingResumeTargetMs.compareAndSet(pendingResume, 0L)
                     ) {
                         VideoResumeStore.savePosition(mediaId, position, durationMs)
@@ -2046,7 +2046,6 @@ private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_500L
 private const val BRIGHTNESS_READ_GUARD_MS = 1_800L
 private const val AUDIO_OUTPUT_REAPPLY_INTERVAL_MS = 250L
 private const val AUDIO_OUTPUT_REAPPLY_ATTEMPTS = 3
-private const val RESUME_SEEK_CONFIRMATION_MS = 3_000L
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 
