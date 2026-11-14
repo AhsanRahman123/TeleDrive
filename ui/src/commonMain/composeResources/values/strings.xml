@@ -964,4 +964,17 @@
         <item>简体中文</item>
         <item>Español</item>
     </string-array>
+
+    <!-- File view modes -->
+    <string name="files_view_mode">View mode</string>
+    <string name="files_view_grid">Grid</string>
+    <string name="files_view_list">List</string>
+    <string name="files_view_details">Details</string>
+
+    <string name="preview_slideshow_start">Start slideshow</string>
+    <string name="preview_slideshow_pause">Pause slideshow</string>
+    <string name="gallery_start_slideshow">Start slideshow</string>
+    <string name="transfers_prioritize_download">Move download to top of queue</string>
+    <string name="error_remote_deletion_disabled">Permanent deletion of files stored in Telegram is disabled to protect your data.</string>
+    <string name="trash_remote_delete_protected">Permanent deletion from Telegram is disabled. Items moved here remain in your storage channel and can be restored at any time.</string>
 </resources>

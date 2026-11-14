@@ -16,7 +16,8 @@ data class PreviewSequence(
     val hiddenOnly: Boolean = false,
     val archivedOnly: Boolean = false,
     val sortField: FileSortField = FileSortField.NAME,
-    val sortDirection: SortDirection = SortDirection.ASCENDING
+    val sortDirection: SortDirection = SortDirection.ASCENDING,
+    val startSlideshow: Boolean = false
 ) {
 
     fun routeFor(fileId: String): Route.Preview = Route.Preview(
@@ -31,7 +32,8 @@ data class PreviewSequence(
         hiddenOnly = hiddenOnly,
         archivedOnly = archivedOnly,
         sortField = sortField.name,
-        sortDescending = sortDirection == SortDirection.DESCENDING
+        sortDescending = sortDirection == SortDirection.DESCENDING,
+        startSlideshow = startSlideshow
     )
 }
 

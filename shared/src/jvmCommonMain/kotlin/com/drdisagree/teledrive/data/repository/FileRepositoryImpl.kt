@@ -579,20 +579,14 @@ class FileRepositoryImpl(
             }
         }
 
-        val chatId = existing.chatId
-        val messageId = existing.messageId
-        if (chatId != null && messageId != null) {
-            runCatching { telegramClient.deleteMessages(chatId, listOf(messageId)) }
-        }
+        // Keep the previous remote mapping until TransferExecutor replaces that Telegram
+        // message in place. If the edit fails, the old remote document remains recoverable.
         fileDao.upsert(
             existing.copy(
                 name = name,
                 localPath = file.absolutePath,
                 sizeBytes = file.length(),
                 contentHash = null,
-                messageId = null,
-                remoteFileId = null,
-                remoteUniqueId = null,
                 backupState = BackupState.NONE,
                 modifiedAt = now
             )

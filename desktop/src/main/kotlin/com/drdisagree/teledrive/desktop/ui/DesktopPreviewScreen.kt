@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.outlined.Description
@@ -90,6 +92,7 @@ import com.drdisagree.teledrive.desktop.resources.preview_open_externally
 import com.drdisagree.teledrive.desktop.resources.preview_open_failed
 import com.drdisagree.teledrive.desktop.resources.preview_stream
 import com.drdisagree.teledrive.domain.model.DriveFile
+import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.LinkedText
 import com.drdisagree.teledrive.presentation.common.MarkdownText
@@ -104,6 +107,8 @@ import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalUrlOpener
 import com.drdisagree.teledrive.presentation.preview.PreviewContent
 import com.drdisagree.teledrive.presentation.preview.PreviewViewModel
+import com.drdisagree.teledrive.presentation.preview.PREVIEW_SLIDESHOW_INTERVAL_MS
+import com.drdisagree.teledrive.presentation.preview.nextSlideshowIndex
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
@@ -129,9 +134,12 @@ import com.drdisagree.teledrive.resources.preview_preparing
 import com.drdisagree.teledrive.resources.preview_previous
 import com.drdisagree.teledrive.resources.preview_progress_bytes
 import com.drdisagree.teledrive.resources.preview_remove_favorites
+import com.drdisagree.teledrive.resources.preview_slideshow_pause
+import com.drdisagree.teledrive.resources.preview_slideshow_start
 import com.drdisagree.teledrive.resources.preview_requires_download
 import com.drdisagree.teledrive.resources.preview_truncated_download_view
 import com.drdisagree.teledrive.resources.preview_unarchive
+import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
@@ -155,6 +163,18 @@ fun DesktopPreviewScreen(
 
     var index by remember(state.ready) { mutableStateOf(state.initialIndex) }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
+    val canSlideshow = state.files.size > 1 &&
+            state.files.all { it.category == FileCategory.IMAGE }
+    var slideshowPlaying by remember(state.files, state.autoStartSlideshow) {
+        mutableStateOf(state.autoStartSlideshow && canSlideshow)
+    }
+    LaunchedEffect(slideshowPlaying, index, canSlideshow) {
+        if (!slideshowPlaying || !canSlideshow) return@LaunchedEffect
+        delay(PREVIEW_SLIDESHOW_INTERVAL_MS)
+        val nextIndex = nextSlideshowIndex(index, state.files.size)
+        if (nextIndex == null) slideshowPlaying = false
+        else index = nextIndex
+    }
     val infoTarget by viewModel.infoTarget.collectAsState()
     var showOverflow by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<DriveFile?>(null) }
@@ -192,6 +212,21 @@ fun DesktopPreviewScreen(
                 },
                 actions = {
                     file?.let { currentFile ->
+                        if (canSlideshow) {
+                            IconButton(onClick = { slideshowPlaying = !slideshowPlaying }) {
+                                Icon(
+                                    imageVector = if (slideshowPlaying) {
+                                        Icons.Filled.Pause
+                                    } else {
+                                        Icons.Filled.PlayArrow
+                                    },
+                                    contentDescription = stringResource(
+                                        if (slideshowPlaying) Res.string.preview_slideshow_pause
+                                        else Res.string.preview_slideshow_start
+                                    )
+                                )
+                            }
+                        }
                         IconButton(onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
                                 Icons.Filled.Info,

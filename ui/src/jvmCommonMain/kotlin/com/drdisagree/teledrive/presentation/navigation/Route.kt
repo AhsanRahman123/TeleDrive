@@ -39,7 +39,8 @@ sealed interface Route {
         val hiddenOnly: Boolean = false,
         val archivedOnly: Boolean = false,
         val sortField: String? = null,
-        val sortDescending: Boolean = false
+        val sortDescending: Boolean = false,
+        val startSlideshow: Boolean = false
     ) : Route
 
     @Serializable

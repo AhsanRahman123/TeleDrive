@@ -31,7 +31,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudQueue
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
@@ -87,10 +86,6 @@ import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.channels_channel_container
 import com.drdisagree.teledrive.resources.channels_create_one_teledrive_store
 import com.drdisagree.teledrive.resources.channels_creates_private_channel_account
-import com.drdisagree.teledrive.resources.channels_delete_confirm_hint
-import com.drdisagree.teledrive.resources.channels_delete_message
-import com.drdisagree.teledrive.resources.channels_delete_telegram
-import com.drdisagree.teledrive.resources.channels_delete_title
 import com.drdisagree.teledrive.resources.channels_drive_actions
 import com.drdisagree.teledrive.resources.channels_drive_name
 import com.drdisagree.teledrive.resources.channels_look_drives
@@ -102,7 +97,6 @@ import com.drdisagree.teledrive.resources.channels_renames_channel_telegram_well
 import com.drdisagree.teledrive.resources.common_back
 import com.drdisagree.teledrive.resources.common_cancel
 import com.drdisagree.teledrive.resources.common_create
-import com.drdisagree.teledrive.resources.common_delete_forever
 import com.drdisagree.teledrive.resources.common_rename
 import com.drdisagree.teledrive.resources.common_storage_channels
 import org.jetbrains.compose.resources.stringResource
@@ -120,7 +114,6 @@ fun ChannelsScreen(
 
     var showCreate by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<DriveChannel?>(null) }
-    var deleteTarget by remember { mutableStateOf<DriveChannel?>(null) }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
@@ -150,17 +143,6 @@ fun ChannelsScreen(
                 viewModel.rename(channel.chatId, label)
             },
             onDismiss = { renameTarget = null }
-        )
-    }
-
-    deleteTarget?.let { channel ->
-        DeleteChannelDialog(
-            channel = channel,
-            onConfirm = {
-                deleteTarget = null
-                viewModel.deleteRemotely(channel.chatId)
-            },
-            onDismiss = { deleteTarget = null }
         )
     }
 
@@ -216,9 +198,6 @@ fun ChannelsScreen(
 
         val keyboard = rememberKeyboardCollection(listState)
         val shortcuts = CollectionShortcuts(
-            onDelete = { index ->
-                if (channels.size > 1) channels.getOrNull(index)?.let { deleteTarget = it }
-            },
             onRename = { index -> channels.getOrNull(index)?.let { renameTarget = it } },
             onBack = onBack
         )
@@ -235,8 +214,6 @@ fun ChannelsScreen(
                     channel = channel,
                     onOpen = { viewModel.switchTo(channel.chatId) },
                     onRename = { renameTarget = channel },
-                    onDelete = { deleteTarget = channel },
-                    canDelete = channels.size > 1,
                     actionsFocusable = keyboard.current == index,
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
@@ -259,8 +236,6 @@ private fun ChannelRow(
     channel: DriveChannel,
     onOpen: () -> Unit,
     onRename: () -> Unit,
-    onDelete: () -> Unit,
-    canDelete: Boolean,
     actionsFocusable: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -340,15 +315,6 @@ private fun ChannelRow(
                         onRename()
                     }
                 )
-                DropdownMenuItem(
-                    text = { Text(stringResource(Res.string.channels_delete_telegram)) },
-                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                    enabled = canDelete,
-                    onClick = {
-                        showMenu = false
-                        onDelete()
-                    }
-                )
             }
         }
     }
@@ -373,72 +339,6 @@ private fun channelSubtitle(channel: DriveChannel): String = buildString {
             }
         )
     }
-}
-
-/**
- * Deleting destroys every file in the drive, so the name has to be typed; a tap is too easy by
- * accident.
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun DeleteChannelDialog(
-    channel: DriveChannel,
-    onConfirm: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    var typed by remember { mutableStateOf("") }
-    val matches = typed.trim().equals(channel.displayName, ignoreCase = true)
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(Res.string.channels_delete_title, channel.displayName)) },
-        text = {
-            Column {
-                Text(
-                    text = stringResource(
-                        Res.string.channels_delete_message,
-                        channel.fileCount,
-                        Formatters.bytes(channel.storedBytes)
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = typed,
-                    onValueChange = { typed = it },
-                    label = {
-                        Text(
-                            stringResource(
-                                Res.string.channels_delete_confirm_hint,
-                                channel.displayName
-                            )
-                        )
-                    },
-                    singleLine = true,
-                    isError = typed.isNotEmpty() && !matches,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                shapes = ButtonDefaults.shapes(),
-                enabled = matches,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError
-                )
-            ) { Text(stringResource(Res.string.common_delete_forever)) }
-        },
-        dismissButton = {
-            OutlinedButton(
-                onClick = onDismiss,
-                shapes = ButtonDefaults.shapes()
-            ) { Text(stringResource(Res.string.common_cancel)) }
-        }
-    )
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

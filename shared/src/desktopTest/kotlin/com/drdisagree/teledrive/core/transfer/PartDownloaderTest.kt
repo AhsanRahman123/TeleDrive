@@ -10,6 +10,7 @@ import com.drdisagree.teledrive.data.repository.SyncHarness
 import com.drdisagree.teledrive.testing.unused
 import java.io.File
 import java.nio.file.Files
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -62,6 +63,36 @@ class PartDownloaderTest {
     }
 
     @Test
+    fun `a corrupt downloaded part is rejected before later parts are fetched`() = runBlocking {
+        recordParts()
+        val faultyTelegram = PartTelegram(contents, workDir, corruptPartIndex = 0)
+        val target = FilePartialDownload.open(destination, "corrupt.vhdx", null)!!
+
+        val events = downloader(faultyTelegram)
+            .download("f1", encrypted = false, target = target)
+            .toList()
+
+        assertTrue(events.contains(PartDownloadEvent.IntegrityFailure(0)))
+        assertEquals(listOf("r0"), faultyTelegram.downloaded)
+        assertEquals(listOf("r0"), faultyTelegram.freed)
+        assertEquals(0L, target.length())
+    }
+
+    @Test
+    fun `a corrupted already downloaded prefix is discarded before resume`() = runBlocking {
+        recordParts()
+        val first = FilePartialDownload.open(destination, "resume.vhdx", null)!!
+        val damaged = contents[0].copyOf().apply { this[0] = 99 }
+        first.append { it.write(damaged) }
+
+        val resumed = FilePartialDownload.open(destination, "resume.vhdx", first.token)!!
+        downloader().download("f1", encrypted = false, target = resumed).toList()
+
+        assertEquals(listOf("r0", "r1", "r2"), telegram.downloaded)
+        assertArrayEquals(contents.reduce { a, b -> a + b }, File(resumed.token).readBytes())
+    }
+
+    @Test
     fun `a name already taken gets a free one`() {
         File(destination, "big.vhdx").writeText("old")
 
@@ -69,6 +100,11 @@ class PartDownloaderTest {
 
         assertTrue(File(target.token).name.startsWith("big (1).vhdx"))
     }
+
+    private fun checksum(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
 
     private suspend fun recordParts() {
         var offset = 0L
@@ -84,15 +120,16 @@ class PartDownloaderTest {
                     plainOffset = offset,
                     plainSize = bytes.size.toLong(),
                     storedSize = bytes.size.toLong(),
-                    uploadedAt = 1
+                    uploadedAt = 1,
+                    plainHash = checksum(bytes)
                 )
             )
             offset += bytes.size
         }
     }
 
-    private fun downloader() = PartDownloader(
-        telegramClient = telegram,
+    private fun downloader(client: TelegramClient = telegram) = PartDownloader(
+        telegramClient = client,
         filePartDao = parts,
         streamCrypto = StreamCrypto(),
         wrappedKeyRepository = unused(),
@@ -105,7 +142,8 @@ class PartDownloaderTest {
 
     private class PartTelegram(
         private val contents: List<ByteArray>,
-        private val dir: File
+        private val dir: File,
+        private val corruptPartIndex: Int? = null
     ) : TelegramClient by unused() {
         val downloaded = mutableListOf<String>()
         val freed = mutableListOf<String>()
@@ -113,7 +151,10 @@ class PartDownloaderTest {
         override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> {
             downloaded += remoteFileId
             val index = remoteFileId.removePrefix("r").toInt()
-            val file = File(dir, "tdlib-$remoteFileId").apply { writeBytes(contents[index]) }
+            val bytes = contents[index].copyOf().also {
+                if (index == corruptPartIndex && it.isNotEmpty()) it[0] = (it[0].toInt() xor 1).toByte()
+            }
+            val file = File(dir, "tdlib-$remoteFileId").apply { writeBytes(bytes) }
             return flowOf(TelegramDownloadEvent.Completed(file.absolutePath, file.length()))
         }
 

@@ -4,6 +4,12 @@ import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(connection: SQLiteConnection) {
+        connection.execSQL("ALTER TABLE `file_parts` ADD COLUMN `plainHash` TEXT")
+    }
+}
+
 val MIGRATION_16_17 = object : Migration(16, 17) {
     override fun migrate(connection: SQLiteConnection) {
         connection.execSQL("ALTER TABLE `files` ADD COLUMN `remoteBase` TEXT")

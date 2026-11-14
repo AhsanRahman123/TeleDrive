@@ -24,6 +24,7 @@ interface ChannelRepository {
 
     suspend fun rename(chatId: Long, label: String): AppResult<Unit>
 
+    /** Permanent channel deletion is disabled to protect all files stored in the channel. */
     suspend fun deleteRemotely(chatId: Long): AppResult<Unit>
 
     suspend fun backupFolders(chatId: Long): Set<String>

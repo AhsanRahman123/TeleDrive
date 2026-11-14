@@ -53,6 +53,8 @@ sealed interface AppError {
 
     data class UnsupportedOperation(val reason: String? = null) : AppError
 
+    data object RemoteDeletionDisabled : AppError
+
     data class EncryptionFailure(val stage: String? = null) : AppError
 
     data class TransferFailed(val reason: String? = null) : AppError

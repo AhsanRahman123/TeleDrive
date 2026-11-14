@@ -325,7 +325,7 @@ compose.desktop {
 }
 
 val DEB_DEPENDS = listOf(
-    "libssl3t64",
+    "libssl3 | libssl3t64",
     "zlib1g",
     "libstdc++6",
     "libgcc-s1",

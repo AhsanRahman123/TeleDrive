@@ -5,6 +5,7 @@ import com.drdisagree.teledrive.domain.model.DriveFile
 data class PreviewUiState(
     val files: List<DriveFile> = emptyList(),
     val initialIndex: Int = 0,
+    val autoStartSlideshow: Boolean = false,
     val ready: Boolean = false,
     val closed: Boolean = false
 )

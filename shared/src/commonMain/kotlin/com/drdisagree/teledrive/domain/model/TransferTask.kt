@@ -25,4 +25,8 @@ data class TransferTask(
     val etaSeconds: Long?
         get() = speedBytesPerSecond.takeIf { it > 0 && sizeBytes > transferredBytes }
             ?.let { (sizeBytes - transferredBytes) / it }
+
+    /** True only while a queued download can still be moved ahead of other queued work. */
+    val canPrioritizeDownload: Boolean
+        get() = type == TransferType.DOWNLOAD && state == TransferState.QUEUED
 }

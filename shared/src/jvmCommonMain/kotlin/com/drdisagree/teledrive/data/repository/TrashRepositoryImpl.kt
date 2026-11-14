@@ -1,47 +1,24 @@
 package com.drdisagree.teledrive.data.repository
 
 import com.drdisagree.teledrive.core.common.AppError
-import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.common.AppResult
-import com.drdisagree.teledrive.core.common.SafeLog
-import com.drdisagree.teledrive.core.crypto.SecureFileDeleter
 import com.drdisagree.teledrive.core.publish.PublishScheduler
-import com.drdisagree.teledrive.core.telegram.TelegramClient
-import com.drdisagree.teledrive.core.telegram.TelegramException
-import com.drdisagree.teledrive.data.local.dao.BackupDao
 import com.drdisagree.teledrive.data.local.dao.FileDao
-import com.drdisagree.teledrive.data.local.dao.FilePartDao
 import com.drdisagree.teledrive.data.local.dao.FolderDao
-import com.drdisagree.teledrive.data.local.dao.FolderTombstoneDao
-import com.drdisagree.teledrive.data.local.dao.PendingDeleteDao
-import com.drdisagree.teledrive.data.local.dao.ThumbnailDao
-import com.drdisagree.teledrive.data.local.entity.PendingDeleteEntity
-import com.drdisagree.teledrive.data.local.entity.FolderTombstoneEntity
 import com.drdisagree.teledrive.data.mapper.toDomain
 import com.drdisagree.teledrive.domain.model.TrashItem
-import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.domain.repository.TrashRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TrashRepositoryImpl(
-    private val storagePaths: AppStoragePaths,
     private val fileDao: FileDao,
     private val folderDao: FolderDao,
-    private val backupDao: BackupDao,
-    private val thumbnailDao: ThumbnailDao,
-    private val telegramClient: TelegramClient,
-    private val secureFileDeleter: SecureFileDeleter,
     private val publishScheduler: PublishScheduler,
-    private val pendingDeleteDao: PendingDeleteDao,
-    private val filePartDao: FilePartDao,
-    private val activeChannel: ActiveChannel,
-    private val transferRepository: TransferRepository,
-    private val tombstoneDao: FolderTombstoneDao
+    private val activeChannel: ActiveChannel
 ) : TrashRepository {
 
     override fun observeTrash(): Flow<List<TrashItem>> =
@@ -152,128 +129,20 @@ class TrashRepositoryImpl(
         return AppResult.Success(Unit)
     }
 
-    override suspend fun deleteFilesPermanently(ids: List<String>): AppResult<Unit> {
-        if (ids.isEmpty()) return AppResult.Success(Unit)
-        transferRepository.cancelForFiles(ids)
-        val entities = ids.chunked(SQL_BATCH).flatMap { fileDao.byIds(it) }
+    override suspend fun deleteFilesPermanently(ids: List<String>): AppResult<Unit> =
+        AppResult.Failure(AppError.RemoteDeletionDisabled)
 
-        val parts = ids.chunked(SQL_BATCH).flatMap { filePartDao.partsOfAll(it) }
-        val remoteByChat = (
-                entities
-                    .filter { it.chatId != null && it.messageId != null }
-                    .map { it.chatId!! to it.messageId!! } +
-                        parts
-                            .filter { it.chatId != null && it.messageId != null }
-                            .map { it.chatId!! to it.messageId!! } +
-                        entities
-                            .filter { it.chatId != null && it.iconFileId != null }
-                            .mapNotNull { entity ->
-                                val iconMsgId = entity.iconFileId?.substringAfter(":", "")?.toLongOrNull()
-                                if (iconMsgId != null) entity.chatId!! to iconMsgId else null
-                            }
-                )
-            .distinct()
-            .groupBy({ it.first }, { it.second })
+    override suspend fun deleteFolderPermanently(id: String): AppResult<Unit> =
+        AppResult.Failure(AppError.RemoteDeletionDisabled)
 
-        pendingDeleteDao.upsertAll(
-            remoteByChat.flatMap { (chatId, messageIds) ->
-                messageIds.map { messageId ->
-                    PendingDeleteEntity(chatId, messageId, ids.first())
-                }
-            }
-        )
+    override suspend fun emptyTrash(): AppResult<Unit> =
+        AppResult.Failure(AppError.RemoteDeletionDisabled)
 
-        for ((chatId, messageIds) in remoteByChat) {
-            try {
-                telegramClient.deleteMessages(chatId, messageIds)
-                SafeLog.d(TAG, "Deleted ${messageIds.size} messages from storage chat")
-            } catch (e: TelegramException) {
-                SafeLog.w(TAG, "Deleting ${messageIds.size} messages failed", e)
-                publishScheduler.kick()
-                return AppResult.Failure(
-                    if (e.isRateLimit) AppError.RateLimited(e.retryAfterSeconds ?: 0)
-                    else AppError.TelegramError(e.code, e.message)
-                )
-            }
-        }
-        if (remoteByChat.isEmpty()) {
-            SafeLog.d(TAG, "No remote copies to delete for ${entities.size} files")
-        }
-
-        for (entity in entities) {
-            thumbnailDao.byFileId(entity.id)?.let { thumb ->
-                secureFileDeleter.delete(File(thumb.path))
-                thumbnailDao.delete(entity.id)
-            }
-            entity.localPath?.let { path -> deleteStagedCopy(File(path)) }
-        }
-        ids.chunked(SQL_BATCH).forEach { chunk ->
-            backupDao.deleteRecordsForFiles(chunk)
-            filePartDao.deleteFor(chunk)
-            fileDao.deleteByIds(chunk)
-        }
-        for ((chatId, messageIds) in remoteByChat) {
-            pendingDeleteDao.clear(chatId, messageIds)
-        }
-        return AppResult.Success(Unit)
-    }
-
-    override suspend fun deleteFolderPermanently(id: String): AppResult<Unit> {
-        val folderIds = collectTrashedDescendantFolderIds(id)
-        val chatId = activeChannel.id()
-        val fileIds = fileDao.trashedInFolders(folderIds, chatId).map { it.id }
-        val result = deleteFilesPermanently(fileIds)
-        if (result is AppResult.Failure) return result
-        recordDeleted(folderIds.map { it to chatId })
-        folderIds.reversed().forEach { folderDao.delete(it) }
-        markFolderStateDirty()
-        return AppResult.Success(Unit)
-    }
-
-    private suspend fun recordDeleted(folders: List<Pair<String, Long?>>) {
-        if (folders.isEmpty()) return
-        val deletedAt = System.currentTimeMillis()
-        tombstoneDao.upsert(
-            folders.map { (id, chatId) -> FolderTombstoneEntity(id, chatId, deletedAt) }
-        )
-    }
-
-    /** Only staging copies the app made are removed; the user's own files are never touched. */
-    private fun deleteStagedCopy(file: File) {
-        val staging = File(storagePaths.filesDir, IMPORT_DIR)
-        if (!file.absolutePath.startsWith(staging.absolutePath + File.separator)) return
-        secureFileDeleter.delete(file)
-    }
-
-    override suspend fun emptyTrash(): AppResult<Unit> {
-        val chatId = activeChannel.id()
-        val files = fileDao.trashInChat(chatId)
-        SafeLog.d(TAG, "Emptying trash: ${files.size} files")
-        var failure: AppResult.Failure? = null
-        for (chunk in files.chunked(REMOTE_DELETE_BATCH)) {
-            val result = deleteFilesPermanently(chunk.map { it.id })
-            if (result is AppResult.Failure) failure = result
-        }
-        if (failure != null) return failure
-        val folders = folderDao.trashInChat(chatId)
-        recordDeleted(folders.map { it.id to it.chatId })
-        folders.forEach { folderDao.delete(it.id) }
-        if (folders.isNotEmpty()) markFolderStateDirty()
-        return AppResult.Success(Unit)
-    }
-
-    override suspend fun clearExpired(days: Int): AppResult<Int> {
-        if (days <= 0) return AppResult.Success(0)
-        val threshold = System.currentTimeMillis() - days * MILLIS_PER_DAY
-        val files = fileDao.trashOlderThan(threshold)
-        val result = deleteFilesPermanently(files.map { it.id })
-        if (result is AppResult.Failure) return result
-        val folders = folderDao.trashOlderThan(threshold)
-        recordDeleted(folders.map { it.id to it.chatId })
-        folders.forEach { folderDao.delete(it.id) }
-        if (folders.isNotEmpty()) markFolderStateDirty()
-        return AppResult.Success(files.size + folders.size)
-    }
+    /**
+     * Automatic expiry is deliberately disabled. Older preference values may still exist on
+     * upgraded installations, but they must never trigger remote file deletion.
+     */
+    override suspend fun clearExpired(days: Int): AppResult<Int> = AppResult.Success(0)
 
     /** A folder whose parent row is gone for good falls back to the drive root. */
     private suspend fun restoreAncestors(folderId: String?) {
@@ -292,18 +161,6 @@ class TrashRepositoryImpl(
         }
     }
 
-    private suspend fun collectTrashedDescendantFolderIds(rootId: String): List<String> {
-        val result = mutableListOf(rootId)
-        var frontier = listOf(rootId)
-        var guard = 0
-        val chatId = activeChannel.id()
-        while (frontier.isNotEmpty() && guard++ < MAX_FOLDER_DEPTH) {
-            frontier = folderDao.trashedChildrenOf(frontier, chatId).map { it.id }
-            result.addAll(frontier)
-        }
-        return result
-    }
-
     private suspend fun collectDescendantFolderIds(rootId: String): List<String> {
         val result = mutableListOf(rootId)
         var frontier = listOf(rootId)
@@ -318,11 +175,7 @@ class TrashRepositoryImpl(
     }
 
     companion object {
-        private const val TAG = "TrashRepository"
-        private const val REMOTE_DELETE_BATCH = 100
-        private const val IMPORT_DIR = "imports"
         private const val SQL_BATCH = 500
-        private const val MILLIS_PER_DAY = 24L * 60 * 60 * 1000
         private const val MAX_FOLDER_DEPTH = 64
     }
 }

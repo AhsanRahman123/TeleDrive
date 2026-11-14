@@ -207,6 +207,10 @@ import com.drdisagree.teledrive.resources.files_share_destination_confirm
 import com.drdisagree.teledrive.resources.files_share_destination_title
 import com.drdisagree.teledrive.resources.files_show_in_file_manager
 import com.drdisagree.teledrive.resources.files_sort
+import com.drdisagree.teledrive.resources.files_view_details
+import com.drdisagree.teledrive.resources.files_view_grid
+import com.drdisagree.teledrive.resources.files_view_list
+import com.drdisagree.teledrive.resources.files_view_mode
 import com.drdisagree.teledrive.resources.info_details
 import com.drdisagree.teledrive.resources.note_edit_action
 import com.drdisagree.teledrive.resources.nav_files
@@ -250,6 +254,7 @@ fun FilesScreen(
     var showCreateFolder by remember { mutableStateOf(false) }
     var confirmDeleteLocal by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
+    var showViewMenu by remember { mutableStateOf(false) }
     var showAddMenu by remember { mutableStateOf(false) }
     var showMovePicker by remember { mutableStateOf(false) }
     var showCopyPicker by remember { mutableStateOf(false) }
@@ -573,6 +578,40 @@ fun FilesScreen(
                                 }
                             },
                             actions = {
+                                Box {
+                                    IconButton(onClick = { showViewMenu = true }) {
+                                        Icon(
+                                            Icons.Filled.Tune,
+                                            contentDescription = stringResource(Res.string.files_view_mode)
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = showViewMenu,
+                                        onDismissRequest = { showViewMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(Res.string.files_view_grid)) },
+                                            onClick = {
+                                                showViewMenu = false
+                                                viewModel.setViewMode(ViewMode.GRID)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(Res.string.files_view_list)) },
+                                            onClick = {
+                                                showViewMenu = false
+                                                viewModel.setViewMode(ViewMode.LIST)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(Res.string.files_view_details)) },
+                                            onClick = {
+                                                showViewMenu = false
+                                                viewModel.setViewMode(ViewMode.DETAILS)
+                                            }
+                                        )
+                                    }
+                                }
                                 RefreshAction(
                                     refreshing = refreshing,
                                     onRefresh = viewModel::refresh
@@ -1148,6 +1187,7 @@ private fun FilesContent(
                     file = file,
                     selected = selected,
                     selectionMode = state.selectionMode,
+                    details = state.viewMode == ViewMode.DETAILS,
                     onClick = {
                         if (state.selectionMode) viewModel.toggleSelection(file.id)
                         else onOpenFile(

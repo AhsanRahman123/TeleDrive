@@ -519,9 +519,13 @@ class TdLibTelegramClient(
         chatId: Long,
         messageId: Long,
         localPath: String,
-        caption: String
+        caption: String,
+        thumbnailPath: String?
     ): RemoteDocument {
         awaitAuthorized()
+        val thumbnail = thumbnailPath?.let {
+            TdApi.InputThumbnail(TdApi.InputFileLocal(it), THUMBNAIL_EDGE, THUMBNAIL_EDGE)
+        }
         val edited = paced {
             send<TdApi.Message>(
                 TdApi.EditMessageMedia(
@@ -530,7 +534,7 @@ class TdLibTelegramClient(
                     null,
                     TdApi.InputMessageDocument(
                         TdApi.InputFileLocal(localPath),
-                        null,
+                        thumbnail,
                         true,
                         TdApi.FormattedText(caption, emptyArray())
                     )

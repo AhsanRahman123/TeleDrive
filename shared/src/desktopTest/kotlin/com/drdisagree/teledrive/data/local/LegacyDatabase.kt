@@ -9,6 +9,7 @@ import com.drdisagree.teledrive.data.local.database.MIGRATION_13_14
 import com.drdisagree.teledrive.data.local.database.MIGRATION_14_15
 import com.drdisagree.teledrive.data.local.database.MIGRATION_15_16
 import com.drdisagree.teledrive.data.local.database.MIGRATION_16_17
+import com.drdisagree.teledrive.data.local.database.MIGRATION_17_18
 import com.drdisagree.teledrive.data.local.database.TeleDriveDatabase
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +52,8 @@ fun openMigrated(file: File): TeleDriveDatabase =
             MIGRATION_13_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
-            MIGRATION_16_17
+            MIGRATION_16_17,
+            MIGRATION_17_18
         )
         .setDriver(BundledSQLiteDriver())
         .setQueryCoroutineContext(Dispatchers.IO)

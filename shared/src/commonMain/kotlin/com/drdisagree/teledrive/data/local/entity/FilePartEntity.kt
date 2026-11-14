@@ -22,5 +22,6 @@ data class FilePartEntity(
     val plainOffset: Long,
     val plainSize: Long,
     val storedSize: Long,
-    val uploadedAt: Long
+    val uploadedAt: Long,
+    val plainHash: String? = null
 )
