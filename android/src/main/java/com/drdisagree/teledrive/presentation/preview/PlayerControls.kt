@@ -487,7 +487,7 @@ fun PlayerControls(
                                 )
                             }
                             if (!audioOnly) {
-                                ExtraControl(expanded || textTracks.isNotEmpty()) {
+                                ExtraControl(true) {
                                     ControlButton(
                                         icon = if (subtitlesOn) {
                                             Icons.Filled.Subtitles
