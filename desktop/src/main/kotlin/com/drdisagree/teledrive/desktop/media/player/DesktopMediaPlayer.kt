@@ -199,7 +199,7 @@ internal fun DesktopMediaPlayer(
     var hKeyPressed by remember { mutableStateOf(false) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
-    // a play/resume event cannot reapply the initial full-volume / unmuted values.
+    // a play/resume event always reapplies the current remembered volume and mute state.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
     val latestRepeatOne = rememberUpdatedState(repeatOne)
@@ -1443,6 +1443,23 @@ private fun PlayerControlsBar(
                             onControlPreferencesChange(
                                 controlPreferences.copy(
                                     autoHideVolumeSlider = !controlPreferences.autoHideVolumeSlider
+                                )
+                            )
+                            onInteraction()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Remember volume across media and restarts") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.rememberVolume,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    rememberVolume = !controlPreferences.rememberVolume
                                 )
                             )
                             onInteraction()
