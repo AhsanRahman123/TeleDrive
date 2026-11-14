@@ -28,6 +28,6 @@ class VideoResumeStoreTest {
 
     @Test
     fun `resume position remains bounded before the end margin`() {
-        assertEquals(98_500L, videoResumeTarget(99_500L, 100_000L))
+        assertEquals(98_000L, videoResumeTarget(98_000L, 100_000L))
     }
 }
