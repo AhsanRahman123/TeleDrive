@@ -161,7 +161,8 @@ fun TrashScreen(
         },
         onEnd = viewModel::endRangeSelection,
         mouseDragAddsToSelection = false,
-        resolveNearestVisibleItem = true
+        resolveNearestVisibleItem = true,
+        processReleasePosition = true
     )
     val keyboard = rememberKeyboardCollection(gridState, columns = 1)
     val selectableIdAt: (Int) -> String? = { index ->
