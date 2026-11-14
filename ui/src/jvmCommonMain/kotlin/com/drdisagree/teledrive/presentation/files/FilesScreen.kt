@@ -1121,6 +1121,7 @@ fun FilesScreen(
                     RefreshableContent(
                         isRefreshing = refreshing,
                         onRefresh = viewModel::refresh,
+                        enabled = !touchRangeSelectionMode,
                         modifier = Modifier
                             .fillMaxSize()
                             .onDesktopEmptySpaceContextClick(
@@ -1528,7 +1529,11 @@ private fun FilesContent(
         resolveNearestVisibleItem = true,
         touchDragEnabled = androidLayout && touchRangeSelectionMode
     )
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(if (androidLayout) dragSelect else Modifier)
+    ) {
         LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(columns),
@@ -1542,7 +1547,7 @@ private fun FilesContent(
                 label = stringResource(Res.string.nav_files)
             )
             .pinchZoom(onZoomIn = viewModel::zoomIn, onZoomOut = viewModel::zoomOut)
-            .then(dragSelect),
+            .then(if (androidLayout) Modifier else dragSelect),
         contentPadding = padding.add(horizontal = 12.dp, top = 12.dp, bottom = 100.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
