@@ -75,7 +75,10 @@ class PlayerVolumeStateTest {
             val writer = DebouncedIntWriter(
                 scope = scope,
                 debounceMillis = 80L,
-                save = saved::add
+                save = { value ->
+                    saved.add(value)
+                    Unit
+                }
             )
 
             writer.schedule(40)
