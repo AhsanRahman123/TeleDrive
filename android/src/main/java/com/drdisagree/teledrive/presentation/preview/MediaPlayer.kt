@@ -181,7 +181,19 @@ fun MediaPlayer(
     }
 
     DisposableEffect(holder) {
-        onDispose { holder.value?.release() }
+        onDispose {
+            holder.value?.let { activePlayer ->
+                if (resumeReadyForListener) {
+                    PlaybackResumeStore.save(
+                        context,
+                        fileId,
+                        activePlayer.currentPosition,
+                        activePlayer.duration
+                    )
+                }
+                activePlayer.release()
+            }
+        }
     }
 
     DisposableEffect(player, isActivePage, resumeReady) {
@@ -262,7 +274,6 @@ fun MediaPlayer(
     var subtitleHitWidthFraction by remember(player) {
         mutableFloatStateOf(DEFAULT_SUBTITLE_HIT_WIDTH_FRACTION)
     }
-    val subtitleVerticalPosition = session.subtitleVerticalPosition
 
     DisposableEffect(player) {
         if (player == null) return@DisposableEffect onDispose { }
