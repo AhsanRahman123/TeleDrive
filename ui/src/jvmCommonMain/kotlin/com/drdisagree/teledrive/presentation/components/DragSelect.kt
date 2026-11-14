@@ -205,7 +205,9 @@ private fun dragSelect(
                 // Keep the resolved fallback anchor for the whole gesture. Without this,
                 // a drag that starts outside an item can re-anchor on its next event after
                 // the initial range has already changed the selection state.
-                if (selectionAnchor != null) anchor = selectionAnchor
+                if (selectionAnchor != null && processReleasePosition) {
+                    anchor = selectionAnchor
+                }
                 val additiveMouseRange = down.type == PointerType.Mouse && mouseDragAddsToSelection
                 if (selectionAnchor != null) {
                     activeAnchor = selectionAnchor
