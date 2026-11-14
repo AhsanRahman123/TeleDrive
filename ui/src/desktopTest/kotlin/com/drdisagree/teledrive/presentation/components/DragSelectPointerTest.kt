@@ -375,7 +375,10 @@ class DragSelectPointerTest {
         rule.onNodeWithTag("trash-selection-grid").performMouseInput {
             moveTo(Offset(90f, 30f))
             press()
-            moveTo(Offset(90f, 170f), delayMillis = 100)
+            // Move inside the range, then change to the last row without sending a move
+            // event. The release event itself must include that final endpoint.
+            moveTo(Offset(90f, 90f), delayMillis = 100)
+            updatePointerTo(Offset(90f, 170f))
             release()
         }
         rule.waitForIdle()
@@ -429,7 +432,9 @@ class DragSelectPointerTest {
         rule.onNodeWithTag("trash-selection-grid-add").performMouseInput {
             moveTo(Offset(90f, 150f))
             press()
-            moveTo(Offset(90f, 310f), delayMillis = 100)
+            moveTo(Offset(90f, 230f), delayMillis = 100)
+            // The final row is delivered by mouse-up, not by a move event.
+            updatePointerTo(Offset(90f, 310f))
             release()
         }
         rule.waitForIdle()
