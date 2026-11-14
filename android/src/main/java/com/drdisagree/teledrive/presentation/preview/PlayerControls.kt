@@ -17,10 +17,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -134,6 +141,7 @@ fun PlayerControls(
     var scrubTarget by remember(player) { mutableStateOf<Float?>(null) }
     var pendingSeek by remember(player) { mutableStateOf<Long?>(null) }
     var speed by session::speed
+    var seekStepSeconds by session::seekStepSeconds
     var muted by remember(player) { mutableStateOf(player.volume == 0f) }
     var repeatOne by remember(player) {
         mutableStateOf(player.repeatMode == Player.REPEAT_MODE_ONE)
@@ -142,6 +150,8 @@ fun PlayerControls(
     var subtitlesOn by remember(player) { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
     var showSpeeds by remember { mutableStateOf(false) }
+    var showSeekSteps by remember { mutableStateOf(false) }
+    var showResizeHint by remember { mutableStateOf(false) }
     var showAudioTracks by remember { mutableStateOf(false) }
     var showTextTracks by remember { mutableStateOf(false) }
 
@@ -216,6 +226,12 @@ fun PlayerControls(
     LaunchedEffect(visible) {
         if (!visible) expanded = false
     }
+    LaunchedEffect(showResizeHint) {
+        if (showResizeHint) {
+            delay(1_100L)
+            showResizeHint = false
+        }
+    }
 
     AnimatedVisibility(
         visible = visible,
@@ -224,7 +240,11 @@ fun PlayerControls(
         modifier = modifier.fillMaxSize()
     ) {
       CompositionLocalProvider(LocalOverVideo provides !audioOnly) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier.fillMaxSize().windowInsetsPadding(
+                WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
+            )
+        ) {
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -305,9 +325,21 @@ fun PlayerControls(
                                         onClick = {
                                             onInteraction()
                                             onCycleResizeMode()
+                                            showResizeHint = true
                                         }
                                     )
                                 }
+                            }
+                            ExtraControl(expanded) {
+                                ControlButton(
+                                    icon = Icons.Filled.Forward10,
+                                    description = "Double-tap seek interval: ${seekStepSeconds}s",
+                                    active = seekStepSeconds == 5,
+                                    onClick = {
+                                        onInteraction()
+                                        showSeekSteps = true
+                                    }
+                                )
                             }
                             ExtraControl(expanded) {
                                 ControlButton(
@@ -388,6 +420,21 @@ fun PlayerControls(
                         expanded = !expanded
                     }
                 )
+            }
+
+            if (showResizeHint) {
+                Surface(
+                    modifier = Modifier.align(Alignment.Center).padding(top = 104.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = Color.Black.copy(alpha = HUD_ALPHA),
+                    contentColor = Color.White
+                ) {
+                    Text(
+                        text = resizeMode.description,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
 
             if (!audioOnly) {
@@ -483,40 +530,80 @@ fun PlayerControls(
 
     if (showSpeeds) {
         ModalBottomSheet(onDismissRequest = { showSpeeds = false }) {
-            Text(
-                text = stringResource(Res.string.preview_playback_speed),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp)
-            )
-            SPEEDS.forEach { option ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .selectable(
-                            selected = speed == option,
-                            role = Role.RadioButton,
-                            onClick = {
-                                speed = option
-                                player.setPlaybackSpeed(option)
-                                onInteraction()
-                            }
-                        )
-                        .padding(horizontal = 24.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RadioButton(selected = speed == option, onClick = null)
-                    Text(
-                        text = speedLabel(option),
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(start = 16.dp)
-                    )
-                }
-            }
-            Box(
+            Column(
                 modifier = Modifier
-                    .navigationBarsPadding()
-                    .height(8.dp)
-            )
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = stringResource(Res.string.preview_playback_speed),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp)
+                )
+                SPEEDS.forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = speed == option,
+                                role = Role.RadioButton,
+                                onClick = {
+                                    speed = option
+                                    player.setPlaybackSpeed(option)
+                                    onInteraction()
+                                }
+                            )
+                            .padding(horizontal = 24.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = speed == option, onClick = null)
+                        Text(
+                            text = speedLabel(option),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.navigationBarsPadding().height(8.dp))
+            }
+        }
+    }
+
+    if (showSeekSteps) {
+        ModalBottomSheet(onDismissRequest = { showSeekSteps = false }) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                Text(
+                    "Double-tap seek interval",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp)
+                )
+                listOf(5, 10).forEach { option ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = seekStepSeconds == option,
+                                role = Role.RadioButton,
+                                onClick = {
+                                    seekStepSeconds = option
+                                    showSeekSteps = false
+                                    onInteraction()
+                                }
+                            )
+                            .padding(horizontal = 24.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = seekStepSeconds == option, onClick = null)
+                        Text(
+                            text = "$option seconds",
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.navigationBarsPadding().height(8.dp))
+            }
         }
     }
 

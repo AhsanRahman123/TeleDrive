@@ -37,6 +37,7 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
@@ -422,6 +423,7 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val androidLayout = LocalAndroidLayout.current
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val selectionMode = state.selectionMode || selectionModeEnabled
     val media = viewModel.pagedMedia.collectAsLazyPagingItems()
@@ -831,7 +833,13 @@ fun GalleryScreen(
             } else {
                 TopAppBar(
                     colors = liftedTopAppBarColors(lifted),
-                    title = { Text(state.albumTitle ?: stringResource(Res.string.gallery_title)) },
+                    title = {
+                        Text(
+                            text = state.albumTitle ?: stringResource(Res.string.gallery_title),
+                            maxLines = if (androidLayout) 1 else Int.MAX_VALUE,
+                            overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
+                        )
+                    },
                     navigationIcon = {
                         onBack?.let {
                             TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = it) {
@@ -886,7 +894,7 @@ fun GalleryScreen(
                                 )
                             )
                         }
-                        if (state.viewMode == ViewMode.GRID) {
+                        if (state.viewMode == ViewMode.GRID && !androidLayout) {
                             TooltipIconButton(
                                 tooltip = "Increase gallery thumbnail size",
                                 onClick = {

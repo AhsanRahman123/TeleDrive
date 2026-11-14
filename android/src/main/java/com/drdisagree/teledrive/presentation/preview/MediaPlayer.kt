@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
 import android.util.Rational
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
@@ -199,6 +200,8 @@ fun MediaPlayer(
     }
     var decoderFailed by remember(player) { mutableStateOf(false) }
     var playbackFailed by remember(player) { mutableStateOf(false) }
+    var playbackErrorDetails by remember(player) { mutableStateOf<String?>(null) }
+    var seekFeedback by remember(player) { mutableStateOf<String?>(null) }
 
     DisposableEffect(player) {
         if (player == null) return@DisposableEffect onDispose { }
@@ -213,6 +216,8 @@ fun MediaPlayer(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                playbackErrorDetails = "Media3 error ${error.errorCode}: ${error.message ?: error.cause?.message ?: error.javaClass.simpleName}"
+                Log.e("TeleDriveMediaPlayer", "Playback failed: ${playbackErrorDetails}", error)
                 when (error.errorCode) {
                     PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
                     PlaybackException.ERROR_CODE_DECODING_FAILED,
@@ -220,6 +225,7 @@ fun MediaPlayer(
                     PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED -> {
                         val decoder = error.failedDecoderName()
                         if (decoder != null && failedDecoders.add(decoder)) {
+                            Log.w("TeleDriveMediaPlayer", "Retrying with decoder fallback; excluded $decoder")
                             player.prepare()
                         } else {
                             decoderFailed = true
@@ -232,6 +238,13 @@ fun MediaPlayer(
         }
         player.addListener(listener)
         onDispose { player.removeListener(listener) }
+    }
+
+    LaunchedEffect(seekFeedback) {
+        if (seekFeedback != null) {
+            delay(750L)
+            seekFeedback = null
+        }
     }
 
     LaunchedEffect(controlsVisible, playing, interactionTick, activePage, audioOnly) {
@@ -352,9 +365,21 @@ fun MediaPlayer(
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+                playbackErrorDetails?.let { details ->
+                    Text(
+                        text = details,
+                        modifier = Modifier.padding(top = 10.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 if (playbackFailed && player != null) {
                     Button(
                         onClick = {
+                            playbackErrorDetails = null
                             playbackFailed = false
                             player.prepare()
                             player.play()
@@ -376,11 +401,46 @@ fun MediaPlayer(
                         notifyControls(!visibleControls)
                     }
                 },
+                onDoubleTap = { forward ->
+                    val activePlayer = player
+                    if (!locked && activePlayer != null) {
+                        val stepMs = session.seekStepSeconds.coerceIn(5, 10).toLong() * 1_000L
+                        val limit = activePlayer.duration.takeIf { it > 0L } ?: Long.MAX_VALUE
+                        val target = if (forward) {
+                            (activePlayer.currentPosition + stepMs).coerceAtMost(limit)
+                        } else {
+                            (activePlayer.currentPosition - stepMs).coerceAtLeast(0L)
+                        }
+                        activePlayer.seekTo(target)
+                        interactionTick++
+                        seekFeedback = (if (forward) "+" else "−") + "${stepMs / 1_000L}s"
+                    }
+                },
                 onAdjustStart = { if (visibleControls) notifyControls(false) },
                 dragEnabled = !locked && !audioOnly,
                 chromeVisible = controlsVisible,
                 modifier = Modifier.matchParentSize()
             )
+        }
+        seekFeedback?.let { feedback ->
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = Color.Black.copy(alpha = 0.78f),
+                    contentColor = Color.White
+                ) {
+                    Text(
+                        feedback,
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 14.dp),
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+            }
         }
         if (player != null) {
             PlayerControls(

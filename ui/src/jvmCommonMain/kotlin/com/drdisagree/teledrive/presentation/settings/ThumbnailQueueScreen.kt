@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +42,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailQueueItem
@@ -55,6 +57,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 
 
 private fun formatThumbnailQueueEta(totalSeconds: Long): String {
@@ -76,6 +79,7 @@ fun ThumbnailQueueScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val androidLayout = LocalAndroidLayout.current
     val repository = koinInject<CacheRepository>()
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
@@ -224,13 +228,15 @@ fun ThumbnailQueueScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Thumbnail queue", style = MaterialTheme.typography.titleLarge)
+                    Text("Thumbnail queue", style = MaterialTheme.typography.titleLarge, maxLines = if (androidLayout) 1 else Int.MAX_VALUE, overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip)
                     Text(
                         "${(pendingCount - activeQueueIds.size).coerceAtLeast(0)} waiting · " +
                             activeQueueIds.size + " generating · " + pendingCount + " total" +
                             if (queuePaused) " · Paused" else "",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (androidLayout) 1 else Int.MAX_VALUE,
+                        overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
                     )
                     val remainingWork = (pendingCount - failedQueueIds.size).coerceAtLeast(0)
                     val queueEstimate = when {
@@ -249,7 +255,9 @@ fun ThumbnailQueueScreen(
                     Text(
                         queueEstimate,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = if (androidLayout) 1 else Int.MAX_VALUE,
+                        overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
                     )
                 }
                 TooltipIconButton(tooltip = "Scroll to top", onClick = { scope.launch { scrollState.animateScrollTo(0) } }) {
@@ -301,7 +309,9 @@ fun ThumbnailQueueScreen(
                     Text(
                         "Changes the list order only; generation continues in its existing priority order.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = if (androidLayout) 2 else Int.MAX_VALUE,
+                        overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
                     )
                 }
                 ThumbnailQueueSortDropdown(
@@ -356,11 +366,18 @@ fun ThumbnailQueueScreen(
                 }
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().then(
+                        if (androidLayout) Modifier.horizontalScroll(rememberScrollState()) else Modifier
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(selectedIds.size.toString() + " selected", modifier = Modifier.weight(1f))
+                    Text(
+                        selectedIds.size.toString() + " selected",
+                        modifier = if (androidLayout) Modifier else Modifier.weight(1f),
+                        maxLines = if (androidLayout) 1 else Int.MAX_VALUE,
+                        softWrap = !androidLayout
+                    )
                     OutlinedButton(
                         enabled = !selectingAll && pendingCount > 0,
                         onClick = {
@@ -373,18 +390,18 @@ fun ThumbnailQueueScreen(
                                 }
                             }
                         }
-                    ) { Text(if (selectingAll) "Selecting…" else "Select all") }
+                    ) { Text(if (selectingAll) "Selecting…" else "Select all", maxLines = if (androidLayout) 1 else Int.MAX_VALUE, softWrap = !androidLayout) }
                     TextButton(
                         enabled = items.isNotEmpty(),
                         onClick = {
                             val pageIds = items.map { it.fileId }.toSet()
                             selectedIds = selectedIds + pageIds
                         }
-                    ) { Text("Select visible page") }
+                    ) { Text("Select visible page", maxLines = if (androidLayout) 1 else Int.MAX_VALUE, softWrap = !androidLayout) }
                     TextButton(
                         enabled = selectedIds.isNotEmpty(),
                         onClick = { selectedIds = emptySet() }
-                    ) { Text("Clear selection") }
+                    ) { Text("Clear selection", maxLines = if (androidLayout) 1 else Int.MAX_VALUE, softWrap = !androidLayout) }
                 }
 
                 Text(

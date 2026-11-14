@@ -40,6 +40,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -109,6 +110,7 @@ fun ThumbnailManagerScreen(
     modifier: Modifier = Modifier,
     onInternalBackStateChange: (Boolean, () -> Unit) -> Unit = { _, _ -> }
 ) {
+    val androidLayout = LocalAndroidLayout.current
     val cacheRepository = koinInject<CacheRepository>()
     val fileRepository = koinInject<FileRepository>()
     val fileClipboard = koinInject<FileClipboard>()
@@ -576,7 +578,9 @@ fun ThumbnailManagerScreen(
             // SettingsSectionScreen already supplies the main page title and back button.
             // Keep only folder navigation here, avoiding a duplicate fixed title bar.
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 1.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .then(if (androidLayout) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
+                    .padding(horizontal = 12.dp, vertical = 1.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (folderPath.isNotEmpty()) {
@@ -602,7 +606,7 @@ fun ThumbnailManagerScreen(
                     onClick = { showQueue = true },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     modifier = Modifier.height(38.dp)
-                ) { Text("View queue") }
+                ) { Text("View queue", maxLines = if (androidLayout) 1 else Int.MAX_VALUE, softWrap = !androidLayout) }
                 TooltipIconButton(tooltip = "Scroll to top", onClick = {
                     scope.launch { scrollState.animateScrollTo(0) }
                 }) {
@@ -618,6 +622,55 @@ fun ThumbnailManagerScreen(
                 }
             }
             // Compact sticky toolbar: only the controls needed for frequent navigation stay pinned.
+            if (androidLayout) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedTextField(
+                        value = searchInput,
+                        onValueChange = { searchInput = it },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        singleLine = true,
+                        placeholder = { Text("Search files in this folder", maxLines = 1) }
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ThumbnailCacheStatusButton(
+                            label = "All",
+                            selected = cacheFilter == ThumbnailCacheFilter.ALL,
+                            onClick = { cacheFilter = ThumbnailCacheFilter.ALL },
+                            compact = true
+                        )
+                        ThumbnailCacheStatusButton(
+                            label = "Generated",
+                            selected = cacheFilter == ThumbnailCacheFilter.GENERATED,
+                            onClick = { cacheFilter = ThumbnailCacheFilter.GENERATED },
+                            compact = true
+                        )
+                        ThumbnailCacheStatusButton(
+                            label = "Not generated",
+                            selected = cacheFilter == ThumbnailCacheFilter.MISSING,
+                            onClick = { cacheFilter = ThumbnailCacheFilter.MISSING },
+                            compact = true
+                        )
+                        ThumbnailQuickSortDropdown(
+                            value = sortOrder,
+                            onSelect = { sortOrder = it }
+                        )
+                        OutlinedButton(
+                            onClick = { showAdvancedFilters = !showAdvancedFilters },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            modifier = Modifier.height(40.dp)
+                        ) {
+                            Text(if (showAdvancedFilters) "Hide filters" else "More filters", maxLines = 1, softWrap = false)
+                        }
+                    }
+                }
+            } else {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -659,6 +712,7 @@ fun ThumbnailManagerScreen(
                 ) {
                     Text(if (showAdvancedFilters) "Hide filters" else "More filters")
                 }
+            }
             }
             if (showAdvancedFilters) {
                 Row(

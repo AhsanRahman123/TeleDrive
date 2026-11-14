@@ -60,6 +60,7 @@ import org.jetbrains.compose.resources.stringResource
 @Composable
 fun PlayerGestureArea(
     onTap: () -> Unit,
+    onDoubleTap: (forward: Boolean) -> Unit = {},
     onAdjustStart: () -> Unit,
     dragEnabled: Boolean,
     chromeVisible: Boolean,
@@ -68,6 +69,7 @@ fun PlayerGestureArea(
     val context = LocalContext.current
     val activity = LocalActivity.current
     val tap by rememberUpdatedState(onTap)
+    val doubleTap by rememberUpdatedState(onDoubleTap)
     val adjustStart by rememberUpdatedState(onAdjustStart)
 
     val audioManager = remember(context) { context.getSystemService(AudioManager::class.java) }
@@ -108,7 +110,12 @@ fun PlayerGestureArea(
                     }
                 }
                 .pointerInput(Unit) {
-                    detectTapGestures { tap() }
+                    detectTapGestures(
+                        onTap = { tap() },
+                        onDoubleTap = { offset ->
+                            doubleTap(offset.x >= size.width / 2f)
+                        }
+                    )
                 }
                 .pointerInput(dragEnabled, maxVolume) {
                     if (!dragEnabled) return@pointerInput

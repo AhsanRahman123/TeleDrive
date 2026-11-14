@@ -12,6 +12,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.runtime.CompositionLocalProvider
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.IntentCompat
 import androidx.core.graphics.drawable.toDrawable
@@ -141,12 +143,14 @@ class MainActivity : FragmentActivity() {
         observeScreenshotProtection()
         handleIntent(intent)
         setContent {
-            ProvidePlatformActions {
-                TeleDriveApp(
-                    pendingShare = pendingShare,
-                    notificationDestination = destination.collectAsStateWithLifecycle().value,
-                    onDestinationHandled = { destination.value = null }
-                )
+            CompositionLocalProvider(LocalAndroidLayout provides true) {
+                ProvidePlatformActions {
+                    TeleDriveApp(
+                        pendingShare = pendingShare,
+                        notificationDestination = destination.collectAsStateWithLifecycle().value,
+                        onDestinationHandled = { destination.value = null }
+                    )
+                }
             }
         }
     }

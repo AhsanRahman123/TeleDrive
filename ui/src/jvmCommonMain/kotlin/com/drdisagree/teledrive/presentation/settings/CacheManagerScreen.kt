@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.presentation.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,6 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.drdisagree.teledrive.domain.repository.CacheEntryUsage
@@ -92,6 +95,7 @@ fun CacheManagerScreen(
     initialFilter: String = "ALL",
     modifier: Modifier = Modifier
 ) {
+    val androidLayout = LocalAndroidLayout.current
     val repository = koinInject<CacheRepository>()
     val settingsViewModel = koinViewModel<SettingsViewModel>()
     val scope = rememberCoroutineScope()
@@ -310,7 +314,9 @@ fun CacheManagerScreen(
             modifier = Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .then(if (androidLayout) Modifier.horizontalScroll(rememberScrollState()) else Modifier)
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterChip(
@@ -445,7 +451,10 @@ fun CacheManagerScreen(
                 label = { Text("Search cached files") }
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.then(if (androidLayout) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 listOf("ALL", "THUMBNAIL", "PREVIEW", "STREAM", "TEMP").forEach { filter ->
                     FilterChip(
                         selected = typeFilter == filter,
@@ -454,13 +463,13 @@ fun CacheManagerScreen(
                             pageOffset = 0
                             selectedPaths = emptySet()
                         },
-                        label = { Text(if (filter == "ALL") "All types" else filter.lowercase().replaceFirstChar { it.uppercase() }) }
+                        label = { Text(if (filter == "ALL") "All types" else filter.lowercase().replaceFirstChar { it.uppercase() }, maxLines = if (androidLayout) 1 else Int.MAX_VALUE, softWrap = !androidLayout) }
                     )
                 }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Sort: ${sortLabel()}", modifier = Modifier.weight(1f))
+                Text("Sort: ${sortLabel()}", modifier = Modifier.weight(1f), maxLines = if (androidLayout) 1 else Int.MAX_VALUE, overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip)
                 TextButton(onClick = {
                     sortOrder = when (sortOrder) {
                         "LARGEST" -> "SMALLEST"
@@ -477,7 +486,9 @@ fun CacheManagerScreen(
                 Text(
                     if (folderPath.isEmpty()) "All cache folders" else folderPath.joinToString("  ›  ") { it.name },
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleSmall
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = if (androidLayout) 1 else Int.MAX_VALUE,
+                    overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
                 )
                 if (folderPath.isNotEmpty()) {
                     TextButton(onClick = { folderPath = folderPath.dropLast(1); pageOffset = 0 }) {
@@ -514,11 +525,13 @@ fun CacheManagerScreen(
                                     Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     Spacer(Modifier.width(10.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(folder.name, style = MaterialTheme.typography.bodyLarge)
+                                        Text(folder.name, style = MaterialTheme.typography.bodyLarge, maxLines = if (androidLayout) 1 else Int.MAX_VALUE, overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip)
                                         Text(
                                             "${folder.entryCount} cached entries · ${Formatters.bytes(folder.totalBytes)} including subfolders",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = if (androidLayout) 2 else Int.MAX_VALUE,
+                                            overflow = if (androidLayout) TextOverflow.Ellipsis else TextOverflow.Clip
                                         )
                                     }
                                     TextButton(onClick = {
