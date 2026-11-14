@@ -121,6 +121,7 @@ import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -220,6 +221,7 @@ internal fun DesktopMediaPlayer(
     val resumeInitializationComplete = remember(mediaId, mrl, isAudio) {
         AtomicBoolean(false)
     }
+    val pendingResumeTargetMs = remember(mediaId, mrl, isAudio) { AtomicLong(0L) }
     val resumeFinished = remember(mediaId, mrl, isAudio) { AtomicBoolean(false) }
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
@@ -254,7 +256,17 @@ internal fun DesktopMediaPlayer(
         for (position in timeUpdates) {
             timeMs = position
             if (!isAudio && resumeInitializationComplete.get() && !resumeFinished.get()) {
-                VideoResumeStore.savePosition(mediaId, position, durationMs)
+                val pendingResume = pendingResumeTargetMs.get()
+                if (pendingResume > 0L) {
+                    // Ignore opening-time events until VLC reports the restored seek position.
+                    if (kotlin.math.abs(position - pendingResume) <= RESUME_SEEK_CONFIRMATION_MS &&
+                        pendingResumeTargetMs.compareAndSet(pendingResume, 0L)
+                    ) {
+                        VideoResumeStore.savePosition(mediaId, position, durationMs)
+                    }
+                } else {
+                    VideoResumeStore.savePosition(mediaId, position, durationMs)
+                }
             }
         }
     }
@@ -270,6 +282,7 @@ internal fun DesktopMediaPlayer(
         val resumeAt = videoResumeTarget(savedResumePositionMs, mediaDurationMs)
         if (resumeAt == null) {
             if (savedResumePositionMs > 0L) VideoResumeStore.clear(mediaId)
+            pendingResumeTargetMs.set(0L)
             resumeInitializationComplete.set(true)
             return
         }
@@ -277,11 +290,16 @@ internal fun DesktopMediaPlayer(
         // Seek only after VLC has opened the media and reported a valid duration. Keep position
         // persistence gated until the native seek has completed so an initial 0:00 time event
         // cannot overwrite the saved resume point while restoration is still in flight.
+        pendingResumeTargetMs.set(resumeAt)
         mediaPlayer.submit {
             val restored = runCatching {
                 mediaPlayer.controls().setTime(resumeAt)
             }.isSuccess
-            if (restored) resumeInitializationComplete.set(true)
+            if (restored) {
+                resumeInitializationComplete.set(true)
+            } else {
+                pendingResumeTargetMs.set(0L)
+            }
         }
     }
 
@@ -502,6 +520,7 @@ internal fun DesktopMediaPlayer(
             if (
                 !isAudio &&
                 resumeInitializationComplete.get() &&
+                pendingResumeTargetMs.get() == 0L &&
                 !resumeFinished.get() &&
                 !latestFinished.value
             ) {
@@ -2012,6 +2031,7 @@ private const val BRIGHTNESS_POLL_INTERVAL_MS = 2_500L
 private const val BRIGHTNESS_READ_GUARD_MS = 1_800L
 private const val AUDIO_OUTPUT_REAPPLY_INTERVAL_MS = 250L
 private const val AUDIO_OUTPUT_REAPPLY_ATTEMPTS = 3
+private const val RESUME_SEEK_CONFIRMATION_MS = 3_000L
 private fun normalizePlaybackRate(value: Float): Float =
     (value.coerceIn(0.25f, 4f) * 20f).roundToInt() / 20f
 
