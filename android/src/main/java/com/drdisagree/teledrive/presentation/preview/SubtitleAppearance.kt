@@ -17,11 +17,11 @@ internal const val SUBTITLE_EDGE_RAISED = 3
 internal const val SUBTITLE_EDGE_DEPRESSED = 4
 
 /**
- * Mirrors the desktop player's subtitle controls, but applies them to Media3's subtitle renderer.
- * Embedded subtitle styling is deliberately disabled so the user's TeleDrive settings win.
+ * Android-only subtitle preferences for TeleDrive's Media3 SubtitleView.
+ * This model and its SharedPreferences store are intentionally independent of Windows/VLC.
  */
-internal data class SubtitleAppearance(
-    val usePlayerDefaults: Boolean = true,
+internal data class AndroidSubtitleStyle(
+    val useSystemDefaults: Boolean = true,
     val fontFamily: String = "sans-serif",
     val textScale: Float = 1f,
     val textColor: Int = 0xFFFFFFFF.toInt(),
@@ -35,7 +35,7 @@ internal data class SubtitleAppearance(
     val edgeOpacity: Float = 1f,
     val verticalPosition: Float = DEFAULT_SUBTITLE_VERTICAL_POSITION
 ) {
-    fun normalized(): SubtitleAppearance = copy(
+    fun normalized(): AndroidSubtitleStyle = copy(
         fontFamily = fontFamily.takeIf(String::isNotBlank) ?: "sans-serif",
         textScale = textScale.coerceIn(0.5f, 2.5f),
         textOpacity = textOpacity.coerceIn(0f, 1f),
@@ -47,13 +47,13 @@ internal data class SubtitleAppearance(
     )
 }
 
-internal object SubtitleAppearanceStore {
-    private const val PREFERENCES = "subtitle_appearance"
+internal object AndroidSubtitleStyleStore {
+    private const val PREFERENCES = "android_subtitle_style"
 
-    fun load(context: Context): SubtitleAppearance = runCatching {
+    fun load(context: Context): AndroidSubtitleStyle = runCatching {
         val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
-        SubtitleAppearance(
-            usePlayerDefaults = preferences.getBoolean("use_player_defaults", true),
+        AndroidSubtitleStyle(
+            useSystemDefaults = preferences.getBoolean("use_player_defaults", true),
             fontFamily = preferences.getString("font_family", "sans-serif") ?: "sans-serif",
             textScale = preferences.getFloat("text_scale", 1f),
             textColor = preferences.getInt("text_color", 0xFFFFFFFF.toInt()),
@@ -70,13 +70,13 @@ internal object SubtitleAppearanceStore {
                 DEFAULT_SUBTITLE_VERTICAL_POSITION
             )
         ).normalized()
-    }.getOrDefault(SubtitleAppearance())
+    }.getOrDefault(AndroidSubtitleStyle())
 
-    fun save(context: Context, appearance: SubtitleAppearance) {
+    fun save(context: Context, appearance: AndroidSubtitleStyle) {
         val value = appearance.normalized()
         runCatching {
             context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE).edit()
-                .putBoolean("use_player_defaults", value.usePlayerDefaults)
+                .putBoolean("use_player_defaults", value.useSystemDefaults)
                 .putString("font_family", value.fontFamily)
                 .putFloat("text_scale", value.textScale)
                 .putInt("text_color", value.textColor)
@@ -95,12 +95,12 @@ internal object SubtitleAppearanceStore {
 }
 
 @OptIn(UnstableApi::class)
-internal fun applySubtitleAppearance(playerView: PlayerView, appearance: SubtitleAppearance) {
+internal fun applyAndroidSubtitleStyle(playerView: PlayerView, appearance: AndroidSubtitleStyle) {
     val subtitleView: SubtitleView = playerView.subtitleView ?: return
     val value = appearance.normalized()
 
-    // Match the desktop player's renderer-owned style: do not let styles embedded in an SRT/ASS
-    // stream silently override the app's selected font, colours, size or position.
+    // Use Android Media3's own styling API so embedded track styles cannot override the
+    // Android user's selected font, colours, size or position.
     subtitleView.setApplyEmbeddedStyles(false)
     subtitleView.setApplyEmbeddedFontSizes(false)
     subtitleView.setStyle(value.toCaptionStyle())
@@ -111,8 +111,8 @@ internal fun applySubtitleAppearance(playerView: PlayerView, appearance: Subtitl
 }
 
 @OptIn(UnstableApi::class)
-private fun SubtitleAppearance.toCaptionStyle(): CaptionStyleCompat {
-    if (usePlayerDefaults) return CaptionStyleCompat.DEFAULT
+private fun AndroidSubtitleStyle.toCaptionStyle(): CaptionStyleCompat {
+    if (useSystemDefaults) return CaptionStyleCompat.DEFAULT
 
     val value = normalized()
     return CaptionStyleCompat(
