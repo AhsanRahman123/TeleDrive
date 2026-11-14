@@ -113,6 +113,11 @@ fun MediaPlayer(
     val audioLanguage by rememberUpdatedState(preferredAudioLanguage)
     val subtitleLanguage by rememberUpdatedState(preferredSubtitleLanguage)
 
+    var androidSubtitleStyle by remember(context) {
+        mutableStateOf(AndroidSubtitleStyleStore.load(context))
+    }
+    var showAndroidSubtitleStyle by remember { mutableStateOf(false) }
+
     val holder = remember(content) { mutableStateOf<ExoPlayer?>(null) }
     val player = holder.value
     val failedDecoders = remember(content) { mutableSetOf<String>() }
@@ -297,6 +302,7 @@ fun MediaPlayer(
                         this.player = player
                         setBackgroundColor(Color.TRANSPARENT)
                         setShutterBackgroundColor(Color.TRANSPARENT)
+                        applyAndroidSubtitleStyle(this, androidSubtitleStyle)
                     }
                 },
                 update = { view ->
@@ -306,6 +312,7 @@ fun MediaPlayer(
                         PlayerResizeMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                         PlayerResizeMode.FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                     }
+                    applyAndroidSubtitleStyle(view, androidSubtitleStyle)
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -404,7 +411,19 @@ fun MediaPlayer(
                     notifyControls(false)
                 },
                 onPreferredAudioLanguage = onPreferredAudioLanguage,
-                onPreferredSubtitleLanguage = onPreferredSubtitleLanguage
+                onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
+                onOpenAndroidSubtitleStyle = { showAndroidSubtitleStyle = true }
+            )
+        }
+        if (showAndroidSubtitleStyle) {
+            AndroidSubtitleStyleDialog(
+                appearance = androidSubtitleStyle,
+                onDismiss = { showAndroidSubtitleStyle = false },
+                onApply = { next ->
+                    androidSubtitleStyle = next.normalized()
+                    AndroidSubtitleStyleStore.save(context, next)
+                    showAndroidSubtitleStyle = false
+                }
             )
         }
         if (locked) {

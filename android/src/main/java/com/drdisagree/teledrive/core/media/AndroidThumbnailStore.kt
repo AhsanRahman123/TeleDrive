@@ -162,7 +162,15 @@ class AndroidThumbnailStore(
 
     private suspend fun processPendingJobs() {
         while (true) {
-            val job = thumbnailJobDao.next(1).firstOrNull() ?: return
+            val now = System.currentTimeMillis()
+            val job = thumbnailJobDao.nextReady(1, now, MAX_BACKGROUND_ATTEMPTS).firstOrNull()
+            if (job == null) {
+                val nextAttemptAt = thumbnailJobDao.nextQueuedAt(MAX_BACKGROUND_ATTEMPTS)
+                    ?: return
+                delay((nextAttemptAt - System.currentTimeMillis()).coerceAtLeast(1L))
+                continue
+            }
+
             val entity = fileDao.byId(job.fileId)
             if (entity == null || entity.trashedAt != null) {
                 thumbnailJobDao.delete(job.fileId)
@@ -184,14 +192,12 @@ class AndroidThumbnailStore(
                 thumbnailJobDao.delete(job.fileId)
                 continue
             }
-            thumbnailJobDao.recordAttempt(job.fileId)
+
+            val retryAt = System.currentTimeMillis() + BACKGROUND_RETRY_DELAY_MS
+            thumbnailJobDao.recordAttempt(job.fileId, retryAt)
             if (job.attempts + 1 >= MAX_BACKGROUND_ATTEMPTS) {
                 thumbnailJobDao.delete(job.fileId)
-                continue
             }
-            delay(BACKGROUND_RETRY_DELAY_MS)
-            jobWakeups.trySend(Unit)
-            return
         }
     }
 

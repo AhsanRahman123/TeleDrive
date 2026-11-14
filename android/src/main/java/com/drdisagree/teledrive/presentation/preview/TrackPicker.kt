@@ -122,6 +122,7 @@ fun TrackPickerSheet(
                 label = track.label,
                 detail = if (track.supported) null else unsupported,
                 selected = track.selected,
+                enabled = track.supported,
                 onClick = { onSelect(track) }
             )
         }
@@ -138,16 +139,22 @@ private fun TrackRow(
     label: String,
     detail: String?,
     selected: Boolean,
+    enabled: Boolean = true,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .selectable(
+                selected = selected,
+                enabled = enabled,
+                role = Role.RadioButton,
+                onClick = onClick
+            )
             .padding(horizontal = 24.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        RadioButton(selected = selected, onClick = null)
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
         Column(modifier = Modifier.padding(start = 16.dp)) {
             Text(text = label, style = MaterialTheme.typography.bodyLarge)
             if (detail != null) {
