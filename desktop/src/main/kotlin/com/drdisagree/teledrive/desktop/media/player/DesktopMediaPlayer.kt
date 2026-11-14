@@ -201,6 +201,7 @@ internal fun DesktopMediaPlayer(
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
     val acceptsCurrentMediaEvents = remember(mrl, isAudio) { AtomicBoolean(false) }
+    val playerDisposed = remember(mrl, isAudio) { AtomicBoolean(false) }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
@@ -325,7 +326,7 @@ internal fun DesktopMediaPlayer(
                 }
             })
         }
-    }
+    }.also(DesktopVlcPlaybackLifecycle::register)
 
     // Render the physical brightness control immediately for video. A successful DDC/CI
     // read will synchronize its value, but an initial transient read failure must not hide it.
@@ -381,8 +382,8 @@ internal fun DesktopMediaPlayer(
 
     val fullscreenController = LocalFullscreenController.current
     LaunchedEffect(player, mrl) {
-        // Each MRL owns its own VLC player and event channels. This keeps callbacks and
-        // decoder state isolated between media items.
+        // Activate this media only after the outgoing player's queued native commands have
+        // drained, stop() has completed, and its native resources have been released.
         acceptsCurrentMediaEvents.set(false)
         playing = false
         finished = false
@@ -390,35 +391,49 @@ internal fun DesktopMediaPlayer(
         timeMs = 0L
         durationMs = 0L
         trackTick++
-        player.submit {
-            runCatching { player.controls().stop() }
-            // Accept opening/length/time callbacks from this player before play(): VLC may
-            // emit lengthChanged before playing. The old player's independent token remains
-            // false after disposal, so its late events cannot leak into this media item.
-            acceptsCurrentMediaEvents.set(true)
-            runCatching { player.media().play(mrl) }
-                .onFailure {
-                    acceptsCurrentMediaEvents.set(false)
-                    playerScope.launch {
-                        playing = false
-                        finished = true
-                        buffering = false
+        try {
+            DesktopVlcPlaybackLifecycle.activate(player) {
+                player.submitAndAwait {
+                    if (!playerDisposed.get()) {
+                        runCatching { player.controls().stop() }
+                        if (!playerDisposed.get()) {
+                            // Accept opening/length/time callbacks before play(): VLC may emit
+                            // lengthChanged before the playing event.
+                            acceptsCurrentMediaEvents.set(true)
+                            val started = player.media().play(mrl)
+                            if (!started) {
+                                acceptsCurrentMediaEvents.set(false)
+                                playerScope.launch {
+                                    playing = false
+                                    finished = true
+                                    buffering = false
+                                }
+                            }
+                        }
                     }
                 }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            acceptsCurrentMediaEvents.set(false)
+            playerScope.launch {
+                playing = false
+                finished = true
+                buffering = false
+            }
+            SafeLog.w("DesktopMediaPlayer", "Could not activate VLC media source", error)
         }
     }
 
     DisposableEffect(player) {
         onDispose {
+            // Close the event gate immediately. The shared lifecycle coordinator then waits for
+            // this player's queued work and synchronously stops/releases it before another
+            // media player's start is allowed to proceed.
+            playerDisposed.set(true)
             acceptsCurrentMediaEvents.set(false)
-            // Keep teardown serialized with pending play/seek/track commands. Disposing the
-            // composable must not race a queued media replacement against native player release.
-            runCatching {
-                player.submit {
-                    runCatching { player.controls().stop() }
-                    runCatching { player.release() }
-                }
-            }
+            DesktopVlcPlaybackLifecycle.dispose(player)
         }
     }
 
