@@ -987,6 +987,7 @@ internal fun DesktopMediaPlayer(
                             false
                         } else {
                             val direction = if (key == Key.DirectionRight) 1L else -1L
+                            markManualVideoSeek()
                             player.submit {
                                 runCatching { player.controls().skipTime(direction * jumpMs) }
                             }
