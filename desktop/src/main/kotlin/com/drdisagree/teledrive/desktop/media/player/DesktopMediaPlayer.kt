@@ -176,7 +176,7 @@ internal fun DesktopMediaPlayer(
     var timeMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
-    var volume by remember(mrl) { mutableIntStateOf(100) }
+    var volume by remember(mrl) { mutableIntStateOf(MAX_VOLUME) }
     var brightness by remember { mutableIntStateOf(100) }
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
@@ -191,7 +191,7 @@ internal fun DesktopMediaPlayer(
     var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
-    // a play/resume event cannot reapply the initial 100% / unmuted values.
+    // a play/resume event cannot reapply the initial full-volume / unmuted values.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
     val latestRepeatOne = rememberUpdatedState(repeatOne)
