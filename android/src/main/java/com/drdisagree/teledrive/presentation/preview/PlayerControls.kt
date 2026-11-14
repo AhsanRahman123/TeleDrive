@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -69,6 +70,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -296,7 +298,7 @@ fun PlayerControls(
       CompositionLocalProvider(LocalOverVideo provides !audioOnly) {
         Box(
             modifier = Modifier.fillMaxSize().windowInsetsPadding(
-                WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
+                WindowInsets.systemBars.only(WindowInsetsSides.Horizontal)
             )
         ) {
             Row(
@@ -534,7 +536,7 @@ fun PlayerControls(
                 Surface(
                     modifier = Modifier.align(Alignment.Center).padding(top = 104.dp),
                     shape = MaterialTheme.shapes.extraLarge,
-                    color = Color.Black.copy(alpha = HUD_ALPHA),
+                    color = Color.Black.copy(alpha = 0.78f),
                     contentColor = Color.White
                 ) {
                     Text(

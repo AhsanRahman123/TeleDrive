@@ -459,8 +459,8 @@ fun MediaPlayer(
             ) {
                 Surface(
                     shape = MaterialTheme.shapes.extraLarge,
-                    color = Color.Black.copy(alpha = 0.78f),
-                    contentColor = Color.White
+                    color = ComposeColor.Black.copy(alpha = 0.78f),
+                    contentColor = ComposeColor.White
                 ) {
                     Text(
                         feedback,
