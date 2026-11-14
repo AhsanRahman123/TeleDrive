@@ -47,8 +47,14 @@ internal object VideoResumeStore {
 
         ioScope.launch {
             runCatching {
-                preferences.putLong(key, positionMs)
-                preferences.flush()
+                synchronized(preferences) {
+                    // An older write can be scheduled before a newer time event but run later
+                    // on the IO pool. Skip it if the in-memory latest value has moved on.
+                    if (lastPersisted[key] == positionMs) {
+                        preferences.putLong(key, positionMs)
+                        preferences.flush()
+                    }
+                }
             }.onFailure {
                 lastPersisted.remove(key, positionMs)
             }
@@ -60,8 +66,13 @@ internal object VideoResumeStore {
         lastPersisted.remove(key)
         ioScope.launch {
             runCatching {
-                preferences.remove(key)
-                preferences.flush()
+                synchronized(preferences) {
+                    // Do not let a delayed clear delete a newer position from a replayed video.
+                    if (!lastPersisted.containsKey(key)) {
+                        preferences.remove(key)
+                        preferences.flush()
+                    }
+                }
             }
         }
     }
