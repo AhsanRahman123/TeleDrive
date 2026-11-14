@@ -45,6 +45,8 @@ android {
     }
     buildTypes {
         debug {
+            // Keep the preview install separate from the regular TeleDrive app and its data.
+            applicationIdSuffix = ".preview"
             if (ciKeystore != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
