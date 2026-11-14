@@ -52,7 +52,7 @@ jobs:
           echo "Verified separate preview package: $package" >> "$GITHUB_STEP_SUMMARY"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           keytool_cert="$(keytool -exportcert -keystore .github/keys/teledrive-preview.keystore -storepass preview-only-2026 -alias teledrive-preview | sha256sum | awk '{print tolower($1)}')"
-          apk_cert="$("$apksigner" verify --print-certs "$apk" 2>&1 | grep -i 'certificate SHA-256 digest' | tail -n 1 | sed 's/.*: *//' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          apk_cert="$("$apksigner" verify --print-certs "$apk" 2>&1 | grep -Eo '[[:xdigit:]]{64}' | head -n 1 | tr '[:upper:]' '[:lower:]')"
           echo "Keystore certificate SHA-256: $keytool_cert"
           echo "APK certificate SHA-256: $apk_cert"
           test -n "$apk_cert"
