@@ -176,7 +176,16 @@ internal fun DesktopMediaPlayer(
     var timeMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
-    var volume by remember(mrl) { mutableIntStateOf(MAX_VOLUME) }
+    var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
+    var volume by remember(mrl) {
+        mutableIntStateOf(
+            if (controlPreferences.rememberVolume) {
+                controlPreferences.volume.coerceIn(0, MAX_VOLUME)
+            } else {
+                MAX_VOLUME
+            }
+        )
+    }
     var brightness by remember { mutableIntStateOf(100) }
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
@@ -188,7 +197,6 @@ internal fun DesktopMediaPlayer(
     var seekFeedbackVisible by remember { mutableStateOf(false) }
     var seekFeedbackTick by remember { mutableIntStateOf(0) }
     var hKeyPressed by remember { mutableStateOf(false) }
-    var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
     // a play/resume event cannot reapply the initial full-volume / unmuted values.
@@ -529,6 +537,13 @@ internal fun DesktopMediaPlayer(
             muted = true
         } else if (unmute) {
             muted = false
+        }
+        // Keep the preference model in sync with the live slider/key value. Persist it
+        // only when volume memory is enabled; otherwise the next media starts at MAX_VOLUME.
+        val updatedPreferences = controlPreferences.copy(volume = nextVolume)
+        controlPreferences = updatedPreferences
+        if (updatedPreferences.rememberVolume) {
+            PlayerControlPreferencesStore.save(updatedPreferences)
         }
         player.submitAudioState(nextVolume, muted)
     }
@@ -1132,8 +1147,11 @@ internal fun DesktopMediaPlayer(
                 onScaling = { scaling = it },
                 controlPreferences = controlPreferences,
                 onControlPreferencesChange = { updated ->
-                    controlPreferences = updated
-                    PlayerControlPreferencesStore.save(updated)
+                    // When enabling volume memory, capture the current live slider value
+                    // immediately so the next media item and app launch restore this value.
+                    val withCurrentVolume = updated.copy(volume = volume)
+                    controlPreferences = withCurrentVolume
+                    PlayerControlPreferencesStore.save(withCurrentVolume)
                     interactionTick++
                 }
             )
