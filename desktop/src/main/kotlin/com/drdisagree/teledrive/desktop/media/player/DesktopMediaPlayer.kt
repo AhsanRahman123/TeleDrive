@@ -173,7 +173,6 @@ internal fun DesktopMediaPlayer(
     onControlsVisibilityChange: (Boolean) -> Unit = {},
     onDelete: () -> Unit = {}
 ) {
-    val factory = VlcPlayback.factory ?: return
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var playing by remember { mutableStateOf(false) }
     var finished by remember { mutableStateOf(false) }
@@ -207,6 +206,12 @@ internal fun DesktopMediaPlayer(
     var subtitleAppearanceRevision by remember(mrl, mediaId, isAudio) { mutableIntStateOf(0) }
     var styleRestartPositionMs by remember(mrl, mediaId, isAudio) { mutableStateOf<Long?>(null) }
     var styleRestartWasPlaying by remember(mrl, mediaId, isAudio) { mutableStateOf(true) }
+    val startPausedForThisRevision = remember(mrl, mediaId, isAudio, subtitleAppearanceRevision) {
+        styleRestartPositionMs != null && !styleRestartWasPlaying
+    }
+    val factory = remember(subtitleAppearance) {
+        VlcPlayback.createFactory(subtitleAppearance)
+    } ?: return
     var subtitleTrackActive by remember(mrl, mediaId, isAudio) { mutableStateOf(false) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
     // a play/resume event always reapplies the current remembered volume and mute state.
@@ -361,7 +366,10 @@ internal fun DesktopMediaPlayer(
                 override fun playing(mediaPlayer: MediaPlayer) {
                     acceptsCurrentMediaEvents.set(true)
                     playerScope.launch {
-                        playing = true
+                        // A subtitle-style restart of a paused video is opened with VLC's
+                        // :start-paused media option. Keep Compose's transport state aligned
+                        // with that native state instead of issuing a racing pause() toggle.
+                        playing = !startPausedForThisRevision
                         finished = false
                         val rateToRestore = latestRate.value
                         val shouldRepeatCurrent = latestRepeatOne.value &&
@@ -369,9 +377,6 @@ internal fun DesktopMediaPlayer(
                         mediaPlayer.submit {
                             runCatching { mediaPlayer.controls().setRate(rateToRestore) }
                             runCatching { mediaPlayer.controls().repeat = shouldRepeatCurrent }
-                        }
-                        if (!styleRestartWasPlaying) {
-                            mediaPlayer.submit { runCatching { mediaPlayer.controls().pause() } }
                         }
                         resumeFinished.set(false)
                         buffering = false
@@ -455,7 +460,13 @@ internal fun DesktopMediaPlayer(
                 }
             })
         }
-    }.also(DesktopVlcPlaybackLifecycle::register)
+    }.also { createdPlayer ->
+        DesktopVlcPlaybackLifecycle.register(createdPlayer, factory)
+    }
+
+    DisposableEffect(factory) {
+        onDispose { DesktopVlcPlaybackLifecycle.retireFactory(factory) }
+    }
 
     // The slider and arrow keys update this dispatcher instead of enqueuing one native
     // command per input event. Intermediate values are coalesced before reaching VLCJ.
@@ -523,7 +534,9 @@ internal fun DesktopMediaPlayer(
 
     val fullscreenController = LocalFullscreenController.current
     LaunchedEffect(player, mrl, mediaId) {
-        val mediaOptions = subtitleAppearance.toVlcMediaOptions(frame?.height ?: 1080)
+        // VLC 3 exposes :start-paused as an input option. It avoids racing a manual
+        // pause() command against the initial playing event during a style-only restart.
+        val mediaOptions = if (startPausedForThisRevision) listOf(":start-paused") else emptyList()
         // Activate this media only after the outgoing player's queued native commands have
         // drained, stop() has completed, and its native resources have been released.
         acceptsCurrentMediaEvents.set(false)
