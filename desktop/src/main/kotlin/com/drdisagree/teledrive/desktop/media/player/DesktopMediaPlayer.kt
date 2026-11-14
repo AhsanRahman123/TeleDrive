@@ -205,7 +205,8 @@ internal fun DesktopMediaPlayer(
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
     var subtitleAppearanceRevision by remember(mrl, mediaId, isAudio) { mutableIntStateOf(0) }
-    var styleRestartPositionMs by remember(mrl, mediaId, isAudio) { mutableLongStateOf(0L) }
+    var styleRestartPositionMs by remember(mrl, mediaId, isAudio) { mutableStateOf<Long?>(null) }
+    var styleRestartWasPlaying by remember(mrl, mediaId, isAudio) { mutableStateOf(true) }
     var subtitleTrackActive by remember(mrl, mediaId, isAudio) { mutableStateOf(false) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
     // a play/resume event always reapplies the current remembered volume and mute state.
@@ -222,7 +223,7 @@ internal fun DesktopMediaPlayer(
     val savedResumePositionMs = remember(mediaId, isAudio, subtitleAppearanceRevision, styleRestartPositionMs) {
         when {
             isAudio -> 0L
-            styleRestartPositionMs > 0L -> styleRestartPositionMs
+            styleRestartPositionMs != null -> styleRestartPositionMs ?: 0L
             else -> VideoResumeStore.loadPosition(mediaId)
         }
     }
@@ -230,8 +231,9 @@ internal fun DesktopMediaPlayer(
         val normalized = next.normalized()
         if (normalized == subtitleAppearance) return
         styleRestartPositionMs = timeMs.coerceAtLeast(0L)
-        if (styleRestartPositionMs > 0L && !isAudio) {
-            VideoResumeStore.savePosition(mediaId, styleRestartPositionMs, durationMs, force = true)
+        styleRestartWasPlaying = playing
+        if ((styleRestartPositionMs ?: 0L) > 0L && !isAudio) {
+            VideoResumeStore.savePosition(mediaId, styleRestartPositionMs ?: 0L, durationMs, force = true)
         }
         subtitleAppearance = normalized
         SubtitleAppearanceStore.save(normalized)
@@ -311,7 +313,14 @@ internal fun DesktopMediaPlayer(
             !resumeRestoreAttempted.compareAndSet(false, true)
         ) return
 
-        val resumeAt = videoResumeTarget(savedResumePositionMs, mediaDurationMs)
+        val styleOverride = styleRestartPositionMs
+        val resumeAt = if (styleOverride != null) {
+            styleOverride.takeIf {
+                it > 0L && mediaDurationMs - it > VIDEO_RESUME_END_MARGIN_MS
+            }
+        } else {
+            videoResumeTarget(savedResumePositionMs, mediaDurationMs)
+        }
         if (resumeAt == null) {
             if (savedResumePositionMs > 0L) VideoResumeStore.clear(mediaId)
             pendingResumeTargetMs.set(0L)
@@ -352,6 +361,9 @@ internal fun DesktopMediaPlayer(
                     playerScope.launch {
                         playing = true
                         finished = false
+                        if (!styleRestartWasPlaying) {
+                            player.submit { runCatching { mediaPlayer.controls().pause() } }
+                        }
                         resumeFinished.set(false)
                         buffering = false
                         // VLC can report the media length before the first playing event. Read
