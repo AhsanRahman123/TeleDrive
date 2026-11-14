@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SlowMotionVideo
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.SubtitlesOff
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -123,6 +124,7 @@ fun PlayerControls(
     onEnterPip: (() -> Unit)? = null,
     onPreferredAudioLanguage: (String) -> Unit = {},
     onPreferredSubtitleLanguage: (String) -> Unit = {},
+    onOpenAndroidSubtitleStyle: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var playing by remember(player) { mutableStateOf(player.isPlaying) }
@@ -364,6 +366,19 @@ fun PlayerControls(
                                     )
                                 }
                             }
+                            if (!audioOnly) {
+                                ExtraControl(expanded || textTracks.isNotEmpty()) {
+                                    ControlButton(
+                                        icon = Icons.Filled.Settings,
+                                        description = "Android subtitle appearance",
+                                        enabled = textTracks.isNotEmpty(),
+                                        onClick = {
+                                            onInteraction()
+                                            onOpenAndroidSubtitleStyle()
+                                        }
+                                    )
+                                }
+                            }
                             ExtraControl(expanded || audioTracks.size > 1) {
                                 ControlButton(
                                     icon = Icons.Filled.Audiotrack,
@@ -565,18 +580,19 @@ fun PlayerControls(
             },
             onSelect = { track ->
                 onInteraction()
+                if (track.supported) {
+                    val parameters = player.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setOverrideForType(
+                            TrackSelectionOverride(track.group.mediaTrackGroup, track.index)
+                        )
+                        .build()
+                    player.trackSelectionParameters = parameters
+                    subtitlesOn = true
+                    onPreferredSubtitleLanguage(track.language)
+                }
                 showTextTracks = false
-                player.trackSelectionParameters = player.trackSelectionParameters
-                    .buildUpon()
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                    .setOverrideForType(
-                        TrackSelectionOverride(track.group.mediaTrackGroup, track.index)
-                    )
-                    .setPreferredTextLanguage(track.language.ifEmpty { null })
-                    .build()
-                subtitlesOn = true
-                onPreferredSubtitleLanguage(track.language)
             },
             onDismiss = { showTextTracks = false }
         )
