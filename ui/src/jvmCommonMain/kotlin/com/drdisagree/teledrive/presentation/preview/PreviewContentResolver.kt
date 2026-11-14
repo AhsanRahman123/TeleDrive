@@ -276,8 +276,11 @@ class PreviewContentResolver(
         }
 
         var tdlibPath: String? = null
-        telegramClient.downloadDocument(file.remoteFileId ?: return null)
-            .collect { event ->
+        telegramClient.downloadDocument(
+            remoteFileId = file.remoteFileId ?: return null,
+            chatId = file.chatId,
+            messageId = file.messageId
+        ).collect { event ->
                 when (event) {
                     is TelegramDownloadEvent.Progress ->
                         onProgress(event.transferredBytes, event.totalBytes)

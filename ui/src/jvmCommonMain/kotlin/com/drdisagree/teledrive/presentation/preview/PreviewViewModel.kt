@@ -199,7 +199,7 @@ class PreviewViewModel(
                 }
                 .stateIn(
                     viewModelScope,
-                    SharingStarted.Lazily,
+                    SharingStarted.WhileSubscribed(5_000),
                     PreviewContent.Loading
                 )
         }

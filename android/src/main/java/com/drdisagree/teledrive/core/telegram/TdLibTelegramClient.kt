@@ -1120,7 +1120,7 @@ class TdLibTelegramClient(
         }
 
         subscribed.await()
-        val file: TdApi.File = remoteFile(remoteFileId)
+        val file: TdApi.File = remoteFile(remoteFileId, chatId, messageId)
         val fileId = file.id
         downloadedFileId.complete(fileId)
 
@@ -1202,18 +1202,30 @@ class TdLibTelegramClient(
     override suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray? {
         val message = runCatching { send(TdApi.GetMessage(chatId, messageId)) }.getOrNull()
             ?: return null
-        val document = (message.content as? TdApi.MessageDocument)?.document ?: return null
+        val (thumbnailFile, miniThumbnail) = when (val content = message.content) {
+            is TdApi.MessageDocument ->
+                content.document.thumbnail?.file to content.document.minithumbnail?.data
 
-        document.thumbnail?.file?.let { thumbnailFile ->
+            is TdApi.MessagePhoto -> {
+                val size = content.photo.sizes.minByOrNull { photoSize ->
+                    kotlin.math.abs(maxOf(photoSize.width, photoSize.height) - THUMBNAIL_EDGE)
+                }
+                size?.photo to content.photo.minithumbnail?.data
+            }
+
+            else -> return null
+        }
+
+        thumbnailFile?.let { file ->
             val downloaded = runCatching {
-                send(TdApi.DownloadFile(thumbnailFile.id, THUMBNAIL_PRIORITY, 0, 0, true))
+                send(TdApi.DownloadFile(file.id, THUMBNAIL_PRIORITY, 0, 0, true))
             }.getOrNull()
             val path = downloaded?.local?.path?.takeIf { it.isNotEmpty() }
             if (path != null) {
                 runCatching { File(path).readBytes() }.getOrNull()?.let { return it }
             }
         }
-        return document.minithumbnail?.data
+        return miniThumbnail
     }
 
     private suspend fun remoteFile(remoteFileId: String): TdApi.File {
@@ -1238,23 +1250,43 @@ class TdLibTelegramClient(
     override suspend fun resolveFile(remoteFileId: String): TelegramFileInfo =
         remoteFile(remoteFileId).toInfo()
 
-    override suspend fun resolveFile(
+    private suspend fun remoteFile(
         remoteFileId: String,
         chatId: Long?,
         messageId: Long?
-    ): TelegramFileInfo {
+    ): TdApi.File {
         try {
-            return resolveFile(remoteFileId)
+            return remoteFile(remoteFileId)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (firstFailure: Exception) {
             if (chatId == null || messageId == null) throw firstFailure
-            val refreshedId = getDocument(chatId, messageId)?.remoteFileId
-                ?.takeIf { it.isNotBlank() && it != remoteFileId }
-                ?: throw firstFailure
-            return resolveFile(refreshedId)
+
+            // Refresh from the source message and use its current TDLib file object directly.
+            // This works for both MessageDocument and MessagePhoto, whose session-local file IDs
+            // can change after TDLib is restarted.
+            val refreshedFile = runCatching {
+                send<TdApi.Message>(TdApi.GetMessage(chatId, messageId)).mediaFile()
+            }.getOrNull() ?: throw firstFailure
+
+            if (refreshedFile.remote?.id.isNullOrBlank()) throw firstFailure
+            return refreshedFile
         }
     }
+
+    private fun TdApi.Message.mediaFile(): TdApi.File? = when (val body = content) {
+        is TdApi.MessageDocument -> body.document.document
+        is TdApi.MessageAudio -> body.audio.audio
+        is TdApi.MessageVideo -> body.video.video
+        is TdApi.MessagePhoto -> body.photo.sizes.maxByOrNull { it.photo.size }?.photo
+        else -> null
+    }
+
+    override suspend fun resolveFile(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ): TelegramFileInfo = remoteFile(remoteFileId, chatId, messageId).toInfo()
 
     override suspend fun getFileInfo(fileId: Int): TelegramFileInfo =
         send(TdApi.GetFile(fileId)).toInfo()
