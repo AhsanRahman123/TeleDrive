@@ -423,11 +423,19 @@ fun FilesScreen(
     // keys themselves have not changed.
     val lifecycleOwner = LocalLifecycleOwner.current
     var returnFromPreviewTick by remember { mutableIntStateOf(0) }
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, selectedTabId, state.folderId) {
         var hasLeftFiles = false
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> hasLeftFiles = true
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    hasLeftFiles = true
+                    viewModel.saveFileListPosition(
+                        tabId = selectedTabId,
+                        folderId = state.folderId,
+                        firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                        firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset
+                    )
+                }
                 Lifecycle.Event.ON_RESUME -> {
                     if (hasLeftFiles) {
                         hasLeftFiles = false
