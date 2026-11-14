@@ -141,6 +141,7 @@ import kotlin.time.Duration.Companion.milliseconds
 @Composable
 internal fun DesktopMediaPlayer(
     mrl: String,
+    mediaId: String,
     isAudio: Boolean,
     modifier: Modifier = Modifier,
     preferredAudioLanguage: String = "",
@@ -202,11 +203,20 @@ internal fun DesktopMediaPlayer(
     // a play/resume event always reapplies the current remembered volume and mute state.
     val latestVolume = rememberUpdatedState(volume)
     val latestMuted = rememberUpdatedState(muted)
+    val latestTimeMs = rememberUpdatedState(timeMs)
+    val latestDurationMs = rememberUpdatedState(durationMs)
+    val latestFinished = rememberUpdatedState(finished)
     val latestRepeatOne = rememberUpdatedState(repeatOne)
     val latestSleepAtTrackEnd = rememberUpdatedState(sleepAtTrackEnd)
     val latestOnPlaybackFinished = rememberUpdatedState(onPlaybackFinished)
     val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
     val playerScope = rememberCoroutineScope()
+    val savedResumePositionMs = remember(mediaId, isAudio) {
+        if (isAudio) 0L else VideoResumeStore.loadPosition(mediaId)
+    }
+    val resumeInitializationComplete = remember(mediaId, mrl, isAudio) {
+        AtomicBoolean(false)
+    }
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
     val acceptsCurrentMediaEvents = remember(mrl, isAudio) { AtomicBoolean(false) }
@@ -236,16 +246,39 @@ internal fun DesktopMediaPlayer(
     val timeUpdates = remember(mrl, isAudio) {
         Channel<Long>(capacity = Channel.CONFLATED)
     }
-    LaunchedEffect(timeUpdates) {
-        for (position in timeUpdates) timeMs = position
+    LaunchedEffect(timeUpdates, mediaId, isAudio) {
+        for (position in timeUpdates) {
+            timeMs = position
+            if (!isAudio && resumeInitializationComplete.get()) {
+                VideoResumeStore.savePosition(mediaId, position, durationMs)
+            }
+        }
     }
     DisposableEffect(timeUpdates) {
         onDispose { timeUpdates.close() }
     }
 
+    fun initializeVideoResume(mediaPlayer: MediaPlayer, mediaDurationMs: Long) {
+        if (isAudio || mediaDurationMs <= 0L ||
+            !resumeInitializationComplete.compareAndSet(false, true)
+        ) return
+
+        val resumeAt = videoResumeTarget(savedResumePositionMs, mediaDurationMs)
+        if (resumeAt == null) {
+            if (savedResumePositionMs > 0L) VideoResumeStore.clear(mediaId)
+            return
+        }
+
+        // Seek only after VLC has opened the media and reported a valid duration. This avoids
+        // sending a seek to an unprepared player and does not touch audio-only playback.
+        mediaPlayer.submit {
+            runCatching { mediaPlayer.controls().setTime(resumeAt) }
+        }
+    }
+
     // Give every MRL an isolated native VLC player. Reusing one decoder/audio-output
     // instance across unrelated media caused corrupted frames and unstable audio on switches.
-    val player = remember(mrl, isAudio) {
+    val player = remember(mrl, mediaId, isAudio) {
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
@@ -268,6 +301,7 @@ internal fun DesktopMediaPlayer(
                             .getOrNull()
                         if (reportedLength != null && reportedLength > 0L) {
                             durationMs = reportedLength
+                            initializeVideoResume(mediaPlayer, reportedLength)
                         }
                         val reportedTime = runCatching { mediaPlayer.status().time() }
                             .getOrNull()
@@ -303,6 +337,8 @@ internal fun DesktopMediaPlayer(
                     playerScope.launch {
                         playing = false
                         finished = true
+                        if (!isAudio) VideoResumeStore.clear(mediaId)
+                        resumeInitializationComplete.set(true)
                         if (!latestRepeatOne.value || latestSleepAtTrackEnd.value) {
                             latestOnPlaybackFinished.value()
                         }
@@ -321,7 +357,10 @@ internal fun DesktopMediaPlayer(
 
                 override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
                     if (acceptsCurrentMediaEvents.get()) {
-                        playerScope.launch { durationMs = newLength }
+                        playerScope.launch {
+                            durationMs = newLength
+                            initializeVideoResume(mediaPlayer, newLength)
+                        }
                     }
                 }
 
@@ -402,7 +441,7 @@ internal fun DesktopMediaPlayer(
     }
 
     val fullscreenController = LocalFullscreenController.current
-    LaunchedEffect(player, mrl) {
+    LaunchedEffect(player, mrl, mediaId) {
         // Activate this media only after the outgoing player's queued native commands have
         // drained, stop() has completed, and its native resources have been released.
         acceptsCurrentMediaEvents.set(false)
@@ -446,8 +485,18 @@ internal fun DesktopMediaPlayer(
         }
     }
 
-    DisposableEffect(player) {
+    DisposableEffect(player, mediaId, isAudio) {
         onDispose {
+            // Save the most recent known video position before navigating to another file or
+            // leaving the viewer. Periodic time updates already persist progress while playing.
+            if (!isAudio && resumeInitializationComplete.get() && !latestFinished.value) {
+                VideoResumeStore.savePosition(
+                    mediaId = mediaId,
+                    positionMs = latestTimeMs.value,
+                    durationMs = latestDurationMs.value,
+                    force = true
+                )
+            }
             // Close the event gate immediately. The shared lifecycle coordinator then waits for
             // this player's queued work and synchronously stops/releases it before another
             // media player's start is allowed to proceed.
