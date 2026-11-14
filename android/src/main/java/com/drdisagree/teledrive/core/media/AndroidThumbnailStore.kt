@@ -184,7 +184,10 @@ class AndroidThumbnailStore(
                 thumbnailJobDao.delete(job.fileId)
                 continue
             }
-            thumbnailJobDao.recordAttempt(job.fileId)
+            thumbnailJobDao.recordAttempt(
+                fileId = job.fileId,
+                retryAt = System.currentTimeMillis() + BACKGROUND_RETRY_DELAY_MS
+            )
             if (job.attempts + 1 >= MAX_BACKGROUND_ATTEMPTS) {
                 thumbnailJobDao.delete(job.fileId)
                 continue
