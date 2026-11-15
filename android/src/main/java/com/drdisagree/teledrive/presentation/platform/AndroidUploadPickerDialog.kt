@@ -721,13 +721,21 @@ private fun createUploadPickerThumbnail(file: File): Bitmap? = runCatching {
             val retriever = MediaMetadataRetriever()
             try {
                 retriever.setDataSource(file.absolutePath)
-                val frame = retriever.getFrameAtTime(
-                    1_000_000L,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-                ) ?: retriever.getFrameAtTime(
-                    0L,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-                )
+                fun frameAt(timeUs: Long): Bitmap? =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                        retriever.getScaledFrameAtTime(
+                            timeUs,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                            480,
+                            480
+                        )
+                    } else {
+                        retriever.getFrameAtTime(
+                            timeUs,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                        )
+                    }
+                val frame = frameAt(1_000_000L) ?: frameAt(0L)
                 frame?.let(::scaleUploadPickerBitmap)
             } finally {
                 runCatching { retriever.release() }
