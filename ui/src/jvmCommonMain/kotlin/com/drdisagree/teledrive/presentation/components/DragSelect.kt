@@ -53,7 +53,9 @@ fun rememberDragSelect(
     scrollPerFrame: Dp = SCROLL_PER_FRAME,
     mouseDragAddsToSelection: Boolean = false,
     resolveNearestVisibleItem: Boolean = false,
-    processReleasePosition: Boolean = false
+    processReleasePosition: Boolean = false,
+    multiTouchEnabled: Boolean = false,
+    onMultiTouchSelect: (Int) -> Unit = {}
 ): Modifier = dragSelect(
     scrollable = gridState,
     indexAt = { offset ->
@@ -84,7 +86,9 @@ fun rememberDragSelect(
     edgeSize = edgeSize,
     scrollPerFrame = scrollPerFrame,
     mouseDragAddsToSelection = mouseDragAddsToSelection,
-    processReleasePosition = processReleasePosition
+    processReleasePosition = processReleasePosition,
+    multiTouchEnabled = multiTouchEnabled,
+    onMultiTouchSelect = onMultiTouchSelect
 )
 
 @Composable
@@ -134,7 +138,9 @@ private fun dragSelect(
     edgeSize: Dp,
     scrollPerFrame: Dp,
     mouseDragAddsToSelection: Boolean,
-    processReleasePosition: Boolean
+    processReleasePosition: Boolean,
+    multiTouchEnabled: Boolean = false,
+    onMultiTouchSelect: (Int) -> Unit = {}
 ): Modifier {
     val density = LocalDensity.current
     val edgePx = with(density) { edgeSize.toPx() }
@@ -150,6 +156,8 @@ private fun dragSelect(
     val currentIsSelected by rememberUpdatedState(isSelected)
     val currentOnRange by rememberUpdatedState(onRange)
     val currentOnEnd by rememberUpdatedState(onEnd)
+    val currentMultiTouchEnabled by rememberUpdatedState(multiTouchEnabled)
+    val currentOnMultiTouchSelect by rememberUpdatedState(onMultiTouchSelect)
 
     LaunchedEffect(scrolling, scrollable) {
         while (scrolling) {
@@ -180,12 +188,25 @@ private fun dragSelect(
             } else {
                 null
             }
-            val shouldStart = if (down.type == PointerType.Mouse) {
-                mouseDragStart != null
+            val touchStart = if (
+                down.type == PointerType.Touch && currentMultiTouchEnabled
+            ) {
+                awaitLongPressOrMultiTouch(
+                    down = down,
+                    indexAt = currentIndexAt,
+                    onSelectIndex = currentOnMultiTouchSelect
+                )
             } else {
-                awaitLongPress(down)
+                null
             }
-            if (!shouldStart) return@awaitEachGesture
+            val shouldStart = when {
+                down.type == PointerType.Mouse -> mouseDragStart != null
+                touchStart != null -> touchStart == TouchGestureStart.LONG_PRESS
+                else -> awaitLongPress(down)
+            }
+            if (touchStart == TouchGestureStart.MULTI_TOUCH || !shouldStart) {
+                return@awaitEachGesture
+            }
 
             var selectionStarted = false
             try {
@@ -239,6 +260,18 @@ private fun dragSelect(
 
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
+                    if (down.type == PointerType.Touch && currentMultiTouchEnabled) {
+                        val additionalTouches = event.changes.filter {
+                            it.id != down.id &&
+                                    it.type == PointerType.Touch &&
+                                    it.pressed &&
+                                    !it.previousPressed
+                        }
+                        additionalTouches.mapNotNull { currentIndexAt(it.position) }
+                            .distinct()
+                            .forEach(currentOnMultiTouchSelect)
+                        additionalTouches.forEach { it.consume() }
+                    }
                     val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
                     val released = !change.pressed
                     if (released && !processReleasePosition) break
@@ -320,6 +353,50 @@ private suspend fun AwaitPointerEventScope.awaitMouseDragStart(
             return change
         }
     }
+}
+
+private enum class TouchGestureStart {
+    LONG_PRESS,
+    MULTI_TOUCH,
+    CANCELLED
+}
+
+/**
+ * A normal first tap remains untouched. When another finger joins before long-press or scrolling,
+ * select the items beneath all currently pressed fingers and consume those presses so the tile's
+ * ordinary open action cannot also fire.
+ */
+private suspend fun AwaitPointerEventScope.awaitLongPressOrMultiTouch(
+    down: PointerInputChange,
+    indexAt: (Offset) -> Int?,
+    onSelectIndex: (Int) -> Unit
+): TouchGestureStart = try {
+    withTimeout(viewConfiguration.longPressTimeoutMillis) {
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val anchor = event.changes.fastFirstOrNull { it.id == down.id }
+                ?: return@withTimeout TouchGestureStart.CANCELLED
+            if (!anchor.pressed ||
+                (anchor.position - down.position).getDistance() > viewConfiguration.touchSlop
+            ) {
+                return@withTimeout TouchGestureStart.CANCELLED
+            }
+            val activeTouches = event.changes.filter {
+                it.type == PointerType.Touch && it.pressed
+            }
+            if (activeTouches.size >= 2) {
+                activeTouches.mapNotNull { indexAt(it.position) }
+                    .distinct()
+                    .forEach(onSelectIndex)
+                activeTouches.forEach { it.consume() }
+                return@withTimeout TouchGestureStart.MULTI_TOUCH
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        TouchGestureStart.CANCELLED
+    }
+} catch (_: PointerEventTimeoutCancellationException) {
+    TouchGestureStart.LONG_PRESS
 }
 
 /**

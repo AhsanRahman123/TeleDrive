@@ -1625,7 +1625,16 @@ private fun FilesContent(
         // The starting row determines the gesture: selected anchor = deselect range;
         // unselected anchor = select range. Do not force every mouse drag to be additive.
         mouseDragAddsToSelection = false,
-        resolveNearestVisibleItem = true
+        resolveNearestVisibleItem = true,
+        multiTouchEnabled = touchRangeSelection && selectionMode,
+        onMultiTouchSelect = { index ->
+            if (index < state.folders.size) {
+                viewModel.selectFolderForMultiTouch(state.folders[index].id)
+            } else {
+                files.peek(index - state.folders.size)
+                    ?.let { viewModel.selectFileForMultiTouch(it.id) }
+            }
+        }
     )
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(

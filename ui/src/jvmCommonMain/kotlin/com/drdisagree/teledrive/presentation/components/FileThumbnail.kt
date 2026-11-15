@@ -49,7 +49,7 @@ fun FileThumbnail(
     var thumbnailRevision by remember(file.id) { mutableStateOf(0L) }
 
     LaunchedEffect(file.id) {
-        ThumbnailChangeNotifier.eventsFor(file.id).collect { change ->
+        ThumbnailChangeNotifier.events.collect { change ->
             if (change.fileId == file.id) {
                 failed = false
                 thumbnailRevision++

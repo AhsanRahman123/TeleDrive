@@ -310,6 +310,8 @@ class FilesViewModel(
     val working: StateFlow<UiText?> = _working.asStateFlow()
 
     private var rangeBase: Pair<Set<String>, Set<String>>? = null
+    private val multiTouchAddedFiles = mutableSetOf<String>()
+    private val multiTouchAddedFolders = mutableSetOf<String>()
     /**
      * Range selection is a gesture-level mode, not a consequence of the current range size.
      * In particular, dragging from an already-selected item temporarily removes items. The
@@ -534,9 +536,31 @@ class FilesViewModel(
         publishSelectionSnapshot()
     }
 
+    /**
+     * Multi-touch selection is additive: touching an already-selected item never removes it.
+     * During a range gesture, these IDs are retained as additions to the range baseline.
+     */
+    fun selectFileForMultiTouch(fileId: String) {
+        _allSelected.value = false
+        selection.update { it + fileId }
+        if (rangeSelectionActive) multiTouchAddedFiles += fileId
+        _selectionModeEnabled.value = true
+        publishSelectionSnapshot()
+    }
+
+    fun selectFolderForMultiTouch(folderId: String) {
+        _allSelected.value = false
+        folderSelection.update { it + folderId }
+        if (rangeSelectionActive) multiTouchAddedFolders += folderId
+        _selectionModeEnabled.value = true
+        publishSelectionSnapshot()
+    }
+
     fun clearSelection() {
         rangeBase = null
         rangeSelectionActive = false
+        multiTouchAddedFiles.clear()
+        multiTouchAddedFolders.clear()
         _selectionModeEnabled.value = false
         _allSelected.value = false
         selection.value = emptySet()
@@ -599,6 +623,8 @@ class FilesViewModel(
 
     fun startRangeSelection() {
         rangeBase = selection.value to folderSelection.value
+        multiTouchAddedFiles.clear()
+        multiTouchAddedFolders.clear()
         rangeSelectionActive = true
         _selectionModeEnabled.value = true
         publishSelectionSnapshot()
@@ -611,8 +637,14 @@ class FilesViewModel(
     ) {
         val base = rangeBase ?: return
         _allSelected.update { false }
-        selection.update { if (shouldSelect) base.first + fileIds else base.first - fileIds.toSet() }
-        folderSelection.update { if (shouldSelect) base.second + folderIds else base.second - folderIds.toSet() }
+        selection.update {
+            (if (shouldSelect) base.first + fileIds else base.first - fileIds.toSet()) +
+                    multiTouchAddedFiles
+        }
+        folderSelection.update {
+            (if (shouldSelect) base.second + folderIds else base.second - folderIds.toSet()) +
+                    multiTouchAddedFolders
+        }
         _selectionModeEnabled.value = keepFilesSelectionMode(
             rangeSelectionActive,
             selection.value.size,
@@ -624,6 +656,8 @@ class FilesViewModel(
     fun endRangeSelection() {
         rangeBase = null
         rangeSelectionActive = false
+        multiTouchAddedFiles.clear()
+        multiTouchAddedFolders.clear()
         _selectionModeEnabled.value = keepFilesSelectionMode(
             rangeSelectionActive = false,
             selectedFileCount = selection.value.size,
