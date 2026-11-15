@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.presentation.navigation
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
@@ -12,6 +14,7 @@ import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.album_not_in_folder
 import com.drdisagree.teledrive.presentation.channels.ChannelsScreen
 import com.drdisagree.teledrive.presentation.common.LocalOpenTransfers
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.collection.CollectionScreen
 import com.drdisagree.teledrive.presentation.files.FilesScreen
 import com.drdisagree.teledrive.presentation.gallery.GalleryScreen
@@ -40,6 +43,7 @@ fun AppNavHost(
     modifier: Modifier = Modifier,
     verticalTabMotion: Boolean = false
 ) {
+    val androidLayout = LocalAndroidLayout.current
     val savesCollectionScrollOnPreview = LocalPlatformCapabilities.current.savesCollectionScrollOnPreview
     CompositionLocalProvider(
         LocalOpenTransfers provides { navController.navigateOnce(Route.Transfers) }
@@ -48,20 +52,27 @@ fun AppNavHost(
         navController = navController,
         startDestination = startDestination,
         modifier = modifier,
+        // Android's file and gallery screens can contain many live thumbnails and controls.
+        // Avoid keeping two full collection screens composited during a navigation animation.
+        // Desktop retains the established shared-axis transitions.
         enterTransition = {
-            if (isPeerSwitch()) tabEnterFor(verticalTabMotion, movesForward())
+            if (androidLayout) EnterTransition.None
+            else if (isPeerSwitch()) tabEnterFor(verticalTabMotion, movesForward())
             else NavigationTransitions.sharedAxisEnter(forward = true)
         },
         exitTransition = {
-            if (isPeerSwitch()) tabExitFor(verticalTabMotion, movesForward())
+            if (androidLayout) ExitTransition.None
+            else if (isPeerSwitch()) tabExitFor(verticalTabMotion, movesForward())
             else NavigationTransitions.sharedAxisExit(forward = true)
         },
         popEnterTransition = {
-            if (isPeerSwitch()) tabEnterFor(verticalTabMotion, movesForward())
+            if (androidLayout) EnterTransition.None
+            else if (isPeerSwitch()) tabEnterFor(verticalTabMotion, movesForward())
             else NavigationTransitions.sharedAxisEnter(forward = false)
         },
         popExitTransition = {
-            if (isPeerSwitch()) tabExitFor(verticalTabMotion, movesForward())
+            if (androidLayout) ExitTransition.None
+            else if (isPeerSwitch()) tabExitFor(verticalTabMotion, movesForward())
             else NavigationTransitions.sharedAxisExit(forward = false)
         }
     ) {
