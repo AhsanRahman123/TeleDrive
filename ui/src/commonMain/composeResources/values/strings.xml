@@ -459,6 +459,8 @@
     <string name="preview_next">Next file</string>
     <string name="preview_no_copy_available">No local or remote copy available</string>
     <string name="preview_no_preview">No preview</string>
+    <string name="preview_open_with">Open with</string>
+    <string name="preview_open_with_failed">Could not open this file. Check that an app supports its format.</string>
     <string name="preview_no_preview_for_type">No preview for this file type</string>
     <string name="preview_nothing_to_remove">Nothing to remove</string>
     <string name="preview_only_zip">This archive format is not supported for preview yet.</string>
