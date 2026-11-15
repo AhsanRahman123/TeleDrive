@@ -94,6 +94,7 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
     var search by remember { mutableStateOf("") }
     var currentRootId by remember { mutableStateOf<String?>(null) }
     var currentPath by remember { mutableStateOf("") }
+    var showAllFiles by remember { mutableStateOf(true) }
     var filter by remember { mutableStateOf(StorageExplorerFilter.ALL) }
     var sort by remember { mutableStateOf(StorageExplorerSort.LARGEST) }
     var selectedPaths by remember { mutableStateOf(emptySet<String>()) }
@@ -138,6 +139,8 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
             snapshot.entries.asSequence().filter { entry ->
                 entry.rootId == currentRootId && entry.parentPath == currentPath
             }
+        } else if (showAllFiles) {
+            snapshot.entries.asSequence()
         } else {
             emptySequence()
         }
@@ -297,16 +300,45 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
                     )
                 }
             }
-        } else {
+        }
+
+        if (currentRoot != null || search.isNotBlank() || showAllFiles) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    if (search.isNotBlank()) "Search results" else "Storage locations",
+                    when {
+                        search.isNotBlank() -> "Search results"
+                        currentRoot != null -> "Folder contents"
+                        else -> "All storage items"
+                    },
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleSmall
                 )
+                if (currentRoot == null && search.isBlank()) {
+                    TextButton(onClick = {
+                        showAllFiles = false
+                        selectedPaths = emptySet()
+                    }) { Text("Locations") }
+                }
+                TextButton(
+                    enabled = filteredEntries.isNotEmpty(),
+                    onClick = {
+                        val visible = filteredEntries.map { it.path }.toSet()
+                        selectedPaths = if (visible.all { it in selectedPaths }) {
+                            selectedPaths - visible
+                        } else {
+                            selectedPaths + visible
+                        }
+                    }
+                ) {
+                    Text(
+                        if (filteredEntries.isNotEmpty() &&
+                            filteredEntries.all { it.path in selectedPaths }
+                        ) "Clear visible" else "Select visible"
+                    )
+                }
                 Box {
                     TextButton(onClick = { sortExpanded = true }) {
                         Text("Sort: " + sort.label, maxLines = 1)
@@ -326,6 +358,21 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
                         }
                     }
                 }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Storage locations",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall
+                )
+                TextButton(onClick = {
+                    showAllFiles = true
+                    selectedPaths = emptySet()
+                }) { Text("All files") }
             }
         }
 
@@ -394,16 +441,20 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
 
-            search.isBlank() && currentRootId == null -> {
+            search.isBlank() && currentRootId == null && !showAllFiles -> {
                 LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(snapshot.roots, key = { it.id }) { root ->
                         StorageRootRow(root = root, onClick = {
-                            currentRootId = root.id
-                            currentPath = root.path
-                            selectedPaths = emptySet()
+                            if (root.isDirectory) {
+                                currentRootId = root.id
+                                currentPath = root.path
+                                selectedPaths = emptySet()
+                            } else {
+                                selectedEntry = snapshot.entries.firstOrNull { it.path == root.path }
+                            }
                         })
                     }
                 }
@@ -718,3 +769,4 @@ private const val CATEGORY_DOWNLOADS = "DOWNLOADS"
 private const val CATEGORY_EXTERNAL_FILES = "EXTERNAL_FILES"
 private const val CATEGORY_DATABASE = "DATABASE"
 private const val CATEGORY_SETTINGS = "SETTINGS"
+private const val CATEGORY_APP_PACKAGE = "APP_PACKAGE"
