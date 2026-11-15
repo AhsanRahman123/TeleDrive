@@ -7,6 +7,8 @@ import android.util.Base64
 import android.os.Build
 import com.drdisagree.teledrive.BuildConfig
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.files.MimeTypes
+import android.webkit.MimeTypeMap
 import com.drdisagree.teledrive.domain.model.Country
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import kotlinx.coroutines.CancellationException
@@ -1259,7 +1261,11 @@ class TdLibTelegramClient(
                 TdApi.FileTypeDocument(),
                 TdApi.FileTypeVideo(),
                 TdApi.FileTypeAudio(),
-                TdApi.FileTypePhoto()
+                TdApi.FileTypePhoto(),
+                TdApi.FileTypeAnimation(),
+                TdApi.FileTypeSticker(),
+                TdApi.FileTypeVideoNote(),
+                TdApi.FileTypeVoiceNote()
             )
             for (fileType in fileTypes) {
                 try {
@@ -1280,23 +1286,28 @@ class TdLibTelegramClient(
         chatId: Long?,
         messageId: Long?
     ): TdApi.File {
-        try {
-            return remoteFile(remoteFileId)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (firstFailure: Exception) {
-            if (chatId == null || messageId == null) throw firstFailure
-
-            // Refresh from the source message and use its current TDLib file object directly.
-            // This works for both MessageDocument and MessagePhoto, whose session-local file IDs
-            // can change after TDLib is restarted.
-            val refreshedFile = runCatching {
+        // A managed download must reference the exact file object attached to its source message.
+        // Resolving the stored remote ID first can produce a valid TDLib file ID that AddFileToDownloads
+        // then rejects as unrelated to the supplied chat/message ("Message has no specified file").
+        if (chatId != null && messageId != null) {
+            val messageFile = try {
                 send<TdApi.Message>(TdApi.GetMessage(chatId, messageId)).mediaFile()
-            }.getOrNull() ?: throw firstFailure
-
-            if (refreshedFile.remote?.id.isNullOrBlank()) throw firstFailure
-            return refreshedFile
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (messageFile != null && !messageFile.remote?.id.isNullOrBlank()) {
+                SafeLog.d(
+                    TAG,
+                    "Resolved download file from source message chat=$chatId message=$messageId"
+                )
+                return messageFile
+            }
         }
+
+        // Legacy records may not retain source-message identifiers. Resolve those by remote ID.
+        return remoteFile(remoteFileId)
     }
 
     private fun TdApi.Message.mediaFile(): TdApi.File? = when (val body = content) {
@@ -1337,7 +1348,7 @@ class TdLibTelegramClient(
         messageId: Long,
         priority: Int
     ) {
-        val file = remoteFile(remoteFileId)
+        val file = remoteFile(remoteFileId, chatId, messageId)
         send<TdApi.File>(
             TdApi.AddFileToDownloads(file.id, chatId, messageId, priority.coerceIn(1, 32))
         )
@@ -1627,14 +1638,29 @@ class TdLibTelegramClient(
     ): RemoteDocument? {
         val remote = file.remote ?: return null
         if (remote.id.isNullOrEmpty()) return null
+
+        // Some Telegram media variants omit fileName or MIME metadata. Keep a useful original
+        // extension where possible so playback, categorization and external opening can identify it.
+        val normalizedName = fileName
+            .trim()
+            .takeIf { it.isNotEmpty() && it != "." }
+            ?.substringAfterLast('/')
+            ?.substringAfterLast('\\')
+            ?: run {
+                val extension = MimeTypeMap.getSingleton()
+                    .getExtensionFromMimeType(mimeType.substringBefore(';').trim().lowercase())
+                "telegram_file_$id" + extension?.let { ".$it" }.orEmpty()
+            }
+        val normalizedMimeType = MimeTypes.resolve(normalizedName, mimeType)
+
         return RemoteDocument(
             chatId = chatId,
             messageId = id,
             remoteFileId = remote.id,
             uniqueFileId = remote.uniqueId,
-            fileName = fileName,
-            mimeType = mimeType,
-            sizeBytes = file.size,
+            fileName = normalizedName,
+            mimeType = normalizedMimeType,
+            sizeBytes = file.size.takeIf { it > 0 } ?: file.expectedSize,
             caption = caption,
             dateSeconds = date,
             miniThumbnail = miniThumbnail
