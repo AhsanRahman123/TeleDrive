@@ -157,6 +157,8 @@ import com.drdisagree.teledrive.resources.preview_extraction_supported_yet_downl
 import com.drdisagree.teledrive.resources.preview_file_info
 import com.drdisagree.teledrive.resources.preview_move_to_trash
 import com.drdisagree.teledrive.resources.preview_no_preview
+import com.drdisagree.teledrive.resources.preview_open_with
+import com.drdisagree.teledrive.resources.preview_open_with_failed
 import com.drdisagree.teledrive.resources.preview_preparing
 import com.drdisagree.teledrive.resources.preview_progress_bytes
 import com.drdisagree.teledrive.resources.preview_remove_favorites
