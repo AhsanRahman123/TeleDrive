@@ -11,6 +11,7 @@ on:
       - android/native-upload-file-manager-20261116
       - android/picker-thumbnails-refresh-rate-20261116
       - android/refresh-rate-dialog-window-fix-20261116
+      - android/performance-optimization-phase1-20261116
     paths:
       - '.github/workflows/android-preview.yml'
       - 'android/src/**'
