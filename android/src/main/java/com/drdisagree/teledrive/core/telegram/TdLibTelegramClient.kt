@@ -1451,16 +1451,18 @@ class TdLibTelegramClient(
 
     override suspend fun editCaption(chatId: Long, messageId: Long, caption: String) {
         ownWrites.wroteCaption(messageId, caption)
-        paced {
-            send(
-                TdApi.EditMessageCaption(
-                    chatId,
-                    messageId,
-                    null,
-                    TdApi.FormattedText(caption, emptyArray()),
-                    false
+        pacer.pacedEdit {
+            withRateLimitRetry {
+                send(
+                    TdApi.EditMessageCaption(
+                        chatId,
+                        messageId,
+                        null,
+                        TdApi.FormattedText(caption, emptyArray()),
+                        false
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -1532,6 +1534,7 @@ class TdLibTelegramClient(
                 return block()
             } catch (e: TelegramException) {
                 if (!e.isRateLimit || attempt++ >= RATE_LIMIT_RETRIES) throw e
+                pacer.recordFloodWait(e.retryAfterSeconds ?: RATE_LIMIT_FALLBACK_SECONDS)
                 delay(
                     (((e.retryAfterSeconds
                         ?: RATE_LIMIT_FALLBACK_SECONDS) + 1) * 1000L).milliseconds

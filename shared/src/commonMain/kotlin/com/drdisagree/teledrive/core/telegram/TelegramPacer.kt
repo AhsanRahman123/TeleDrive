@@ -13,6 +13,8 @@ import kotlin.time.Duration.Companion.milliseconds
 class TelegramPacer {
 
     private val mutex = Mutex()
+    private val editMutex = Mutex()
+    private var lastEditAt = 0L
     private var tokens = BURST.toDouble()
     private var lastRefillAt = System.currentTimeMillis()
 
@@ -61,7 +63,38 @@ class TelegramPacer {
         return ((1.0 - tokens) / TOKENS_PER_MS).toLong().coerceAtLeast(MIN_WAIT_MS)
     }
 
-    private fun recordFloodWait(seconds: Int) {
+    /**
+     * Caption edits update existing Telegram messages rather than creating new ones, so they use
+     * a separate conservative one-per-second lane. Server FLOOD_WAIT responses still pause every
+     * Telegram mutation through the shared account-wide deadline.
+     */
+    suspend fun <T> pacedEdit(block: suspend () -> T): T {
+        awaitEditClearance()
+        return try {
+            block()
+        } catch (e: TelegramException) {
+            if (e.isRateLimit) recordFloodWait(e.retryAfterSeconds ?: FALLBACK_SECONDS)
+            throw e
+        }
+    }
+
+    private suspend fun awaitEditClearance() {
+        editMutex.withLock {
+            while (true) {
+                val now = System.currentTimeMillis()
+                val floodWait = (floodUntil - now).coerceAtLeast(0L)
+                val intervalWait = (EDIT_INTERVAL_MS - (now - lastEditAt)).coerceAtLeast(0L)
+                val wait = maxOf(floodWait, intervalWait)
+                if (wait == 0L) {
+                    lastEditAt = System.currentTimeMillis()
+                    break
+                }
+                delay(wait.milliseconds)
+            }
+        }
+    }
+
+    fun recordFloodWait(seconds: Int) {
         val until = System.currentTimeMillis() + (seconds + 1) * 1000L
         if (until > floodUntil) {
             floodUntil = until
@@ -76,5 +109,6 @@ class TelegramPacer {
         const val TOKENS_PER_MS = PER_MINUTE / 60_000.0
         const val MIN_WAIT_MS = 50L
         const val FALLBACK_SECONDS = 5
+        const val EDIT_INTERVAL_MS = 1_000L
     }
 }
