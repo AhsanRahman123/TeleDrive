@@ -662,14 +662,16 @@ fun FilesScreen(
                                         }
                                     )
                                 }
-                                TooltipIconButton(
-                                    tooltip = "Invert selection",
-                                    onClick = viewModel::invertSelection
-                                ) {
-                                    Icon(
-                                        Icons.Filled.SwapHoriz,
-                                        contentDescription = "Invert selection"
-                                    )
+                                if (touchSelectionActionBar) {
+                                    TooltipIconButton(
+                                        tooltip = "Invert selection",
+                                        onClick = viewModel::invertSelection
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.SwapHoriz,
+                                            contentDescription = "Invert selection"
+                                        )
+                                    }
                                 }
                                 if (selectedCount > 0) {
                                     if (!touchSelectionActionBar) {
@@ -1541,6 +1543,7 @@ private fun FilesContent(
     viewModel: FilesViewModel
 ) {
     val columns = if (state.viewMode == ViewMode.GRID) state.gridSize else 1
+    val touchRangeSelection = LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
     val keyboard = rememberKeyboardCollection(gridState, columns)
     val itemCount = state.folders.size + files.itemCount
     val toggleAt: (Int) -> Unit = { index ->
@@ -1651,7 +1654,7 @@ private fun FilesContent(
                         if (selectionMode) viewModel.toggleFolderSelection(folder.id)
                         else onOpenFolder(folder.id)
                     },
-                    onLongClick = { viewModel.toggleFolderSelection(folder.id) },
+                    onLongClick = { if (!touchRangeSelection) viewModel.toggleFolderSelection(folder.id) },
                     onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
@@ -1672,7 +1675,7 @@ private fun FilesContent(
                         if (selectionMode) viewModel.toggleFolderSelection(folder.id)
                         else onOpenFolder(folder.id)
                     },
-                    onLongClick = { viewModel.toggleFolderSelection(folder.id) },
+                    onLongClick = { if (!touchRangeSelection) viewModel.toggleFolderSelection(folder.id) },
                     onToggleSelection = { viewModel.toggleFolderSelection(folder.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
@@ -1716,7 +1719,7 @@ private fun FilesContent(
                             )
                         }
                     },
-                    onLongClick = { viewModel.toggleSelection(file.id) },
+                    onLongClick = { if (!touchRangeSelection) viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .ctrlClickSelect { viewModel.toggleSelection(file.id) }
@@ -1752,7 +1755,7 @@ private fun FilesContent(
                             )
                         }
                     },
-                    onLongClick = { viewModel.toggleSelection(file.id) },
+                    onLongClick = { if (!touchRangeSelection) viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .ctrlClickSelect { viewModel.toggleSelection(file.id) }
@@ -1787,7 +1790,7 @@ private fun FilesContent(
                             )
                         }
                     },
-                    onLongClick = { viewModel.toggleSelection(file.id) },
+                    onLongClick = { if (!touchRangeSelection) viewModel.toggleSelection(file.id) },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .ctrlClickSelect { viewModel.toggleSelection(file.id) }
