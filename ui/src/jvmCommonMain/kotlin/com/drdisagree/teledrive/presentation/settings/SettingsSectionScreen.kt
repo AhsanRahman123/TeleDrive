@@ -78,6 +78,9 @@ import com.drdisagree.teledrive.resources.settings_auto_lock
 import com.drdisagree.teledrive.resources.settings_automatic_backup
 import com.drdisagree.teledrive.resources.settings_back_new_media_instantly
 import com.drdisagree.teledrive.resources.settings_background_playback
+import com.drdisagree.teledrive.resources.settings_preview_background
+import com.drdisagree.teledrive.resources.settings_preview_background_theme
+import com.drdisagree.teledrive.resources.settings_preview_background_black
 import com.drdisagree.teledrive.resources.settings_backup_folders_title
 import com.drdisagree.teledrive.resources.settings_backup_interval
 import com.drdisagree.teledrive.resources.settings_backup_results
@@ -165,6 +168,7 @@ import com.drdisagree.teledrive.resources.theme_system
 import com.drdisagree.teledrive.resources.trash_clear_labels
 import com.drdisagree.teledrive.core.telegram.TelegramConnectionState
 import com.drdisagree.teledrive.domain.model.AppTheme
+import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
 import com.drdisagree.teledrive.domain.model.LayoutDensity
 import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.presentation.platform.LocalDownloadLocationConfigurable
@@ -1063,7 +1067,34 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
 @Composable
 private fun PlaybackSection(state: SettingsUiState, viewModel: SettingsViewModel) {
     val prefs = state.preferences
+    var showPreviewBackgroundDialog by remember { mutableStateOf(false) }
+    val previewBackgroundOptions = listOf(
+        PreviewBackgroundMode.THEME to stringResource(Res.string.settings_preview_background_theme),
+        PreviewBackgroundMode.BLACK to stringResource(Res.string.settings_preview_background_black)
+    )
+    if (showPreviewBackgroundDialog) {
+        ChoiceDialog(
+            title = stringResource(Res.string.settings_preview_background),
+            options = previewBackgroundOptions,
+            selected = prefs.previewBackgroundMode,
+            onSelect = { mode ->
+                showPreviewBackgroundDialog = false
+                viewModel.update { it.copy(previewBackgroundMode = mode) }
+            },
+            onDismiss = { showPreviewBackgroundDialog = false }
+        )
+    }
     SettingsGroup {
+        add {
+            SettingsClickRow(
+                title = stringResource(Res.string.settings_preview_background),
+                subtitle = when (prefs.previewBackgroundMode) {
+                    PreviewBackgroundMode.THEME -> stringResource(Res.string.settings_preview_background_theme)
+                    PreviewBackgroundMode.BLACK -> stringResource(Res.string.settings_preview_background_black)
+                },
+                onClick = { showPreviewBackgroundDialog = true }
+            )
+        }
         add {
             SettingsSwitchRow(
                 title = stringResource(Res.string.settings_stream_downloading),

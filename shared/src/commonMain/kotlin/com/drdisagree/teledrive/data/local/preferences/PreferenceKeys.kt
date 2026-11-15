@@ -54,6 +54,7 @@ object PreferenceKeys {
     val PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
     val ACTIVE_PROXY_ID = stringPreferencesKey("active_proxy_id")
     val TEXT_PREVIEW_SCALE = floatPreferencesKey("text_preview_scale")
+    val PREVIEW_BACKGROUND_MODE = stringPreferencesKey("preview_background_mode")
 
     val SORT_FIELD = stringPreferencesKey("sort_field")
     val SORT_DIRECTION = stringPreferencesKey("sort_direction")

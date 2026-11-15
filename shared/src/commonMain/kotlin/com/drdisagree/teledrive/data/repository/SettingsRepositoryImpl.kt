@@ -9,6 +9,7 @@ import com.drdisagree.teledrive.core.telegram.TelegramCredentials
 import com.drdisagree.teledrive.data.local.preferences.PreferenceKeys
 import com.drdisagree.teledrive.domain.model.AppLanguage
 import com.drdisagree.teledrive.domain.model.UserPreferences
+import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -134,6 +135,10 @@ class SettingsRepositoryImpl(
             activeProxyId = this[PreferenceKeys.ACTIVE_PROXY_ID] ?: defaults.activeProxyId,
             textPreviewScale = this[PreferenceKeys.TEXT_PREVIEW_SCALE]
                 ?: defaults.textPreviewScale,
+            previewBackgroundMode = enumOrDefault(
+                this[PreferenceKeys.PREVIEW_BACKGROUND_MODE],
+                defaults.previewBackgroundMode
+            ),
             sortField = enumOrDefault(this[PreferenceKeys.SORT_FIELD], defaults.sortField),
             sortDirection = enumOrDefault(
                 this[PreferenceKeys.SORT_DIRECTION],
@@ -212,6 +217,7 @@ class SettingsRepositoryImpl(
         this[PreferenceKeys.PROXY_ENABLED] = prefs.proxyEnabled
         this[PreferenceKeys.ACTIVE_PROXY_ID] = prefs.activeProxyId
         this[PreferenceKeys.TEXT_PREVIEW_SCALE] = prefs.textPreviewScale
+        this[PreferenceKeys.PREVIEW_BACKGROUND_MODE] = prefs.previewBackgroundMode.name
         this[PreferenceKeys.SORT_FIELD] = prefs.sortField.name
         this[PreferenceKeys.SORT_DIRECTION] = prefs.sortDirection.name
         this[PreferenceKeys.GALLERY_SORT_FIELD] = prefs.gallerySortField.name

@@ -987,4 +987,7 @@
     <string name="snackbar_view_downloads">View downloads</string>
     <string name="snackbar_view_transfers">View</string>
     <string name="nav_offline">Offline</string>
+    <string name="settings_preview_background">Image and video background</string>
+    <string name="settings_preview_background_theme">Match app theme (default)</string>
+    <string name="settings_preview_background_black">Black</string>
 </resources>

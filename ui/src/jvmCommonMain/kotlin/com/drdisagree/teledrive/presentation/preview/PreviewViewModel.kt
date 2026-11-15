@@ -27,6 +27,7 @@ import com.drdisagree.teledrive.domain.model.DriveFolder
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.LinkMetadata
+import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
 import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
@@ -150,6 +151,14 @@ class PreviewViewModel(
     val backgroundPlayback: StateFlow<Boolean> = settingsRepository.preferences
         .map { it.backgroundPlayback }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val previewBackgroundMode: StateFlow<PreviewBackgroundMode> = settingsRepository.preferences
+        .map { it.previewBackgroundMode }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            PreviewBackgroundMode.THEME
+        )
 
     val preferredAudioLanguage: StateFlow<String> = settingsRepository.preferences
         .map { it.preferredAudioLanguage }
