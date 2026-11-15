@@ -65,7 +65,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -199,7 +199,12 @@ fun AndroidUploadPickerDialog(
     }
 
     LaunchedEffect(currentPath, showHiddenFiles, search, sort, descending, filter, refreshToken, hasStorageAccess) {
-        val path = currentPath ?: return@LaunchedEffect
+        val path = currentPath ?: run {
+            entries = emptyList()
+            unreadable = false
+            loading = false
+            return@LaunchedEffect
+        }
         if (!hasStorageAccess) {
             entries = emptyList()
             unreadable = false
