@@ -9,6 +9,7 @@ on:
       - android/storage-explorer-performance-20261116
       - android/auto-remove-managed-copies-20261116
       - android/native-upload-file-manager-20261116
+      - android/picker-thumbnails-refresh-rate-20261116
     paths:
       - '.github/workflows/android-preview.yml'
       - 'android/src/**'
