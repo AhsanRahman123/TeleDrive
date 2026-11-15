@@ -825,7 +825,7 @@ private fun LazyListScope.section(
     content: @Composable (TransferTask) -> Unit
 ) {
     if (transfers.isEmpty()) return
-    item(key = "header-$sectionKey") {
+    item(key = "header-$sectionKey", contentType = "section-header") {
         Text(
             text = title,
             style = MaterialTheme.typography.titleSmall,
@@ -834,12 +834,16 @@ private fun LazyListScope.section(
                 .semantics { heading() }
         )
     }
-    items(transfers, key = { "$sectionKey-${it.id}" }) { transfer ->
+    items(
+        transfers,
+        key = { "$sectionKey-${it.id}" },
+        contentType = { "transfer-row" }
+    ) { transfer ->
         content(transfer)
     }
     val hidden = total - transfers.size
     if (hidden > 0) {
-        item(key = "more-$sectionKey") {
+        item(key = "more-$sectionKey", contentType = "section-more") {
             Text(
                 text = pluralStringResource(Res.plurals.transfers_more_queued, hidden, hidden),
                 style = MaterialTheme.typography.bodySmall,
