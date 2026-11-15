@@ -589,7 +589,7 @@ class FilesViewModel(
             selection.value = nextFileIds
             folderSelection.value = nextFolderIds
             _allSelected.value =
-                allFileIds.isNotEmpty() || allFolderIds.isNotEmpty() &&
+                (allFileIds.isNotEmpty() || allFolderIds.isNotEmpty()) &&
                     nextFileIds.size == allFileIds.size &&
                     nextFolderIds.size == allFolderIds.size
             _selectionModeEnabled.value = nextFileIds.isNotEmpty() || nextFolderIds.isNotEmpty()
