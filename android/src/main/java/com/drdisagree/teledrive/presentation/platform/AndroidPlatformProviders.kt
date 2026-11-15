@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -38,6 +39,7 @@ import com.drdisagree.teledrive.presentation.platform.AndroidUploadPickerDialog
 import com.drdisagree.teledrive.presentation.theme.TeleDriveTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import java.io.File
 
@@ -49,6 +51,7 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
     val activity = LocalActivity.current
 
     val prefs by settingsRepository.preferences.collectAsStateWithLifecycle(UserPreferences())
+    val scope = rememberCoroutineScope()
     val darkTheme = when (prefs.theme) {
         AppTheme.LIGHT -> false
         AppTheme.DARK -> true
@@ -207,7 +210,7 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
                     folderMode = false,
                     showHiddenFiles = prefs.showHiddenFiles,
                     onShowHiddenFilesChange = { value ->
-                        settingsRepository.update { it.copy(showHiddenFiles = value) }
+                        scope.launch { settingsRepository.update { it.copy(showHiddenFiles = value) } }
                     },
                     accessRefreshToken = storageAccessRefreshToken,
                     onRequestStorageAccess = {
@@ -242,7 +245,7 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
                     folderMode = true,
                     showHiddenFiles = prefs.showHiddenFiles,
                     onShowHiddenFilesChange = { value ->
-                        settingsRepository.update { it.copy(showHiddenFiles = value) }
+                        scope.launch { settingsRepository.update { it.copy(showHiddenFiles = value) } }
                     },
                     accessRefreshToken = storageAccessRefreshToken,
                     onRequestStorageAccess = {
