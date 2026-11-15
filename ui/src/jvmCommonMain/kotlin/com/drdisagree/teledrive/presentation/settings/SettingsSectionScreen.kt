@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -99,6 +100,10 @@ import com.drdisagree.teledrive.resources.settings_debug_logging
 import com.drdisagree.teledrive.resources.settings_dynamic_color
 import com.drdisagree.teledrive.resources.settings_accent_color
 import com.drdisagree.teledrive.resources.settings_accent_level
+import com.drdisagree.teledrive.resources.settings_refresh_rate
+import com.drdisagree.teledrive.resources.settings_refresh_rate_summary
+import com.drdisagree.teledrive.resources.settings_refresh_rate_unsupported_title
+import com.drdisagree.teledrive.resources.settings_refresh_rate_unsupported
 import com.drdisagree.teledrive.resources.accent_color_labels
 import com.drdisagree.teledrive.resources.accent_level_labels
 import com.drdisagree.teledrive.resources.settings_encrypt_thumbnails
@@ -180,6 +185,7 @@ import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
 import com.drdisagree.teledrive.domain.model.LayoutDensity
 import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.presentation.platform.LocalDownloadLocationConfigurable
+import com.drdisagree.teledrive.presentation.platform.LocalDisplayRefreshRateController
 import com.drdisagree.teledrive.resources.settings_download_location
 import com.drdisagree.teledrive.resources.settings_download_location_default
 import com.drdisagree.teledrive.resources.settings_download_location_reset
@@ -947,6 +953,11 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
     var showThemeDialog by remember { mutableStateOf(false) }
     var showAccentColorDialog by remember { mutableStateOf(false) }
     var showAccentLevelDialog by remember { mutableStateOf(false) }
+    var showDisplayRefreshRateDialog by remember { mutableStateOf(false) }
+    var unsupportedDisplayRefreshRate by remember { mutableStateOf<Int?>(null) }
+    val displayRefreshRateController = LocalDisplayRefreshRateController.current
+    val supportedRefreshRatesLabel = displayRefreshRateController?.supportedRates()
+        ?.sorted()?.joinToString(" / ") { "$it Hz" }?.ifBlank { "none detected" } ?: "none detected"
     var showLanguageDialog by remember { mutableStateOf(false) }
 
     if (showThemeDialog) {
@@ -988,6 +999,44 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
         )
     }
 
+    if (showDisplayRefreshRateDialog && displayRefreshRateController != null) {
+        ChoiceDialog(
+            title = stringResource(Res.string.settings_refresh_rate),
+            options = listOf(60 to "60 Hz", 90 to "90 Hz", 120 to "120 Hz"),
+            selected = prefs.displayRefreshRate,
+            onSelect = { rate ->
+                if (displayRefreshRateController.requestRefreshRate(rate)) {
+                    showDisplayRefreshRateDialog = false
+                    viewModel.update { it.copy(displayRefreshRate = rate) }
+                } else {
+                    unsupportedDisplayRefreshRate = rate
+                }
+            },
+            onDismiss = { showDisplayRefreshRateDialog = false }
+        )
+    }
+
+    unsupportedDisplayRefreshRate?.let { rate ->
+        AlertDialog(
+            onDismissRequest = { unsupportedDisplayRefreshRate = null },
+            title = { Text(stringResource(Res.string.settings_refresh_rate_unsupported_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        Res.string.settings_refresh_rate_unsupported,
+                        rate,
+                        supportedRefreshRatesLabel
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { unsupportedDisplayRefreshRate = null }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
     if (showLanguageDialog) {
         ChoiceDialog(
             title = stringResource(Res.string.settings_language),
@@ -1025,6 +1074,17 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                 title = stringResource(Res.string.settings_accent_level),
                 subtitle = stringArrayResource(Res.array.accent_level_labels)[prefs.accentLevel.ordinal],
                 onClick = { showAccentLevelDialog = true }
+            )
+        }
+        add(visible = displayRefreshRateController != null) {
+            SettingsClickRow(
+                title = stringResource(Res.string.settings_refresh_rate),
+                subtitle = stringResource(
+                    Res.string.settings_refresh_rate_summary,
+                    prefs.displayRefreshRate,
+                    supportedRefreshRatesLabel
+                ),
+                onClick = { showDisplayRefreshRateDialog = true }
             )
         }
         add {
