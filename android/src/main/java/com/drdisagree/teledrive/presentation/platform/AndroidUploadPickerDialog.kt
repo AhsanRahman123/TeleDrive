@@ -7,6 +7,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
+import android.view.View
+import android.view.ViewParent
+import android.view.Window
 import android.os.storage.StorageManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -63,6 +66,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,11 +80,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
@@ -151,6 +157,7 @@ private data class UploadPickerEntry(
 fun AndroidUploadPickerDialog(
     context: Context,
     folderMode: Boolean,
+    preferredRefreshRate: Float?,
     showHiddenFiles: Boolean,
     onShowHiddenFilesChange: (Boolean) -> Unit,
     accessRefreshToken: Int,
@@ -284,6 +291,7 @@ fun AndroidUploadPickerDialog(
             decorFitsSystemWindows = false
         )
     ) {
+        ApplyPreferredRefreshRateToDialogWindow(preferredRefreshRate)
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.surface
@@ -564,6 +572,32 @@ fun AndroidUploadPickerDialog(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ApplyPreferredRefreshRateToDialogWindow(refreshRate: Float?) {
+    val view = LocalView.current
+    val dialogWindow = remember(view) {
+        var parent: ViewParent? = view.parent
+        var foundWindow: Window? = null
+        while (parent != null && foundWindow == null) {
+            if (parent is DialogWindowProvider) {
+                foundWindow = parent.window
+            }
+            parent = (parent as? View)?.parent
+        }
+        foundWindow
+    }
+
+    SideEffect {
+        if (refreshRate != null && dialogWindow != null) {
+            val attributes = dialogWindow.attributes
+            if (kotlin.math.abs(attributes.preferredRefreshRate - refreshRate) > 0.01f) {
+                attributes.preferredRefreshRate = refreshRate
+                dialogWindow.attributes = attributes
             }
         }
     }
