@@ -28,29 +28,31 @@ class AndroidDisplayRefreshRateController(
             .toSet()
     }.getOrDefault(emptySet())
 
-    override fun requestRefreshRate(refreshRate: Int): Boolean = runCatching {
+    override fun requestRefreshRate(refreshRate: Int): Boolean {
         if (refreshRate !in selectableRates) return false
 
-        val display = display()
-        val currentMode = display.mode
-        // Never trade resolution for refresh rate: only request a mode matching the current
-        // physical resolution, so the app's layout and density remain unchanged.
-        val matchingMode = display.supportedModes
-            .filter {
-                it.physicalWidth == currentMode.physicalWidth &&
-                    it.physicalHeight == currentMode.physicalHeight &&
-                    abs(it.refreshRate - refreshRate.toFloat()) <= RATE_TOLERANCE
-            }
-            .minByOrNull { abs(it.refreshRate - refreshRate.toFloat()) }
-            ?: return false
+        return runCatching {
+            val display = display()
+            val currentMode = display.mode
+            // Never trade resolution for refresh rate: only request a mode matching the current
+            // physical resolution, so the app's layout and density remain unchanged.
+            val matchingMode = display.supportedModes
+                .filter {
+                    it.physicalWidth == currentMode.physicalWidth &&
+                        it.physicalHeight == currentMode.physicalHeight &&
+                        abs(it.refreshRate - refreshRate.toFloat()) <= RATE_TOLERANCE
+                }
+                .minByOrNull { abs(it.refreshRate - refreshRate.toFloat()) }
+                ?: return@runCatching false
 
-        val attributes = activity.window.attributes
-        if (attributes.preferredDisplayModeId != matchingMode.modeId) {
-            attributes.preferredDisplayModeId = matchingMode.modeId
-            activity.window.attributes = attributes
-        }
-        true
-    }.getOrDefault(false)
+            val attributes = activity.window.attributes
+            if (attributes.preferredDisplayModeId != matchingMode.modeId) {
+                attributes.preferredDisplayModeId = matchingMode.modeId
+                activity.window.attributes = attributes
+            }
+            true
+        }.getOrDefault(false)
+    }
 
     @Suppress("DEPRECATION")
     private fun display(): Display =
