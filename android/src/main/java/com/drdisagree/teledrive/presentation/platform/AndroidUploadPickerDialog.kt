@@ -580,16 +580,15 @@ fun AndroidUploadPickerDialog(
 @Composable
 private fun ApplyPreferredRefreshRateToDialogWindow(refreshRate: Float?) {
     val view = LocalView.current
-    val dialogWindow = remember(view) {
-        var parent: ViewParent? = view.parent
-        var foundWindow: Window? = null
-        while (parent != null && foundWindow == null) {
-            if (parent is DialogWindowProvider) {
-                foundWindow = parent.window
-            }
-            parent = (parent as? View)?.parent
+    // Resolve on each composition rather than remembering null: a dialog's view can be attached
+    // to its Window after the first composition.
+    var parent: ViewParent? = view.parent
+    var dialogWindow: Window? = null
+    while (parent != null && dialogWindow == null) {
+        if (parent is DialogWindowProvider) {
+            dialogWindow = parent.window
         }
-        foundWindow
+        parent = (parent as? View)?.parent
     }
 
     SideEffect {
