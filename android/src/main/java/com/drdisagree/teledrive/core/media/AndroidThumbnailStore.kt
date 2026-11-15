@@ -208,7 +208,10 @@ class AndroidThumbnailStore(
             thumbnailDao.delete(fileId)
             return null
         }
-        thumbnailDao.touch(fileId, System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        if (now - cached.lastAccessAt >= LRU_TOUCH_INTERVAL_MS) {
+            thumbnailDao.touch(fileId, now)
+        }
         val raw = file.readBytes()
         return if (cached.encrypted) {
             runCatching { streamCrypto.decryptBytes(thumbnailKey(), raw) }.getOrNull()
@@ -463,6 +466,7 @@ class AndroidThumbnailStore(
         private const val MAX_BACKGROUND_ATTEMPTS = 3
         private const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         private const val JOB_INSERT_BATCH_SIZE = 250
+        private const val LRU_TOUCH_INTERVAL_MS = 5 * 60 * 1_000L
         private const val TARGET_FILE = "FILE"
 
     }
