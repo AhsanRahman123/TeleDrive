@@ -12,6 +12,7 @@ on:
       - android/picker-thumbnails-refresh-rate-20261116
       - android/refresh-rate-dialog-window-fix-20261116
       - android/performance-optimization-phase1-20261116
+      - android/performance-release-preview-20261116
     paths:
       - '.github/workflows/android-preview.yml'
       - 'android/src/**'
@@ -34,7 +35,7 @@ concurrency:
 
 jobs:
   android:
-    name: Android optimized preview APK
+    name: Android debug and optimized preview APKs
     runs-on: ubuntu-latest
     steps:
       - name: Check out Android preview branch
@@ -106,5 +107,46 @@ jobs:
         with:
           name: TeleDrive-Android-Preview-2
           path: android/build/outputs/apk/debug/*-universal-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Assemble universal optimized release APK
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/teledrive-preview-keystore.p12
+          KEYSTORE_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TELEDRIVE_PREVIEW_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEY_PASSWORD }}
+          ANDROID_PREVIEW_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./gradlew :android:assembleRelease -PwithFfmpegDecoder -PsplitAbis=false
+
+      - name: Verify optimized preview package ID and persistent signing certificate
+        shell: bash
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/teledrive-preview-keystore.p12
+          KEYSTORE_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TELEDRIVE_PREVIEW_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          apk="$(find android/build/outputs/apk/release -name '*-universal-release.apk' -print -quit)"
+          test -n "$apk"
+          aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          package="$("$aapt" dump badging "$apk" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p")"
+          echo "Built optimized Android package ID: $package"
+          test "$package" = "com.drdisagree.teledrive.preview2"
+          keytool_cert="$(keytool -exportcert -keystore "$KEYSTORE_FILE" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" | sha256sum | awk '{print tolower($1)}')"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          apk_cert="$("$apksigner" verify --print-certs "$apk" 2>&1 | awk -F': ' '/certificate SHA-256 digest/ {print $NF; exit}' | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          echo "Keystore certificate SHA-256: $keytool_cert"
+          echo "Optimized APK certificate SHA-256: $apk_cert"
+          test -n "$apk_cert"
+          test "$apk_cert" = "$keytool_cert"
+          echo "Verified optimized preview package: $package" >> "$GITHUB_STEP_SUMMARY"
+          echo "Verified persistent signer: $apk_cert" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload optimized release preview APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: TeleDrive-Android-Preview-2-Optimized
+          path: android/build/outputs/apk/release/*-universal-release.apk
           if-no-files-found: error
           retention-days: 14
