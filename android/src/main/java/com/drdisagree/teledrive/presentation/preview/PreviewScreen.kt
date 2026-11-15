@@ -83,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -108,6 +109,7 @@ import com.drdisagree.teledrive.core.media.TelegramDataSourceFactory
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.LinkMetadata
+import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.LinkedText
@@ -191,6 +193,7 @@ fun PreviewScreen(
     val preferredSubtitleLanguage by
     viewModel.preferredSubtitleLanguage.collectAsStateWithLifecycle()
     val storedTextScale by viewModel.textScale.collectAsStateWithLifecycle()
+    val previewBackgroundMode by viewModel.previewBackgroundMode.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val shareChooserTitle = stringResource(Res.string.preview_share_chooser_title)
@@ -300,7 +303,13 @@ fun PreviewScreen(
                 beyondViewportPageCount = 0,
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+                    .background(
+                        if (immersive && previewBackgroundMode == PreviewBackgroundMode.BLACK) {
+                            ComposeColor.Black
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLowest
+                        }
+                    ),
                 key = { state.files[it].id }
             ) { page ->
                 val file = state.files[page]
@@ -312,6 +321,7 @@ fun PreviewScreen(
                     file = file,
                     content = content,
                     isActivePage = pagerState.currentPage == page,
+                    previewBackgroundMode = previewBackgroundMode,
                     dataSourceFactory = dataSourceFactory,
                     onDownload = { viewModel.download(file) },
                     onPreviousFile = {
@@ -615,6 +625,7 @@ private fun PreviewPage(
     file: DriveFile,
     content: PreviewContent,
     isActivePage: Boolean,
+    previewBackgroundMode: PreviewBackgroundMode,
     dataSourceFactory: TelegramDataSourceFactory,
     onDownload: () -> Unit,
     onPreviousFile: () -> Unit,
@@ -700,6 +711,15 @@ private fun PreviewPage(
         is PreviewContent.Image -> ZoomableImage(
             model = content.model,
             contentDescription = file.name,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    if (previewBackgroundMode == PreviewBackgroundMode.BLACK) {
+                        ComposeColor.Black
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerLowest
+                    }
+                ),
             controlsVisible = chromeVisible,
             onTap = onToggleChrome
         )
@@ -722,6 +742,7 @@ private fun PreviewPage(
                 onPlaybackFinished = onPlaybackFinished,
                 controlsVisible = chromeVisible,
                 allowBackgroundPlayback = allowBackgroundPlayback,
+                previewBackgroundMode = previewBackgroundMode,
                 preferredAudioLanguage = preferredAudioLanguage,
                 preferredSubtitleLanguage = preferredSubtitleLanguage,
                 onPreferredAudioLanguage = onPreferredAudioLanguage,

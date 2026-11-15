@@ -77,6 +77,7 @@ import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import com.drdisagree.teledrive.core.media.PipController
 import com.drdisagree.teledrive.core.media.TelegramDataSourceFactory
+import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
 import com.drdisagree.teledrive.core.media.ThumbnailModel
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.player_codec_unsupported
@@ -110,6 +111,7 @@ fun MediaPlayer(
     onPlaybackFinished: () -> Unit = {},
     controlsVisible: Boolean = true,
     allowBackgroundPlayback: Boolean = false,
+    previewBackgroundMode: PreviewBackgroundMode = PreviewBackgroundMode.THEME,
     preferredAudioLanguage: String = "",
     preferredSubtitleLanguage: String = "",
     onPreferredAudioLanguage: (String) -> Unit = {},
@@ -402,6 +404,7 @@ fun MediaPlayer(
     val darkTheme = MaterialTheme.colorScheme.surface.luminance() < LIGHT_LUMINANCE
     val stageColor = when {
         audioOnly -> ComposeColor.Transparent
+        previewBackgroundMode == PreviewBackgroundMode.BLACK -> ComposeColor.Black
         darkTheme -> ComposeColor.Black
         else -> MaterialTheme.colorScheme.surfaceContainerLowest
     }
