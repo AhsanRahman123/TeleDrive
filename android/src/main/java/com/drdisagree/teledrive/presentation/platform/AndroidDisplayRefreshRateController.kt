@@ -3,7 +3,6 @@ package com.drdisagree.teledrive.presentation.platform
 import android.app.Activity
 import android.os.Build
 import android.view.Display
-import com.drdisagree.teledrive.presentation.platform.DisplayRefreshRateController
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -16,27 +15,33 @@ class AndroidDisplayRefreshRateController(
     private val activity: Activity
 ) : DisplayRefreshRateController {
 
-    override fun supportedRates(): Set<Int> =
-        display().supportedModes
+    override fun supportedRates(): Set<Int> {
+        val display = display()
+        val currentMode = display.mode
+        return display.supportedModes
+            .filter {
+                it.physicalWidth == currentMode.physicalWidth &&
+                    it.physicalHeight == currentMode.physicalHeight
+            }
             .map { it.refreshRate.roundToInt() }
             .filter { it in selectableRates }
             .toSet()
+    }
 
     override fun requestRefreshRate(refreshRate: Int): Boolean {
         if (refreshRate !in selectableRates) return false
 
         val display = display()
         val currentMode = display.mode
+        // Never trade resolution for refresh rate: only request a mode matching the current
+        // physical resolution, so the app's layout and density remain unchanged.
         val matchingMode = display.supportedModes
-            .filter { abs(it.refreshRate - refreshRate.toFloat()) <= RATE_TOLERANCE }
-            .sortedWith(
-                compareBy<Display.Mode> {
-                    if (
-                        it.physicalWidth == currentMode.physicalWidth &&
-                        it.physicalHeight == currentMode.physicalHeight
-                    ) 0 else 1
-                }.thenBy { abs(it.refreshRate - refreshRate.toFloat()) }
-            )
+            .filter {
+                it.physicalWidth == currentMode.physicalWidth &&
+                    it.physicalHeight == currentMode.physicalHeight &&
+                    abs(it.refreshRate - refreshRate.toFloat()) <= RATE_TOLERANCE
+            }
+            .minByOrNull { abs(it.refreshRate - refreshRate.toFloat()) }
             .firstOrNull()
             ?: return false
 
