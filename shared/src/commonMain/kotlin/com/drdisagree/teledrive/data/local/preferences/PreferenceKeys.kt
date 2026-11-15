@@ -39,6 +39,7 @@ object PreferenceKeys {
     val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     val ACCENT_COLOR = stringPreferencesKey("accent_color")
     val ACCENT_LEVEL = stringPreferencesKey("accent_level")
+    val DISPLAY_REFRESH_RATE = intPreferencesKey("display_refresh_rate")
     val VIEW_MODE = stringPreferencesKey("view_mode")
     val GRID_SIZE = intPreferencesKey("grid_size")
     val GALLERY_VIEW_MODE = stringPreferencesKey("gallery_view_mode")
