@@ -7,9 +7,9 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Uses WindowManager.LayoutParams.preferredDisplayModeId so Android can switch the Activity
- * to a real display mode. This is intentionally not Surface.setFrameRate(), which only asks
- * a surface to present at a cadence and does not by itself select the panel refresh mode.
+ * Uses WindowManager.LayoutParams.preferredRefreshRate, Android's window-level preference
+ * for apps that want to request only a refresh rate without changing display resolution.
+ * Rates are matched against the display's supported modes before the preference is applied.
  */
 class AndroidDisplayRefreshRateController(
     private val activity: Activity
@@ -36,18 +36,20 @@ class AndroidDisplayRefreshRateController(
             val currentMode = display.mode
             // Never trade resolution for refresh rate: only request a mode matching the current
             // physical resolution, so the app's layout and density remain unchanged.
-            val matchingMode = display.supportedModes
+            val matchingRate = display.supportedModes
+                .asSequence()
                 .filter {
                     it.physicalWidth == currentMode.physicalWidth &&
                         it.physicalHeight == currentMode.physicalHeight &&
                         abs(it.refreshRate - refreshRate.toFloat()) <= RATE_TOLERANCE
                 }
                 .minByOrNull { abs(it.refreshRate - refreshRate.toFloat()) }
+                ?.refreshRate
                 ?: return@runCatching false
 
             val attributes = activity.window.attributes
-            if (attributes.preferredDisplayModeId != matchingMode.modeId) {
-                attributes.preferredDisplayModeId = matchingMode.modeId
+            if (abs(attributes.preferredRefreshRate - matchingRate) > RATE_TOLERANCE) {
+                attributes.preferredRefreshRate = matchingRate
                 activity.window.attributes = attributes
             }
             true
