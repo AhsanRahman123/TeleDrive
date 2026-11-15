@@ -34,8 +34,10 @@ val LocalPlatformCapabilities = staticCompositionLocalOf<PlatformCapabilities> {
 interface DisplayRefreshRateController {
     fun supportedRates(): Set<Int>
 
+    /** Returns the exact native rate matching the requested option at the current resolution. */
     fun resolveSupportedRefreshRate(refreshRate: Int): Float?
 
+    /** Requests the selected native refresh rate for the Activity window. */
     fun requestRefreshRate(refreshRate: Int): Boolean
 }
 
