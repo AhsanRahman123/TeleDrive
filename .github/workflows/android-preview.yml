@@ -6,6 +6,7 @@ on:
       - android/touch-preview-20261114
       - android/telegram-media-download-20261115
       - android/performance-multitouch-save-speed-20261115
+      - android/storage-explorer-performance-20261116
     paths:
       - '.github/workflows/android-preview.yml'
       - 'android/src/**'
