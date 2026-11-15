@@ -1658,6 +1658,7 @@ private fun FilesContent(
         items(
             count = state.folders.size,
             key = { "folder-${state.folders[it].id}" },
+            contentType = { "folder" },
             span = {
                 if (state.viewMode == ViewMode.GRID) GridItemSpan(1)
                 else GridItemSpan(maxLineSpan)
@@ -1712,7 +1713,8 @@ private fun FilesContent(
 
         items(
             count = files.itemCount,
-            key = files.itemKey { "file-${it.id}" }
+            key = files.itemKey { "file-${it.id}" },
+            contentType = { "file" }
         ) { index ->
             val file = files[index] ?: return@items
             val selected = file.id in selectedFileIds
