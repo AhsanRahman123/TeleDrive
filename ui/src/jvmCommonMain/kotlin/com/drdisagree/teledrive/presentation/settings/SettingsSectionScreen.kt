@@ -1067,6 +1067,7 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
 @Composable
 private fun PlaybackSection(state: SettingsUiState, viewModel: SettingsViewModel) {
     val prefs = state.preferences
+    val isAndroid = LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
     var showPreviewBackgroundDialog by remember { mutableStateOf(false) }
     val previewBackgroundOptions = listOf(
         PreviewBackgroundMode.THEME to stringResource(Res.string.settings_preview_background_theme),
@@ -1085,7 +1086,7 @@ private fun PlaybackSection(state: SettingsUiState, viewModel: SettingsViewModel
         )
     }
     SettingsGroup {
-        add(visible = LocalPlatformCapabilities.current.supportsTouchSelectionActionBar) {
+        add(visible = isAndroid) {
             SettingsClickRow(
                 title = stringResource(Res.string.settings_preview_background),
                 subtitle = when (prefs.previewBackgroundMode) {
