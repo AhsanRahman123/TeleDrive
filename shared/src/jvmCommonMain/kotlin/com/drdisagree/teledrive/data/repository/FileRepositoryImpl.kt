@@ -763,9 +763,12 @@ class FileRepositoryImpl(
         fileDao.byIds(ids).map { it.toDomain() }
 
     override suspend fun reconcileLocalCopies(ids: List<String>) {
-        fileDao.byIds(ids)
-            .filter { entity -> entity.localPath?.let { !File(it).exists() } == true }
-            .forEach { entity -> fileDao.setLocalPath(entity.id, null) }
+        val staleIds = withContext(Dispatchers.IO) {
+            fileDao.byIds(ids)
+                .filter { entity -> entity.localPath?.let { !File(it).exists() } == true }
+                .map { it.id }
+        }
+        staleIds.forEach { fileDao.setLocalPath(it, null) }
     }
 
     override suspend fun saveNote(

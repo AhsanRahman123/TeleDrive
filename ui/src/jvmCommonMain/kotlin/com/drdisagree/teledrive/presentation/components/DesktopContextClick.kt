@@ -9,6 +9,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 
 /**
  * Adds a mouse secondary-click handler without changing touch long-press selection.
@@ -17,6 +18,7 @@ import androidx.compose.ui.input.pointer.pointerInput
  */
 @Composable
 fun Modifier.onDesktopContextClick(onContextClick: () -> Unit): Modifier {
+    if (LocalPlatformCapabilities.current.supportsTouchSelectionActionBar) return this
     val currentOnContextClick by rememberUpdatedState(onContextClick)
     return pointerInput(Unit) {
         awaitPointerEventScope {
