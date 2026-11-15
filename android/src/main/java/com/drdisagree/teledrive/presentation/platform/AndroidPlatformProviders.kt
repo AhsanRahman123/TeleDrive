@@ -235,6 +235,7 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
                 AndroidUploadPickerDialog(
                     context = context,
                     folderMode = false,
+                    preferredRefreshRate = displayRefreshRateController?.resolveSupportedRefreshRate(prefs.displayRefreshRate),
                     showHiddenFiles = prefs.showHiddenFiles,
                     onShowHiddenFilesChange = { value ->
                         scope.launch { settingsRepository.update { it.copy(showHiddenFiles = value) } }
@@ -275,6 +276,7 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
                 AndroidUploadPickerDialog(
                     context = context,
                     folderMode = true,
+                    preferredRefreshRate = displayRefreshRateController?.resolveSupportedRefreshRate(prefs.displayRefreshRate),
                     showHiddenFiles = prefs.showHiddenFiles,
                     onShowHiddenFilesChange = { value ->
                         scope.launch { settingsRepository.update { it.copy(showHiddenFiles = value) } }
