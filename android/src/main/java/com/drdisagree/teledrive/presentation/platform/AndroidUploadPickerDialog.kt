@@ -187,7 +187,15 @@ fun AndroidUploadPickerDialog(
     }
 
     LaunchedEffect(roots, hasStorageAccess) {
-        if (currentPath == null) currentPath = roots.firstOrNull()?.path
+        val path = currentPath
+        val stillOnMountedVolume = path != null && roots.any { root ->
+            path == root.path || path.startsWith(root.path.trimEnd('/') + "/")
+        }
+        if (!stillOnMountedVolume) {
+            currentPath = roots.firstOrNull()?.path
+            selectedPaths = emptySet()
+            search = ""
+        }
     }
 
     LaunchedEffect(currentPath, showHiddenFiles, search, sort, descending, filter, refreshToken, hasStorageAccess) {
