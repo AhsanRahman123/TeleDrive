@@ -55,6 +55,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.File
 import java.net.URI
@@ -116,6 +117,7 @@ class FileRepositoryImpl(
     override fun observeFiles(spec: FileQuerySpec): Flow<List<DriveFile>> =
         activeChannel.observe().flatMapLatest { chatId ->
             fileDao.observeList(FileQueryBuilder.build(spec.copy(chatId = chatId)))
+                .distinctUntilChanged()
                 .map { list -> list.map { it.toDomain() } }
         }
 
@@ -139,7 +141,7 @@ class FileRepositoryImpl(
         fileDao.idList(FileQueryBuilder.buildIds(spec.copy(chatId = activeChannel.id())))
 
     override fun observeFile(id: String): Flow<DriveFile?> =
-        fileDao.observeById(id).map { it?.toDomain() }
+        fileDao.observeById(id).map { it?.toDomain() }.distinctUntilChanged()
 
     override suspend fun getFile(id: String): DriveFile? = fileDao.byId(id)?.toDomain()
 
@@ -148,7 +150,9 @@ class FileRepositoryImpl(
 
     override fun observeRecent(limit: Int): Flow<List<DriveFile>> =
         activeChannel.observe().flatMapLatest { chatId ->
-            fileDao.observeRecent(limit, chatId).map { list -> list.map { it.toDomain() } }
+            fileDao.observeRecent(limit, chatId)
+                .distinctUntilChanged()
+                .map { list -> list.map { it.toDomain() } }
         }
 
     override fun observeAlbums(
@@ -156,9 +160,9 @@ class FileRepositoryImpl(
         showArchived: Boolean
     ): Flow<List<MediaAlbum>> =
         activeChannel.observe().flatMapLatest { chatId ->
-            fileDao.observeAlbumsScoped(showHidden, showArchived, chatId).map { list ->
-                list.map { it.toDomain() }
-            }
+            fileDao.observeAlbumsScoped(showHidden, showArchived, chatId)
+                .distinctUntilChanged()
+                .map { list -> list.map { it.toDomain() } }
         }
 
     override fun observeFolders(
@@ -170,6 +174,7 @@ class FileRepositoryImpl(
     ): Flow<List<DriveFolder>> =
         activeChannel.observe().flatMapLatest { chatId ->
             folderDao.observeChildrenWithCountsScoped(parentId, chatId, showHidden, showArchived)
+                .distinctUntilChanged()
                 .map { list -> list.map { it.toDomain() }.sortedBy(sortField, sortDirection) }
         }
 
@@ -207,9 +212,9 @@ class FileRepositoryImpl(
 
     override fun observeStorageByCategory(): Flow<List<StorageSlice>> =
         activeChannel.observe().flatMapLatest { chatId ->
-            fileDao.observeUsageByCategory(chatId).map { rows ->
-                rows.map { StorageSlice(it.category, it.fileCount, it.totalBytes) }
-            }
+            fileDao.observeUsageByCategory(chatId)
+                .distinctUntilChanged()
+                .map { rows -> rows.map { StorageSlice(it.category, it.fileCount, it.totalBytes) } }
         }
 
     override fun observeFolder(id: String): Flow<DriveFolder?> =
@@ -219,7 +224,9 @@ class FileRepositoryImpl(
 
     override fun observeFavoriteFolders(): Flow<List<DriveFolder>> =
         activeChannel.observe().flatMapLatest { chatId ->
-            folderDao.observeFavorites(chatId).map { list -> list.map { it.toDomain() } }
+            folderDao.observeFavorites(chatId)
+                .distinctUntilChanged()
+                .map { list -> list.map { it.toDomain() } }
         }
 
     override fun observeAvailableOfflineFolders(): Flow<List<DriveFolder>> =
