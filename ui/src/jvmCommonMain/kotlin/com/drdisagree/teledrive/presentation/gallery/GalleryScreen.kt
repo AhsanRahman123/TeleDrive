@@ -316,7 +316,8 @@ private fun AlbumGrid(
         ) {
             listItemsIndexed(
                 albums,
-                key = { _, album -> album.folderId ?: UNFILED_ALBUM_KEY }
+                key = { _, album -> album.folderId ?: UNFILED_ALBUM_KEY },
+                contentType = { _, _ -> "album" }
             ) { index, album ->
                 AlbumListItem(
                     album = album,
@@ -378,7 +379,8 @@ private fun AlbumGrid(
         ) {
             itemsIndexed(
                 albums,
-                key = { _, album -> album.folderId ?: UNFILED_ALBUM_KEY }
+                key = { _, album -> album.folderId ?: UNFILED_ALBUM_KEY },
+                contentType = { _, _ -> "album" }
             ) { index, album ->
                 AlbumCard(
                     album = album,
@@ -1283,7 +1285,14 @@ fun GalleryScreen(
                     ) {
                         items(
                             count = media.itemCount,
-                            key = media.itemKey { it.key }
+                            key = media.itemKey { it.key },
+                            contentType = { index ->
+                                when (media.peek(index)) {
+                                    is GalleryListItem.DayHeader -> "day-header"
+                                    is GalleryListItem.Media -> "media"
+                                    null -> null
+                                }
+                            }
                         ) { index ->
                             when (val item = media[index]) {
                                 is GalleryListItem.DayHeader -> DayHeaderRow(
@@ -1367,6 +1376,13 @@ fun GalleryScreen(
                         items(
                             count = media.itemCount,
                             key = media.itemKey { it.key },
+                            contentType = { index ->
+                                when (media.peek(index)) {
+                                    is GalleryListItem.DayHeader -> "day-header"
+                                    is GalleryListItem.Media -> "media"
+                                    null -> null
+                                }
+                            },
                             span = { index ->
                                 if (media.peek(index) is GalleryListItem.DayHeader) {
                                     GridItemSpan(maxLineSpan)
