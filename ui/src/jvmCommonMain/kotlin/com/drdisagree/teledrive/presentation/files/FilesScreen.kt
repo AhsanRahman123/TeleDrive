@@ -1186,12 +1186,14 @@ fun FilesScreen(
                             TouchSelectionAction(
                                 label = "Copy",
                                 icon = Icons.Filled.ContentCopy,
+                                enabled = selectedCount > 0,
                                 onClick = { showCopyPicker = true },
                                 modifier = Modifier.weight(1f)
                             )
                             TouchSelectionAction(
                                 label = "Move",
                                 icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                                enabled = selectedCount > 0,
                                 onClick = { showMovePicker = true },
                                 modifier = Modifier.weight(1f)
                             )
@@ -1205,12 +1207,14 @@ fun FilesScreen(
                             TouchSelectionAction(
                                 label = "Delete",
                                 icon = Icons.Filled.DeleteOutline,
+                                enabled = selectedCount > 0,
                                 onClick = { confirmTrash = true },
                                 modifier = Modifier.weight(1f)
                             )
                             TouchSelectionAction(
                                 label = "More",
                                 icon = Icons.Filled.MoreVert,
+                                enabled = selectedCount > 0,
                                 onClick = { showSelectionOverflow = true },
                                 modifier = Modifier.weight(1f)
                             )
