@@ -4,7 +4,9 @@ on:
   push:
     branches:
       - android/touch-preview-20261114
+      - android/telegram-media-download-20261115
     paths:
+      - '.github/workflows/android-preview.yml'
       - 'android/src/**'
       - 'ui/src/**'
       - 'shared/src/**'
