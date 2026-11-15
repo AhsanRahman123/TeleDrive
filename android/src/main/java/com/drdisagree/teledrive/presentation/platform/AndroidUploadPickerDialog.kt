@@ -10,6 +10,7 @@ import android.media.MediaMetadataRetriever
 import android.view.View
 import android.view.ViewParent
 import android.view.Window
+import android.util.LruCache
 import android.os.storage.StorageManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -706,7 +707,7 @@ private fun UploadPickerPreview(
         key3 = entry.size
     ) {
         value = if (isPreviewable && !entry.isDirectory) {
-            withContext(Dispatchers.IO) { createUploadPickerThumbnail(entry.file) }
+            withContext(Dispatchers.IO) { cachedUploadPickerThumbnail(entry.file) }
         } else {
             null
         }
@@ -748,6 +749,27 @@ private val uploadPickerVideoExtensions = setOf(
     "mp4", "mkv", "mov", "avi", "webm", "m4v", "3gp", "mpeg", "mpg", "ts", "m2ts"
 )
 
+private object UploadPickerPreviewCache {
+    private const val MAX_CACHE_KB = 8 * 1024
+
+    private val cache = object : LruCache<String, Bitmap>(MAX_CACHE_KB) {
+        override fun sizeOf(key: String, value: Bitmap): Int =
+            (value.byteCount / 1024).coerceAtLeast(1)
+    }
+
+    fun getOrCreate(file: File): Bitmap? {
+        val key = "${file.absolutePath}|${file.lastModified()}|${file.length()}"
+        cache.get(key)?.let { return it }
+
+        val decoded = createUploadPickerThumbnail(file) ?: return null
+        cache.put(key, decoded)
+        return decoded
+    }
+}
+
+private fun cachedUploadPickerThumbnail(file: File): Bitmap? =
+    UploadPickerPreviewCache.getOrCreate(file)
+
 private fun createUploadPickerThumbnail(file: File): Bitmap? = runCatching {
     when (file.extension.lowercase()) {
         in uploadPickerVideoExtensions -> {
@@ -785,7 +807,7 @@ private fun decodeUploadPickerImage(file: File): Bitmap? {
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
     var sampleSize = 1
-    while (bounds.outWidth / sampleSize > 720 || bounds.outHeight / sampleSize > 720) {
+    while (bounds.outWidth / sampleSize > 480 || bounds.outHeight / sampleSize > 480) {
         sampleSize *= 2
     }
     val options = BitmapFactory.Options().apply {
