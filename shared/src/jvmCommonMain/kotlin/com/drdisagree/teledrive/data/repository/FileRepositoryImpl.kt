@@ -99,8 +99,10 @@ class FileRepositoryImpl(
         activeChannel.observe().flatMapLatest { chatId ->
             Pager(
                 config = PagingConfig(
-                    pageSize = 60,
-                    prefetchDistance = 120,
+                    pageSize = 48,
+                    initialLoadSize = 96,
+                    prefetchDistance = 32,
+                    maxSize = 288,
                     enablePlaceholders = false
                 ),
                 pagingSourceFactory = {
