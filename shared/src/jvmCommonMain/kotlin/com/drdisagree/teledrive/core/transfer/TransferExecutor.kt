@@ -991,6 +991,7 @@ class TransferExecutor(
         File(storagePaths.cacheDir, "staging").apply { mkdirs() }
 
     companion object {
+        private const val TAG = "TransferExecutor"
         private const val DEFAULT_TDLIB_DOWNLOAD_PRIORITY = 16
         private const val MAX_TDLIB_DOWNLOAD_PRIORITY = 32
         private const val EAGER_HASH_LIMIT = 512L * 1024 * 1024
