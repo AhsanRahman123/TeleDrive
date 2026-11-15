@@ -23,3 +23,9 @@
 -keepclasseswithmembers class com.drdisagree.teledrive.data.remote.telegram.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# Apache Commons Compress references these optional codecs. TeleDrive does not bundle
+# their runtime libraries, so keep the archive support while suppressing only these
+# optional class-presence warnings during R8 shrinking.
+-dontwarn com.github.luben.zstd.ZstdInputStream
+-dontwarn org.brotli.dec.BrotliInputStream
