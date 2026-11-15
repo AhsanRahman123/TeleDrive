@@ -18,6 +18,9 @@ interface PlatformCapabilities {
 
     /** Whether returning from an item preview restores the previous collection scroll position. */
     val savesCollectionScrollOnPreview: Boolean get() = false
+
+    /** Android file manager exposes a fixed touch-first bulk-selection action bar. */
+    val supportsTouchSelectionActionBar: Boolean get() = false
 }
 
 val LocalPlatformCapabilities = staticCompositionLocalOf<PlatformCapabilities> {
