@@ -2,8 +2,10 @@ package com.drdisagree.teledrive.presentation.preview
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
@@ -98,6 +100,7 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.widget.Toast
 import androidx.media3.common.util.UnstableApi
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.media.PipController
@@ -789,13 +792,36 @@ private fun PreviewPage(
             onAction = onDownload
         )
 
-        is PreviewContent.Unsupported -> EmptyState(
-            icon = Icons.Outlined.Description,
-            title = stringResource(Res.string.preview_no_preview),
-            description = stringResource(content.reasonRes),
-            actionLabel = if (file.hasLocalCopy) null else stringResource(Res.string.common_download),
-            onAction = if (file.hasLocalCopy) null else onDownload
-        )
+        is PreviewContent.Unsupported -> {
+            val localPath = content.localPath
+            val context = LocalContext.current
+            val openWithTitle = stringResource(Res.string.preview_open_with)
+            val openFailedMessage = stringResource(Res.string.preview_open_with_failed)
+            EmptyState(
+                icon = Icons.Outlined.Description,
+                title = stringResource(Res.string.preview_no_preview),
+                description = stringResource(content.reasonRes),
+                actionLabel = when {
+                    localPath != null -> openWithTitle
+                    !file.hasLocalCopy -> stringResource(Res.string.common_download)
+                    else -> null
+                },
+                onAction = when {
+                    localPath != null -> ({
+                        openFileWith(
+                            context = context,
+                            displayName = file.name,
+                            localPath = localPath,
+                            mimeType = file.mimeType,
+                            chooserTitle = openWithTitle,
+                            failureMessage = openFailedMessage
+                        )
+                    })
+                    !file.hasLocalCopy -> onDownload
+                    else -> null
+                }
+            )
+        }
 
         is PreviewContent.Failed -> ErrorState(message = stringResource(content.messageRes))
     }
@@ -1092,6 +1118,38 @@ private const val SEPARATOR = "/"
 private const val ROW_FADE_MS = 180
 private const val CHEVRON_ROTATE_MS = 220
 private val INDENT_STEP = 16.dp
+
+private fun openFileWith(
+    context: Context,
+    displayName: String,
+    localPath: String,
+    mimeType: String,
+    chooserTitle: String,
+    failureMessage: String
+) {
+    runCatching {
+        val uri = when {
+            localPath.startsWith("content://") || localPath.startsWith("file://") ->
+                Uri.parse(localPath)
+            else -> FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                File(localPath)
+            )
+        }
+        val resolvedMimeType = MimeTypes.resolve(displayName, mimeType)
+            .takeUnless { it == MimeTypes.GENERIC }
+            ?: "*/*"
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, resolvedMimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = ClipData.newUri(context.contentResolver, displayName, uri)
+        }
+        context.startActivity(Intent.createChooser(intent, chooserTitle))
+    }.onFailure {
+        Toast.makeText(context, failureMessage, Toast.LENGTH_LONG).show()
+    }
+}
 
 private fun shareFile(context: Context, file: DriveFile, chooserTitle: String) {
     val localPath = file.localPath ?: return
