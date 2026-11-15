@@ -1217,7 +1217,6 @@ fun FilesScreen(
                                 onClick = { confirmTrash = true },
                                 modifier = Modifier.weight(1f)
                             )
-                            TouchSelectionAction(
                             Box(modifier = Modifier.weight(1f)) {
                                 TouchSelectionAction(
                                     label = "More",
@@ -1232,7 +1231,6 @@ fun FilesScreen(
                                     actions = selectionActions
                                 )
                             }
-                            )
                         }
                     }
                 }
