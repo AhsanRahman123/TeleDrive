@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -36,7 +35,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -59,7 +57,10 @@ import com.drdisagree.teledrive.domain.repository.StorageExplorerSnapshot
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 import java.io.File
 
@@ -97,6 +98,8 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
     var showAllFiles by remember { mutableStateOf(true) }
     var filter by remember { mutableStateOf(StorageExplorerFilter.ALL) }
     var sort by remember { mutableStateOf(StorageExplorerSort.LARGEST) }
+    var sorting by remember { mutableStateOf(false) }
+    var filteredEntries by remember { mutableStateOf(emptyList<StorageExplorerEntry>()) }
     var selectedPaths by remember { mutableStateOf(emptySet<String>()) }
     var selectedEntry by remember { mutableStateOf<StorageExplorerEntry?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -129,42 +132,53 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) { refresh() }
 
     val currentRoot = snapshot.roots.firstOrNull { it.id == currentRootId }
-    val filteredEntries = remember(snapshot, search, currentRootId, currentPath, filter, sort) {
-        val source = if (search.isNotBlank()) {
-            snapshot.entries.asSequence().filter { entry ->
-                entry.name.contains(search, ignoreCase = true) ||
-                    entry.path.contains(search, ignoreCase = true)
-            }
-        } else if (currentRootId != null) {
-            snapshot.entries.asSequence().filter { entry ->
-                entry.rootId == currentRootId && entry.parentPath == currentPath
-            }
-        } else if (showAllFiles) {
-            snapshot.entries.asSequence()
-        } else {
-            emptySequence()
-        }
 
-        source.filter { entry -> matchesFilter(entry.category, filter) }
-            .let { sequence ->
-                when (sort) {
-                    StorageExplorerSort.LARGEST -> sequence.sortedWith(
-                        compareByDescending<StorageExplorerEntry> { it.sizeBytes }
-                            .thenBy { it.name.lowercase() }
-                    )
-                    StorageExplorerSort.SMALLEST -> sequence.sortedWith(
-                        compareBy<StorageExplorerEntry> { it.sizeBytes }
-                            .thenBy { it.name.lowercase() }
-                    )
-                    StorageExplorerSort.NEWEST -> sequence.sortedByDescending { it.lastModifiedAt }
-                    StorageExplorerSort.OLDEST -> sequence.sortedBy { it.lastModifiedAt }
-                    StorageExplorerSort.NAME -> sequence.sortedBy { it.name.lowercase() }
-                    StorageExplorerSort.TYPE -> sequence.sortedWith(
-                        compareBy<StorageExplorerEntry> { it.category }
-                            .thenBy { it.name.lowercase() }
-                    )
+    // Large inventories can contain many thousands of paths. Filter and sort off the UI thread.
+    LaunchedEffect(snapshot, search, currentRootId, currentPath, filter, sort, showAllFiles) {
+        sorting = true
+        try {
+            delay(140)
+            filteredEntries = withContext(Dispatchers.Default) {
+                val source = if (search.isNotBlank()) {
+                    snapshot.entries.asSequence().filter { entry ->
+                        entry.name.contains(search, ignoreCase = true) ||
+                            entry.path.contains(search, ignoreCase = true)
+                    }
+                } else if (currentRootId != null) {
+                    snapshot.entries.asSequence().filter { entry ->
+                        entry.rootId == currentRootId && entry.parentPath == currentPath
+                    }
+                } else if (showAllFiles) {
+                    snapshot.entries.asSequence()
+                } else {
+                    emptySequence()
                 }
-            }.toList()
+
+                source.filter { entry -> matchesFilter(entry.category, filter) }
+                    .let { sequence ->
+                        when (sort) {
+                            StorageExplorerSort.LARGEST -> sequence.sortedWith(
+                                compareByDescending<StorageExplorerEntry> { it.sizeBytes }
+                                    .thenBy { it.name.lowercase() }
+                            )
+                            StorageExplorerSort.SMALLEST -> sequence.sortedWith(
+                                compareBy<StorageExplorerEntry> { it.sizeBytes }
+                                    .thenBy { it.name.lowercase() }
+                            )
+                            StorageExplorerSort.NEWEST -> sequence.sortedByDescending { it.lastModifiedAt }
+                            StorageExplorerSort.OLDEST -> sequence.sortedBy { it.lastModifiedAt }
+                            StorageExplorerSort.NAME -> sequence.sortedBy { it.name.lowercase() }
+                            StorageExplorerSort.TYPE -> sequence.sortedWith(
+                                compareBy<StorageExplorerEntry> {
+                                    if (it.isDirectory) "" else it.name.substringAfterLast('.', "").lowercase()
+                                }.thenBy { it.name.lowercase() }
+                            )
+                        }
+                    }.toList()
+            }
+        } finally {
+            sorting = false
+        }
     }
 
     val selectedEntries = snapshot.entries.filter { it.path in selectedPaths }
@@ -242,6 +256,11 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
                     } else {
                         "Scan to inspect files stored by TeleDrive on this device."
                     },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Overlapping locations are counted once; folder sizes include their contents.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -336,7 +355,7 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
                     Text(
                         if (filteredEntries.isNotEmpty() &&
                             filteredEntries.all { it.path in selectedPaths }
-                        ) "Clear visible" else "Select visible"
+                        ) "Clear all" else "Select all"
                     )
                 }
                 Box {
@@ -436,7 +455,7 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
         }
 
         when {
-            loading -> Box(
+            loading || sorting -> Box(
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentAlignment = Alignment.Center
             ) { CircularProgressIndicator() }
@@ -527,7 +546,7 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
             },
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (!entry.isDirectory) {
+                    if (canOpenWith(entry.category) && !entry.isDirectory) {
                         TextButton(onClick = {
                             selectedEntry = null
                             fileSharer.share(listOf(entry.path), "*/*", "Open with")
@@ -729,6 +748,14 @@ private fun StorageEntryRow(
         }
     }
 }
+
+private fun canOpenWith(category: String): Boolean = category in setOf(
+    CATEGORY_CACHE,
+    CATEGORY_DOWNLOADS,
+    CATEGORY_TELEGRAM_DOWNLOADS,
+    CATEGORY_LOCAL_COPIES,
+    CATEGORY_EXTERNAL_FILES
+)
 
 private fun matchesFilter(category: String, filter: StorageExplorerFilter): Boolean = when (filter) {
     StorageExplorerFilter.ALL -> true
