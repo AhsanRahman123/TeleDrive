@@ -14,6 +14,7 @@ import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.SyncRepository
 import com.drdisagree.teledrive.domain.repository.TelegramAuthRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
+import com.drdisagree.teledrive.domain.repository.StorageExplorerRepository
 import com.drdisagree.teledrive.domain.repository.TrashRepository
 import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.bind
@@ -41,6 +42,7 @@ val repositoryModule = module {
     singleOf(::SyncRepositoryImpl) bind SyncRepository::class
     singleOf(::ChannelRepositoryImpl) bind ChannelRepository::class
     singleOf(::CacheRepositoryImpl) bind CacheRepository::class
+    singleOf(::StorageExplorerRepositoryImpl) bind StorageExplorerRepository::class
     singleOf(::DuplicateManagerRepositoryImpl) bind DuplicateManagerRepository::class
     singleOf(::KeyBackupRepositoryImpl) bind KeyBackupRepository::class
 }

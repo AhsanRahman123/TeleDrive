@@ -54,12 +54,21 @@ class CacheRepositoryImpl(
     override fun observeStats(): Flow<CacheStats> = stats
 
     override suspend fun refreshStats() {
+        val thumbnailBytes = thumbnailDao.totalSizeBytes()
+        val previewBytes = cacheDao.sizeByType(CacheEntryType.PREVIEW)
+        val streamBytes = cacheDao.sizeByType(CacheEntryType.STREAM)
+        val indexedTempBytes = cacheDao.sizeByType(CacheEntryType.TEMP)
+        // Walking TDLib and temporary cache directories can touch thousands of files.
+        // Keep this work off the UI dispatcher during startup and cache-stat refreshes.
+        val (workingBytes, tdlibBytes) = withContext(Dispatchers.IO) {
+            (stagingSize() + partSize()) to storageInspector.directorySize(tdlibFilesDir())
+        }
         stats.value = CacheStats(
-            thumbnailBytes = thumbnailDao.totalSizeBytes(),
-            previewBytes = cacheDao.sizeByType(CacheEntryType.PREVIEW),
-            streamBytes = cacheDao.sizeByType(CacheEntryType.STREAM),
-            tempBytes = cacheDao.sizeByType(CacheEntryType.TEMP) + stagingSize() + partSize(),
-            tdlibBytes = storageInspector.directorySize(tdlibFilesDir())
+            thumbnailBytes = thumbnailBytes,
+            previewBytes = previewBytes,
+            streamBytes = streamBytes,
+            tempBytes = indexedTempBytes + workingBytes,
+            tdlibBytes = tdlibBytes
         )
     }
 

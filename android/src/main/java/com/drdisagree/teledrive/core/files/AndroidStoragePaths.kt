@@ -19,4 +19,22 @@ class AndroidStoragePaths(
 
     override val externalStorageRoot: File?
         get() = Environment.getExternalStorageDirectory()
+
+    override val dataDir: File
+        get() = context.dataDir
+
+    override val externalFilesDirs: List<File>
+        get() = context.getExternalFilesDirs(null).filterNotNull()
+
+    override val externalCacheDirs: List<File>
+        get() = context.externalCacheDirs.filterNotNull()
+
+    override val codeCacheDir: File
+        get() = context.codeCacheDir
+
+    override val appCodeFiles: List<File>
+        get() = buildList {
+            context.applicationInfo.sourceDir?.let { add(File(it)) }
+            context.applicationInfo.splitSourceDirs?.forEach { add(File(it)) }
+        }
 }

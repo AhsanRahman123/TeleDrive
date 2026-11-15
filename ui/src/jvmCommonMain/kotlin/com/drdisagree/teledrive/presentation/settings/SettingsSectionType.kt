@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
@@ -35,6 +36,8 @@ import com.drdisagree.teledrive.resources.settings_section_security_subtitle
 import com.drdisagree.teledrive.resources.settings_section_security_title
 import com.drdisagree.teledrive.resources.settings_section_storage_subtitle
 import com.drdisagree.teledrive.resources.settings_section_storage_title
+import com.drdisagree.teledrive.resources.settings_section_storage_explorer_title
+import com.drdisagree.teledrive.resources.settings_section_storage_explorer_subtitle
 import com.drdisagree.teledrive.resources.settings_section_thumbnails_subtitle
 import com.drdisagree.teledrive.resources.settings_section_thumbnails_title
 
@@ -62,6 +65,11 @@ enum class SettingsSectionType(
         Res.string.settings_section_thumbnails_title,
         Res.string.settings_section_thumbnails_subtitle,
         Icons.Filled.Image
+    ),
+    STORAGE_EXPLORER(
+        Res.string.settings_section_storage_explorer_title,
+        Res.string.settings_section_storage_explorer_subtitle,
+        Icons.Filled.Folder
     ),
     PERMISSIONS(
         Res.string.settings_section_permissions_title,

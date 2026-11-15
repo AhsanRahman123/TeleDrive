@@ -235,7 +235,15 @@ fun SettingsSectionScreen(
         topBar = {
             TopAppBar(
                 colors = liftedTopAppBarColors(lifted),
-                title = { Text(if (section == SettingsSectionType.THUMBNAILS) "Thumbnail manager" else stringResource(section.titleRes)) },
+                title = {
+                    Text(
+                        when (section) {
+                            SettingsSectionType.THUMBNAILS -> "Thumbnail manager"
+                            SettingsSectionType.STORAGE_EXPLORER -> "Storage Explorer"
+                            else -> stringResource(section.titleRes)
+                        }
+                    )
+                },
                 navigationIcon = {
                     TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = onBack) {
                         Icon(
@@ -254,6 +262,12 @@ fun SettingsSectionScreen(
         if (section == SettingsSectionType.THUMBNAILS) {
             ThumbnailManagerScreen(
                 onBack = onBack,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = padding.calculateTopPadding())
+            )
+        } else if (section == SettingsSectionType.STORAGE_EXPLORER) {
+            StorageExplorerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = padding.calculateTopPadding())
@@ -289,6 +303,7 @@ fun SettingsSectionScreen(
                         )
 
                         SettingsSectionType.THUMBNAILS -> Unit
+                        SettingsSectionType.STORAGE_EXPLORER -> Unit
 
                         SettingsSectionType.PERMISSIONS ->
                             PermissionsSection(viewModel.permissionChecker)

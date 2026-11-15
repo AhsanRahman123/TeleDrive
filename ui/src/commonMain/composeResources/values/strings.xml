@@ -625,6 +625,8 @@
     <string name="settings_section_security_title">Security</string>
     <string name="settings_section_storage_subtitle">Cache, trash auto-clear</string>
     <string name="settings_section_storage_title">Storage</string>
+    <string name="settings_section_storage_explorer_title">Storage Explorer</string>
+    <string name="settings_section_storage_explorer_subtitle">Inspect app data, cache and downloads</string>
 
     <!-- Settings: account -->
     <string name="settings_files_stay_telegram_channel">Your files stay in the Telegram channel. This device drops its index, thumbnails and caches, and rebuilds them when you sign in again.</string>
