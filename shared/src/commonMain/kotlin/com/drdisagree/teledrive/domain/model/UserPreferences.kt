@@ -30,6 +30,7 @@ data class UserPreferences(
     val dynamicColor: Boolean = true,
     val accentColor: AccentColor = AccentColor.BLUE,
     val accentLevel: AccentLevel = AccentLevel.MEDIUM,
+    val displayRefreshRate: Int = 60,
     val viewMode: ViewMode = ViewMode.GRID,
     val gridSize: Int = 3,
     val galleryViewMode: ViewMode = ViewMode.GRID,
