@@ -755,6 +755,10 @@
     <string name="settings_dynamic_color">Dynamic color</string>
     <string name="settings_accent_color">Accent color</string>
     <string name="settings_accent_level">Accent shade</string>
+    <string name="settings_refresh_rate">Display refresh rate</string>
+    <string name="settings_refresh_rate_summary">%1$d Hz requested · Available: %2$s. Android may still cap the rate due to system settings or power saving.</string>
+    <string name="settings_refresh_rate_unsupported_title">Refresh rate unavailable</string>
+    <string name="settings_refresh_rate_unsupported">%1$d Hz is not available as a native display mode on this phone. Available rates: %2$s.</string>
     <string name="settings_gallery_grid_columns">Gallery grid columns</string>
     <string name="settings_gallery_grid_view">Grid view in gallery</string>
     <string name="settings_grid_columns">Files grid columns</string>
