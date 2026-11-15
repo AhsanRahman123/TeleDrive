@@ -1085,7 +1085,7 @@ private fun PlaybackSection(state: SettingsUiState, viewModel: SettingsViewModel
         )
     }
     SettingsGroup {
-        add {
+        add(visible = LocalPlatformCapabilities.current.supportsTouchSelectionActionBar) {
             SettingsClickRow(
                 title = stringResource(Res.string.settings_preview_background),
                 subtitle = when (prefs.previewBackgroundMode) {
