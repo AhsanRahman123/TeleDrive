@@ -9,6 +9,7 @@ on:
     paths:
       - '.github/workflows/android-preview.yml'
       - 'android/src/**'
+      - 'android/proguard-rules.pro'
       - 'ui/src/**'
       - 'shared/src/**'
       - '.github/actions/build-ffmpeg-decoder/**'
