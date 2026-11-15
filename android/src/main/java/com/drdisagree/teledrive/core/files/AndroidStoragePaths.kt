@@ -32,6 +32,8 @@ class AndroidStoragePaths(
     override val codeCacheDir: File
         get() = context.codeCacheDir
 
+    override val autoRemoveManagedCopiesAfterUpload: Boolean = true
+
     override val appCodeFiles: List<File>
         get() = buildList {
             context.applicationInfo.sourceDir?.let { add(File(it)) }

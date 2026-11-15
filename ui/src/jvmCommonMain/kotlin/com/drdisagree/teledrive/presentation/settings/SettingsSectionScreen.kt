@@ -50,6 +50,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.drdisagree.teledrive.domain.model.AppLanguage
 import com.drdisagree.teledrive.resources.settings_delete_after_upload
 import com.drdisagree.teledrive.resources.settings_delete_after_upload_summary
+import com.drdisagree.teledrive.resources.settings_auto_remove_managed_copies
+import com.drdisagree.teledrive.resources.settings_auto_remove_managed_copies_summary
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.language_english
 import com.drdisagree.teledrive.resources.language_labels
@@ -631,6 +633,7 @@ private fun StorageSection(
 
     val downloadLocationConfigurable = LocalDownloadLocationConfigurable.current
     val downloadFolderPicker = LocalFolderPicker.current
+    val autoRemoveManagedCopies = LocalPlatformCapabilities.current.supportsAutoBackup
     SettingsGroup {
         add(visible = downloadLocationConfigurable) {
             SettingsClickRow(
@@ -653,7 +656,7 @@ private fun StorageSection(
                 onClick = { viewModel.update { it.copy(downloadDirectory = null) } }
             )
         }
-        add {
+        add(visible = !autoRemoveManagedCopies) {
             SettingsSwitchRow(
                 title = stringResource(Res.string.settings_delete_after_upload),
                 subtitle = stringResource(Res.string.settings_delete_after_upload_summary),
@@ -661,6 +664,15 @@ private fun StorageSection(
                 onChange = { value ->
                     viewModel.update { it.copy(deleteAfterUpload = value) }
                 }
+            )
+        }
+        add(visible = autoRemoveManagedCopies) {
+            SettingsSwitchRow(
+                title = stringResource(Res.string.settings_auto_remove_managed_copies),
+                subtitle = stringResource(Res.string.settings_auto_remove_managed_copies_summary),
+                checked = true,
+                onChange = {},
+                enabled = false
             )
         }
         add {

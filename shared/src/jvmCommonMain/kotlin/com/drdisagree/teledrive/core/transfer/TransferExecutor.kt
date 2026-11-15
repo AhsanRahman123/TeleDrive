@@ -35,7 +35,9 @@ import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
+import com.drdisagree.teledrive.core.common.AppResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
@@ -63,6 +65,7 @@ class TransferExecutor(
     private val telegramClient: TelegramClient,
     private val transferDao: TransferDao,
     private val fileDao: FileDao,
+    private val fileRepository: FileRepository,
     private val backupDao: BackupDao,
     private val manifestCodec: ManifestCodec,
     private val folderPathResolver: FolderPathResolver,
@@ -897,6 +900,61 @@ class TransferExecutor(
         localPath: String,
         contentHash: String?
     ) {
+        if (storagePaths.autoRemoveManagedCopiesAfterUpload) {
+            // Android imports user-selected files into TeleDrive-owned storage. After a successful
+            // Telegram upload, use the repository's guarded cleanup instead of deleting the
+            // transfer path directly. That routine verifies the remote mapping, respects
+            // Available Offline pins, and only removes paths inside TeleDrive-managed roots.
+            val latest = fileDao.byId(entity.id) ?: return
+            if (
+                latest.localPath != localPath ||
+                latest.messageId == null ||
+                latest.remoteFileId == null ||
+                latest.backupState != BackupState.BACKED_UP
+            ) {
+                return
+            }
+
+            val source = File(localPath)
+            if (!source.isFile || source.length() != latest.sizeBytes) return
+            if (source.length() <= EAGER_HASH_LIMIT &&
+                (contentHash == null || Hashing.sha256(source) != contentHash)
+            ) {
+                return
+            }
+
+            try {
+                when (val result = fileRepository.deleteLocalCopy(listOf(entity.id))) {
+                    is AppResult.Success -> {
+                        val cleanup = result.value
+                        if (cleanup.consentRequest != null) {
+                            SafeLog.w(
+                                TAG,
+                                "Automatic local-copy cleanup needs Android confirmation; the copy was retained."
+                            )
+                        }
+                        if (cleanup.failedCount > 0 || cleanup.unverifiedCount > 0) {
+                            SafeLog.w(
+                                TAG,
+                                "Automatic local-copy cleanup was incomplete; remaining files were retained."
+                            )
+                        }
+                    }
+                    is AppResult.Failure -> {
+                        SafeLog.w(TAG, "Automatic local-copy cleanup was skipped after upload.")
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                // A cleanup problem must never turn a successful Telegram upload into a failed one.
+                SafeLog.w(TAG, "Automatic local-copy cleanup failed after upload.", error)
+            }
+            return
+        }
+
+        // Preserve the existing desktop behaviour. Legacy staged imports are temporary and can
+        // still be removed after completion; ordinary desktop uploads remain user-controlled.
         if (fileImporter.isStaged(localPath)) {
             File(localPath).delete()
             fileDao.setLocalPath(entity.id, null)

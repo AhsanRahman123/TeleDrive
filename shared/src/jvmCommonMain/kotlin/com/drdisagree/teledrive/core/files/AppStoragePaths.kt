@@ -28,6 +28,13 @@ interface AppStoragePaths {
     val codeCacheDir: File?
         get() = null
 
+    /**
+     * Android opts into removing only TeleDrive-managed local copies after a confirmed upload.
+     * Desktop keeps its existing user-controlled delete-after-upload behaviour.
+     */
+    val autoRemoveManagedCopiesAfterUpload: Boolean
+        get() = false
+
     /** Installed APK and split APK files; these are inventory-only, never deletable here. */
     val appCodeFiles: List<File>
         get() = emptyList()
