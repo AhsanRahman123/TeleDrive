@@ -18,4 +18,6 @@ class AndroidPlatformCapabilities : PlatformCapabilities {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
     override val savesCollectionScrollOnPreview: Boolean = true
+
+    override val supportsTouchSelectionActionBar: Boolean = true
 }
