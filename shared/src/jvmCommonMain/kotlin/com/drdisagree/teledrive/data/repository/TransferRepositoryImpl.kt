@@ -26,6 +26,7 @@ import com.drdisagree.teledrive.domain.usecase.ValidateUploadUseCase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -84,20 +85,26 @@ class TransferRepositoryImpl(
         TransferSection.COMPLETED -> transferDao.observeCompleted(limit)
     }.map { list -> list.map { it.toDomain() } }
 
-    override fun observeSectionCount(section: TransferSection): Flow<Int> = when (section) {
-        TransferSection.ACTIVE -> transferDao.observeActiveCount()
-        TransferSection.PAUSED -> transferDao.observeCountByState(TransferState.PAUSED)
-        TransferSection.FAILED -> transferDao.observeCountByState(TransferState.FAILED)
-        TransferSection.COMPLETED -> transferDao.observeCountByState(TransferState.COMPLETED)
-    }
+    override fun observeSectionCount(section: TransferSection): Flow<Int> =
+        (when (section) {
+            TransferSection.ACTIVE -> transferDao.observeActiveCount()
+            TransferSection.PAUSED -> transferDao.observeCountByState(TransferState.PAUSED)
+            TransferSection.FAILED -> transferDao.observeCountByState(TransferState.FAILED)
+            TransferSection.COMPLETED -> transferDao.observeCountByState(TransferState.COMPLETED)
+        }).distinctUntilChanged()
 
-    override fun observeActiveCount(): Flow<Int> = transferDao.observeActiveCount()
+    override fun observeActiveCount(): Flow<Int> =
+        transferDao.observeActiveCount().distinctUntilChanged()
 
     override fun observeActiveForFile(fileId: String): Flow<TransferTask?> =
-        transferDao.observeActiveForFile(fileId).map { it?.toDomain() }
+        transferDao.observeActiveForFile(fileId)
+            .map { it?.toDomain() }
+            .distinctUntilChanged()
 
     override fun observeActiveDownloads(): Flow<List<TransferTask>> =
-        transferDao.observeActiveDownloads().map { list -> list.map { it.toDomain() } }
+        transferDao.observeActiveDownloads()
+            .distinctUntilChanged()
+            .map { list -> list.map { it.toDomain() } }
 
     override suspend fun enqueueUpload(fileId: String, priority: Int): AppResult<String> =
         enqueue(fileId, TransferType.UPLOAD, priority)
