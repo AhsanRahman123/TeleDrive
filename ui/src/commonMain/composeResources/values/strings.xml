@@ -753,6 +753,8 @@
     <string name="settings_archived_shortcut">Archived shortcut</string>
     <string name="settings_compact_layout">Compact layout</string>
     <string name="settings_dynamic_color">Dynamic color</string>
+    <string name="settings_accent_color">Accent color</string>
+    <string name="settings_accent_level">Accent shade</string>
     <string name="settings_gallery_grid_columns">Gallery grid columns</string>
     <string name="settings_gallery_grid_view">Grid view in gallery</string>
     <string name="settings_grid_columns">Files grid columns</string>
@@ -1004,6 +1006,18 @@
         <item>After a month</item>
         <item>After 3 months</item>
         <item>After a year</item>
+    </string-array>
+    <string-array name="accent_color_labels">
+        <item>Blue</item><item>Indigo</item><item>Purple</item><item>Violet</item><item>Magenta</item>
+        <item>Pink</item><item>Rose</item><item>Crimson</item><item>Red</item><item>Coral</item>
+        <item>Orange</item><item>Amber</item><item>Yellow</item><item>Lime</item><item>Olive</item>
+        <item>Green</item><item>Emerald</item><item>Mint</item><item>Teal</item><item>Turquoise</item>
+        <item>Cyan</item><item>Sky</item><item>Slate</item><item>Brown</item><item>Graphite</item>
+    </string-array>
+    <string-array name="accent_level_labels">
+        <item>Light</item>
+        <item>Medium</item>
+        <item>Deep</item>
     </string-array>
     <string-array name="theme_labels">
         <item>Light</item>

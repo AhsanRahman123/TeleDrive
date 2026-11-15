@@ -104,6 +104,8 @@ class SettingsRepositoryImpl(
             theme = enumOrDefault(this[PreferenceKeys.THEME], defaults.theme),
             language = AppLanguage.fromCode(this[PreferenceKeys.LANGUAGE]),
             dynamicColor = this[PreferenceKeys.DYNAMIC_COLOR] ?: defaults.dynamicColor,
+            accentColor = enumOrDefault(this[PreferenceKeys.ACCENT_COLOR], defaults.accentColor),
+            accentLevel = enumOrDefault(this[PreferenceKeys.ACCENT_LEVEL], defaults.accentLevel),
             viewMode = enumOrDefault(this[PreferenceKeys.VIEW_MODE], defaults.viewMode),
             galleryViewMode = enumOrDefault(
                 this[PreferenceKeys.GALLERY_VIEW_MODE],
@@ -200,6 +202,8 @@ class SettingsRepositoryImpl(
         this[PreferenceKeys.THEME] = prefs.theme.name
         this[PreferenceKeys.LANGUAGE] = prefs.language.code
         this[PreferenceKeys.DYNAMIC_COLOR] = prefs.dynamicColor
+        this[PreferenceKeys.ACCENT_COLOR] = prefs.accentColor.name
+        this[PreferenceKeys.ACCENT_LEVEL] = prefs.accentLevel.name
         this[PreferenceKeys.VIEW_MODE] = prefs.viewMode.name
         this[PreferenceKeys.GALLERY_VIEW_MODE] = prefs.galleryViewMode.name
         this[PreferenceKeys.GALLERY_GRID_SIZE] = prefs.galleryGridSize

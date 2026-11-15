@@ -161,7 +161,12 @@ fun TeleDriveApp(
         true
     }
 
-    TeleDriveTheme(darkTheme = darkTheme, dynamicColor = state.dynamicColor) {
+    TeleDriveTheme(
+        darkTheme = darkTheme,
+        dynamicColor = state.dynamicColor,
+        accentColor = state.accentColor,
+        accentLevel = state.accentLevel
+    ) {
         CompositionLocalProvider(
             (LocalLocaleList as ProvidableCompositionLocal<LocaleList>) provides targetLocaleList,
             LocalCompactLayout provides state.compactLayout

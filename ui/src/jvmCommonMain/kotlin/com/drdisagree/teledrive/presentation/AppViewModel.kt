@@ -68,6 +68,8 @@ class AppViewModel(
             theme = prefs.theme,
             language = prefs.language,
             dynamicColor = prefs.dynamicColor,
+            accentColor = prefs.accentColor,
+            accentLevel = prefs.accentLevel,
             compactLayout = prefs.layoutDensity == LayoutDensity.COMPACT,
             locked = locked
         )

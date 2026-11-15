@@ -47,6 +47,8 @@ import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.unit.dp
 import org.koin.compose.viewmodel.koinViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.drdisagree.teledrive.domain.model.AccentColor
+import com.drdisagree.teledrive.domain.model.AccentLevel
 import com.drdisagree.teledrive.domain.model.AppLanguage
 import com.drdisagree.teledrive.resources.settings_delete_after_upload
 import com.drdisagree.teledrive.resources.settings_delete_after_upload_summary
@@ -95,6 +97,10 @@ import com.drdisagree.teledrive.resources.settings_compact_layout
 import com.drdisagree.teledrive.resources.settings_confirm_removing_lock
 import com.drdisagree.teledrive.resources.settings_debug_logging
 import com.drdisagree.teledrive.resources.settings_dynamic_color
+import com.drdisagree.teledrive.resources.settings_accent_color
+import com.drdisagree.teledrive.resources.settings_accent_level
+import com.drdisagree.teledrive.resources.accent_color_labels
+import com.drdisagree.teledrive.resources.accent_level_labels
 import com.drdisagree.teledrive.resources.settings_encrypt_thumbnails
 import com.drdisagree.teledrive.resources.settings_encrypt_uploads
 import com.drdisagree.teledrive.resources.settings_encryption_stays_off
@@ -939,6 +945,8 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
     val prefs = state.preferences
     val capabilities = LocalPlatformCapabilities.current
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showAccentColorDialog by remember { mutableStateOf(false) }
+    var showAccentLevelDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
 
     if (showThemeDialog) {
@@ -951,6 +959,32 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                 viewModel.update { it.copy(theme = choice) }
             },
             onDismiss = { showThemeDialog = false }
+        )
+    }
+
+    if (showAccentColorDialog) {
+        ChoiceDialog(
+            title = stringResource(Res.string.settings_accent_color),
+            options = AccentColor.entries.zip(stringArrayResource(Res.array.accent_color_labels)),
+            selected = prefs.accentColor,
+            onSelect = { choice ->
+                showAccentColorDialog = false
+                viewModel.update { it.copy(accentColor = choice, dynamicColor = false) }
+            },
+            onDismiss = { showAccentColorDialog = false }
+        )
+    }
+
+    if (showAccentLevelDialog) {
+        ChoiceDialog(
+            title = stringResource(Res.string.settings_accent_level),
+            options = AccentLevel.entries.zip(stringArrayResource(Res.array.accent_level_labels)),
+            selected = prefs.accentLevel,
+            onSelect = { choice ->
+                showAccentLevelDialog = false
+                viewModel.update { it.copy(accentLevel = choice, dynamicColor = false) }
+            },
+            onDismiss = { showAccentLevelDialog = false }
         )
     }
 
@@ -977,6 +1011,20 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                     AppTheme.SYSTEM -> stringResource(Res.string.theme_system)
                 },
                 onClick = { showThemeDialog = true }
+            )
+        }
+        add {
+            SettingsClickRow(
+                title = stringResource(Res.string.settings_accent_color),
+                subtitle = stringArrayResource(Res.array.accent_color_labels)[prefs.accentColor.ordinal],
+                onClick = { showAccentColorDialog = true }
+            )
+        }
+        add {
+            SettingsClickRow(
+                title = stringResource(Res.string.settings_accent_level),
+                subtitle = stringArrayResource(Res.array.accent_level_labels)[prefs.accentLevel.ordinal],
+                onClick = { showAccentLevelDialog = true }
             )
         }
         add {

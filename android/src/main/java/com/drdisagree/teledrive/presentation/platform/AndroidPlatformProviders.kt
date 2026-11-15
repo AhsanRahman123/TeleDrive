@@ -204,7 +204,12 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
         content()
 
         activeUploadPickerCallback?.let { callback ->
-            TeleDriveTheme(darkTheme = darkTheme, dynamicColor = prefs.dynamicColor) {
+            TeleDriveTheme(
+                darkTheme = darkTheme,
+                dynamicColor = prefs.dynamicColor,
+                accentColor = prefs.accentColor,
+                accentLevel = prefs.accentLevel
+            ) {
                 AndroidUploadPickerDialog(
                     context = context,
                     folderMode = false,
@@ -239,7 +244,12 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
         }
 
         activeFolderPickerCallback?.let { callback ->
-            TeleDriveTheme(darkTheme = darkTheme, dynamicColor = prefs.dynamicColor) {
+            TeleDriveTheme(
+                darkTheme = darkTheme,
+                dynamicColor = prefs.dynamicColor,
+                accentColor = prefs.accentColor,
+                accentLevel = prefs.accentLevel
+            ) {
                 AndroidUploadPickerDialog(
                     context = context,
                     folderMode = true,
