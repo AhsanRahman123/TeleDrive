@@ -34,6 +34,8 @@ val LocalPlatformCapabilities = staticCompositionLocalOf<PlatformCapabilities> {
 interface DisplayRefreshRateController {
     fun supportedRates(): Set<Int>
 
+    fun resolveSupportedRefreshRate(refreshRate: Int): Float?
+
     fun requestRefreshRate(refreshRate: Int): Boolean
 }
 
