@@ -28,15 +28,13 @@ class AndroidDisplayRefreshRateController(
             .toSet()
     }.getOrDefault(emptySet())
 
-    override fun requestRefreshRate(refreshRate: Int): Boolean {
-        if (refreshRate !in selectableRates) return false
+    override fun resolveSupportedRefreshRate(refreshRate: Int): Float? {
+        if (refreshRate !in selectableRates) return null
 
         return runCatching {
             val display = display()
             val currentMode = display.mode
-            // Never trade resolution for refresh rate: only request a mode matching the current
-            // physical resolution, so the app's layout and density remain unchanged.
-            val matchingRate = display.supportedModes
+            display.supportedModes
                 .asSequence()
                 .filter {
                     it.physicalWidth == currentMode.physicalWidth &&
@@ -45,8 +43,13 @@ class AndroidDisplayRefreshRateController(
                 }
                 .minByOrNull { abs(it.refreshRate - refreshRate.toFloat()) }
                 ?.refreshRate
-                ?: return@runCatching false
+        }.getOrNull()
+    }
 
+    override fun requestRefreshRate(refreshRate: Int): Boolean {
+        val matchingRate = resolveSupportedRefreshRate(refreshRate) ?: return false
+
+        return runCatching {
             val attributes = activity.window.attributes
             if (abs(attributes.preferredRefreshRate - matchingRate) > RATE_TOLERANCE) {
                 attributes.preferredRefreshRate = matchingRate
