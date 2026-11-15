@@ -15,10 +15,10 @@ class AndroidDisplayRefreshRateController(
     private val activity: Activity
 ) : DisplayRefreshRateController {
 
-    override fun supportedRates(): Set<Int> {
+    override fun supportedRates(): Set<Int> = runCatching {
         val display = display()
         val currentMode = display.mode
-        return display.supportedModes
+        display.supportedModes
             .filter {
                 it.physicalWidth == currentMode.physicalWidth &&
                     it.physicalHeight == currentMode.physicalHeight
@@ -26,9 +26,9 @@ class AndroidDisplayRefreshRateController(
             .map { it.refreshRate.roundToInt() }
             .filter { it in selectableRates }
             .toSet()
-    }
+    }.getOrDefault(emptySet())
 
-    override fun requestRefreshRate(refreshRate: Int): Boolean {
+    override fun requestRefreshRate(refreshRate: Int): Boolean = runCatching {
         if (refreshRate !in selectableRates) return false
 
         val display = display()
@@ -44,15 +44,13 @@ class AndroidDisplayRefreshRateController(
             .minByOrNull { abs(it.refreshRate - refreshRate.toFloat()) }
             ?: return false
 
-        return runCatching {
-            val attributes = activity.window.attributes
-            if (attributes.preferredDisplayModeId != matchingMode.modeId) {
-                attributes.preferredDisplayModeId = matchingMode.modeId
-                activity.window.attributes = attributes
-            }
-            true
-        }.getOrDefault(false)
-    }
+        val attributes = activity.window.attributes
+        if (attributes.preferredDisplayModeId != matchingMode.modeId) {
+            attributes.preferredDisplayModeId = matchingMode.modeId
+            activity.window.attributes = attributes
+        }
+        true
+    }.getOrDefault(false)
 
     @Suppress("DEPRECATION")
     private fun display(): Display =
