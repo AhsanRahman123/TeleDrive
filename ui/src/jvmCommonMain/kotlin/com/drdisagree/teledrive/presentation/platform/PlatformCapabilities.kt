@@ -26,3 +26,17 @@ interface PlatformCapabilities {
 val LocalPlatformCapabilities = staticCompositionLocalOf<PlatformCapabilities> {
     error("PlatformCapabilities is not provided")
 }
+
+/**
+ * Requests a physical display mode exposed by Android, rather than changing only app animation
+ * timing. Implementations must reject rates that are not present in the display's supported modes.
+ */
+interface DisplayRefreshRateController {
+    fun supportedRates(): Set<Int>
+
+    fun requestRefreshRate(refreshRate: Int): Boolean
+}
+
+val LocalDisplayRefreshRateController = staticCompositionLocalOf<DisplayRefreshRateController?> {
+    null
+}
