@@ -575,6 +575,28 @@ class FilesViewModel(
         }
     }
 
+    /**
+     * Selects every file and folder that is currently in the active Files query except
+     * those already selected. This is intentionally scoped to the current folder/query.
+     */
+    fun invertSelection() {
+        viewModelScope.launch {
+            val allFileIds = fileRepository.fileIds(querySpec.first()).toSet()
+            val allFolderIds = uiState.value.folders.map { it.id }.toSet()
+            val nextFileIds = allFileIds - selection.value
+            val nextFolderIds = allFolderIds - folderSelection.value
+
+            selection.value = nextFileIds
+            folderSelection.value = nextFolderIds
+            _allSelected.value =
+                allFileIds.isNotEmpty() || allFolderIds.isNotEmpty() &&
+                    nextFileIds.size == allFileIds.size &&
+                    nextFolderIds.size == allFolderIds.size
+            _selectionModeEnabled.value = nextFileIds.isNotEmpty() || nextFolderIds.isNotEmpty()
+            publishSelectionSnapshot()
+        }
+    }
+
     fun startRangeSelection() {
         rangeBase = selection.value to folderSelection.value
         rangeSelectionActive = true
