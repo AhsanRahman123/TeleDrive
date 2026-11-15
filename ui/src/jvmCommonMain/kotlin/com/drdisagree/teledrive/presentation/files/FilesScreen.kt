@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarOutline
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -74,6 +75,7 @@ import androidx.compose.material3.Icon
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -101,6 +103,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -180,6 +183,7 @@ import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalFolderPicker
 import com.drdisagree.teledrive.presentation.platform.LocalMultiFilePicker
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.presentation.platform.PickResult
 import com.drdisagree.teledrive.presentation.preview.PreviewSequence
 import com.drdisagree.teledrive.resources.Res
@@ -278,6 +282,7 @@ fun FilesScreen(
     val selectedFolderIds = selectionSnapshot.folderIds
     val selectedCount = selectionSnapshot.count
     val selectionMode = selectedCount > 0 || selectionSnapshot.selectionModeEnabled
+    val touchSelectionActionBar = LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
     val renameTarget by viewModel.renameTarget.collectAsStateWithLifecycle()
     val files = viewModel.pagedFiles.collectAsLazyPagingItems()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
@@ -657,15 +662,26 @@ fun FilesScreen(
                                         }
                                     )
                                 }
+                                TooltipIconButton(
+                                    tooltip = "Invert selection",
+                                    onClick = viewModel::invertSelection
+                                ) {
+                                    Icon(
+                                        Icons.Filled.SwapHoriz,
+                                        contentDescription = "Invert selection"
+                                    )
+                                }
                                 if (selectedCount > 0) {
-                                    TooltipIconButton(tooltip = stringResource(Res.string.files_move), onClick = { showMovePicker = true }) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.DriveFileMove,
-                                            contentDescription = stringResource(Res.string.files_move)
-                                        )
+                                    if (!touchSelectionActionBar) {
+                                        TooltipIconButton(tooltip = stringResource(Res.string.files_move), onClick = { showMovePicker = true }) {
+                                            Icon(
+                                                Icons.AutoMirrored.Filled.DriveFileMove,
+                                                contentDescription = stringResource(Res.string.files_move)
+                                            )
+                                        }
                                     }
-                                    Box {
-                                        TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
+                                    Box(modifier = if (touchSelectionActionBar) Modifier.size(1.dp) else Modifier) {
+                                        if (!touchSelectionActionBar) TooltipIconButton(tooltip = stringResource(Res.string.common_actions), onClick = { showSelectionOverflow = true }) {
                                         Icon(
                                             Icons.Filled.MoreVert,
                                             contentDescription = stringResource(Res.string.common_actions)
@@ -792,11 +808,11 @@ fun FilesScreen(
                                         )
                                     }
 
-                                    ActionMenu(
-                                        expanded = showSelectionOverflow,
-                                        onDismissRequest = { showSelectionOverflow = false },
-                                        actions = actions
-                                    )
+                                        ActionMenu(
+                                            expanded = showSelectionOverflow,
+                                            onDismissRequest = { showSelectionOverflow = false },
+                                            actions = actions
+                                        )
                                     }
                                 }
                             }
@@ -1150,6 +1166,58 @@ fun FilesScreen(
                     }
                 }
             }
+            if (touchSelectionActionBar && selectionMode) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp)
+                            .padding(bottom = LocalBottomBarInset.current + 8.dp),
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TouchSelectionAction(
+                                label = "Copy",
+                                icon = Icons.Filled.ContentCopy,
+                                onClick = { showCopyPicker = true },
+                                modifier = Modifier.weight(1f)
+                            )
+                            TouchSelectionAction(
+                                label = "Move",
+                                icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                                onClick = { showMovePicker = true },
+                                modifier = Modifier.weight(1f)
+                            )
+                            TouchSelectionAction(
+                                label = "Rename",
+                                icon = Icons.Filled.DriveFileRenameOutline,
+                                enabled = selectedCount == 1,
+                                onClick = viewModel::requestRenameSelected,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TouchSelectionAction(
+                                label = "Delete",
+                                icon = Icons.Filled.DeleteOutline,
+                                onClick = { confirmTrash = true },
+                                modifier = Modifier.weight(1f)
+                            )
+                            TouchSelectionAction(
+                                label = "More",
+                                icon = Icons.Filled.MoreVert,
+                                onClick = { showSelectionOverflow = true },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -1319,6 +1387,40 @@ fun FilesScreen(
 
     infoTarget?.let { file ->
         FileInfoSheet(file = file, onDismiss = viewModel::dismissInfo)
+    }
+}
+
+
+@Composable
+private fun TouchSelectionAction(
+    label: String,
+    icon: ImageVector,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(MaterialTheme.shapes.small)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 2.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            modifier = Modifier.size(21.dp),
+            tint = if (enabled) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            color = if (enabled) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+        )
     }
 }
 
