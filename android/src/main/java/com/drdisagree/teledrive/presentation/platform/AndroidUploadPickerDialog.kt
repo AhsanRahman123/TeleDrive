@@ -3,8 +3,13 @@ package com.drdisagree.teledrive.presentation.platform
 import android.content.Context
 import android.os.Build
 import android.os.Environment
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.MediaMetadataRetriever
 import android.os.storage.StorageManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,6 +26,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,6 +42,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Tune
@@ -61,9 +68,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
@@ -107,6 +118,9 @@ import com.drdisagree.teledrive.resources.picker_grant_access
 import com.drdisagree.teledrive.resources.picker_use_android_picker
 import com.drdisagree.teledrive.resources.common_cancel
 import org.jetbrains.compose.resources.stringResource
+import androidx.exifinterface.media.ExifInterface
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -570,12 +584,10 @@ private fun UploadPickerListItem(
         if (showSelection) {
             Checkbox(checked = selected, onCheckedChange = { onToggle() })
         }
-        Icon(
-            if (entry.isDirectory) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
-            contentDescription = null,
-            tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(25.dp)
+        UploadPickerPreview(
+            entry = entry,
+            modifier = Modifier.size(54.dp).clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -615,17 +627,21 @@ private fun UploadPickerGridItem(
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (entry.isDirectory) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
-                    contentDescription = null,
-                    tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(28.dp)
-                )
-                Spacer(Modifier.weight(1f))
-                if (showSelection) Checkbox(checked = selected, onCheckedChange = { onToggle() })
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Box(
+                modifier = Modifier.fillMaxWidth().height(132.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                UploadPickerPreview(entry = entry, modifier = Modifier.fillMaxSize())
+                if (showSelection) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = { onToggle() },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)
+                    )
+                }
             }
             Text(
                 entry.file.name.ifBlank { entry.file.absolutePath },
@@ -640,6 +656,146 @@ private fun UploadPickerGridItem(
             )
         }
     }
+}
+
+@Composable
+private fun UploadPickerPreview(
+    entry: UploadPickerEntry,
+    modifier: Modifier = Modifier
+) {
+    val extension = entry.file.extension.lowercase()
+    val video = extension in uploadPickerVideoExtensions
+    val isPreviewable = extension in uploadPickerImageExtensions || video
+    val thumbnail by produceState<Bitmap?>(
+        initialValue = null,
+        key1 = entry.file.absolutePath,
+        key2 = entry.modified,
+        key3 = entry.size
+    ) {
+        value = if (isPreviewable && !entry.isDirectory) {
+            withContext(Dispatchers.IO) { createUploadPickerThumbnail(entry.file) }
+        } else {
+            null
+        }
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (thumbnail != null) {
+            Image(
+                bitmap = thumbnail!!.asImageBitmap(),
+                contentDescription = entry.file.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Icon(
+                imageVector = if (entry.isDirectory) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
+                contentDescription = null,
+                tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(30.dp)
+            )
+        }
+        if (video) {
+            Icon(
+                imageVector = Icons.Filled.PlayArrow,
+                contentDescription = "Video",
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).size(22.dp)
+            )
+        }
+    }
+}
+
+private val uploadPickerImageExtensions = setOf(
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "tif", "tiff", "avif"
+)
+
+private val uploadPickerVideoExtensions = setOf(
+    "mp4", "mkv", "mov", "avi", "webm", "m4v", "3gp", "mpeg", "mpg", "ts", "m2ts"
+)
+
+private fun createUploadPickerThumbnail(file: File): Bitmap? = runCatching {
+    when (file.extension.lowercase()) {
+        in uploadPickerVideoExtensions -> {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(file.absolutePath)
+                val frame = retriever.getFrameAtTime(
+                    1_000_000L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                ) ?: retriever.getFrameAtTime(
+                    0L,
+                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                )
+                frame?.let(::scaleUploadPickerBitmap)
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }
+        in uploadPickerImageExtensions -> decodeUploadPickerImage(file)
+        else -> null
+    }
+}.getOrNull()
+
+private fun decodeUploadPickerImage(file: File): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+    var sampleSize = 1
+    while (bounds.outWidth / sampleSize > 720 || bounds.outHeight / sampleSize > 720) {
+        sampleSize *= 2
+    }
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.RGB_565
+    }
+    val decoded = BitmapFactory.decodeFile(file.absolutePath, options) ?: return null
+
+    val orientation = runCatching {
+        ExifInterface(file.absolutePath).getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL
+        )
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    val matrix = Matrix().apply {
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                postRotate(90f)
+                postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                postRotate(270f)
+                postScale(-1f, 1f)
+            }
+        }
+    }
+    val oriented = if (matrix.isIdentity) decoded else {
+        Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+            .also { if (it !== decoded) decoded.recycle() }
+    }
+    return scaleUploadPickerBitmap(oriented)
+}
+
+private fun scaleUploadPickerBitmap(bitmap: Bitmap): Bitmap {
+    val maxDimension = 480
+    val largestSide = maxOf(bitmap.width, bitmap.height)
+    if (largestSide <= maxDimension) return bitmap
+    val ratio = maxDimension.toFloat() / largestSide
+    val scaled = Bitmap.createScaledBitmap(
+        bitmap,
+        (bitmap.width * ratio).toInt().coerceAtLeast(1),
+        (bitmap.height * ratio).toInt().coerceAtLeast(1),
+        true
+    )
+    if (scaled !== bitmap) bitmap.recycle()
+    return scaled
 }
 
 private fun discoverUploadStorageRoots(context: Context): List<UploadStorageRoot> {
