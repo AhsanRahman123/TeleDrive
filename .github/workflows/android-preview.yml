@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   android:
-    name: Android debug APK
+    name: Android optimized preview APK
     runs-on: ubuntu-latest
     steps:
       - name: Check out Android preview branch
@@ -61,14 +61,14 @@ jobs:
       - name: Build FFmpeg audio decoder
         uses: ./.github/actions/build-ffmpeg-decoder
 
-      - name: Assemble universal debug APK
+      - name: Assemble universal release APK
         env:
           KEYSTORE_FILE: ${{ runner.temp }}/teledrive-preview-keystore.p12
           KEYSTORE_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.TELEDRIVE_PREVIEW_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.TELEDRIVE_PREVIEW_KEY_PASSWORD }}
           ANDROID_PREVIEW_BUILD_NUMBER: ${{ github.run_number }}
-        run: ./gradlew :android:assembleDebug -PwithFfmpegDecoder -PsplitAbis=false
+        run: ./gradlew :android:assembleRelease -PwithFfmpegDecoder -PsplitAbis=false
 
       - name: Verify isolated package ID and persistent signing certificate
         shell: bash
@@ -78,7 +78,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.TELEDRIVE_PREVIEW_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          apk="$(find android/build/outputs/apk/debug -name '*-universal-debug.apk' -print -quit)"
+          apk="$(find android/build/outputs/apk/release -name '*-universal-release.apk' -print -quit)"
           test -n "$apk"
           aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           package="$("$aapt" dump badging "$apk" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p")"
@@ -98,6 +98,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: TeleDrive-Android-Preview-2
-          path: android/build/outputs/apk/debug/*-universal-debug.apk
+          path: android/build/outputs/apk/release/*-universal-release.apk
           if-no-files-found: error
           retention-days: 14
