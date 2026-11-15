@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.components
 
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -7,6 +8,7 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 
 /**
  * Makes Ctrl + primary mouse click a selection gesture for desktop file/folder rows.
@@ -15,8 +17,10 @@ import androidx.compose.ui.input.pointer.pointerInput
  * or enter folder) cannot also run for the same gesture. Normal clicks and touch gestures
  * continue through the existing combinedClickable handler.
  */
-fun Modifier.ctrlClickSelect(onSelect: () -> Unit): Modifier =
-    pointerInput(onSelect) {
+@Composable
+fun Modifier.ctrlClickSelect(onSelect: () -> Unit): Modifier {
+    if (LocalPlatformCapabilities.current.supportsTouchSelectionActionBar) return this
+    return pointerInput(onSelect) {
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -34,3 +38,4 @@ fun Modifier.ctrlClickSelect(onSelect: () -> Unit): Modifier =
             }
         }
     }
+}
