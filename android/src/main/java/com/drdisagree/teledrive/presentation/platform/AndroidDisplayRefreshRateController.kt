@@ -42,7 +42,6 @@ class AndroidDisplayRefreshRateController(
                     abs(it.refreshRate - refreshRate.toFloat()) <= RATE_TOLERANCE
             }
             .minByOrNull { abs(it.refreshRate - refreshRate.toFloat()) }
-            .firstOrNull()
             ?: return false
 
         return runCatching {
