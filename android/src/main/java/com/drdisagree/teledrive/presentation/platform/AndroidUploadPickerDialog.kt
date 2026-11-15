@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -76,7 +76,6 @@ import android.content.pm.PackageManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.drdisagree.teledrive.resources.Res
-import com.drdisagree.teledrive.resources.picker_upload_title
 import com.drdisagree.teledrive.resources.picker_folder_mode_title
 import com.drdisagree.teledrive.resources.picker_files_mode_title
 import com.drdisagree.teledrive.resources.picker_storage_internal
@@ -201,7 +200,7 @@ fun AndroidUploadPickerDialog(
         }
         loading = true
         unreadable = false
-        val loaded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val loadResult = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 val directory = File(path)
                 require(directory.isDirectory && directory.canRead()) { "This folder cannot be read." }
@@ -222,17 +221,17 @@ fun AndroidUploadPickerDialog(
                     .filter { entry -> matchesUploadPickerFilter(entry, filter) }
                     .toList()
                     .sortedWith(uploadPickerComparator(sort, descending))
-            }.getOrElse {
-                unreadable = true
-                emptyList()
-            }
+            }.fold(
+                onSuccess = { files -> files to false },
+                onFailure = { emptyList<UploadPickerEntry>() to true }
+            )
         }
-        entries = loaded
+        entries = loadResult.first
+        unreadable = loadResult.second
         loading = false
     }
 
-    val selectedVisible = entries.count { it.file.absolutePath in selectedPaths }
-    val allVisibleSelected = entries.isNotEmpty() && selectedVisible == entries.size
+    val allVisibleSelected = entries.isNotEmpty() && entries.all { it.file.absolutePath in selectedPaths }
 
     fun toggleEntry(entry: UploadPickerEntry) {
         val path = entry.file.absolutePath
@@ -265,7 +264,7 @@ fun AndroidUploadPickerDialog(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .windowInsetsPadding(WindowInsets.systemBars)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
@@ -588,8 +587,6 @@ private fun UploadPickerListItem(
         }
         if (entry.isDirectory) {
             TextButton(onClick = onClick) { Text("Open") }
-        } else if (showSelection) {
-            Checkbox(checked = selected, onCheckedChange = { onToggle() })
         }
     }
 }
