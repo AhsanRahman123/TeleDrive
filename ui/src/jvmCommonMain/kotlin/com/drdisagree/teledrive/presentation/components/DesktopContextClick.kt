@@ -50,6 +50,9 @@ fun Modifier.onDesktopEmptySpaceContextClick(
     onContextClick: () -> Unit,
     onEmptySpaceClick: () -> Unit = {}
 ): Modifier {
+    // Android has no desktop empty-space context menu; avoid an extra pointer-input
+    // coroutine on the collection while touch scrolling.
+    if (LocalPlatformCapabilities.current.supportsTouchSelectionActionBar) return this
     val currentOnContextClick by rememberUpdatedState(onContextClick)
     val currentOnEmptySpaceClick by rememberUpdatedState(onEmptySpaceClick)
     return pointerInput(Unit) {
