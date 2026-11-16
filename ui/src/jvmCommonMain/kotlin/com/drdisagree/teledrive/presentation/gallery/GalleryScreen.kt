@@ -333,7 +333,7 @@ private fun AlbumGrid(
                     } },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
-                        .animateItem()
+                        .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                 )
             }
             }
@@ -396,7 +396,7 @@ private fun AlbumGrid(
                     } },
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
-                        .animateItem()
+                        .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                 )
             }
             }
@@ -1297,7 +1297,7 @@ fun GalleryScreen(
                             when (val item = media[index]) {
                                 is GalleryListItem.DayHeader -> DayHeaderRow(
                                     dayStartMillis = item.dayStartMillis,
-                                    modifier = Modifier.animateItem()
+                                    modifier = Modifier.then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                                 )
 
                                 is GalleryListItem.Media -> {
@@ -1324,7 +1324,7 @@ fun GalleryScreen(
                                         onToggleSelection = { viewModel.toggleSelection(file.id) },
                                         modifier = Modifier
                                             .keyboardCollectionItem(listKeyboard, index)
-                                            .animateItem()
+                                            .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                                             .onDesktopContextClick {
                                                 viewModel.selectFileForContext(file.id)
                                                 showSelectionOverflow = true
@@ -1394,7 +1394,7 @@ fun GalleryScreen(
                             when (val item = media[index]) {
                                 is GalleryListItem.DayHeader -> DayHeaderRow(
                                     dayStartMillis = item.dayStartMillis,
-                                    modifier = Modifier.animateItem()
+                                    modifier = Modifier.then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                                 )
 
                                 is GalleryListItem.Media -> {
@@ -1421,7 +1421,7 @@ fun GalleryScreen(
                                         onLongClick = { viewModel.toggleSelection(file.id) },
                                         modifier = Modifier
                                             .keyboardCollectionItem(gridKeyboard, index)
-                                            .animateItem()
+                                            .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                                             .onDesktopContextClick {
                                                 viewModel.selectFileForContext(file.id)
                                                 showSelectionOverflow = true
