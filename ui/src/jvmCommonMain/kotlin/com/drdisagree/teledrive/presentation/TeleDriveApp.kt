@@ -145,6 +145,7 @@ fun TeleDriveApp(
             AppLanguage.CHINESE_SIMPLIFIED -> LocaleList(Locale("zh-CN"))
             AppLanguage.SPANISH -> LocaleList(Locale("es"))
             AppLanguage.INDONESIAN -> LocaleList(Locale("id"))
+            AppLanguage.ITALIAN -> LocaleList(Locale("it"))
         }
     }
 
@@ -160,6 +161,7 @@ fun TeleDriveApp(
                 AppLanguage.CHINESE_SIMPLIFIED -> java.util.Locale.forLanguageTag("zh-CN")
                 AppLanguage.SPANISH -> java.util.Locale.forLanguageTag("es")
                 AppLanguage.INDONESIAN -> java.util.Locale.forLanguageTag("id")
+                AppLanguage.ITALIAN -> java.util.Locale.forLanguageTag("it")
             }
         )
         true
