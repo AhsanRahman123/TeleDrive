@@ -13,6 +13,7 @@ on:
       - android/refresh-rate-dialog-window-fix-20261116
       - android/performance-optimization-phase1-20261116
       - android/performance-release-preview-20261116
+      - android/performance-scroll-navigation-fix-20261116
     paths:
       - '.github/workflows/android-preview.yml'
       - 'android/src/**'
