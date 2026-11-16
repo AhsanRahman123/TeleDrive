@@ -23,6 +23,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.drdisagree.teledrive.BuildConfig
 import com.drdisagree.teledrive.core.common.AppNotifications
 import com.drdisagree.teledrive.core.files.PendingShare
 import com.drdisagree.teledrive.core.media.PipController
