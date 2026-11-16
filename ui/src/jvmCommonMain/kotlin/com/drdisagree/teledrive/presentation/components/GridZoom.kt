@@ -2,6 +2,9 @@ package com.drdisagree.teledrive.presentation.components
 
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -27,8 +30,37 @@ fun GridZoomLevel.zoomedOut(): GridZoomLevel = when {
     else -> GridZoomLevel(ViewMode.GRID, gridSize + 1)
 }
 
-fun Modifier.pinchZoom(onZoomIn: () -> Unit, onZoomOut: () -> Unit): Modifier =
-    wheelZoom(onZoomIn, onZoomOut).pointerInput(onZoomIn, onZoomOut) {
+/**
+ * Keep the two-finger touch gesture on every platform, but only install Ctrl+mouse-wheel
+ * zoom on desktop. The gesture coroutines use updated callbacks rather than callback instances
+ * as pointerInput keys, so ordinary recompositions do not restart active input handling.
+ */
+@Composable
+fun Modifier.pinchZoom(onZoomIn: () -> Unit, onZoomOut: () -> Unit): Modifier {
+    val zoomIn by rememberUpdatedState(onZoomIn)
+    val zoomOut by rememberUpdatedState(onZoomOut)
+
+    val wheelModifier = if (LocalAndroidLayout.current) {
+        this
+    } else {
+        pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    if (event.type != PointerEventType.Scroll) continue
+                    if (!event.keyboardModifiers.isCtrlPressed) continue
+                    val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                    when {
+                        delta < 0f -> zoomIn()
+                        delta > 0f -> zoomOut()
+                    }
+                    event.changes.forEach { it.consume() }
+                }
+            }
+        }
+    }
+
+    return wheelModifier.pointerInput(Unit) {
         awaitEachGesture {
             var accumulated = 1f
             var multitouch = false
@@ -40,12 +72,12 @@ fun Modifier.pinchZoom(onZoomIn: () -> Unit, onZoomOut: () -> Unit): Modifier =
                     accumulated *= event.calculateZoom()
                     when {
                         accumulated >= STEP_THRESHOLD -> {
-                            onZoomIn()
+                            zoomIn()
                             accumulated = 1f
                         }
 
                         accumulated <= 1f / STEP_THRESHOLD -> {
-                            onZoomOut()
+                            zoomOut()
                             accumulated = 1f
                         }
                     }
@@ -54,22 +86,6 @@ fun Modifier.pinchZoom(onZoomIn: () -> Unit, onZoomOut: () -> Unit): Modifier =
             } while (event.changes.any { it.pressed })
         }
     }
-
-private fun Modifier.wheelZoom(onZoomIn: () -> Unit, onZoomOut: () -> Unit): Modifier =
-    pointerInput(onZoomIn, onZoomOut) {
-        awaitPointerEventScope {
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                if (event.type != PointerEventType.Scroll) continue
-                if (!event.keyboardModifiers.isCtrlPressed) continue
-                val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-                when {
-                    delta < 0f -> onZoomIn()
-                    delta > 0f -> onZoomOut()
-                }
-                event.changes.forEach { it.consume() }
-            }
-        }
-    }
+}
 
 private const val STEP_THRESHOLD = 1.3f
