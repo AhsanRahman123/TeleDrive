@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Build
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -38,6 +39,7 @@ class MainActivity : FragmentActivity() {
 
     private val settingsRepository: SettingsRepository by inject()
     private val pipController: PipController by inject()
+    private var frameMetrics: DebugFrameMetrics? = null
 
 
     /**
@@ -76,6 +78,19 @@ class MainActivity : FragmentActivity() {
                     }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (BuildConfig.DEBUG && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            frameMetrics = DebugFrameMetrics(window).also { it.start() }
+        }
+    }
+
+    override fun onStop() {
+        frameMetrics?.stop()
+        frameMetrics = null
+        super.onStop()
     }
 
     override fun onUserLeaveHint() {
