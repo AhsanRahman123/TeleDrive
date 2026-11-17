@@ -240,8 +240,34 @@ class AndroidThumbnailStore(
             // waiting loses nothing, and generation resumes as soon as the
             // interaction ends. On-demand thumbnails for visible tiles do
             // not pass through this loop and are unaffected.
+            // The wait is capped at 30s and then fails open (C5), mirroring
+            // the publish drainer's F1 wait, so a long browsing session
+            // cannot hold the queue indefinitely.
+            var waitedMs = 0L
             while (PublishInteractionGate.isBusy()) {
+                if (waitedMs >= MAX_INTERACTION_WAIT_MS) break
                 delay(INTERACTION_POLL_MS)
+                waitedMs += INTERACTION_POLL_MS
+            }
+            if (waitedMs > 0L) {
+                // Re-validate after the wait (C5): while the gate held this
+                // job, the user may have paused the queue or this item,
+                // cancelled the job, or trashed the file. Skipping is safe —
+                // nextReady() re-evaluates durable state on the next pass.
+                if (schedulingPaused || thumbnailPolicyDao.isQueuePaused()) return
+                val currentJob = thumbnailJobDao.byFileId(job.fileId)
+                val currentEntity = fileDao.byId(job.fileId)
+                if (
+                    currentJob == null ||
+                    currentEntity == null ||
+                    currentEntity.trashedAt != null ||
+                    job.fileId in thumbnailPolicyDao.pausedQueueItemIds()
+                ) {
+                    if (currentJob != null && (currentEntity == null || currentEntity.trashedAt != null)) {
+                        thumbnailJobDao.delete(job.fileId)
+                    }
+                    continue
+                }
             }
             _activeJobs.update { it + job.fileId }
             val bytes = try {
@@ -531,6 +557,7 @@ class AndroidThumbnailStore(
         private const val MAX_BACKGROUND_ATTEMPTS = 3
         private const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         private const val INTERACTION_POLL_MS = 250L
+        private const val MAX_INTERACTION_WAIT_MS = 30_000L
         private const val JOB_INSERT_BATCH_SIZE = 250
         private const val LRU_TOUCH_INTERVAL_MS = 5 * 60 * 1_000L
         private const val TARGET_FILE = "FILE"
