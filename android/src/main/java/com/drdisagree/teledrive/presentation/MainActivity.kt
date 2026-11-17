@@ -22,7 +22,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.drdisagree.teledrive.BuildConfig
 import com.drdisagree.teledrive.core.common.AppNotifications
 import com.drdisagree.teledrive.core.files.PendingShare
 import com.drdisagree.teledrive.core.media.PipController
@@ -39,7 +38,6 @@ class MainActivity : FragmentActivity() {
 
     private val settingsRepository: SettingsRepository by inject()
     private val pipController: PipController by inject()
-    private var frameMetrics: DebugFrameMetrics? = null
 
 
     /**
@@ -78,19 +76,6 @@ class MainActivity : FragmentActivity() {
                     }
             }
         }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        if (BuildConfig.DEBUG && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            frameMetrics = DebugFrameMetrics(window).also { it.start() }
-        }
-    }
-
-    override fun onStop() {
-        frameMetrics?.stop()
-        frameMetrics = null
-        super.onStop()
     }
 
     override fun onUserLeaveHint() {
