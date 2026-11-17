@@ -2,7 +2,9 @@ package com.drdisagree.teledrive.presentation.gallery
 
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.Alignment
+import com.drdisagree.teledrive.core.publish.PublishInteractionGate
 import com.drdisagree.teledrive.presentation.components.DesktopHorizontalScrollbar
+import kotlinx.coroutines.delay
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Archive
@@ -624,6 +626,26 @@ fun GalleryScreen(
         mediaListState.rememberPosition(viewModel.listPosition, media.itemCount)
     } else {
         mediaGridState.rememberPosition(viewModel.listPosition, media.itemCount)
+    }
+    // Same publish-outbox coordination as Files (F1): while either media
+    // list is scrolling, the drainer waits instead of invalidating the
+    // paging source mid-gesture. The gate expires on its own after scrolling
+    // stops, so nothing has to clear it.
+    LaunchedEffect(mediaListState.isScrollInProgress) {
+        if (mediaListState.isScrollInProgress) {
+            while (mediaListState.isScrollInProgress) {
+                PublishInteractionGate.keepBusy()
+                delay(1_000)
+            }
+        }
+    }
+    LaunchedEffect(mediaGridState.isScrollInProgress) {
+        if (mediaGridState.isScrollInProgress) {
+            while (mediaGridState.isScrollInProgress) {
+                PublishInteractionGate.keepBusy()
+                delay(1_000)
+            }
+        }
     }
     val lifted by rememberToolbarLift(scrolled)
 

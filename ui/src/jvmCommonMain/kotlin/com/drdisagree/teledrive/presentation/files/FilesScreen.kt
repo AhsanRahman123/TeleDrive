@@ -72,6 +72,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
+import com.drdisagree.teledrive.core.publish.PublishInteractionGate
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -485,6 +486,18 @@ fun FilesScreen(
 
 
     val gridState = rememberLazyGridState()
+    // While this list is scrolling, keep the publish outbox from writing to
+    // the files table: each write invalidates this list's paging source and
+    // forces a reload mid-gesture (F1). The gate expires on its own shortly
+    // after scrolling stops, so nothing has to clear it.
+    LaunchedEffect(gridState.isScrollInProgress) {
+        if (gridState.isScrollInProgress) {
+            while (gridState.isScrollInProgress) {
+                PublishInteractionGate.keepBusy()
+                delay(1_000)
+            }
+        }
+    }
     val filesCommandFocusRequester = rememberCollectionCommandFocusRequester()
     fun saveCurrentTabPosition() {
         viewModel.saveFileListPosition(

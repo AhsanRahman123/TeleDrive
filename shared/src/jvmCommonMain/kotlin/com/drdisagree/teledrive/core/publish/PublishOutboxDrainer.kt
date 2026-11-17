@@ -51,6 +51,7 @@ class PublishOutboxDrainer(
             while (index < batch.size) {
                 val entity = batch[index++]
                 if (isStopped()) return false
+                if (!awaitInteractionWindow(isStopped)) return false
                 when (val result = manifestPublisher.publish(entity)) {
                     is AppResult.Success -> {
                         clearIfUnchanged(entity, accepted = true)
@@ -87,6 +88,26 @@ class PublishOutboxDrainer(
             }
         }
         return folderDao.pendingPublishCount() == 0
+    }
+
+    /**
+     * Publishing one manifest ends in a `files`-table write, and every such
+     * write invalidates the paging source behind the Files/Gallery lists,
+     * forcing a visible-list reload on the main thread. While the user is
+     * scrolling or a folder/tab change is settling (PublishInteractionGate),
+     * wait for a quiet window instead of landing that reload mid-gesture.
+     * Fails open after [MAX_INTERACTION_WAIT_MS] so interaction can delay a
+     * drain but never starve it.
+     */
+    private suspend fun awaitInteractionWindow(isStopped: () -> Boolean): Boolean {
+        var waitedMs = 0L
+        while (PublishInteractionGate.isBusy()) {
+            if (isStopped()) return false
+            if (waitedMs >= MAX_INTERACTION_WAIT_MS) return true
+            delay(INTERACTION_POLL_MS.milliseconds)
+            waitedMs += INTERACTION_POLL_MS
+        }
+        return true
     }
 
     private suspend fun waitOut(
@@ -163,6 +184,8 @@ class PublishOutboxDrainer(
         const val INLINE_WAIT_LIMIT = 900
         const val WAIT_TICK_SECONDS = 15
         const val MAX_FOLDER_PUSHES = 3
+        const val INTERACTION_POLL_MS = 200L
+        const val MAX_INTERACTION_WAIT_MS = 30_000L
         val PERMANENT_CODES = 400..499
     }
 }

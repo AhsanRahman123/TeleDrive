@@ -7,6 +7,7 @@ import androidx.navigation.toRoute
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.core.publish.PublishInteractionGate
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
@@ -294,6 +295,9 @@ class FilesViewModel(
     fun setActiveFolder(folderId: String?) {
         clearSelection()
         if (_activeFolderId.value == folderId) return
+        // A folder/tab change makes the list reload and settle over the next
+        // few seconds; keep publish-outbox writes out of that window (F1).
+        PublishInteractionGate.markBusy(4_000L)
         _activeFolderId.value = folderId
     }
 
