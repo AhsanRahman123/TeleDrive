@@ -81,6 +81,7 @@ class SyncRepositoryImpl(
     private var dbgRecovered = 0
     private var dbgRecoveredDiverged = 0
     private var dbgRecoveredNoBaseline = 0
+    private var dbgDiffBudget = 12
 
     // Remember how many pending rows this repository instance has already scheduled.
     // A new instance starts at zero so work left pending across an app restart is kicked once.
@@ -303,6 +304,14 @@ class SyncRepositoryImpl(
             }
             detached = detach(stale)
         }
+        runCatching {
+            folderDao.allFolders(chatId).forEach { f ->
+                SafeLog.w(
+                    "SyncDebug",
+                    "SYNCDBG FOLDER_TABLE id=${f.id} name=${f.name} parent=${f.parentId} trashed=${f.trashedAt != null}"
+                )
+            }
+        }
         SafeLog.d(TAG, "Sync done: +$inserted ~$updated -$detached, $locked locked")
         SafeLog.w(
             "SyncDebug",
@@ -324,6 +333,7 @@ class SyncRepositoryImpl(
         dbgRecovered = 0
         dbgRecoveredDiverged = 0
         dbgRecoveredNoBaseline = 0
+        dbgDiffBudget = 12
         return AppResult.Success(
             SyncStats(inserted, updated, detached, locked)
         )
@@ -787,7 +797,45 @@ class SyncRepositoryImpl(
             existing != entity.keepingRemoteIdOf(existing) -> "UPDATED"
             else -> "UNCHANGED"
         }
-        SafeLog.w("SyncDebug", "SYNCDBG RECONCILE_EXIT id=${entity.id} result=$dbgOutcome")
+        if (dbgOutcome == "UPDATED" && existing != null && dbgDiffBudget > 0) {
+            dbgDiffBudget--
+            val norm = entity.keepingRemoteIdOf(existing)
+            fun cmp(field: String, a: Any?, b: Any?) {
+                if (a != b) SafeLog.w(
+                    "SyncDebug",
+                    "SYNCDBG FIELD_DIFF id=${entity.id} field=$field existing=$a entity=$b"
+                )
+            }
+            cmp("id", existing.id, norm.id)
+            cmp("name", existing.name, norm.name)
+            cmp("folderId", existing.folderId, norm.folderId)
+            cmp("sizeBytes", existing.sizeBytes, norm.sizeBytes)
+            cmp("mimeType", existing.mimeType, norm.mimeType)
+            cmp("category", existing.category, norm.category)
+            cmp("contentHash", existing.contentHash, norm.contentHash)
+            cmp("localPath", existing.localPath, norm.localPath)
+            cmp("isHidden", existing.isHidden, norm.isHidden)
+            cmp("isArchived", existing.isArchived, norm.isArchived)
+            cmp("isFavorite", existing.isFavorite, norm.isFavorite)
+            cmp("isAvailableOffline", existing.isAvailableOffline, norm.isAvailableOffline)
+            cmp("isEncrypted", existing.isEncrypted, norm.isEncrypted)
+            cmp("width", existing.width, norm.width)
+            cmp("height", existing.height, norm.height)
+            cmp("durationMs", existing.durationMs, norm.durationMs)
+            cmp("trashedAt", existing.trashedAt, norm.trashedAt)
+            cmp("preTrashFolderId", existing.preTrashFolderId, norm.preTrashFolderId)
+            cmp("pendingPublish", existing.pendingPublish, norm.pendingPublish)
+            cmp("partCount", existing.partCount, norm.partCount)
+            cmp("iconFileId", existing.iconFileId, norm.iconFileId)
+            cmp("createdAt", existing.createdAt, norm.createdAt)
+            cmp("modifiedAt", existing.modifiedAt, norm.modifiedAt)
+            cmp("addedAt", existing.addedAt, norm.addedAt)
+            cmp("backupState", existing.backupState, norm.backupState)
+            cmp("manifestExtra", existing.manifestExtra?.let { "${it.length}:${it.hashCode()}" }, norm.manifestExtra?.let { "${it.length}:${it.hashCode()}" })
+            cmp("remoteBase", existing.remoteBase?.let { "${it.length}:${it.hashCode()}" }, norm.remoteBase?.let { "${it.length}:${it.hashCode()}" })
+            cmp("remoteBaseSemantic", existing.remoteBase?.let { runCatching { FileBase.fromText(it) }.getOrNull() }, norm.remoteBase?.let { runCatching { FileBase.fromText(it) }.getOrNull() })
+        }
+        SafeLog.w("SyncDebug", "SYNCDBG RECONCILE_EXIT id=${entity.id} result=$dbgOutcome name=${entity.name} folder=${entity.folderId} mfid=${manifest?.folderId} mpath=${manifest?.folderPath}")
         return when {
             existing == null -> {
                 fileDao.upsert(entity)
