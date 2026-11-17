@@ -108,12 +108,19 @@ class TrashRepositoryImpl(
     override suspend fun repairTrashTree() {
         var repaired: Int
         var guard = 0
+        var anyRepaired = false
         do {
             val orphans = folderDao.untrashedChildrenOfTrashed(activeChannel.id())
             val trashedAt = System.currentTimeMillis()
             orphans.forEach { folder -> folderDao.moveToTrash(folder.id, trashedAt) }
             repaired = orphans.size
+            anyRepaired = anyRepaired || repaired > 0
         } while (repaired > 0 && guard++ < MAX_FOLDER_DEPTH)
+        // Trashing a folder is publishable folder state. Without the mark the
+        // drainer's folder phase skips its push entirely (it returns early when
+        // no folder is pending), so the repair would only reach Telegram when
+        // an unrelated folder edit happened to set the flag.
+        if (anyRepaired) markFolderStateDirty()
     }
 
     override suspend fun restoreFiles(ids: List<String>): AppResult<Unit> {
