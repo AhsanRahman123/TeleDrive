@@ -268,6 +268,9 @@ fun MediaPlayer(
     var playbackErrorDetails by remember(player) { mutableStateOf<String?>(null) }
     var seekFeedback by remember(player) { mutableStateOf<String?>(null) }
     var speedBoostActive by remember(player) { mutableStateOf(false) }
+    // The user's selected speed, captured when a long-press boost starts so the
+    // boost can hand it back on release instead of resetting to 1x (C2).
+    var speedBeforeBoost by remember(player) { mutableFloatStateOf(1f) }
     var hasActiveSubtitles by remember(player) {
         mutableStateOf(
             player?.currentCues?.cues?.any { !it.text.isNullOrBlank() } == true
@@ -541,6 +544,7 @@ fun MediaPlayer(
                 onLongPressStart = {
                     val activePlayer = player
                     if (!locked && activePlayer != null) {
+                        if (!speedBoostActive) speedBeforeBoost = session.speed
                         speedBoostActive = true
                         session.speed = 2f
                         activePlayer.setPlaybackSpeed(2f)
@@ -550,8 +554,8 @@ fun MediaPlayer(
                 onLongPressEnd = {
                     if (speedBoostActive) {
                         speedBoostActive = false
-                        session.speed = 1f
-                        player?.setPlaybackSpeed(1f)
+                        session.speed = speedBeforeBoost
+                        player?.setPlaybackSpeed(speedBeforeBoost)
                         interactionTick++
                     }
                 },
