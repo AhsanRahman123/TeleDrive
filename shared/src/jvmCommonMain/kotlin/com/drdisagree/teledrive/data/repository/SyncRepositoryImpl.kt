@@ -589,6 +589,27 @@ class SyncRepositoryImpl(
 
             else -> manifest?.trashedAt ?: folderTrashedAt ?: existing?.trashedAt
         }
+        // The baseline is the published state as this client understands it. When the
+        // manifest was adopted and its folderId names a folder that no longer exists
+        // here (merged away), resolveFolder adopted the file into the surviving folder
+        // by path — recording the raw dead id as the baseline would diverge from the
+        // adopted row forever and read as an unpublished local move. With a local edit
+        // in flight the baseline stays the raw published state: the recovery check and
+        // the outbox keep measuring the edit against what is actually on Telegram.
+        val adoptedBase = manifest?.let { published ->
+            val base = FileBase.of(published)
+            if (local != null) {
+                base
+            } else {
+                base.copy(
+                    folderId = if (trashedAt != null) {
+                        folderId ?: existing?.preTrashFolderId
+                    } else {
+                        folderId
+                    }
+                )
+            }
+        }
         val entity = FileEntity(
             id = manifest?.fileId ?: existing?.id ?: UUID.randomUUID().toString(),
             folderId = if (trashedAt != null) null else folderId,
@@ -639,7 +660,7 @@ class SyncRepositoryImpl(
             } else {
                 existing?.manifestExtra
             },
-            remoteBase = manifest?.let { FileBase.of(it).toText() } ?: existing?.remoteBase
+            remoteBase = adoptedBase?.toText() ?: existing?.remoteBase
         )
 
         if (laterPart) {
