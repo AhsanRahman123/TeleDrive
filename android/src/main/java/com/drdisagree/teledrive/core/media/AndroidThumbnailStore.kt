@@ -120,7 +120,16 @@ class AndroidThumbnailStore(
             return null
         }
         readCachedThumbnail(fileId)?.let { return it }
-        if (effectivePolicy(fileId) != ThumbnailPolicy.AUTOMATIC) return null
+        // On-demand generation follows the official app: a file with no explicit
+        // thumbnail policy generates (and caches) its thumbnail the first time it
+        // is shown. Only an explicit MANUAL_ONLY rule — set by the user in the
+        // Thumbnail Manager for this file or an ancestor folder — suppresses
+        // automatic generation; generateNow() remains available for those files.
+        // Files that arrived by sync have no policy row at all, and treating
+        // "no rule" as MANUAL_ONLY left them on the placeholder icon forever.
+        val resolvedPolicy = thumbnailPolicyDao.effectivePolicy(fileId)
+            ?.let { runCatching { ThumbnailPolicy.valueOf(it) }.getOrNull() }
+        if (resolvedPolicy == ThumbnailPolicy.MANUAL_ONLY) return null
         return generationSemaphore.withPermit { generate(fileId) }
     }
 
