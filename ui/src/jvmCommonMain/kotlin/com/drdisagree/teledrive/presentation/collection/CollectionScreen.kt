@@ -379,6 +379,7 @@ fun CollectionScreen(
                 FolderRow(
                     folder = folder,
                     selected = folder.id in folderSelection,
+                    selectionMode = selectionMode,
                     showFavorite = viewModel.type != CollectionType.FAVORITES,
                     showAvailableOffline = !offline,
                     onClick = {

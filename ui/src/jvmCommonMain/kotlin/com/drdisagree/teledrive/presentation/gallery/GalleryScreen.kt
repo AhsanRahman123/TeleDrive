@@ -1430,6 +1430,7 @@ fun GalleryScreen(
                                     FileGridItem(
                                         file = file,
                                         selected = file.id in state.selection,
+                                        selectionMode = selectionMode,
                                         compact = true,
                                         location = folderLocation,
                                         onToggleSelection = { viewModel.toggleSelection(file.id) },

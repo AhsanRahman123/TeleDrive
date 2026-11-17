@@ -48,7 +48,8 @@ fun FileGridItem(
     location: String? = null,
     showSelectionCheckbox: Boolean = true,
     onToggleSelection: (() -> Unit)? = null,
-    prominentSelectionCheckbox: Boolean = false
+    prominentSelectionCheckbox: Boolean = false,
+    selectionMode: Boolean = false
 ) {
     Column(
         modifier = modifier
@@ -72,7 +73,7 @@ fun FileGridItem(
                     .fillMaxWidth()
                     .aspectRatio(1f)
             )
-            if (showSelectionCheckbox) {
+            if (showSelectionCheckbox && (selectionMode || selected)) {
                 SelectionCheckbox(
                     checked = selected,
                     onClick = onToggleSelection ?: onClick,

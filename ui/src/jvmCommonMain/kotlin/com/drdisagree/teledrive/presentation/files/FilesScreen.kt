@@ -1684,6 +1684,7 @@ private fun FilesContent(
                 FolderGridItem(
                     folder = folder,
                     selected = folderSelected,
+                    selectionMode = selectionMode,
                     prominentSelectionCheckbox = true,
                     onClick = {
                         if (selectionMode) viewModel.toggleFolderSelection(folder.id)
@@ -1705,6 +1706,7 @@ private fun FilesContent(
                 FolderRow(
                     folder = folder,
                     selected = folderSelected,
+                    selectionMode = selectionMode,
                     prominentSelectionCheckbox = true,
                     onClick = {
                         if (selectionMode) viewModel.toggleFolderSelection(folder.id)
@@ -1737,6 +1739,7 @@ private fun FilesContent(
                 FileGridItem(
                     file = file,
                     selected = selected,
+                    selectionMode = selectionMode,
                     prominentSelectionCheckbox = true,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {

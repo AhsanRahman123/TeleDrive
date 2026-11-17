@@ -76,7 +76,7 @@ fun FileListItem(
             .padding(horizontal = 12.dp, vertical = if (compact) 4.dp else if (prominent) 12.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (showSelectionCheckbox) {
+        if (showSelectionCheckbox && (selectionMode || selected)) {
             SelectionCheckbox(
                 checked = selected,
                 onClick = onToggleSelection ?: onClick,

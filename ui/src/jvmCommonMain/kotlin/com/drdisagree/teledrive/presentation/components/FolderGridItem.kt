@@ -44,7 +44,8 @@ fun FolderGridItem(
     modifier: Modifier = Modifier,
     showSelectionCheckbox: Boolean = true,
     onToggleSelection: (() -> Unit)? = null,
-    prominentSelectionCheckbox: Boolean = false
+    prominentSelectionCheckbox: Boolean = false,
+    selectionMode: Boolean = false
 ) {
     Column(
         modifier = modifier
@@ -72,7 +73,7 @@ fun FolderGridItem(
                 modifier = Modifier.size(48.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
-            if (showSelectionCheckbox) {
+            if (showSelectionCheckbox && (selectionMode || selected)) {
                 SelectionCheckbox(
                     checked = selected,
                     onClick = onToggleSelection ?: onClick,

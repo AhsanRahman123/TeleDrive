@@ -71,12 +71,14 @@ fun FileDetailsItem(
             .padding(horizontal = 12.dp, vertical = if (compact) 2.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        SelectionCheckbox(
-            checked = selected,
-            onClick = onToggleSelection,
-            highContrast = prominentSelectionCheckbox,
-            modifier = Modifier.padding(end = 6.dp)
-        )
+        if (selectionMode || selected) {
+            SelectionCheckbox(
+                checked = selected,
+                onClick = onToggleSelection,
+                highContrast = prominentSelectionCheckbox,
+                modifier = Modifier.padding(end = 6.dp)
+            )
+        }
         FileThumbnail(
             file = file,
             contentDescription = null,
