@@ -14,6 +14,7 @@ import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
 import com.drdisagree.teledrive.core.files.MimeTypes
+import com.drdisagree.teledrive.core.publish.PublishInteractionGate
 import com.drdisagree.teledrive.core.files.Urls
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
@@ -180,6 +181,16 @@ class AndroidThumbnailStore(
             if (cached || (!job.force && effectivePolicy(job.fileId) != ThumbnailPolicy.AUTOMATIC)) {
                 thumbnailJobDao.delete(job.fileId)
                 continue
+            }
+            // Background generation is heavy CPU work (decode, JPEG encode,
+            // optional encryption) on the same cores the UI thread needs.
+            // While the user is scrolling a collection or a folder/tab
+            // change is settling, hold off (F2): queued jobs are durable, so
+            // waiting loses nothing, and generation resumes as soon as the
+            // interaction ends. On-demand thumbnails for visible tiles do
+            // not pass through this loop and are unaffected.
+            while (PublishInteractionGate.isBusy()) {
+                delay(INTERACTION_POLL_MS)
             }
             val bytes = try {
                 generationSemaphore.withPermit { generate(job.fileId) }
@@ -465,6 +476,7 @@ class AndroidThumbnailStore(
         private const val JPEG_QUALITY = 82
         private const val MAX_BACKGROUND_ATTEMPTS = 3
         private const val BACKGROUND_RETRY_DELAY_MS = 5_000L
+        private const val INTERACTION_POLL_MS = 250L
         private const val JOB_INSERT_BATCH_SIZE = 250
         private const val LRU_TOUCH_INTERVAL_MS = 5 * 60 * 1_000L
         private const val TARGET_FILE = "FILE"
