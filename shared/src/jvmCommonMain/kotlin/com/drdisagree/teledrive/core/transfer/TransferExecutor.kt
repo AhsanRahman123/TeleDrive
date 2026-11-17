@@ -602,6 +602,13 @@ class TransferExecutor(
                                     transfer.id, event.transferredBytes, now
                                 )
                             } else {
+                                // Persist at most once per ticker window (P3), exactly
+                                // like the upload paths: writing transferredBytes on
+                                // every TDLib event churned the transfers table and its
+                                // observers without changing what the UI can show —
+                                // its staleness threshold is 5s, far above this rate.
+                                // Completion and state changes still write immediately
+                                // in their own handlers.
                                 val speed = ticker.tick(event.transferredBytes, now)
                                 if (speed != null) {
                                     transferDao.updateProgress(
@@ -611,12 +618,6 @@ class TransferExecutor(
                                         "TransferDiagnostics",
                                         "DOWNLOAD_SAMPLE transferId=${transfer.id} bytes=${event.transferredBytes} " +
                                             "total=${entity.sizeBytes} bytesPerSecond=$speed"
-                                    )
-                                } else {
-                                    // Keep progress timestamps fresh for every TDLib update;
-                                    // the speed sample itself is only refreshed once per second.
-                                    transferDao.updateTransferredBytes(
-                                        transfer.id, event.transferredBytes, now
                                     )
                                 }
                             }
@@ -714,18 +715,23 @@ class TransferExecutor(
                     when (event) {
                         is PartDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            transferDao.setStage(transfer.id, null, now)
                             if (!tickerStarted) {
                                 // The first progress event includes any complete parts already
                                 // present in the resumable target. Seed the rate meter from it.
                                 ticker.start(event.transferredBytes, now)
                                 tickerStarted = true
+                                transferDao.setStage(transfer.id, null, now)
                                 transferDao.updateTransferredBytes(
                                     transfer.id, event.transferredBytes, now
                                 )
                             } else {
+                                // Persist at most once per ticker window (P3): this
+                                // branch previously wrote setStage + updateTransferredBytes
+                                // on every TDLib event. Stage transitions (Joining,
+                                // finish) and completion still write immediately.
                                 val speed = ticker.tick(event.transferredBytes, now)
                                 if (speed != null) {
+                                    transferDao.setStage(transfer.id, null, now)
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
                                     )
@@ -733,10 +739,6 @@ class TransferExecutor(
                                         "TransferDiagnostics",
                                         "PART_DOWNLOAD_SAMPLE transferId=${transfer.id} bytes=${event.transferredBytes} " +
                                             "total=${entity.sizeBytes} bytesPerSecond=$speed"
-                                    )
-                                } else {
-                                    transferDao.updateTransferredBytes(
-                                        transfer.id, event.transferredBytes, now
                                     )
                                 }
                             }
