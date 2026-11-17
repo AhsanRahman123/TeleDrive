@@ -13,6 +13,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -584,24 +585,89 @@ fun FilesScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // A saved position that was deeper than the items loaded when the restore effect
+    // ran. The passive effect below completes the restore as items arrive; any real
+    // user press on the grid cancels it, so it never fights the user.
+    var pendingScrollRestore by remember { mutableStateOf<PendingScrollRestore?>(null) }
+
     // Restore a tab/folder position only when navigation changes. Do not key this effect
     // to Paging itemCount: every appended page changes that count, and re-running
     // scrollToItem(0) was snapping the user back to the top while they scrolled.
-    // Restore once, clamped to what is already loaded (official-style): never force-page
-    // to reach a deep saved position, so the list settles immediately after navigation.
+    // Settle immediately with one scroll clamped to what is already loaded
+    // (official-style): never force-page to reach a deep saved position, so the list
+    // is usable at once after navigation. If the saved position is deeper than the
+    // loaded items, park the remainder in pendingScrollRestore instead of giving up:
+    // after a Preview return, uiState has reset (WhileSubscribed) and re-emits
+    // asynchronously, so folders/items can still be missing when this runs — and at
+    // root folderId is null before and after, so this effect would never re-run when
+    // they arrive and the one-shot clamp (or no scroll at all) would be final.
     LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId, returnFromPreviewTick) {
+        // A new restore cycle supersedes any pending one.
+        pendingScrollRestore = null
         val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
         if (currentTab.folderId != state.folderId) return@LaunchedEffect
 
         snapshotFlow { files.loadState.refresh }
             .first { it !is LoadState.Loading }
 
-        val target = viewModel.fileListPosition(selectedTabId, state.folderId) ?: (0 to 0)
+        val saved = viewModel.fileListPosition(selectedTabId, state.folderId)
+        val target = saved ?: (0 to 0)
         val targetIndex = target.first.coerceAtLeast(0)
 
         val count = state.folders.size + files.itemCount
         if (count > 0) {
             gridState.scrollToItem(targetIndex.coerceIn(0, count - 1), target.second)
+        }
+        if (saved != null && targetIndex > count - 1) {
+            pendingScrollRestore = PendingScrollRestore(
+                tabId = selectedTabId,
+                folderId = state.folderId,
+                targetIndex = targetIndex,
+                scrollOffset = target.second
+            )
+        }
+    }
+
+    // Progressive completion of a clamped restore. As folders/paging items arrive,
+    // hop to the deepest loaded item — being parked at the end is what makes Paging
+    // prefetch the next page, so this never calls refresh/append and never suspends
+    // navigation — and once the saved index is reachable, land on it exactly, once.
+    // Gives up on timeout or navigation, leaving the clamped position: never worse
+    // than the one-shot restore.
+    LaunchedEffect(pendingScrollRestore) {
+        val pending = pendingScrollRestore ?: return@LaunchedEffect
+        withTimeoutOrNull(PENDING_RESTORE_TIMEOUT_MS.milliseconds) {
+            var parkedCount = -1
+            while (true) {
+                val count = snapshotFlow { state.folders.size + files.itemCount }
+                    .first { it != parkedCount }
+                // Navigated elsewhere meanwhile: abandon this restore.
+                if (pending.tabId != selectedTabId || pending.folderId != state.folderId) break
+                if (count <= 0) {
+                    parkedCount = count
+                    continue
+                }
+                if (pending.targetIndex <= count - 1) {
+                    gridState.scrollToItem(pending.targetIndex, pending.scrollOffset)
+                    break
+                }
+                gridState.scrollToItem(count - 1)
+                parkedCount = count
+            }
+        }
+        if (pendingScrollRestore == pending) {
+            pendingScrollRestore = null
+        }
+    }
+
+    // A real press on the grid means the user is taking over: abandon any pending
+    // restore. Programmatic scrollToItem calls emit no interactions, so the
+    // restore's own hops never cancel it.
+    LaunchedEffect(gridState) {
+        gridState.interactionSource.interactions.collect { interaction ->
+            if (interaction is PressInteraction.Press) {
+                pendingScrollRestore = null
+            }
         }
     }
     var fabVisible by remember { mutableStateOf(true) }
@@ -1922,6 +1988,15 @@ private fun Modifier.focusHighlight(active: Boolean): Modifier {
     }
 }
 
+/** A saved scroll position that was deeper than the items loaded when its restore ran. */
+private data class PendingScrollRestore(
+    val tabId: Int,
+    val folderId: String?,
+    val targetIndex: Int,
+    val scrollOffset: Int
+)
+
+private const val PENDING_RESTORE_TIMEOUT_MS = 15_000L
 private const val FOCUS_PAGE_LIMIT = 10
 private const val FOCUS_PAGE_WAIT_MS = 5_000L
 private const val FOCUS_HIGHLIGHT_MS = 1_800L
