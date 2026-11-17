@@ -116,4 +116,4 @@ fun ZoomableImage(
     }
 }
 
-private const val MAX_ZOOM = 4f
+private const val MAX_ZOOM = 6f
