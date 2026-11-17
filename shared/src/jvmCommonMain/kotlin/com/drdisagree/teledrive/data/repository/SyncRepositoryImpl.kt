@@ -476,7 +476,14 @@ class SyncRepositoryImpl(
     ): ReconcileResult {
         val manifest = known.manifests[document]
         val indexedExisting = manifest?.let { known.byId[it.fileId] }
-            ?: known.byUniqueId[document.uniqueFileId]
+            ?: known.byUniqueId[document.uniqueFileId]?.takeIf { row ->
+                // A row bound to a different live message is a duplicate upload of the
+                // same content (both messages share a Telegram unique id), not this
+                // document's row. Claiming it deletes the twin's row and rewrites both
+                // rows on every sync, forever. Only adopt a unique-id match when it is
+                // unbound or bound to this very message (a re-registered upload).
+                row.messageId == null || row.messageId == document.messageId
+            }
         // existingForPage() is read before the page transaction begins. A user can move a
         // file in that gap. Re-read the current row inside the transaction so pendingPublish
         // and the latest folderId cannot be lost to the older sync snapshot.
