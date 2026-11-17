@@ -38,6 +38,11 @@ class PublishOutboxDrainer(
         onProgress: suspend (published: Int, total: Int) -> Unit = { _, _ -> },
         onWaiting: suspend (secondsLeft: Int) -> Unit = {}
     ): Boolean {
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG DRAIN_START pendingFiles=${fileDao.pendingPublishCount()} " +
+                "pendingFolders=${folderDao.pendingPublishCount()}"
+        )
         if (!replayDeletes(isStopped)) return false
 
         var published = 0
@@ -76,17 +81,42 @@ class PublishOutboxDrainer(
             }
         }
 
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG DRAIN_FILES_DONE published=$published " +
+                "remaining=${fileDao.pendingPublishCount()}"
+        )
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG DRAIN_FOLDER_PHASE_ENTER pendingFolders=${folderDao.pendingPublishCount()}"
+        )
         repeat(MAX_FOLDER_PUSHES) {
+            SafeLog.w(
+                "SyncDebug",
+                "SYNCDBG DRAIN_FOLDER_ROUND round=$it " +
+                    "pendingFolders=${folderDao.pendingPublishCount()}"
+            )
             if (folderDao.pendingPublishCount() == 0) return true
             val before = folderSnapshot()
             val pushed = runCatching { folderStateSynchronizer.push() }
                 .onFailure { SafeLog.w(TAG, "Folder state push failed", it) }
                 .isSuccess
+            SafeLog.w("SyncDebug", "SYNCDBG DRAIN_FOLDER_PUSH_ATTEMPT round=$it pushed=$pushed")
             if (!pushed) return false
             database.inImmediateTransaction {
                 if (folderSnapshot() == before) folderDao.clearPendingPublish()
             }
         }
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG DRAIN_FOLDER_PHASE_EXIT pendingFolders=${folderDao.pendingPublishCount()}"
+        )
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG DRAIN_END published=$published " +
+                "remainingFiles=${fileDao.pendingPublishCount()} " +
+                "remainingFolders=${folderDao.pendingPublishCount()}"
+        )
         return folderDao.pendingPublishCount() == 0
     }
 

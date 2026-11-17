@@ -71,6 +71,17 @@ class SyncRepositoryImpl(
     private val syncMutex = Mutex()
     private val captionRepairsQueued = mutableSetOf<String>()
 
+    // SYNCDBG diagnostic counters: written only by the inserted SyncDebug logging in
+    // reconcile()/finishSync() and reset there after each summary. Never read by sync logic.
+    private var dbgScanned = 0
+    private var dbgManifestsSeen = 0
+    private var dbgCreated = 0
+    private var dbgUpdated = 0
+    private var dbgStaleDropped = 0
+    private var dbgRecovered = 0
+    private var dbgRecoveredDiverged = 0
+    private var dbgRecoveredNoBaseline = 0
+
     // Remember how many pending rows this repository instance has already scheduled.
     // A new instance starts at zero so work left pending across an app restart is kicked once.
     private var lastScheduledPendingPublishCount = 0
@@ -90,6 +101,11 @@ class SyncRepositoryImpl(
     }
 
     override suspend fun catchUpWithRemote(): AppResult<SyncStats>? {
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG CATCHUP_START locked=${syncMutex.isLocked} " +
+                "msSinceLastFull=${System.currentTimeMillis() - lastFullSyncAt}"
+        )
         if (syncMutex.isLocked) return null
         val since = System.currentTimeMillis() - lastFullSyncAt
         if (since in 0 until CATCH_UP_INTERVAL_MS) return null
@@ -101,12 +117,18 @@ class SyncRepositoryImpl(
         quiet: Boolean = false
     ): AppResult<SyncStats> =
         syncMutex.withLock {
+            SafeLog.w("SyncDebug", "SYNCDBG SYNC_RUN_START incremental=$incremental quiet=$quiet")
             if (!quiet) {
                 _syncing.value = true
                 _indexedSoFar.value = 0
             }
             try {
                 doSync(incremental, quiet).also { result ->
+                    SafeLog.w(
+                        "SyncDebug",
+                        "SYNCDBG SYNC_RUN_FINISH incremental=$incremental " +
+                            "success=${result is AppResult.Success}"
+                    )
                     if (!incremental && result is AppResult.Success) {
                         lastFullSyncAt = System.currentTimeMillis()
                     }
@@ -282,6 +304,26 @@ class SyncRepositoryImpl(
             detached = detach(stale)
         }
         SafeLog.d(TAG, "Sync done: +$inserted ~$updated -$detached, $locked locked")
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG RECONCILE_SUMMARY scanned=$dbgScanned manifests=$dbgManifestsSeen " +
+                "created=$dbgCreated updated=$dbgUpdated staleDropped=$dbgStaleDropped " +
+                "recovered=$dbgRecovered diverged=$dbgRecoveredDiverged " +
+                "noBaseline=$dbgRecoveredNoBaseline" +
+                if (dbgRecovered > 60) {
+                    " recoveredLinesCappedAt=60 and ${dbgRecovered - 60} more recovered"
+                } else {
+                    ""
+                }
+        )
+        dbgScanned = 0
+        dbgManifestsSeen = 0
+        dbgCreated = 0
+        dbgUpdated = 0
+        dbgStaleDropped = 0
+        dbgRecovered = 0
+        dbgRecoveredDiverged = 0
+        dbgRecoveredNoBaseline = 0
         return AppResult.Success(
             SyncStats(inserted, updated, detached, locked)
         )
@@ -474,6 +516,7 @@ class SyncRepositoryImpl(
         folderCache: MutableMap<String, String?>,
         known: KnownRows
     ): ReconcileResult {
+        dbgScanned++
         val manifest = known.manifests[document]
         val indexedExisting = manifest?.let { known.byId[it.fileId] }
             ?: known.byUniqueId[document.uniqueFileId]
@@ -483,6 +526,13 @@ class SyncRepositoryImpl(
         val existing = indexedExisting?.let { indexed ->
             fileDao.byId(indexed.id) ?: indexed
         }
+        if (manifest != null) dbgManifestsSeen++
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG RECONCILE_ENTER msg=${document.messageId} " +
+                "fileId=${manifest?.fileId ?: existing?.id} hasManifest=${manifest != null} " +
+                "hasExisting=${existing != null}"
+        )
 
         val publishedBase = FileBase.fromText(existing?.remoteBase)
         val incomingBase = manifest?.let { FileBase.of(it) }
@@ -513,6 +563,47 @@ class SyncRepositoryImpl(
                 )
         val recoveredLocalPublish =
             localChangedSincePublishedBase || localMoveOrTrashWithoutBaseline
+        if (recoveredLocalPublish && existing != null) {
+            dbgRecovered++
+            if (publishedBase == null) dbgRecoveredNoBaseline++ else dbgRecoveredDiverged++
+            if (dbgRecovered <= 60) {
+                val dbgDiffs = buildString {
+                    if (currentBase != null && publishedBase != null) {
+                        if (currentBase.folderId != publishedBase.folderId) {
+                            append(" folderId:${publishedBase.folderId}->${currentBase.folderId}")
+                        }
+                        if (currentBase.name != publishedBase.name) {
+                            append(" name:${publishedBase.name}->${currentBase.name}")
+                        }
+                        if (currentBase.favorite != publishedBase.favorite) {
+                            append(" favorite:${publishedBase.favorite}->${currentBase.favorite}")
+                        }
+                        if (currentBase.hidden != publishedBase.hidden) {
+                            append(" hidden:${publishedBase.hidden}->${currentBase.hidden}")
+                        }
+                        if (currentBase.archived != publishedBase.archived) {
+                            append(" archived:${publishedBase.archived}->${currentBase.archived}")
+                        }
+                        if (currentBase.trashedAt != publishedBase.trashedAt) {
+                            append(" trashedAt:${publishedBase.trashedAt}->${currentBase.trashedAt}")
+                        }
+                    } else if (currentBase != null && incomingBase != null) {
+                        if (currentBase.folderId != incomingBase.folderId) {
+                            append(" folderId:${incomingBase.folderId}->${currentBase.folderId}")
+                        }
+                        if (currentBase.trashedAt != incomingBase.trashedAt) {
+                            append(" trashedAt:${incomingBase.trashedAt}->${currentBase.trashedAt}")
+                        }
+                    }
+                }
+                SafeLog.w(
+                    "SyncDebug",
+                    "SYNCDBG RECOVERED id=${existing.id} name=${existing.name} " +
+                        "clause=${if (publishedBase == null) "NO_BASELINE" else "DIVERGED"}" +
+                        dbgDiffs
+                )
+            }
+        }
 
         val stalePublishedManifest = existing != null &&
             !existing.pendingPublish &&
@@ -521,12 +612,24 @@ class SyncRepositoryImpl(
             incomingBase != publishedBase &&
             manifest.modifiedAt < existing.modifiedAt
         if (stalePublishedManifest) {
+            dbgStaleDropped++
+            SafeLog.w(
+                "SyncDebug",
+                "SYNCDBG STALE_DROPPED id=${existing?.id} name=${existing?.name} " +
+                    "manifestModifiedAt=${manifest?.modifiedAt} " +
+                    "existingModifiedAt=${existing?.modifiedAt} " +
+                    "currentEqPublished=${currentBase == publishedBase}"
+            )
             // A delayed Telegram update can deliver the pre-move caption after the local
             // publish succeeded. Preserve any unqueued local delta and let the outbox publish
             // it again; otherwise ignore the stale remote event.
             if (recoveredLocalPublish) {
                 existing?.let { fileDao.markPendingPublish(listOf(it.id)) }
             }
+            SafeLog.w(
+                "SyncDebug",
+                "SYNCDBG RECONCILE_EXIT id=${existing?.id} result=UNCHANGED_STALE"
+            )
             return ReconcileResult.UNCHANGED
         }
 
@@ -672,23 +775,35 @@ class SyncRepositoryImpl(
                     remoteUniqueId = null
                 )
             )
+            dbgCreated++
+            SafeLog.w("SyncDebug", "SYNCDBG RECONCILE_EXIT id=${entity.id} result=INSERTED_PART")
             return ReconcileResult.INSERTED
         }
 
+        val dbgOutcome = when {
+            existing == null -> "INSERTED"
+            existing.id != entity.id -> "UPDATED"
+            existing != entity.keepingRemoteIdOf(existing) -> "UPDATED"
+            else -> "UNCHANGED"
+        }
+        SafeLog.w("SyncDebug", "SYNCDBG RECONCILE_EXIT id=${entity.id} result=$dbgOutcome")
         return when {
             existing == null -> {
                 fileDao.upsert(entity)
+                dbgCreated++
                 ReconcileResult.INSERTED
             }
 
             existing.id != entity.id -> {
                 fileDao.deleteByIds(listOf(existing.id))
                 fileDao.upsert(entity)
+                dbgUpdated++
                 ReconcileResult.UPDATED
             }
 
             existing != entity.keepingRemoteIdOf(existing) -> {
                 fileDao.upsert(entity)
+                dbgUpdated++
                 ReconcileResult.UPDATED
             }
 

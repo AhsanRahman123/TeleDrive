@@ -18,6 +18,7 @@ class FolderMerger(
 
     suspend fun mergeDuplicates(chatId: Long): Int {
         val merged = database.inImmediateTransaction { mergeAll(chatId) }
+        SafeLog.w("SyncDebug", "SYNCDBG MERGE_SUMMARY chat=$chatId pairsMerged=$merged")
         if (merged > 0) SafeLog.d(TAG, "Merged $merged duplicate folders")
         return merged
     }
@@ -36,6 +37,7 @@ class FolderMerger(
                 val ordered = group.sortedWith(compareBy<FolderEntity>({ it.createdAt }, { it.id }))
                 val survivor = ordered.first()
                 ordered.drop(1).forEach { loser ->
+                    val dbgRowsReferencingLoser = fileDao.rowsReferencingFolder(loser.id).size
                     followBaselineForRemap(loser.id, survivor.id)
                     fileDao.moveAllBetweenFolders(loser.id, survivor.id)
                     fileDao.retargetTrashedBetweenFolders(loser.id, survivor.id)
@@ -43,6 +45,12 @@ class FolderMerger(
                     folderDao.retargetTrashedChildren(loser.id, survivor.id, now)
                     tombstoneDao.upsert(listOf(FolderTombstoneEntity(loser.id, chatId, now)))
                     folderDao.delete(loser.id)
+                    SafeLog.w(
+                        "SyncDebug",
+                        "SYNCDBG MERGE_PAIR loser=${loser.id} loserName=${loser.name} " +
+                            "survivor=${survivor.id} survivorName=${survivor.name} " +
+                            "rowsReferencingLoser=$dbgRowsReferencingLoser"
+                    )
                     merged++
                 }
             }

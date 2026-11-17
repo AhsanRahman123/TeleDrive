@@ -69,6 +69,11 @@ class FolderStateSynchronizer(
             indexMessageId = pointIndexAt ?: remote?.indexMessageId,
             extra = remote?.extra.orEmpty()
         )
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG FOLDERSTATE_PUSH_START folders=${state.folders.size} " +
+                "maxChangedAt=${state.folders.maxOfOrNull { it.clock }}"
+        )
         applyLocally(chatId, state)
 
         val staging = File(storagePaths.cacheDir, RemoteFolderState.FILE_NAME)
@@ -95,6 +100,11 @@ class FolderStateSynchronizer(
         }
         tombstoneDao.deleteOlderThan(deletionCutoff())
         indexMessageId = state.indexMessageId
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG FOLDERSTATE_PUSH_OK folders=${state.folders.size} " +
+                "indexMessageId=${state.indexMessageId}"
+        )
     }
 
     /**
@@ -121,6 +131,10 @@ class FolderStateSynchronizer(
 
     /** Never publishes, so applying other devices' changes cannot echo back. */
     suspend fun pull(): Int = mutex.withLock {
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG FOLDERSTATE_PULL_START pendingFolders=${folderDao.pendingPublishCount()}"
+        )
         if (folderDao.pendingPublishCount() > 0) return@withLock 0
         val chatId = storageChatId()
         var remote: RemoteFolderState? = null
@@ -128,7 +142,14 @@ class FolderStateSynchronizer(
             val read = read(document) as? RemoteFolderRead.Ok ?: continue
             remote = combined(remote, read.state)
         }
+        SafeLog.w("SyncDebug", "SYNCDBG FOLDERSTATE_PULL_LOOKUP found=${remote != null}")
         val found = remote ?: return@withLock 0
+        SafeLog.w(
+            "SyncDebug",
+            "SYNCDBG FOLDERSTATE_PULL_DOC folders=${found.folders.size} " +
+                "maxChangedAt=${found.folders.maxOfOrNull { it.clock }} " +
+                "deleted=${found.deleted.size}"
+        )
         indexMessageId = found.indexMessageId
         applyLocally(chatId, merged(chatId, found))
     }
@@ -176,9 +197,22 @@ class FolderStateSynchronizer(
      */
     private suspend fun applyLocally(chatId: Long, state: RemoteFolderState): Int {
         var changed = 0
+        var dbgFolderDiffs = 0
         for (entry in state.folders.sortedBy { depthOf(it, state.folders) }) {
             val existing = folderDao.byId(entry.id)
             if (existing?.chatId != null && existing.chatId != chatId) continue
+            if (existing != null && existing.changedAt != entry.clock) {
+                dbgFolderDiffs++
+                if (dbgFolderDiffs <= 40) {
+                    SafeLog.w(
+                        "SyncDebug",
+                        "SYNCDBG FOLDERSTATE_FOLDER_DIFF id=${entry.id} name=${entry.name} " +
+                            "localChangedAt=${existing.changedAt} " +
+                            "remoteChangedAt=${entry.clock} " +
+                            "winner=${if (existing.changedAt > entry.clock) "LOCAL" else "REMOTE"}"
+                    )
+                }
+            }
             if (existing != null && existing.changedAt >= entry.clock &&
                 existing.parentId == entry.parentId
             ) continue
@@ -229,6 +263,12 @@ class FolderStateSynchronizer(
             }
             folderDao.delete(folder.id)
             changed++
+        }
+        if (dbgFolderDiffs > 40) {
+            SafeLog.w(
+                "SyncDebug",
+                "SYNCDBG FOLDERSTATE_FOLDER_DIFF_TAIL and ${dbgFolderDiffs - 40} more folder diffs"
+            )
         }
         return changed
     }
