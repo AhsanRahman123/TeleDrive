@@ -372,6 +372,12 @@ class FileRepositoryImpl(
                 isAvailableOffline = if (isRemoteBacked) false else source.isAvailableOffline,
                 trashedAt = null,
                 preTrashFolderId = null,
+                // A copy is a new file: it must not inherit the source's published
+                // baseline (which describes the source's name/folder) or its dirty
+                // flag. A remote copy's caption is written with the copy's own state
+                // at creation; a local copy gets its baseline when its upload lands.
+                pendingPublish = false,
+                remoteBase = null,
                 addedAt = now,
                 modifiedAt = now
             )
