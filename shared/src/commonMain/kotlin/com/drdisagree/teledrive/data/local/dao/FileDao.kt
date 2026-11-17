@@ -68,6 +68,10 @@ interface FileDao {
     @Query("UPDATE files SET preTrashFolderId = :to WHERE preTrashFolderId = :from")
     suspend fun retargetTrashedBetweenFolders(from: String, to: String)
 
+    /** Every row whose live or pre-trash folder reference is [folderId]. */
+    @Query("SELECT * FROM files WHERE folderId = :folderId OR preTrashFolderId = :folderId")
+    suspend fun rowsReferencingFolder(folderId: String): List<FileEntity>
+
     @Query("SELECT COUNT(*) FROM files WHERE pendingPublish = 1")
     fun observePendingPublishCount(): Flow<Int>
 

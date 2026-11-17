@@ -36,6 +36,7 @@ class FolderMerger(
                 val ordered = group.sortedWith(compareBy<FolderEntity>({ it.createdAt }, { it.id }))
                 val survivor = ordered.first()
                 ordered.drop(1).forEach { loser ->
+                    followBaselineForRemap(loser.id, survivor.id)
                     fileDao.moveAllBetweenFolders(loser.id, survivor.id)
                     fileDao.retargetTrashedBetweenFolders(loser.id, survivor.id)
                     folderDao.reparentChildren(loser.id, survivor.id, now)
@@ -48,6 +49,24 @@ class FolderMerger(
             folderDao.markPendingPublish()
         }
         return merged
+    }
+
+    /**
+     * A merge remap is the app reorganizing its own folders, not a user edit: the
+     * caption on Telegram still names the loser folder, and every client resolves
+     * that dead id to the survivor by path. The published baseline must follow the
+     * remap inside the same transaction, or the sync recovery check reads every
+     * remapped row as an unpublished local move and republishes all of them.
+     * Rows whose baseline names any other folder keep it — that divergence is a
+     * real unpublished state, not the merger's doing.
+     */
+    private suspend fun followBaselineForRemap(from: String, to: String) {
+        fileDao.rowsReferencingFolder(from).forEach { row ->
+            val base = FileBase.fromText(row.remoteBase) ?: return@forEach
+            if (base.folderId == from) {
+                fileDao.setRemoteBase(row.id, base.copy(folderId = to).toText())
+            }
+        }
     }
 
     private companion object {
