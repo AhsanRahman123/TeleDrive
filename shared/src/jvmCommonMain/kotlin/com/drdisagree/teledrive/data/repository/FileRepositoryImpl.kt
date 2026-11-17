@@ -1047,7 +1047,6 @@ class FileRepositoryImpl(
 
     companion object {
         private const val MAX_FOLDER_DEPTH = 64
-        private const val SQL_BATCH = 500
         private const val FOLDER_SEARCH_LIMIT = 200
         private const val NOTE_TITLE_LIMIT = 60
     }
