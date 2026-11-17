@@ -519,6 +519,7 @@ class SyncRepositoryImpl(
             publishedBase != null &&
             incomingBase != null &&
             incomingBase != publishedBase &&
+            currentBase != publishedBase &&
             manifest.modifiedAt < existing.modifiedAt
         if (stalePublishedManifest) {
             // A delayed Telegram update can deliver the pre-move caption after the local
