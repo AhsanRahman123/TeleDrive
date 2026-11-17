@@ -587,6 +587,8 @@ fun FilesScreen(
     // Restore a tab/folder position only when navigation changes. Do not key this effect
     // to Paging itemCount: every appended page changes that count, and re-running
     // scrollToItem(0) was snapping the user back to the top while they scrolled.
+    // Restore once, clamped to what is already loaded (official-style): never force-page
+    // to reach a deep saved position, so the list settles immediately after navigation.
     LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId, returnFromPreviewTick) {
         val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
         if (currentTab.folderId != state.folderId) return@LaunchedEffect
@@ -596,30 +598,6 @@ fun FilesScreen(
 
         val target = viewModel.fileListPosition(selectedTabId, state.folderId) ?: (0 to 0)
         val targetIndex = target.first.coerceAtLeast(0)
-        val targetFileIndex = targetIndex - state.folders.size
-
-        // If a saved tab position is beyond the first Paging page, request pages until
-        // that item is available (or the source reaches its end) before restoring once.
-        if (targetFileIndex >= 0) {
-            while (
-                files.itemCount <= targetFileIndex &&
-                !files.loadState.append.endOfPaginationReached &&
-                files.loadState.append !is LoadState.Error
-            ) {
-                val loadedCount = files.itemCount
-                if (loadedCount <= 0) break
-                files[loadedCount - 1]
-                val advanced = withTimeoutOrNull(FOCUS_PAGE_WAIT_MS.milliseconds) {
-                    snapshotFlow { files.itemCount to files.loadState.append }
-                        .first { (count, append) ->
-                            count > loadedCount ||
-                                append.endOfPaginationReached ||
-                                append is LoadState.Error
-                        }
-                } ?: break
-                if (advanced.second is LoadState.Error) break
-            }
-        }
 
         val count = state.folders.size + files.itemCount
         if (count > 0) {
