@@ -166,6 +166,14 @@ class PublishOutboxDrainer(
                 pendingPublish = published.pendingPublish,
                 remoteBase = published.remoteBase
             ) == published
+            if (!accepted && unchanged) {
+                // Permanent rejection (e.g. MESSAGE_ID_INVALID): this message can
+                // never accept the publish, so adopt the local state as the
+                // baseline. Otherwise the sync recovery check re-queues the same
+                // unpublishable file on every pass, forever. The caption itself
+                // stays stale until the file is re-uploaded.
+                fileDao.setRemoteBase(published.id, FileBase.of(current).toText())
+            }
             if (unchanged) {
                 fileDao.clearPendingPublish(published.id)
             }
