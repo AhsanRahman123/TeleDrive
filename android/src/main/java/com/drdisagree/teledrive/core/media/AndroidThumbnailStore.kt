@@ -14,7 +14,6 @@ import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
 import com.drdisagree.teledrive.core.files.MimeTypes
-import com.drdisagree.teledrive.core.publish.PublishInteractionGate
 import com.drdisagree.teledrive.core.files.Urls
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
@@ -242,42 +241,13 @@ class AndroidThumbnailStore(
                 thumbnailJobDao.delete(job.fileId)
                 continue
             }
-            // Background generation is heavy CPU work (decode, JPEG encode,
-            // optional encryption) on the same cores the UI thread needs.
-            // While the user is scrolling a collection or a folder/tab
-            // change is settling, hold off (F2): queued jobs are durable, so
-            // waiting loses nothing, and generation resumes as soon as the
-            // interaction ends. On-demand thumbnails for visible tiles do
-            // not pass through this loop and are unaffected.
-            // The wait is capped at 30s and then fails open (C5), mirroring
-            // the publish drainer's F1 wait, so a long browsing session
-            // cannot hold the queue indefinitely.
-            var waitedMs = 0L
-            while (PublishInteractionGate.isBusy()) {
-                if (waitedMs >= MAX_INTERACTION_WAIT_MS) break
-                delay(INTERACTION_POLL_MS)
-                waitedMs += INTERACTION_POLL_MS
-            }
-            if (waitedMs > 0L) {
-                // Re-validate after the wait (C5): while the gate held this
-                // job, the user may have paused the queue or this item,
-                // cancelled the job, or trashed the file. Skipping is safe —
-                // nextReady() re-evaluates durable state on the next pass.
-                if (schedulingPaused || thumbnailPolicyDao.isQueuePaused()) return
-                val currentJob = thumbnailJobDao.byFileId(job.fileId)
-                val currentEntity = fileDao.byId(job.fileId)
-                if (
-                    currentJob == null ||
-                    currentEntity == null ||
-                    currentEntity.trashedAt != null ||
-                    job.fileId in thumbnailPolicyDao.pausedQueueItemIds()
-                ) {
-                    if (currentJob != null && (currentEntity == null || currentEntity.trashedAt != null)) {
-                        thumbnailJobDao.delete(job.fileId)
-                    }
-                    continue
-                }
-            }
+            // Generation proceeds immediately: the pause/trashed/cached/policy
+            // checks above run on every pass, so no interaction wait is needed
+            // here. (The F2 PublishInteractionGate wait that used to sit at
+            // this point starved the queue during browsing — the gate is busy
+            // almost continuously while the user scrolls — and its own
+            // measurement showed no jank benefit, so it was removed. The
+            // publish outbox keeps its own F1 gate, untouched.)
             _activeJobs.update { it + job.fileId }
             val bytes = try {
                 generationSemaphore.withPermit { generate(job.fileId) }
@@ -565,8 +535,6 @@ class AndroidThumbnailStore(
         private const val JPEG_QUALITY = 82
         private const val MAX_BACKGROUND_ATTEMPTS = 3
         private const val BACKGROUND_RETRY_DELAY_MS = 5_000L
-        private const val INTERACTION_POLL_MS = 250L
-        private const val MAX_INTERACTION_WAIT_MS = 30_000L
         private const val JOB_INSERT_BATCH_SIZE = 250
         private const val LRU_TOUCH_INTERVAL_MS = 5 * 60 * 1_000L
         private const val TARGET_FILE = "FILE"
