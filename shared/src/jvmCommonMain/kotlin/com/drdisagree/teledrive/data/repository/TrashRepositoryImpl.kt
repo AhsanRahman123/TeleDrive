@@ -100,12 +100,6 @@ class TrashRepositoryImpl(
         return AppResult.Success(Unit)
     }
 
-    private suspend fun markFilesDirty(ids: List<String>) {
-        if (ids.isEmpty()) return
-        ids.chunked(SQL_BATCH).forEach { fileDao.markPendingPublish(it) }
-        publishScheduler.kick()
-    }
-
     private suspend fun markFolderStateDirty() {
         folderDao.markPendingPublish()
         publishScheduler.kick()
@@ -130,12 +124,12 @@ class TrashRepositoryImpl(
             val parent = entity.preTrashFolderId
             parent != null && folderDao.byId(parent) == null
         }
-        ids.chunked(SQL_BATCH).forEach { fileDao.restoreFromTrash(it) }
-        if (orphaned.isNotEmpty()) {
-            fileDao.move(orphaned.map { it.id }, null, System.currentTimeMillis())
-        }
+        fileDao.restoreAndMarkPendingPublish(
+            ids,
+            orphaned.map { it.id },
+            System.currentTimeMillis()
+        )
         markFolderStateDirty()
-        markFilesDirty(ids)
         return AppResult.Success(Unit)
     }
 
@@ -149,9 +143,8 @@ class TrashRepositoryImpl(
         if (restoredParent != null && folderDao.byId(restoredParent) == null) {
             folderDao.move(id, null, System.currentTimeMillis())
         }
-        fileIds.chunked(SQL_BATCH).forEach { fileDao.restoreFromTrash(it) }
+        fileDao.restoreAndMarkPendingPublish(fileIds, emptyList(), restoredAt)
         markFolderStateDirty()
-        markFilesDirty(fileIds)
         return AppResult.Success(Unit)
     }
 

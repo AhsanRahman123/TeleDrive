@@ -280,7 +280,7 @@ class FileRepositoryImpl(
         }
         if (unique == file.name) return AppResult.Success(Unit)
         val now = System.currentTimeMillis()
-        fileDao.rename(id, unique, now)
+        fileDao.renameAndMarkPendingPublish(id, unique, now)
 
         file.localPath?.let { path ->
             val localFile = File(path)
@@ -291,7 +291,7 @@ class FileRepositoryImpl(
                 }
             }
         }
-        markFilesDirty(listOf(id))
+        publishScheduler.kick()
         return AppResult.Success(Unit)
     }
 
@@ -677,12 +677,6 @@ class FileRepositoryImpl(
         publishScheduler.kick()
     }
 
-    private suspend fun markFilesDirty(ids: List<String>) {
-        if (ids.isEmpty()) return
-        ids.chunked(SQL_BATCH).forEach { fileDao.markPendingPublish(it) }
-        publishScheduler.kick()
-    }
-
     private suspend fun markFolderStateDirty() {
         folderDao.markPendingPublish()
         publishScheduler.kick()
@@ -697,18 +691,18 @@ class FileRepositoryImpl(
     }
 
     override suspend fun setFilesFavorite(ids: List<String>, favorite: Boolean) {
-        fileDao.setFavorite(ids, favorite)
-        markFilesDirty(ids)
+        fileDao.setFavoriteAndMarkPendingPublish(ids, favorite)
+        if (ids.isNotEmpty()) publishScheduler.kick()
     }
 
     override suspend fun setFilesHidden(ids: List<String>, hidden: Boolean) {
-        fileDao.setHidden(ids, hidden)
-        markFilesDirty(ids)
+        fileDao.setHiddenAndMarkPendingPublish(ids, hidden)
+        if (ids.isNotEmpty()) publishScheduler.kick()
     }
 
     override suspend fun setFilesArchived(ids: List<String>, archived: Boolean) {
-        fileDao.setArchived(ids, archived)
-        markFilesDirty(ids)
+        fileDao.setArchivedAndMarkPendingPublish(ids, archived)
+        if (ids.isNotEmpty()) publishScheduler.kick()
     }
 
     override suspend fun setFolderFavorite(id: String, favorite: Boolean) {
@@ -902,10 +896,9 @@ class FileRepositoryImpl(
         val match = candidates.firstOrNull { it.contentHash == localHash } ?: return null
 
         val now = System.currentTimeMillis()
-        fileDao.restoreFromTrash(listOf(match.id))
-        fileDao.move(listOf(match.id), folderId(), now)
+        fileDao.restoreMoveAndMarkPendingPublish(match.id, folderId(), now)
         fileDao.setLocalPath(match.id, source.absolutePath)
-        markFilesDirty(listOf(match.id))
+        publishScheduler.kick()
         return fileDao.byId(match.id)?.toDomain()
     }
 

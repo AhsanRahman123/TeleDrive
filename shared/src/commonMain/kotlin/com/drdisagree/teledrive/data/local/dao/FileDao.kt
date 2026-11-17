@@ -394,6 +394,69 @@ interface FileDao {
         }
     }
 
+    /** Same atomicity rule as move/trash: the rename and its marker land together. */
+    @Transaction
+    suspend fun renameAndMarkPendingPublish(id: String, name: String, modifiedAt: Long) {
+        rename(id, name, modifiedAt)
+        markPendingPublish(listOf(id))
+    }
+
+    @Transaction
+    suspend fun setFavoriteAndMarkPendingPublish(ids: List<String>, favorite: Boolean) {
+        ids.distinct().chunked(400).forEach { batch ->
+            setFavorite(batch, favorite)
+            markPendingPublish(batch)
+        }
+    }
+
+    @Transaction
+    suspend fun setHiddenAndMarkPendingPublish(ids: List<String>, hidden: Boolean) {
+        ids.distinct().chunked(400).forEach { batch ->
+            setHidden(batch, hidden)
+            markPendingPublish(batch)
+        }
+    }
+
+    @Transaction
+    suspend fun setArchivedAndMarkPendingPublish(ids: List<String>, archived: Boolean) {
+        ids.distinct().chunked(400).forEach { batch ->
+            setArchived(batch, archived)
+            markPendingPublish(batch)
+        }
+    }
+
+    /**
+     * Restoring is a move + un-trash and needs the same atomic visibility as one:
+     * a reconcile that observes the restored row before its marker lands treats
+     * the still-current manifest as truth and trashes it again. [orphanedIds] are
+     * the restored rows whose pre-trash folder no longer exists; they land at the
+     * drive root inside the same transaction.
+     */
+    @Transaction
+    suspend fun restoreAndMarkPendingPublish(
+        ids: List<String>,
+        orphanedIds: List<String>,
+        modifiedAt: Long
+    ) {
+        val distinct = ids.distinct()
+        distinct.chunked(400).forEach { batch -> restoreFromTrash(batch) }
+        if (orphanedIds.isNotEmpty()) {
+            move(orphanedIds.distinct(), null, modifiedAt)
+        }
+        distinct.chunked(400).forEach { batch -> markPendingPublish(batch) }
+    }
+
+    @Transaction
+    suspend fun restoreMoveAndMarkPendingPublish(
+        id: String,
+        folderId: String?,
+        modifiedAt: Long
+    ) {
+        restoreFromTrash(listOf(id))
+        move(listOf(id), folderId, modifiedAt)
+        markPendingPublish(listOf(id))
+    }
+
     @Query(
         """UPDATE files SET folderId = preTrashFolderId, trashedAt = NULL, preTrashFolderId = NULL
            WHERE id IN (:ids)"""
