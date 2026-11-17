@@ -610,6 +610,7 @@ class SyncRepositoryImpl(
             publishedBase != null &&
             incomingBase != null &&
             incomingBase != publishedBase &&
+            currentBase != publishedBase &&
             manifest.modifiedAt < existing.modifiedAt
         if (stalePublishedManifest) {
             dbgStaleDropped++
