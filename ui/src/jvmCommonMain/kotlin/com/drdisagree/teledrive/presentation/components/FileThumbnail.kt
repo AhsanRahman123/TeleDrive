@@ -49,6 +49,8 @@ fun FileThumbnail(
     var thumbnailRevision by remember(file.id) { mutableStateOf(0L) }
 
     LaunchedEffect(file.id) {
+        // DIAGNOSTIC BUILD (no-thumbnails test): thumbnail change subscription disabled.
+        if (DIAGNOSTIC_DISABLE_THUMBNAILS) return@LaunchedEffect
         ThumbnailChangeNotifier.eventsFor(file.id).collect { change ->
             if (change.fileId == file.id) {
                 failed = false
@@ -65,7 +67,7 @@ fun FileThumbnail(
         val badgeSize = (shortestSide * BADGE_RATIO).coerceIn(18.dp, 44.dp)
         val showDuration = shortestSide >= DURATION_MIN_SIDE
 
-        if (supportsThumbnail && (file.hasLocalCopy || file.hasRemoteCopy) && !failed) {
+        if (!DIAGNOSTIC_DISABLE_THUMBNAILS && supportsThumbnail && (file.hasLocalCopy || file.hasRemoteCopy) && !failed) {
             AsyncImage(
                 model = ThumbnailModel(file.id, thumbnailRevision),
                 contentDescription = contentDescription,
@@ -111,6 +113,11 @@ fun FileThumbnail(
         }
     }
 }
+
+// DIAGNOSTIC BUILD ONLY: when true, tiles render the plain category icon and never
+// load thumbnails, so a gfxinfo A/B run can isolate the thumbnail pipeline's cost.
+// This branch must never be merged as a fix.
+private const val DIAGNOSTIC_DISABLE_THUMBNAILS = true
 
 private val SCRIM = Color.Black.copy(alpha = 0.45f)
 private const val BADGE_RATIO = 0.34f
