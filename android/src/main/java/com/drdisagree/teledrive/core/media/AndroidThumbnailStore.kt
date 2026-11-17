@@ -28,10 +28,15 @@ import com.drdisagree.teledrive.data.local.entity.ThumbnailPolicyEntity
 import com.drdisagree.teledrive.data.local.entity.ThumbnailJobEntity
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.model.ThumbnailPolicy
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -61,10 +66,51 @@ class AndroidThumbnailStore(
     private val jobScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobWakeups = Channel<Unit>(Channel.CONFLATED)
 
+    // Global queue pause (C1): mirrors DesktopThumbnailStore. The durable truth is the
+    // thumbnail_policies QUEUE/GLOBAL/PAUSED row checked via isQueuePaused(); this flag
+    // additionally lets pauseAllJobs() stop the loop without waiting for the next fetch.
+    @Volatile
+    private var schedulingPaused = false
+    private val _activeJobs = MutableStateFlow<Set<String>>(emptySet())
+    private val consumerLock = Any()
+    private var queueConsumer: Job? = null
+
     init {
-        jobScope.launch {
-            for (ignored in jobWakeups) processPendingJobs()
+        ensureQueueConsumer()
+        jobWakeups.trySend(Unit)
+    }
+
+    private fun ensureQueueConsumer() {
+        synchronized(consumerLock) {
+            if (queueConsumer?.isActive == true) return
+            queueConsumer = jobScope.launch {
+                for (ignored in jobWakeups) processPendingJobs()
+            }
         }
+    }
+
+    override fun observeActiveJobs(): Flow<Set<String>> = _activeJobs.asStateFlow()
+
+    override suspend fun pauseAllJobs() {
+        schedulingPaused = true
+        // Stop the loop promptly instead of letting it fetch the next job, and wait for
+        // the in-flight generation to unwind (Desktop joins its cancelled jobs the same
+        // way) so callers can safely touch the cache afterwards. The job row being
+        // generated stays queued and is retried when the queue resumes.
+        val consumer = synchronized(consumerLock) { queueConsumer }
+        consumer?.cancel()
+        consumer?.join()
+    }
+
+    override suspend fun resumeQueue() {
+        schedulingPaused = false
+        ensureQueueConsumer()
+        jobWakeups.trySend(Unit)
+    }
+
+    override suspend fun retryJobs(fileIds: List<String>) {
+        // Rows were reset in the database by the caller; just wake the loop so it
+        // re-evaluates the queue (it may have exited while the queue was empty).
         jobWakeups.trySend(Unit)
     }
 
@@ -163,6 +209,11 @@ class AndroidThumbnailStore(
 
     private suspend fun processPendingJobs() {
         while (true) {
+            // Global pause (C1): the manager's "Pause all" writes a QUEUE/GLOBAL/PAUSED
+            // policy row; honour it here the way DesktopThumbnailStore does, otherwise
+            // generation continues while the UI claims the queue is paused. Durable job
+            // rows are left untouched and resume when the pause is cleared.
+            if (schedulingPaused || thumbnailPolicyDao.isQueuePaused()) return
             val now = System.currentTimeMillis()
             val job = thumbnailJobDao.nextReady(1, now, MAX_BACKGROUND_ATTEMPTS).firstOrNull()
             if (job == null) {
@@ -192,12 +243,15 @@ class AndroidThumbnailStore(
             while (PublishInteractionGate.isBusy()) {
                 delay(INTERACTION_POLL_MS)
             }
+            _activeJobs.update { it + job.fileId }
             val bytes = try {
                 generationSemaphore.withPermit { generate(job.fileId) }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 null
+            } finally {
+                _activeJobs.update { it - job.fileId }
             }
             if (bytes != null) {
                 thumbnailJobDao.delete(job.fileId)
