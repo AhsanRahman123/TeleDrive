@@ -1171,6 +1171,11 @@ fun FilesScreen(
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp)
+                            // The floating nav bar measures its 88dp from above the
+                            // system navigation bar (windowInsetsPadding); without the
+                            // same baseline this bar slides under the pill and the
+                            // system bar area on devices with a tall nav bar.
+                            .navigationBarsPadding()
                             .padding(bottom = LocalBottomBarInset.current + 8.dp),
                         shape = MaterialTheme.shapes.large,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
