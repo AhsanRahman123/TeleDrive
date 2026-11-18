@@ -286,6 +286,7 @@ class GalleryViewModel(
             backedUpOnly = currentFilters.backedUpOnly,
             notBackedUpOnly = currentFilters.notBackedUpOnly,
             missingThumbnailOnly = currentFilters.missingThumbnailOnly,
+            withThumbnailOnly = currentFilters.withThumbnailOnly,
             extension = currentFilters.extensionQuery.trim().removePrefix(".")
                 .takeIf { it.isNotBlank() },
             minSizeBytes = currentFilters.minSizeMb.toSizeBytes(),
@@ -332,6 +333,7 @@ class GalleryViewModel(
             backedUpOnly = currentFilters.backedUpOnly,
             notBackedUpOnly = currentFilters.notBackedUpOnly,
             missingThumbnailOnly = currentFilters.missingThumbnailOnly,
+            withThumbnailOnly = currentFilters.withThumbnailOnly,
             extension = currentFilters.extensionQuery.trim().removePrefix(".")
                 .takeIf { it.isNotBlank() },
             minSizeBytes = currentFilters.minSizeMb.toSizeBytes(),
@@ -460,7 +462,22 @@ class GalleryViewModel(
 
     fun setMissingThumbnailFilter(enabled: Boolean) {
         clearSelection()
-        filters.update { it.copy(missingThumbnailOnly = enabled) }
+        filters.update {
+            it.copy(
+                missingThumbnailOnly = enabled,
+                withThumbnailOnly = if (enabled) false else it.withThumbnailOnly
+            )
+        }
+    }
+
+    fun setWithThumbnailFilter(enabled: Boolean) {
+        clearSelection()
+        filters.update {
+            it.copy(
+                withThumbnailOnly = enabled,
+                missingThumbnailOnly = if (enabled) false else it.missingThumbnailOnly
+            )
+        }
     }
 
     fun setOfflineFilter(enabled: Boolean) {

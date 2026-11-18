@@ -39,6 +39,7 @@ sealed interface Route {
         val backedUpOnly: Boolean = false,
         val notBackedUpOnly: Boolean = false,
         val missingThumbnailOnly: Boolean = false,
+        val withThumbnailOnly: Boolean = false,
         val extension: String? = null,
         val minSizeBytes: Long? = null,
         val maxSizeBytes: Long? = null,

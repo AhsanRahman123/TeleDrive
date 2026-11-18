@@ -90,6 +90,11 @@ object FileQueryBuilder {
             // durable distinction between those two for files whose jobs expired.
             where.append(" AND id NOT IN (SELECT fileId FROM thumbnails)")
         }
+        if (spec.withThumbnailOnly) {
+            // "With thumbnail" separation: the exact inverse of the filter above — a
+            // generated/cached row exists in the thumbnails table for the file.
+            where.append(" AND id IN (SELECT fileId FROM thumbnails)")
+        }
         if (spec.hiddenOnly) where.append(" AND isHidden = 1")
         if (spec.archivedOnly) where.append(" AND isArchived = 1")
         coveringColumn(spec)?.let { column ->

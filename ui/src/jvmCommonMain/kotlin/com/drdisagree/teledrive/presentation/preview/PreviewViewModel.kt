@@ -102,6 +102,7 @@ class PreviewViewModel(
                     backedUpOnly = route.backedUpOnly,
                     notBackedUpOnly = route.notBackedUpOnly,
                     missingThumbnailOnly = route.missingThumbnailOnly,
+                    withThumbnailOnly = route.withThumbnailOnly,
                     extension = route.extension,
                     minSizeBytes = route.minSizeBytes,
                     maxSizeBytes = route.maxSizeBytes,

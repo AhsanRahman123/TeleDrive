@@ -84,4 +84,15 @@ class FileQueryBuilderTest {
         val notBacked = FileQueryBuilder.build(FileQuerySpec(notBackedUpOnly = true)).sql
         assertTrue(notBacked.contains("backupState != 'BACKED_UP'"))
     }
+
+    @Test
+    fun `thumbnail filters are inverse clauses over the thumbnails table`() {
+        val missing = FileQueryBuilder.build(FileQuerySpec(missingThumbnailOnly = true)).sql
+        assertTrue(missing.contains("id NOT IN (SELECT fileId FROM thumbnails)"))
+        val withThumb = FileQueryBuilder.build(FileQuerySpec(withThumbnailOnly = true)).sql
+        assertTrue(withThumb.contains("id IN (SELECT fileId FROM thumbnails)"))
+        assertFalse(withThumb.contains("id NOT IN (SELECT fileId FROM thumbnails)"))
+        val unfiltered = FileQueryBuilder.build(FileQuerySpec()).sql
+        assertFalse(unfiltered.contains("FROM thumbnails"))
+    }
 }

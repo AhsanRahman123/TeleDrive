@@ -17,6 +17,8 @@ data class FileQuerySpec(
     val availableOfflineOnly: Boolean = false,
     /** Only files with no generated thumbnail cached (no row in the thumbnails table). */
     val missingThumbnailOnly: Boolean = false,
+    /** Only files with a generated thumbnail cached (a row exists in the thumbnails table). */
+    val withThumbnailOnly: Boolean = false,
     val hiddenOnly: Boolean = false,
     val archivedOnly: Boolean = false,
     val showHidden: Boolean = false,
