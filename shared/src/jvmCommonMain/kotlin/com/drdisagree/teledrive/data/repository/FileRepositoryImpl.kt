@@ -24,12 +24,14 @@ import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.core.telegram.RemoteDocument
 import com.drdisagree.teledrive.core.telegram.TelegramDocumentCopyRequest
-import com.drdisagree.teledrive.core.telegram.TelegramDocumentCopyResult
+import com.drdisagree.teledrive.core.transfer.FileParts
 import com.drdisagree.teledrive.data.local.FileQueryBuilder
 import com.drdisagree.teledrive.data.local.OffsetRefreshPagingSource
 import com.drdisagree.teledrive.data.local.dao.FileDao
+import com.drdisagree.teledrive.data.local.dao.FilePartDao
 import com.drdisagree.teledrive.data.local.dao.FolderDao
 import com.drdisagree.teledrive.data.local.entity.FileEntity
+import com.drdisagree.teledrive.data.local.entity.FilePartEntity
 import com.drdisagree.teledrive.data.local.entity.FolderEntity
 import com.drdisagree.teledrive.data.mapper.toDomain
 import com.drdisagree.teledrive.data.remote.telegram.ManifestCodec
@@ -65,6 +67,7 @@ import java.util.UUID
 class FileRepositoryImpl(
     private val fileDao: FileDao,
     private val folderDao: FolderDao,
+    private val filePartDao: FilePartDao,
     private val publishScheduler: PublishScheduler,
     private val localCopyDeleter: LocalCopyDeleter,
     private val telegramClient: TelegramClient,
@@ -383,7 +386,13 @@ class FileRepositoryImpl(
             )
 
             if (isRemoteBacked) {
-                remoteCopies += PendingRemoteCopy(copy, remoteFileId!!, sourceChatId!!)
+                remoteCopies += PendingRemoteCopy(
+                    copy = copy,
+                    remoteFileId = remoteFileId!!,
+                    sourceChatId = sourceChatId!!,
+                    sourceMessageId = source.messageId,
+                    sourceParts = filePartDao.partsOf(source.id)
+                )
             } else {
                 localCopies += copy
             }
@@ -394,12 +403,17 @@ class FileRepositoryImpl(
         var copied = localCopies.size
         var lastError: AppError? = null
 
-        // A document album carries up to ten independent document captions/manifests.
-        // Batch by source chat because Telegram cannot mix channels in one album.
+        // Batch by source chat because a forward cannot mix channels. A copy whose source
+        // messages are all known is forwarded inside the chat and relabelled with its own
+        // manifest; a copy whose source messages are not all known keeps the one-by-one
+        // server-side send.
         for ((chatId, chatCopies) in remoteCopies.groupBy { it.sourceChatId }) {
-            for (batch in chatCopies.chunked(10)) {
-                if (batch.size == 1) {
-                    val candidate = batch.single()
+            val forwardable = mutableListOf<Pair<PendingRemoteCopy, List<Long>>>()
+            for (candidate in chatCopies) {
+                val messageIds = candidate.forwardMessageIds()
+                if (messageIds != null) {
+                    forwardable += candidate to messageIds
+                } else {
                     when (val result = copyRemote(candidate.copy, candidate.remoteFileId, chatId)) {
                         is AppResult.Success -> {
                             fileDao.upsert(result.value)
@@ -407,47 +421,12 @@ class FileRepositoryImpl(
                         }
                         is AppResult.Failure -> lastError = result.error
                     }
-                    continue
                 }
-
-                val outcomes = try {
-                    telegramClient.copyDocuments(
-                        chatId,
-                        batch.map { candidate ->
-                            remoteCopyRequest(candidate.copy, candidate.remoteFileId)
-                        }
-                    )
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    val telegramError = error as? TelegramException
-                        ?: TelegramException(500, error.message ?: "Telegram album copy failed")
-                    List(batch.size) { TelegramDocumentCopyResult(error = telegramError) }
-                }
-
-                val successfulCopies = mutableListOf<FileEntity>()
-                batch.forEachIndexed { index, candidate ->
-                    val outcome = outcomes.getOrNull(index)
-                    val document = outcome?.document
-                    if (document != null) {
-                        successfulCopies += withRemoteDocument(candidate.copy, document)
-                    } else {
-                        val error = outcome?.error
-                            ?: TelegramException(500, "Telegram returned an incomplete album result")
-                        lastError = if (error.isRateLimit) {
-                            AppError.RateLimited(error.retryAfterSeconds ?: 0)
-                        } else {
-                            AppError.TelegramError(error.code, error.message)
-                        }
-                    }
-                }
-
-                // Persist successes even when another album item failed. A retry only needs
-                // to create the copies that did not make it.
-                if (successfulCopies.isNotEmpty()) {
-                    fileDao.upsertAll(successfulCopies)
-                    copied += successfulCopies.size
-                }
+            }
+            if (forwardable.isNotEmpty()) {
+                val (forwardedCount, forwardError) = forwardRemoteCopies(chatId, forwardable)
+                copied += forwardedCount
+                if (lastError == null) lastError = forwardError
             }
         }
 
@@ -564,14 +543,213 @@ class FileRepositoryImpl(
     private data class PendingRemoteCopy(
         val copy: FileEntity,
         val remoteFileId: String,
-        val sourceChatId: Long
+        val sourceChatId: Long,
+        val sourceMessageId: Long?,
+        val sourceParts: List<FilePartEntity>
+    ) {
+
+        /** Parts the channel copy consists of: the recorded count, or however many part rows exist. */
+        val partTotal: Int get() = maxOf(copy.partCount, sourceParts.size)
+
+        /**
+         * The source message ids that recreate this file when forwarded, in part order, or
+         * null when forwarding cannot recreate it (the message id is unknown, or a split
+         * file's parts are not all accounted for in the source chat) and the send-based
+         * copy must be used instead.
+         */
+        fun forwardMessageIds(): List<Long>? {
+            if (partTotal <= 1) return sourceMessageId?.let { listOf(it) }
+            if (sourceParts.size < partTotal) return null
+            val ids = ArrayList<Long>(partTotal)
+            for (index in 0 until partTotal) {
+                val part = sourceParts.getOrNull(index) ?: return null
+                if (part.partIndex != index || part.chatId != sourceChatId) return null
+                ids += part.messageId ?: return null
+            }
+            return ids
+        }
+    }
+
+    private data class ForwardSlot(
+        val candidateIndex: Int,
+        val messageId: Long
     )
 
-    private suspend fun remoteCopyRequest(
-        copy: FileEntity,
-        remoteFileId: String
-    ): TelegramDocumentCopyRequest {
-        val manifest = RemoteFileManifest(
+    /**
+     * Forwards every candidate's source messages inside [chatId], relabels each new message
+     * with the copy's own manifest, and only then records the copy — with the baseline a
+     * successful publish would have sealed, because the caption already carries exactly
+     * this copy's state. A candidate whose messages do not all arrive, or whose relabel
+     * fails, is deleted again and counted as failed, so a copy attempt never leaves behind
+     * a message that still claims to be the source file.
+     */
+    private suspend fun forwardRemoteCopies(
+        chatId: Long,
+        forwardable: List<Pair<PendingRemoteCopy, List<Long>>>
+    ): Pair<Int, AppError?> {
+        var copied = 0
+        var lastError: AppError? = null
+
+        val slots = forwardable.flatMapIndexed { candidateIndex, (_, messageIds) ->
+            messageIds.map { ForwardSlot(candidateIndex, it) }
+        }
+        // TDLib forwards at most 100 messages per call and wants their ids strictly
+        // increasing, so flatten everything and answer per message id.
+        val documents = HashMap<Long, RemoteDocument>()
+        for (chunk in slots.chunked(MAX_FORWARD_BATCH)) {
+            val chunkIds = chunk.map { it.messageId }.distinct().sorted()
+            var chunkError: TelegramException? = null
+            val resolved = try {
+                telegramClient.forwardDocuments(chatId, chunkIds)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: TelegramException) {
+                chunkError = error
+                null
+            }
+            if (resolved != null) {
+                chunkIds.forEachIndexed { index, messageId ->
+                    resolved.getOrNull(index)?.let { documents[messageId] = it }
+                }
+                continue
+            }
+            if (chunk.map { it.candidateIndex }.distinct().size == 1) {
+                if (lastError == null) lastError = chunkError?.toAppError()
+                continue
+            }
+            // One bad message can fail the whole call. Retry per candidate so a single
+            // unforwardable file does not take the rest of the chunk down with it.
+            for ((_, candidateSlots) in chunk.groupBy { it.candidateIndex }) {
+                val ids = candidateSlots.map { it.messageId }.distinct().sorted()
+                try {
+                    val retried = telegramClient.forwardDocuments(chatId, ids)
+                    ids.forEachIndexed { index, messageId ->
+                        retried.getOrNull(index)?.let { documents[messageId] = it }
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: TelegramException) {
+                    if (lastError == null) lastError = error.toAppError()
+                }
+            }
+        }
+
+        for ((candidate, messageIds) in forwardable) {
+            val arrived = messageIds.map { documents[it] }
+            if (arrived.any { it == null }) {
+                // The copy is incomplete: remove whatever did arrive, so it cannot linger
+                // in the channel as an unlabelled orphan.
+                deleteQuietly(chatId, arrived.filterNotNull().map { it.messageId })
+                if (lastError == null) {
+                    lastError = AppError.TelegramError(
+                        500,
+                        "Telegram could not forward every message"
+                    )
+                }
+                continue
+            }
+            val forwarded = arrived.filterNotNull()
+
+            val relabelled = try {
+                val manifests = copyPartManifests(candidate)
+                forwarded.forEachIndexed { index, document ->
+                    telegramClient.editCaption(
+                        chatId,
+                        document.messageId,
+                        manifestCodec.encode(manifests[index], candidate.copy.isEncrypted)
+                    )
+                }
+                true
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: TelegramException) {
+                if (lastError == null) lastError = error.toAppError()
+                false
+            }
+            if (!relabelled) {
+                // The safeguard: a forwarded message that could not be relabelled is
+                // deleted at once, inside the copy operation itself.
+                deleteQuietly(chatId, forwarded.map { it.messageId })
+                continue
+            }
+
+            val stored = withRemoteDocument(candidate.copy, forwarded.first()).copy(
+                partCount = if (candidate.partTotal > 1) {
+                    candidate.partTotal
+                } else {
+                    candidate.copy.partCount
+                },
+                pendingPublish = false,
+                remoteBase = FileBase.of(candidate.copy).toText()
+            )
+            fileDao.upsert(stored)
+            if (candidate.partTotal > 1) {
+                forwarded.forEachIndexed { index, document ->
+                    val sourcePart = candidate.sourceParts[index]
+                    filePartDao.upsert(
+                        FilePartEntity(
+                            fileId = candidate.copy.id,
+                            partIndex = index,
+                            chatId = document.chatId,
+                            messageId = document.messageId,
+                            remoteFileId = document.remoteFileId,
+                            remoteUniqueId = document.uniqueFileId,
+                            plainOffset = sourcePart.plainOffset,
+                            plainSize = sourcePart.plainSize,
+                            storedSize = document.sizeBytes,
+                            uploadedAt = document.dateSeconds.toLong() * 1000L,
+                            plainHash = sourcePart.plainHash
+                        )
+                    )
+                }
+            }
+            copied++
+        }
+        return copied to lastError
+    }
+
+    /**
+     * The copy's own manifests, one per channel message: a single manifest for a whole
+     * file, or the per-part manifests a split upload writes. Part hashes are reused from
+     * the source's parts because the forwarded content is identical.
+     */
+    private suspend fun copyPartManifests(
+        candidate: PendingRemoteCopy
+    ): List<RemoteFileManifest> {
+        val base = copyManifest(candidate.copy)
+        if (candidate.partTotal <= 1) return listOf(base)
+        return (0 until candidate.partTotal).map { index ->
+            base.copy(
+                version = RemoteFileManifest.PART_VERSION,
+                partCount = candidate.partTotal,
+                partIndex = index,
+                partOffset = FileParts.offsetOf(index),
+                partSize = FileParts.sizeOf(index, candidate.copy.sizeBytes),
+                partHash = candidate.sourceParts.getOrNull(index)?.plainHash
+            )
+        }
+    }
+
+    /** Best-effort removal of forwarded messages a failed copy must not leave behind. */
+    private suspend fun deleteQuietly(chatId: Long, messageIds: List<Long>) {
+        if (messageIds.isEmpty()) return
+        try {
+            telegramClient.deleteMessages(chatId, messageIds)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // A leftover here is a caption-less orphan, never a second message carrying
+            // the source's manifest, so a failed cleanup cannot corrupt the library.
+        }
+    }
+
+    private fun TelegramException.toAppError(): AppError =
+        if (isRateLimit) AppError.RateLimited(retryAfterSeconds ?: 0)
+        else AppError.TelegramError(code, message)
+
+    /** The manifest every channel message of a copy carries, whichever way it was created. */
+    private suspend fun copyManifest(copy: FileEntity): RemoteFileManifest =
+        RemoteFileManifest(
             fileId = copy.id,
             name = copy.name,
             folderPath = folderPathResolver.pathOf(copy.folderId),
@@ -589,11 +767,16 @@ class FileRepositoryImpl(
             height = copy.height,
             durationMs = copy.durationMs
         )
+
+    private suspend fun remoteCopyRequest(
+        copy: FileEntity,
+        remoteFileId: String
+    ): TelegramDocumentCopyRequest {
         return TelegramDocumentCopyRequest(
             remoteFileId = remoteFileId,
             fileName = if (copy.isEncrypted) "${copy.id}.tde" else copy.name,
             mimeType = if (copy.isEncrypted) "application/octet-stream" else copy.mimeType,
-            caption = manifestCodec.encode(manifest, copy.isEncrypted)
+            caption = manifestCodec.encode(copyManifest(copy), copy.isEncrypted)
         )
     }
 
@@ -1049,6 +1232,9 @@ class FileRepositoryImpl(
         private const val MAX_FOLDER_DEPTH = 64
         private const val FOLDER_SEARCH_LIMIT = 200
         private const val NOTE_TITLE_LIMIT = 60
+
+        /** TDLib forwards at most 100 messages in one call. */
+        private const val MAX_FORWARD_BATCH = 100
     }
 
     private fun escapeLike(value: String): String =

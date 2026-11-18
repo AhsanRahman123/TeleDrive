@@ -1075,6 +1075,37 @@ class DesktopTelegramClient(
         }
     }
 
+    /**
+     * Forwards messages back into the same chat as clean copies (send_copy): Telegram
+     * duplicates them server-side, with no forward header and — via remove_caption — no
+     * caption, so a copy never carries its source's manifest even briefly. The answer lists
+     * the new messages in the order the ids were passed; a slot Telegram left empty (or a
+     * message that is not a document) becomes null.
+     */
+    override suspend fun forwardDocuments(
+        chatId: Long,
+        messageIds: List<Long>
+    ): List<RemoteDocument?> {
+        if (messageIds.isEmpty()) return emptyList()
+        val forwarded = paced {
+            send<TdApi.Messages>(
+                TdApi.ForwardMessages(
+                    chatId,
+                    null,
+                    chatId,
+                    messageIds.toLongArray(),
+                    null,
+                    true,
+                    true
+                )
+            )
+        }
+        val messages = forwarded.messages
+        return messageIds.indices.map { index ->
+            messages.getOrNull(index)?.toRemoteDocument()
+        }
+    }
+
     @OptIn(DelicateCoroutinesApi::class)
     override fun downloadDocument(
         remoteFileId: String,
