@@ -632,9 +632,11 @@ class FileRepositoryImpl(
      * counted as failed, so a copy attempt never leaves behind a message that still claims
      * to be the source file.
      *
-     * The forwarded ids are registered in [InFlightForwardedCopies] the moment they land
-     * and stay registered until the copy is recorded or the messages are deleted, so a
-     * sync running alongside cannot adopt the still caption-less messages as stray root
+     * The forwarded messages' final ids — resolved by the client, because the ids a
+     * forward starts with are temporary ones Telegram retires as each send succeeds —
+     * are registered in [InFlightForwardedCopies] the moment they land and stay
+     * registered until the copy is recorded or the messages are deleted, so a sync
+     * running alongside cannot adopt the still caption-less messages as stray root
      * files in between. Every exit path — including cancellation of the operation
      * itself — deletes whatever was forwarded but never recorded before the protection
      * is lifted, so an interrupted copy leaves zero orphan messages behind.
@@ -651,12 +653,18 @@ class FileRepositoryImpl(
             messageIds.map { ForwardSlot(candidateIndex, it) }
         }
         // TDLib forwards at most 100 messages per call and wants their ids strictly
-        // increasing, so flatten everything and answer per message id. Only the raw new
-        // message ids are collected here: the answer's documents can lag behind the
-        // forwards (a just-forwarded file may have no remote identity in it yet), and
-        // reading that lag as "not arrived" once failed every copy in an operation.
-        // Identities are re-read per candidate below, from the ids themselves.
+        // increasing, so flatten everything and answer per message id. Only the new
+        // message ids are collected here — final ids, resolved by the client, because
+        // the ids a forward starts with are temporary ones Telegram retires as each
+        // send succeeds. The answer's documents can lag behind the forwards (a
+        // just-forwarded file may have no remote identity in it yet), and reading that
+        // lag as "not arrived" once failed every copy in an operation. Identities are
+        // re-read per candidate below, from the ids themselves.
         val forwardedIds = HashMap<Long, Long>()
+        // Final id -> the temporary id the forward started under, when the two differ.
+        // Cleanup-only: deletions target both forms, so a message is removed under
+        // whichever id it currently lives under; nothing else ever keys on these.
+        val temporaryIds = HashMap<Long, Long>()
         val registeredHere = mutableSetOf<Long>()
         // Landed ids that are neither recorded nor deleted yet. The finally block
         // deletes whatever is still in here — under NonCancellable, so the deletion
@@ -668,6 +676,12 @@ class FileRepositoryImpl(
                 answers.getOrNull(index)?.let { forwarded ->
                     forwardedIds[sourceId] = forwarded.messageId
                     landed += forwarded.messageId
+                    forwarded.temporaryMessageId
+                        ?.takeIf { it != forwarded.messageId }
+                        ?.let { temporaryId ->
+                            temporaryIds[forwarded.messageId] = temporaryId
+                            unresolvedIds += temporaryId
+                        }
                 }
             }
             if (landed.isNotEmpty()) {
@@ -676,6 +690,10 @@ class FileRepositoryImpl(
                 unresolvedIds += landed
             }
         }
+        // Every id a deletion should target for these messages: the final id each one
+        // lives under, plus the temporary id it started under when the two differ.
+        fun cleanupIds(ids: List<Long>): List<Long> =
+            ids.flatMap { id -> listOfNotNull(id, temporaryIds[id]) }.distinct()
         try {
             for (chunk in slots.chunked(MAX_FORWARD_BATCH)) {
                 val chunkIds = chunk.map { it.messageId }.distinct().sorted()
@@ -717,8 +735,9 @@ class FileRepositoryImpl(
                     // forwarded id, read back or not — so it cannot linger in the
                     // channel as an unlabelled orphan.
                     val arrivedIds = newIds.filterNotNull()
-                    deleteQuietly(chatId, arrivedIds)
-                    unresolvedIds.removeAll(arrivedIds)
+                    val arrivedCleanupIds = cleanupIds(arrivedIds)
+                    deleteQuietly(chatId, arrivedCleanupIds)
+                    unresolvedIds.removeAll(arrivedCleanupIds)
                     InFlightForwardedCopies.unregister(chatId, arrivedIds)
                     if (lastError == null) {
                         lastError = AppError.TelegramError(
@@ -734,6 +753,7 @@ class FileRepositoryImpl(
                     continue
                 }
                 val candidateIds = newIds.filterNotNull()
+                val candidateCleanupIds = cleanupIds(candidateIds)
 
                 // The settle re-read: a forwarded message that has not finished
                 // sending yet, or whose file has no remote identity yet, is re-read
@@ -742,8 +762,8 @@ class FileRepositoryImpl(
                 // once multiplied the strays that sync then adopted.
                 val forwarded = awaitForwardedDocuments(chatId, candidateIds)
                 if (forwarded == null) {
-                    deleteQuietly(chatId, candidateIds)
-                    unresolvedIds.removeAll(candidateIds)
+                    deleteQuietly(chatId, candidateCleanupIds)
+                    unresolvedIds.removeAll(candidateCleanupIds)
                     InFlightForwardedCopies.unregister(chatId, candidateIds)
                     if (lastError == null) {
                         lastError = AppError.TelegramError(
@@ -780,8 +800,8 @@ class FileRepositoryImpl(
                 if (!relabelled) {
                     // The safeguard: a forwarded message that could not be relabelled is
                     // deleted at once, inside the copy operation itself.
-                    deleteQuietly(chatId, candidateIds)
-                    unresolvedIds.removeAll(candidateIds)
+                    deleteQuietly(chatId, candidateCleanupIds)
+                    unresolvedIds.removeAll(candidateCleanupIds)
                     InFlightForwardedCopies.unregister(chatId, candidateIds)
                     SafeLog.d(
                         TAG,
@@ -822,7 +842,7 @@ class FileRepositoryImpl(
                         )
                     }
                 }
-                unresolvedIds.removeAll(candidateIds)
+                unresolvedIds.removeAll(candidateCleanupIds)
                 InFlightForwardedCopies.unregister(chatId, candidateIds)
                 copied++
                 SafeLog.d(
@@ -863,30 +883,70 @@ class FileRepositoryImpl(
      * the same messages — never by forwarding again, which would create a second copy
      * of each message. Identity alone is not enough: a message still in its sending
      * state refuses the caption edit that relabels it, and every copy once failed on
-     * exactly that. Returns the documents in the order of [messageIds], or null when
-     * the bounded wait runs out.
+     * exactly that. The ids are the forwards' FINAL ids — the client resolves the
+     * temporary ids a send starts under before returning them — so the message being
+     * re-read here is the message that will keep the label. Returns the documents in
+     * the order of [messageIds], or null when the bounded wait runs out.
      */
     private suspend fun awaitForwardedDocuments(
         chatId: Long,
         messageIds: List<Long>
     ): List<RemoteDocument>? {
         val found = HashMap<Long, RemoteDocument>()
+        val identitySeen = mutableSetOf<Long>()
+        val settledSeen = mutableSetOf<Long>()
         var attempts = 0
         while (true) {
             for (messageId in messageIds) {
                 if (messageId in found) continue
                 telegramClient.getDocument(chatId, messageId)?.let { document ->
+                    identitySeen += messageId
                     if (telegramClient.isMessageSettled(chatId, messageId)) {
+                        settledSeen += messageId
                         found[messageId] = document
                     }
                 }
             }
             if (found.size == messageIds.size) {
+                logSettleOutcome(messageIds, identitySeen, settledSeen)
                 return messageIds.map { found.getValue(it) }
             }
-            if (++attempts > MAX_FORWARD_READ_ATTEMPTS) return null
+            if (++attempts > MAX_FORWARD_READ_ATTEMPTS) {
+                logSettleOutcome(messageIds, identitySeen, settledSeen)
+                return null
+            }
             delay(FORWARD_READ_DELAY_MS)
         }
+    }
+
+    /**
+     * One line per settle wait, naming each forwarded message's final id with what the
+     * wait last observed for it: whether its file identity ever appeared, and whether
+     * its sending state ever cleared. Two builds failed at this wait with neither fact
+     * recorded, which kept the real mechanism at "strongly indicated" for days — this
+     * line is what names the next refusal, if there is one.
+     */
+    private fun logSettleOutcome(
+        messageIds: List<Long>,
+        identitySeen: Set<Long>,
+        settledSeen: Set<Long>
+    ) {
+        SafeLog.d(
+            TAG,
+            "Copy: settle wait concluded — " + messageIds.joinToString("; ") { messageId ->
+                val identity = if (messageId in identitySeen) {
+                    "identity found"
+                } else {
+                    "identity missing"
+                }
+                val sending = when {
+                    messageId in settledSeen -> "sending state cleared"
+                    messageId in identitySeen -> "still sending"
+                    else -> "sending state not observed"
+                }
+                "$messageId: $identity, $sending"
+            }
+        )
     }
 
     /**

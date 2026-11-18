@@ -157,11 +157,15 @@ interface TelegramClient {
      * original sender and no caption, so each copy is born blank and its owner can relabel it
      * with its own manifest. [messageIds] must be in strictly increasing order (at most 100
      * per call). Results are returned in the same order as [messageIds]; a null entry marks a
-     * slot Telegram created nothing for. A non-null entry always carries the new message's
-     * id, but its document can still be null while Telegram fills in the forwarded file's
-     * remote identity — re-read it with [getDocument] rather than treating the forward as
-     * failed. The default implementation cannot forward, so simple/test clients keep
-     * compiling.
+     * slot Telegram created nothing for — including a forward whose send failed or whose
+     * final id could not be resolved in time. A non-null entry always carries the new
+     * message's FINAL id: a just-sent message starts under a temporary id that Telegram
+     * retires when the send succeeds, so implementations resolve that mapping before
+     * returning and report the temporary id separately (see [ForwardedMessage]), for
+     * clean-up only. The entry's document can still be null while Telegram fills in the
+     * forwarded file's remote identity — re-read it with [getDocument] rather than
+     * treating the forward as failed. The default implementation cannot forward, so
+     * simple/test clients keep compiling.
      */
     suspend fun forwardDocuments(
         chatId: Long,

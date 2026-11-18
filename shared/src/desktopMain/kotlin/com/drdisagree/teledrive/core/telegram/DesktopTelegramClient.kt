@@ -1080,32 +1080,143 @@ class DesktopTelegramClient(
      * duplicates them server-side, with no forward header and — via remove_caption — no
      * caption, so a copy never carries its source's manifest even briefly. The answer lists
      * the new messages in the order the ids were passed; a slot Telegram left empty becomes
-     * null. A filled slot keeps the new message's id even when its document cannot be read
-     * yet, so the caller can re-read or delete that exact message either way.
+     * null.
+     *
+     * The answer's ids are NOT final: a message that is still sending lives under a
+     * temporary id, and when its send succeeds Telegram retires that id and re-issues the
+     * message under its final server id — UpdateMessageSendSucceeded carries the mapping
+     * (oldMessageId -> message.id). Everything a caller does with the answer keys on the
+     * message id (registering the message as in-flight, re-reading it until it settles,
+     * editing its caption), so the mapping is resolved here first, the same way
+     * copyDocument and copyDocuments already resolve it for their sends. A message the
+     * answer already shows as sent keeps its id — it is final. A still-sending one is
+     * followed through the send updates, bounded by FORWARD_RESOLVE_TIMEOUT_MS. A forward
+     * whose send fails, or whose final id does not arrive in time, counts as not arrived
+     * (null slot) and is deleted here under its temporary id — the only id it is known
+     * by — because the caller never learns that id and could not clean the message up.
      */
     override suspend fun forwardDocuments(
         chatId: Long,
         messageIds: List<Long>
     ): List<ForwardedMessage?> {
         if (messageIds.isEmpty()) return emptyList()
-        val forwarded = paced {
-            send<TdApi.Messages>(
-                TdApi.ForwardMessages(
-                    chatId,
-                    null,
-                    chatId,
-                    messageIds.toLongArray(),
-                    null,
-                    true,
-                    true
-                )
-            )
-        }
-        val messages = forwarded.messages
-        return messageIds.indices.map { index ->
-            messages.getOrNull(index)?.let { message ->
-                ForwardedMessage(message.id, message.toRemoteDocument())
+
+        val subscribed = CompletableDeferred<Unit>()
+        val events = Channel<TdApi.Object>(Channel.UNLIMITED)
+        val collector = scope.launch {
+            updates.onSubscription { subscribed.complete(Unit) }.collect { event ->
+                events.send(event)
             }
+        }
+
+        try {
+            withTimeoutOrNull(COPY_TIMEOUT_MS.milliseconds) { subscribed.await() }
+                ?: throw TelegramException(REQUEST_TIMEOUT_CODE, "Telegram update listener did not start")
+
+            val forwarded = paced {
+                send<TdApi.Messages>(
+                    TdApi.ForwardMessages(
+                        chatId,
+                        null,
+                        chatId,
+                        messageIds.toLongArray(),
+                        null,
+                        true,
+                        true
+                    )
+                )
+            }
+            val messages = forwarded.messages
+
+            val slots = arrayOfNulls<ForwardedMessage>(messageIds.size)
+            // Temporary id -> slot index, for the forwards still sending in the answer.
+            val pending = HashMap<Long, Int>()
+            messages.forEachIndexed { index, message ->
+                if (index >= messageIds.size) return@forEachIndexed
+                if (message.sendingState == null) {
+                    slots[index] = ForwardedMessage(message.id, message.toRemoteDocument())
+                } else {
+                    pending[message.id] = index
+                }
+            }
+
+            var timeouts = 0
+            var failures = 0
+            if (pending.isNotEmpty()) {
+                var interrupted: CancellationException? = null
+                val allResolved = try {
+                    withTimeoutOrNull(FORWARD_RESOLVE_TIMEOUT_MS.milliseconds) {
+                        while (pending.isNotEmpty()) {
+                            when (val event = events.receive()) {
+                                is TdApi.UpdateMessageSendSucceeded -> {
+                                    val index = pending.remove(event.oldMessageId)
+                                    if (index != null) {
+                                        val finalMessage = event.message
+                                        slots[index] = ForwardedMessage(
+                                            messageId = finalMessage.id,
+                                            document = finalMessage.toRemoteDocument(),
+                                            temporaryMessageId = event.oldMessageId
+                                                .takeIf { it != finalMessage.id }
+                                        )
+                                    }
+                                }
+
+                                is TdApi.UpdateMessageSendFailed -> {
+                                    if (pending.remove(event.oldMessageId) != null) {
+                                        failures++
+                                        deleteForwardsQuietly(chatId, listOf(event.oldMessageId))
+                                    }
+                                }
+                            }
+                        }
+                        true
+                    } != null
+                } catch (error: CancellationException) {
+                    interrupted = error
+                    false
+                }
+                if (!allResolved) {
+                    if (interrupted == null) timeouts = pending.size
+                    val leftovers = pending.keys.toList()
+                    pending.clear()
+                    if (leftovers.isNotEmpty()) {
+                        // Under NonCancellable: this also runs when the wait itself was
+                        // cancelled, so an operation interrupted mid-resolution still
+                        // leaves no forwards behind that nobody can name.
+                        withContext(NonCancellable) {
+                            deleteForwardsQuietly(chatId, leftovers)
+                        }
+                    }
+                    if (interrupted != null) throw interrupted
+                }
+            }
+
+            SafeLog.d(
+                TAG,
+                "Forward: resolved ${slots.count { it != null }} of ${messageIds.size} " +
+                    "forwarded ids to final ids ($timeouts timed out, $failures failed)"
+            )
+            return slots.toList()
+        } finally {
+            collector.cancel()
+            events.close()
+        }
+    }
+
+    /**
+     * Best-effort removal of forwarded messages that count as not arrived (their send
+     * failed, or their final id never resolved). The caller never learns the temporary
+     * ids such messages live under, so the deletion has to happen here; a failure is
+     * swallowed because the message is either already gone or still sending under an id
+     * Telegram is about to retire.
+     */
+    private suspend fun deleteForwardsQuietly(chatId: Long, temporaryIds: List<Long>) {
+        try {
+            deleteMessages(chatId, temporaryIds)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // Best effort only — see the doc above.
         }
     }
 
@@ -1617,6 +1728,7 @@ class DesktopTelegramClient(
         private const val PROXY_READY_WAIT_MS = 10_000L
         private const val REQUEST_TIMEOUT_CODE = 408
         private const val COPY_TIMEOUT_MS = 30_000L
+        private const val FORWARD_RESOLVE_TIMEOUT_MS = 10_000L
         private const val CLIENT_WAIT_STEP_MS = 10L
         private const val DOWNLOAD_PRIORITY = 16
         const val DOWNLOAD_RESUME_INTERVAL_MS = 15_000L
