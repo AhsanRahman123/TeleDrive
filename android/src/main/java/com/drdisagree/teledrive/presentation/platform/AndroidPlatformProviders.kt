@@ -37,6 +37,7 @@ import com.drdisagree.teledrive.domain.model.AppTheme
 import com.drdisagree.teledrive.domain.model.UserPreferences
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.presentation.applock.requireDeviceOwner
+import com.drdisagree.teledrive.presentation.common.openFileWithChooser
 import com.drdisagree.teledrive.presentation.common.openLink
 import com.drdisagree.teledrive.presentation.common.shareLocalFiles
 import com.drdisagree.teledrive.presentation.platform.AndroidUploadPickerDialog
@@ -144,6 +145,12 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
         }
     }
 
+    val fileOpener = remember(context) {
+        FileOpener { path, displayName, mimeType ->
+            openFileWithChooser(context, path, displayName, mimeType)
+        }
+    }
+
     val consentCallback = remember { CallbackHolder<Boolean>() }
     val consentLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -215,6 +222,7 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
         LocalFilePicker provides filePicker,
         LocalMultiFilePicker provides multiFilePicker,
         LocalFileSharer provides fileSharer,
+        LocalFileOpener provides fileOpener,
         LocalDeleteConsentLauncher provides deleteConsentLauncher,
         LocalPermissionRequester provides permissionRequester,
         LocalSystemScreens provides systemScreens,

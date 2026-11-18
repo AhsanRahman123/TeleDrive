@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.core.transfer
 
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
@@ -9,9 +10,12 @@ import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramUploadEvent
 import com.drdisagree.teledrive.data.local.entity.FileEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 class ApkIconUploader(
     private val telegramClient: TelegramClient,
@@ -56,20 +60,51 @@ class ApkIconUploader(
             iconMimeType = "image/jpeg"
         }
 
+        SafeLog.d(TAG, "APK icon upload started for ${entity.name}")
         var resultId: String? = null
         try {
-            runCatching {
-                telegramClient.uploadDocument(
-                    chatId = chatId,
-                    localPath = iconUploadPath,
-                    fileName = iconFileName,
-                    mimeType = iconMimeType,
-                    caption = ICON_CAPTION,
-                    thumbnailPath = null
-                ).first { it is TelegramUploadEvent.Completed } as? TelegramUploadEvent.Completed
-            }.getOrNull()?.let { completed ->
-                val doc = completed.document
-                resultId = "${doc.remoteFileId}:${doc.messageId}"
+            // The icon is an optional decoration: it must never gate the file itself.
+            // uploadDocument completes only when Telegram's send-succeeded update
+            // arrives, and in a bad session that update may never come — the old
+            // unbounded wait parked the whole transfer at 0% before the real upload
+            // even started, unreachable by Pause/Cancel. Bound the wait like the
+            // folder-state upload: on timeout or failure, proceed with no icon.
+            var failure: Throwable? = null
+            val completed = try {
+                withTimeoutOrNull(ICON_UPLOAD_TIMEOUT_MS.milliseconds) {
+                    telegramClient.uploadDocument(
+                        chatId = chatId,
+                        localPath = iconUploadPath,
+                        fileName = iconFileName,
+                        mimeType = iconMimeType,
+                        caption = ICON_CAPTION,
+                        thumbnailPath = null
+                    ).first { it is TelegramUploadEvent.Completed } as TelegramUploadEvent.Completed
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failure = e
+                null
+            }
+            when {
+                completed != null -> {
+                    val doc = completed.document
+                    resultId = "${doc.remoteFileId}:${doc.messageId}"
+                    SafeLog.d(TAG, "APK icon uploaded for ${entity.name}: $resultId")
+                }
+
+                failure != null -> SafeLog.w(
+                    TAG,
+                    "APK icon upload failed for ${entity.name}; continuing without an icon",
+                    failure
+                )
+
+                else -> SafeLog.w(
+                    TAG,
+                    "APK icon upload timed out after ${ICON_UPLOAD_TIMEOUT_MS}ms for " +
+                        "${entity.name}; continuing without an icon"
+                )
             }
         } finally {
             stagingIconFile?.delete()
@@ -80,5 +115,7 @@ class ApkIconUploader(
 
     companion object {
         const val ICON_CAPTION = "#teledrive-icon"
+        private const val TAG = "ApkIconUploader"
+        private const val ICON_UPLOAD_TIMEOUT_MS = 30_000L
     }
 }

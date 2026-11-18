@@ -10,6 +10,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.drdisagree.teledrive.R
 import com.drdisagree.teledrive.core.common.AppNotifications
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.telegram.TelegramSession
 import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
@@ -17,11 +18,13 @@ import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Expedited with a dataSync foreground service, so long transfers survive app death. */
 class TransferQueueWorker(
@@ -35,36 +38,59 @@ class TransferQueueWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        if (!drainer.hasRunnableWork()) return Result.success()
-        if (!telegramSession.ensureReady()) return Result.retry()
-        appNotifications.createChannels()
-        runCatching { setForeground(getForegroundInfo()) }
+        try {
+            if (!drainer.hasRunnableWork()) return Result.success()
+            if (!telegramSession.ensureReady()) return Result.retry()
+            appNotifications.createChannels()
+            runCatching { setForeground(getForegroundInfo()) }
 
-        val result = coroutineScope {
-            val progress = launch { showProgress() }
-            drainer.drain(
-                isStopped = { isStopped },
-                onTerminalFailure = { transfer ->
-                    if (settingsRepository.preferences.first().failureNotifications) {
-                        appNotifications.notifyFailure(
-                            title = applicationContext.getString(
-                                when (transfer.type) {
-                                    TransferType.UPLOAD,
-                                    TransferType.BACKUP -> R.string.notification_upload_failed
+            val result = coroutineScope {
+                val progress = launch { showProgress() }
+                drainer.drain(
+                    isStopped = { isStopped },
+                    onTerminalFailure = { transfer ->
+                        if (settingsRepository.preferences.first().failureNotifications) {
+                            appNotifications.notifyFailure(
+                                title = applicationContext.getString(
+                                    when (transfer.type) {
+                                        TransferType.UPLOAD,
+                                        TransferType.BACKUP -> R.string.notification_upload_failed
 
-                                    TransferType.DOWNLOAD,
-                                    TransferType.RESTORE -> R.string.notification_download_failed
-                                }
-                            ),
-                            message = transfer.displayName
-                        )
+                                        TransferType.DOWNLOAD,
+                                        TransferType.RESTORE -> R.string.notification_download_failed
+                                    }
+                                ),
+                                message = transfer.displayName
+                            )
+                        }
                     }
-                }
-            ).also { progress.cancel() }
+                ).also { progress.cancel() }
+            }
+            return when (result) {
+                TransferDrainResult.COMPLETED -> Result.success()
+                TransferDrainResult.INTERRUPTED -> Result.retry()
+            }
+        } finally {
+            SafeLog.d(TAG, "Transfer queue worker ending (stopped=$isStopped)")
+            clearBannerIfQueueEmpty()
         }
-        return when (result) {
-            TransferDrainResult.COMPLETED -> Result.success()
-            TransferDrainResult.INTERRUPTED -> Result.retry()
+    }
+
+    /**
+     * The banner is this worker's foreground notification and nothing else ever
+     * removes it. When a run ends with an empty active set — drained normally,
+     * cancelled down to empty, or failed on the way out — the banner ends with the
+     * run instead of freezing at its last frame. A non-empty set means work is
+     * still queued (e.g. this run is retrying), and the next run re-posts it.
+     */
+    private suspend fun clearBannerIfQueueEmpty() {
+        val activeEmpty = withContext(NonCancellable) {
+            runCatching { transferDao.observeActive(1).first().isEmpty() }
+                .getOrDefault(false)
+        }
+        if (activeEmpty) {
+            appNotifications.cancelTransfers()
+            SafeLog.d(TAG, "Transfer queue empty at worker end; transfers banner cleared")
         }
     }
 
@@ -165,6 +191,7 @@ class TransferQueueWorker(
 
     companion object {
         const val UNIQUE_NAME = "transfer_queue"
+        private const val TAG = "TransferQueueWorker"
         private const val QUEUE_REQUEST_CODE = 3
         private const val PROGRESS_ROW_LIMIT = 1000
         private const val PROGRESS_INTERVAL_MS = 1_000L

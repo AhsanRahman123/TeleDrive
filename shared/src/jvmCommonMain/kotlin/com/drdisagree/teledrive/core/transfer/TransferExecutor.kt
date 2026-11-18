@@ -163,6 +163,11 @@ class TransferExecutor(
     }
 
     suspend fun execute(transfer: TransferEntity): TransferOutcome = try {
+        SafeLog.d(
+            TAG,
+            "Transfer execution started: id=${transfer.id} type=${transfer.type} " +
+                "name=${transfer.displayName} size=${transfer.sizeBytes}"
+        )
         when (transfer.type) {
             TransferType.UPLOAD, TransferType.BACKUP -> executeUpload(transfer)
             TransferType.DOWNLOAD, TransferType.RESTORE -> executeDownload(transfer)
@@ -213,6 +218,30 @@ class TransferExecutor(
         val sourceFile = File(localPath)
         if (!sourceFile.exists()) return TransferOutcome.Failed(messages.localFileGone)
 
+        // Preparation (hashing, the APK icon upload, encryption staging) used to be
+        // unreachable by Pause/Cancel: control was only polled inside the main upload
+        // loop, so a transfer parked in preparation ignored Cancel forever and never
+        // even failed. The body now polls checkControl between preparation steps, and
+        // a control exception thrown there lands in this catch with exactly the
+        // in-loop semantics — paused stays queued-paused, cancelled ends CANCELLED.
+        return try {
+            executeUploadBody(transfer, entity, localPath, sourceFile)
+        } catch (e: TransferControlException) {
+            fileDao.setBackupStateIfLocalOnly(
+                entity.id,
+                if (e.paused) BackupState.QUEUED else BackupState.NONE
+            )
+            if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
+        }
+    }
+
+    private suspend fun executeUploadBody(
+        transfer: TransferEntity,
+        entity: FileEntity,
+        localPath: String,
+        sourceFile: File
+    ): TransferOutcome {
+        checkControl(transfer.id)
         val prefs = settingsRepository.preferences.first()
         val chatId = transfer.chatId
             ?: entity.chatId
@@ -239,7 +268,9 @@ class TransferExecutor(
             ?.takeIf { entity.chatId == chatId && filePartDao.countOf(entity.id) == 0 }
 
         val rawIconPath = thumbnailStore.uploadThumbnailFile(entity.id)?.absolutePath
+        checkControl(transfer.id)
         val iconFileId = apkIconUploader.uploadIconIfApk(entity, chatId, encrypt)
+        checkControl(transfer.id)
         val previewPath = if (encrypt) null else rawIconPath
 
         val manifest = RemoteFileManifest(
@@ -263,6 +294,7 @@ class TransferExecutor(
         val caption = manifestCodec.encode(manifest, encrypt)
 
         fileDao.setBackupState(entity.id, BackupState.UPLOADING)
+        checkControl(transfer.id)
 
         if (splitsIntoParts(entity, sourceFile, encrypt)) {
             try {
@@ -287,6 +319,7 @@ class TransferExecutor(
             }
         }
 
+        checkControl(transfer.id)
         var stagingFile: File? = null
         val (uploadPath, uploadName) = if (encrypt) {
             val staging = File(stagingDir(), "${entity.id}.tde")
@@ -331,6 +364,11 @@ class TransferExecutor(
                             ticker.tick(event.transferredBytes, now)?.let { speed ->
                                 transferDao.updateProgress(
                                     transfer.id, event.transferredBytes, speed, now
+                                )
+                                SafeLog.d(
+                                    "TransferDiagnostics",
+                                    "UPLOAD_SAMPLE transferId=${transfer.id} bytes=${event.transferredBytes} " +
+                                        "total=$uploadSize bytesPerSecond=$speed"
                                 )
                             }
                         }
@@ -447,6 +485,11 @@ class TransferExecutor(
                                 ticker.tick(event.transferredBytes, now)?.let { speed ->
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
+                                    )
+                                    SafeLog.d(
+                                        "TransferDiagnostics",
+                                        "PART_UPLOAD_SAMPLE transferId=${transfer.id} bytes=${event.transferredBytes} " +
+                                            "total=${entity.sizeBytes} bytesPerSecond=$speed"
                                     )
                                 }
                             }

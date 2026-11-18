@@ -95,6 +95,7 @@ import com.drdisagree.teledrive.presentation.components.keyboardCollectionItem
 import com.drdisagree.teledrive.presentation.components.liftedTopAppBarColors
 import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollection
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
+import com.drdisagree.teledrive.presentation.platform.LocalFileOpener
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
@@ -147,6 +148,7 @@ fun TransfersScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val transferConcurrency by viewModel.transferConcurrency.collectAsStateWithLifecycle()
     val fileRevealer = LocalFileRevealer.current
+    val fileOpener = LocalFileOpener.current
     val telegramClient = koinInject<TelegramClient>()
     val speedLimitDirection by telegramClient.speedLimitNotifications
         .map { isUpload -> if (isUpload) 1 else 0 }
@@ -741,6 +743,11 @@ fun TransfersScreen(
                 TransferRow(
                     transfer = transfer,
                     onOpenInApp = transfer.fileId?.let { id -> { onOpenFile(id) } },
+                    onOpenWith = if (transfer.type.isIncoming) {
+                        transfer.localPath?.takeIf { fileOpener != null }?.let { path ->
+                            { fileOpener?.openWith(path, transfer.displayName, null) }
+                        }
+                    } else null,
                     onShowInFolder = transfer.localPath?.takeIf { fileRevealer != null }?.let { path ->
                         { fileRevealer?.reveal(path) }
                     },
@@ -901,6 +908,7 @@ private fun TransferRow(
     onMoveToTop: (() -> Unit)? = null,
     dragEnabled: Boolean = false,
     onOpenInApp: (() -> Unit)? = null,
+    onOpenWith: (() -> Unit)? = null,
     onShowInFolder: (() -> Unit)? = null,
     selected: Boolean = false,
     onSelect: ((Boolean) -> Unit)? = null,
@@ -994,7 +1002,8 @@ private fun TransferRow(
                     }
                 }
                 if (onCancel != null || onPriorityChange != null ||
-                    onOpenInApp != null || onShowInFolder != null || onDetails != null
+                    onOpenInApp != null || onOpenWith != null ||
+                    onShowInFolder != null || onDetails != null
                 ) {
                     Box {
                         TooltipIconButton(tooltip = "Transfer actions", onClick = { showRowMenu = true }, modifier = actions) {
@@ -1011,6 +1020,16 @@ private fun TransferRow(
                                     onClick = {
                                         showRowMenu = false
                                         open()
+                                    }
+                                )
+                            }
+                            onOpenWith?.let { openWith ->
+                                DropdownMenuItem(
+                                    text = { Text("Open with…") },
+                                    leadingIcon = { Icon(Icons.Filled.OpenInNew, contentDescription = null) },
+                                    onClick = {
+                                        showRowMenu = false
+                                        openWith()
                                     }
                                 )
                             }

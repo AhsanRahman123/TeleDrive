@@ -114,6 +114,19 @@ class AppNotifications(
         }
     }
 
+    /**
+     * Removes the transfers worker's foreground banner. Same reasoning as
+     * [cancelPublish]: that banner is posted only by TransferQueueWorker and nothing
+     * else in the app ever removes it, so the worker clears it on every exit that
+     * leaves the queue empty — otherwise it stays frozen at its last frame
+     * ("Uploading 1 of 3 files • 0%") after the work is gone.
+     */
+    fun cancelTransfers() {
+        runCatching {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_TRANSFER_QUEUE)
+        }
+    }
+
     fun createChannels() {
         val manager = NotificationManagerCompat.from(context)
         manager.createNotificationChannel(

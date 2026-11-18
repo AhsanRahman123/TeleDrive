@@ -349,6 +349,11 @@ class TransferRepositoryImpl(
             updatedAt = now
         )
         transferDao.upsert(transfer)
+        SafeLog.d(
+            TAG,
+            "Transfer enqueued: id=${transfer.id} type=${transfer.type} " +
+                "name=${transfer.displayName} size=${transfer.sizeBytes}"
+        )
         kickWorker()
         return AppResult.Success(transfer.id)
     }
@@ -412,12 +417,13 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun cancelAll() {
-        enqueueLock.withLock {
+        val cancelled = enqueueLock.withLock {
             // Serialize cancellation against upload inserts. Any import batch holding an older
             // generation is rejected if it tries to enqueue after this block completes.
             uploadBatchGeneration.advance()
             transferDao.cancelAll(System.currentTimeMillis())
         }
+        SafeLog.d(TAG, "Cancel-all invoked: $cancelled transfers cancelled")
         syncFileStates()
         backupSessionTracker.refreshActive()
     }
