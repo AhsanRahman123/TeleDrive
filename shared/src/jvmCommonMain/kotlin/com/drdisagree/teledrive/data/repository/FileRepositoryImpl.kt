@@ -53,7 +53,11 @@ import com.drdisagree.teledrive.domain.repository.FileRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.usecase.FolderCycleCheck
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -84,6 +88,22 @@ class FileRepositoryImpl(
     private val fileImporter: FileImporter,
     private val storagePaths: AppStoragePaths
 ) : FileRepository {
+
+    /**
+     * Copy operations run here, not in the caller's scope. A copy is launched from a
+     * folder screen's own lifetime, and in the per-folder navigation leaving the folder
+     * destroys that screen and cancels everything it started — a 57-file copy died
+     * mid-flight that way, leaving its forwarded messages behind as label-less orphans.
+     * This repository is a singleton, so its scope outlives every screen: the work runs
+     * to completion no matter where the user navigates, and a caller that goes away
+     * simply never hears the result. The forward pass additionally cleans up after
+     * itself under [NonCancellable], so even a cancellation that somehow lands here
+     * cannot strand a forwarded message.
+     */
+    private val operationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private suspend fun <T> runCopyOperation(block: suspend () -> T): T =
+        operationScope.async { block() }.await()
 
     override suspend fun resolveImportFolder(relativePath: String, parentId: String?): String? =
         if (relativePath.isBlank()) {
@@ -332,6 +352,11 @@ class FileRepositoryImpl(
     override suspend fun copyFiles(
         ids: List<String>,
         targetFolderId: String?
+    ): AppResult<Int> = runCopyOperation { copyFilesNow(ids, targetFolderId) }
+
+    private suspend fun copyFilesNow(
+        ids: List<String>,
+        targetFolderId: String?
     ): AppResult<Int> {
         if (ids.isEmpty()) return AppResult.Success(0)
         if (targetFolderId != null && folderDao.byId(targetFolderId) == null) {
@@ -455,6 +480,11 @@ class FileRepositoryImpl(
     }
 
     override suspend fun copyFolder(
+        id: String,
+        targetParentId: String?
+    ): AppResult<FolderCopyResult> = runCopyOperation { copyFolderNow(id, targetParentId) }
+
+    private suspend fun copyFolderNow(
         id: String,
         targetParentId: String?
     ): AppResult<FolderCopyResult> {
@@ -605,7 +635,9 @@ class FileRepositoryImpl(
      * The forwarded ids are registered in [InFlightForwardedCopies] the moment they land
      * and stay registered until the copy is recorded or the messages are deleted, so a
      * sync running alongside cannot adopt the still caption-less messages as stray root
-     * files in between.
+     * files in between. Every exit path — including cancellation of the operation
+     * itself — deletes whatever was forwarded but never recorded before the protection
+     * is lifted, so an interrupted copy leaves zero orphan messages behind.
      */
     private suspend fun forwardRemoteCopies(
         chatId: Long,
@@ -626,6 +658,10 @@ class FileRepositoryImpl(
         // Identities are re-read per candidate below, from the ids themselves.
         val forwardedIds = HashMap<Long, Long>()
         val registeredHere = mutableSetOf<Long>()
+        // Landed ids that are neither recorded nor deleted yet. The finally block
+        // deletes whatever is still in here — under NonCancellable, so the deletion
+        // runs even when the operation itself was cancelled — before unregistering.
+        val unresolvedIds = mutableSetOf<Long>()
         fun recordLanded(sourceIds: List<Long>, answers: List<ForwardedMessage?>) {
             val landed = mutableListOf<Long>()
             sourceIds.forEachIndexed { index, sourceId ->
@@ -637,6 +673,7 @@ class FileRepositoryImpl(
             if (landed.isNotEmpty()) {
                 InFlightForwardedCopies.register(chatId, landed)
                 registeredHere += landed
+                unresolvedIds += landed
             }
         }
         try {
@@ -681,6 +718,7 @@ class FileRepositoryImpl(
                     // channel as an unlabelled orphan.
                     val arrivedIds = newIds.filterNotNull()
                     deleteQuietly(chatId, arrivedIds)
+                    unresolvedIds.removeAll(arrivedIds)
                     InFlightForwardedCopies.unregister(chatId, arrivedIds)
                     if (lastError == null) {
                         lastError = AppError.TelegramError(
@@ -697,14 +735,15 @@ class FileRepositoryImpl(
                 }
                 val candidateIds = newIds.filterNotNull()
 
-                // The identity re-read: a forwarded message whose file has no remote
-                // identity yet is re-read until the identity lands (bounded), never
-                // re-forwarded — forwarding again would duplicate the message, and
-                // retry rounds doing exactly that once multiplied the strays that
-                // sync then adopted.
+                // The settle re-read: a forwarded message that has not finished
+                // sending yet, or whose file has no remote identity yet, is re-read
+                // until it settles (bounded), never re-forwarded — forwarding again
+                // would duplicate the message, and retry rounds doing exactly that
+                // once multiplied the strays that sync then adopted.
                 val forwarded = awaitForwardedDocuments(chatId, candidateIds)
                 if (forwarded == null) {
                     deleteQuietly(chatId, candidateIds)
+                    unresolvedIds.removeAll(candidateIds)
                     InFlightForwardedCopies.unregister(chatId, candidateIds)
                     if (lastError == null) {
                         lastError = AppError.TelegramError(
@@ -720,6 +759,7 @@ class FileRepositoryImpl(
                     continue
                 }
 
+                var relabelError: TelegramException? = null
                 val relabelled = try {
                     val manifests = copyPartManifests(candidate)
                     forwarded.forEachIndexed { index, document ->
@@ -733,6 +773,7 @@ class FileRepositoryImpl(
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: TelegramException) {
+                    relabelError = error
                     if (lastError == null) lastError = error.toAppError()
                     false
                 }
@@ -740,10 +781,12 @@ class FileRepositoryImpl(
                     // The safeguard: a forwarded message that could not be relabelled is
                     // deleted at once, inside the copy operation itself.
                     deleteQuietly(chatId, candidateIds)
+                    unresolvedIds.removeAll(candidateIds)
                     InFlightForwardedCopies.unregister(chatId, candidateIds)
                     SafeLog.d(
                         TAG,
-                        "Copy: '${candidate.copy.name}' failed — relabel failed; " +
+                        "Copy: '${candidate.copy.name}' failed — relabel failed " +
+                            "(${relabelError?.code}: ${relabelError?.message}); " +
                             "deleted ${candidateIds.size} forwarded messages"
                     )
                     continue
@@ -779,6 +822,7 @@ class FileRepositoryImpl(
                         )
                     }
                 }
+                unresolvedIds.removeAll(candidateIds)
                 InFlightForwardedCopies.unregister(chatId, candidateIds)
                 copied++
                 SafeLog.d(
@@ -787,12 +831,23 @@ class FileRepositoryImpl(
                 )
             }
         } finally {
-            // The in-flight window closes with the operation: any id still registered
-            // here belongs to a message that was neither recorded nor deleted above
-            // (the operation was cancelled or failed midway). Unregistering cannot
-            // resurrect such a message — sync may adopt the orphan later, exactly as
-            // it treats any other caption-less message — but the registry must never
-            // outlive the operation that created it.
+            // The in-flight window closes with the operation. Any id still unresolved
+            // here belongs to a message that was neither recorded nor deleted above —
+            // the operation was cancelled or failed midway. Those messages are deleted
+            // BEFORE their protection is lifted, under NonCancellable so the deletion
+            // itself cannot be cancelled: an earlier version only unregistered them,
+            // and sync adopted the ~53 label-less leftovers of each cancelled copy as
+            // stray root files. The registry must never outlive the operation that
+            // created it, but it must not outlive the messages either.
+            if (unresolvedIds.isNotEmpty()) {
+                val stranded = unresolvedIds.toList()
+                withContext(NonCancellable) { deleteQuietly(chatId, stranded) }
+                SafeLog.d(
+                    TAG,
+                    "Copy: deleted ${stranded.size} forwarded messages the operation " +
+                        "left unprocessed"
+                )
+            }
             if (registeredHere.isNotEmpty()) {
                 InFlightForwardedCopies.unregister(chatId, registeredHere)
             }
@@ -802,11 +857,14 @@ class FileRepositoryImpl(
     }
 
     /**
-     * Re-reads forwarded messages until each one's file carries its remote identity.
-     * The forward answer itself can beat the identity, so a missing identity is retried
-     * by re-reading the same messages — never by forwarding again, which would create
-     * a second copy of each message. Returns the documents in the order of
-     * [messageIds], or null when the bounded wait runs out.
+     * Re-reads forwarded messages until each one is fully settled: its file carries
+     * its remote identity AND the message itself has finished sending. The forward
+     * answer itself can beat both, so an unsettled message is retried by re-reading
+     * the same messages — never by forwarding again, which would create a second copy
+     * of each message. Identity alone is not enough: a message still in its sending
+     * state refuses the caption edit that relabels it, and every copy once failed on
+     * exactly that. Returns the documents in the order of [messageIds], or null when
+     * the bounded wait runs out.
      */
     private suspend fun awaitForwardedDocuments(
         chatId: Long,
@@ -818,7 +876,9 @@ class FileRepositoryImpl(
             for (messageId in messageIds) {
                 if (messageId in found) continue
                 telegramClient.getDocument(chatId, messageId)?.let { document ->
-                    found[messageId] = document
+                    if (telegramClient.isMessageSettled(chatId, messageId)) {
+                        found[messageId] = document
+                    }
                 }
             }
             if (found.size == messageIds.size) {

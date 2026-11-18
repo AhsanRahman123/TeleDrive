@@ -1416,6 +1416,11 @@ class DesktopTelegramClient(
         runCatching { send(TdApi.GetMessage(chatId, messageId)).toRemoteDocument() }
             .getOrNull()
 
+    override suspend fun isMessageSettled(chatId: Long, messageId: Long): Boolean =
+        runCatching { send(TdApi.GetMessage(chatId, messageId)) }
+            .getOrNull()
+            ?.takeIf { it.chatId == chatId && it.sendingState == null } != null
+
     override suspend fun editCaption(chatId: Long, messageId: Long, caption: String) {
         ownWrites.wroteCaption(messageId, caption)
         paced {

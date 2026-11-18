@@ -8,6 +8,7 @@ internal data class KnownRows(
     val manifests: Map<RemoteDocument, RemoteFileManifest?>,
     val byId: Map<String, FileEntity>,
     val byUniqueId: Map<String, FileEntity>,
+    val byMessageId: Map<Long, FileEntity>,
     val splitCounts: Map<String, Int>,
     val firstPartStored: Set<String>
 )

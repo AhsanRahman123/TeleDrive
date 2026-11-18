@@ -229,6 +229,17 @@ interface TelegramClient {
 
     suspend fun getDocument(chatId: Long, messageId: Long): RemoteDocument?
 
+    /**
+     * True when the message has finished sending — its sending state has cleared, the
+     * same mark [messageChanges] uses to tell a settled message from one still going
+     * out. A message that is still sending refuses caption edits, so work that must
+     * relabel a just-created message (a forwarded copy) has to wait for this, not only
+     * for the file's remote identity. The default cannot observe sending state and
+     * reports settled, so simple/test clients keep compiling; the TDLib clients
+     * override it with the real check.
+     */
+    suspend fun isMessageSettled(chatId: Long, messageId: Long): Boolean = true
+
     suspend fun editCaption(chatId: Long, messageId: Long, caption: String)
 
     suspend fun deleteMessages(chatId: Long, messageIds: List<Long>)

@@ -163,6 +163,14 @@ interface FileDao {
     @Query("SELECT * FROM files WHERE remoteUniqueId IN (:uniqueIds)")
     suspend fun byRemoteUniqueIds(uniqueIds: List<String>): List<FileEntity>
 
+    /** Rows bound to exact channel messages — the primary identity sync matches on. */
+    @Query("SELECT * FROM files WHERE chatId = :chatId AND messageId IN (:messageIds)")
+    suspend fun byMessageIds(chatId: Long, messageIds: List<Long>): List<FileEntity>
+
+    /** Every row in the chat that is bound to a channel message. */
+    @Query("SELECT * FROM files WHERE chatId = :chatId AND messageId IS NOT NULL")
+    suspend fun boundRowsInChat(chatId: Long): List<FileEntity>
+
     /**
      * One pass for every home screen number: separate observed queries each rescan the table on any
      * write.

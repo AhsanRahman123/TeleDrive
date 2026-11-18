@@ -153,6 +153,8 @@ class SyncRepositoryImpl(
             runCatching { folderStateSynchronizer.pull() }
                 .onFailure { SafeLog.w(TAG, "Folder state pull failed", it) }
             folderMerger.mergeDuplicates(chatId)
+            runCatching { mergeDuplicateMessageRows(chatId) }
+                .onFailure { SafeLog.w(TAG, "Message-row merge failed", it) }
             if (folderDao.pendingPublishCount() > 0) publishScheduler.kick()
             if (fileDao.fileCount(chatId) == 0) fromSnapshot = applySnapshot(chatId, quiet)
         }
@@ -299,6 +301,45 @@ class SyncRepositoryImpl(
         return stale.size
     }
 
+    /**
+     * Collapses the duplicate rows the caption-less adoption churn accumulated:
+     * several local rows bound to the SAME channel message, re-inserted pass after
+     * pass because a label-less document could never be matched back to the row an
+     * earlier pass created for it. Only rows sharing an exact message id are merged —
+     * rows that merely share a content (unique) id are distinct messages, true
+     * duplicate uploads, and stay distinct. The keeper is the most complete row: one
+     * carrying a manifest baseline first, else the oldest created. Idempotent: once
+     * merged, later full syncs find nothing to do. Rows bound to messages that have
+     * since left the channel need no help from this sweep — [finishSync]'s prune
+     * already removes a bound row whose message a full scan no longer sees (deleting
+     * it when it has no local copy, detaching it when it has).
+     */
+    private suspend fun mergeDuplicateMessageRows(chatId: Long) {
+        val duplicateGroups = fileDao.boundRowsInChat(chatId)
+            .groupBy { it.messageId!! }
+            .values.filter { it.size > 1 }
+        var merged = 0
+        if (duplicateGroups.isNotEmpty()) {
+            database.inImmediateTransaction {
+                for (rows in duplicateGroups) {
+                    val keeper = rows.sortedWith(
+                        compareBy(
+                            { it.remoteBase == null },
+                            { it.createdAt },
+                            { it.addedAt },
+                            { it.id }
+                        )
+                    ).first()
+                    val losers = rows.filter { it.id != keeper.id }
+                    filePartDao.deleteFor(losers.map { it.id })
+                    fileDao.deleteByIds(losers.map { it.id })
+                    merged += losers.size
+                }
+            }
+        }
+        SafeLog.d(TAG, "Message-row merge: collapsed $merged duplicate rows")
+    }
+
     override suspend fun followRemoteChanges() {
         activeChannel.observe().filterNotNull().collectLatest { chatId ->
             runCatching { telegramClient.openChat(chatId) }
@@ -393,11 +434,22 @@ class SyncRepositoryImpl(
                 entity.remoteUniqueId?.let { it to entity }
             }.toMap()
         }
+        // Rows bound to the page's exact messages. Duplicate rows can share one
+        // message id (the accumulated damage the merge sweep collapses); when they
+        // do, a row carrying a manifest baseline wins the map slot, as it is the
+        // most complete representative of the message.
+        val byMessageId = documents.groupBy { it.chatId }
+            .flatMap { (chatId, chatDocuments) ->
+                fileDao.byMessageIds(chatId, chatDocuments.map { it.messageId }.distinct())
+            }
+            .sortedBy { it.remoteBase != null }
+            .associateBy { it.messageId!! }
         val parts = if (fileIds.isEmpty()) emptyList() else filePartDao.partsOfAll(fileIds)
         return KnownRows(
             manifests = manifests,
             byId = byId,
             byUniqueId = byUniqueId,
+            byMessageId = byMessageId,
             splitCounts = splitCounts(manifests.values, byId, parts),
             firstPartStored = parts.filter { it.partIndex == 0 }.map { it.fileId }.toSet()
         )
@@ -483,7 +535,16 @@ class SyncRepositoryImpl(
             return ReconcileResult.UNCHANGED
         }
         val manifest = known.manifests[document]
-        val indexedExisting = manifest?.let { known.byId[it.fileId] }
+        // A row bound to this exact message IS this document's row — the strongest
+        // identity there is, and the only one a caption-less document can be matched
+        // by reliably. Matching it first is what lets an adopted orphan settle after
+        // one pass: the unique-id route below squeezes every row sharing a content
+        // id into a single map entry and then refuses any row bound to a different
+        // message, so an orphan whose content duplicates its source's could never
+        // match the row a previous pass created for it and was re-inserted fresh,
+        // with a new random id, on every pass forever.
+        val indexedExisting = known.byMessageId[document.messageId]
+            ?: manifest?.let { known.byId[it.fileId] }
             ?: known.byUniqueId[document.uniqueFileId]?.takeIf { row ->
                 // A row bound to a different live message is a duplicate upload of the
                 // same content (both messages share a Telegram unique id), not this
