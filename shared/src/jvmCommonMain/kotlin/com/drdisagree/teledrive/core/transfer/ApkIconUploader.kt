@@ -11,11 +11,12 @@ import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramUploadEvent
 import com.drdisagree.teledrive.data.local.entity.FileEntity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.UUID
-import kotlin.time.Duration.Companion.milliseconds
 
 class ApkIconUploader(
     private val telegramClient: TelegramClient,
@@ -29,7 +30,8 @@ class ApkIconUploader(
     suspend fun uploadIconIfApk(
         entity: FileEntity,
         chatId: Long,
-        encrypt: Boolean
+        encrypt: Boolean,
+        checkControl: (suspend () -> Unit)? = null
     ): String? {
         if (!MimeTypes.isApk(entity.mimeType, entity.name)) return null
 
@@ -67,21 +69,56 @@ class ApkIconUploader(
             // uploadDocument completes only when Telegram's send-succeeded update
             // arrives, and in a bad session that update may never come — the old
             // unbounded wait parked the whole transfer at 0% before the real upload
-            // even started, unreachable by Pause/Cancel. Bound the wait like the
-            // folder-state upload: on timeout or failure, proceed with no icon.
+            // even started, unreachable by Pause/Cancel. The wait is bounded like
+            // the folder-state upload (on timeout or failure, proceed with no
+            // icon), and it polls the transfer's control every CONTROL_POLL_MS so
+            // a Pause/Cancel lands here immediately — the executor's control check
+            // throws TransferControlException, which propagates out of the upload
+            // with exactly the in-loop semantics — instead of only being noticed
+            // once the full 30 s bound has burned.
             var failure: Throwable? = null
             val completed = try {
-                withTimeoutOrNull(ICON_UPLOAD_TIMEOUT_MS.milliseconds) {
-                    telegramClient.uploadDocument(
-                        chatId = chatId,
-                        localPath = iconUploadPath,
-                        fileName = iconFileName,
-                        mimeType = iconMimeType,
-                        caption = ICON_CAPTION,
-                        thumbnailPath = null
-                    ).first { it is TelegramUploadEvent.Completed } as TelegramUploadEvent.Completed
+                coroutineScope {
+                    val wait = async {
+                        runCatching {
+                            telegramClient.uploadDocument(
+                                chatId = chatId,
+                                localPath = iconUploadPath,
+                                fileName = iconFileName,
+                                mimeType = iconMimeType,
+                                caption = ICON_CAPTION,
+                                thumbnailPath = null
+                            ).first {
+                                it is TelegramUploadEvent.Completed
+                            } as TelegramUploadEvent.Completed
+                        }
+                    }
+                    val deadline = System.nanoTime() +
+                        ICON_UPLOAD_TIMEOUT_MS * NANOS_PER_MILLISECOND
+                    var result: TelegramUploadEvent.Completed? = null
+                    while (result == null) {
+                        if (wait.isCompleted) {
+                            val outcome = wait.await()
+                            result = outcome.getOrNull()
+                            if (result == null) {
+                                val error = outcome.exceptionOrNull()
+                                if (error is CancellationException) throw error
+                                failure = error
+                                break
+                            }
+                        } else if (System.nanoTime() >= deadline) {
+                            wait.cancel()
+                            break
+                        } else {
+                            checkControl?.invoke()
+                            delay(CONTROL_POLL_MS)
+                        }
+                    }
+                    result
                 }
             } catch (e: CancellationException) {
+                throw e
+            } catch (e: TransferControlException) {
                 throw e
             } catch (e: Exception) {
                 failure = e
@@ -117,5 +154,7 @@ class ApkIconUploader(
         const val ICON_CAPTION = "#teledrive-icon"
         private const val TAG = "ApkIconUploader"
         private const val ICON_UPLOAD_TIMEOUT_MS = 30_000L
+        private const val CONTROL_POLL_MS = 250L
+        private const val NANOS_PER_MILLISECOND = 1_000_000L
     }
 }

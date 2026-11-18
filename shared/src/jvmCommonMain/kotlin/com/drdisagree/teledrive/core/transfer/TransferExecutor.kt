@@ -269,7 +269,9 @@ class TransferExecutor(
 
         val rawIconPath = thumbnailStore.uploadThumbnailFile(entity.id)?.absolutePath
         checkControl(transfer.id)
-        val iconFileId = apkIconUploader.uploadIconIfApk(entity, chatId, encrypt)
+        val iconFileId = apkIconUploader.uploadIconIfApk(entity, chatId, encrypt) {
+            checkControl(transfer.id)
+        }
         checkControl(transfer.id)
         val previewPath = if (encrypt) null else rawIconPath
 
@@ -469,7 +471,10 @@ class TransferExecutor(
             TransferOutcome.Failed(messages.uploadEnded)
 
         return try {
-            partUploader.upload(entity, sourceFile, chatId, manifest, encrypt, previewPath)
+            partUploader.upload(
+                entity, sourceFile, chatId, manifest, encrypt, previewPath,
+                checkControl = { checkControl(transfer.id) }
+            )
                 .collect { event ->
                     currentCoroutineContext().ensureActive()
                     when (event) {

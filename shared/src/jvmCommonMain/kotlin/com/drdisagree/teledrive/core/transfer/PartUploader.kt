@@ -45,7 +45,8 @@ class PartUploader(
         chatId: Long,
         manifest: RemoteFileManifest,
         encrypt: Boolean,
-        thumbnailPath: String? = null
+        thumbnailPath: String? = null,
+        checkControl: (suspend () -> Unit)? = null
     ): Flow<PartUploadEvent> = flow {
         val totalSize = source.length()
         val partCount = FileParts.countFor(totalSize)
@@ -76,7 +77,7 @@ class PartUploader(
                 if (encrypt) emit(PartUploadEvent.PartDone(index, partCount))
 
                 val iconFileId = if (index == 0) {
-                    apkIconUploader.uploadIconIfApk(entity, chatId, encrypt)
+                    apkIconUploader.uploadIconIfApk(entity, chatId, encrypt, checkControl)
                 } else null
 
                 val partManifest = manifest.copy(

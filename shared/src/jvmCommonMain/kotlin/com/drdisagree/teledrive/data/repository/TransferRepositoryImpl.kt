@@ -83,7 +83,36 @@ class TransferRepositoryImpl(
         TransferSection.PAUSED -> transferDao.observePaused(limit)
         TransferSection.FAILED -> transferDao.observeFailed(limit)
         TransferSection.COMPLETED -> transferDao.observeCompleted(limit)
-    }.map { list -> list.map { it.toDomain() } }
+    }.map { list ->
+        val tasks = list.map { it.toDomain() }
+        if (section == TransferSection.COMPLETED) tasks.withFileLocalPaths() else tasks
+    }
+
+    /**
+     * A transfer row's own localPath is never written when a download completes —
+     * the saved path lives on the file's row (and split completion even clears the
+     * transfer row's copy) — so a finished row would give the UI's open-with action
+     * nothing to point at. Resolve it from the file row via fileId, the same source
+     * "Open in TeleDrive" already trusts.
+     */
+    private suspend fun List<TransferTask>.withFileLocalPaths(): List<TransferTask> {
+        val fileIds = mapNotNull { task ->
+            task.fileId?.takeIf { task.localPath == null }
+        }.distinct()
+        if (fileIds.isEmpty()) return this
+        val pathsById = fileDao.byIds(fileIds)
+            .mapNotNull { file -> file.localPath?.let { path -> file.id to path } }
+            .toMap()
+        if (pathsById.isEmpty()) return this
+        return map { task ->
+            val resolved = task.fileId?.let { pathsById[it] }
+            if (task.localPath == null && resolved != null) {
+                task.copy(localPath = resolved)
+            } else {
+                task
+            }
+        }
+    }
 
     override fun observeSectionCount(section: TransferSection): Flow<Int> =
         (when (section) {

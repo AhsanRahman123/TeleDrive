@@ -854,6 +854,7 @@ class TdLibTelegramClient(
         )
         var finished = false
         var sentMessageId: Long
+        var progressLogged = false
         val subscribed = CompletableDeferred<Unit>()
         val pendingMessageId = CompletableDeferred<Long>()
         val pendingFile = CompletableDeferred<Int?>()
@@ -867,6 +868,16 @@ class TdLibTelegramClient(
                         if (pendingFileId != null && update.file.id == pendingFileId) {
                             val total = update.file.size.takeIf { it > 0 }
                                 ?: update.file.expectedSize
+                            if (!progressLogged) {
+                                progressLogged = true
+                                SafeLog.d(
+                                    TAG,
+                                    "Upload progress started: file=$fileName " +
+                                        "messageId=$pendingId " +
+                                        "uploaded=${update.file.remote?.uploadedSize ?: 0} " +
+                                        "total=$total"
+                                )
+                            }
                             trySend(
                                 TelegramUploadEvent.Progress(
                                     update.file.remote?.uploadedSize ?: 0,
@@ -882,22 +893,52 @@ class TdLibTelegramClient(
                             val document = update.message.toRemoteDocument()
                             if (document != null) {
                                 finished = true
+                                SafeLog.d(
+                                    TAG,
+                                    "Upload completed: file=$fileName " +
+                                        "messageId=${update.message.id} " +
+                                        "(temporary id $pendingId)"
+                                )
                                 trySend(TelegramUploadEvent.Completed(document))
                                 close()
                             } else {
                                 finished = true
+                                SafeLog.w(
+                                    TAG,
+                                    "Upload failed: file=$fileName sent message " +
+                                        "${update.message.id} is not a document"
+                                )
                                 close(
                                     TelegramException(500, "Sent message is not a document")
                                 )
                             }
+                        } else {
+                            SafeLog.d(
+                                TAG,
+                                "Upload observed send-succeeded for another message: " +
+                                    "file=$fileName oldMessageId=${update.oldMessageId} " +
+                                    "newMessageId=${update.message.id} (waiting on $pendingId)"
+                            )
                         }
                     }
 
                     is TdApi.UpdateMessageSendFailed -> {
                         if (update.oldMessageId == pendingId) {
                             finished = true
+                            SafeLog.w(
+                                TAG,
+                                "Upload send failed: file=$fileName messageId=$pendingId " +
+                                    "error=${update.error.code}: ${update.error.message}"
+                            )
                             close(
                                 TelegramException.from(update.error.code, update.error.message)
+                            )
+                        } else {
+                            SafeLog.d(
+                                TAG,
+                                "Upload observed send-failure for another message: " +
+                                    "file=$fileName oldMessageId=${update.oldMessageId} " +
+                                    "error=${update.error.code} (waiting on $pendingId)"
                             )
                         }
                     }
@@ -906,11 +947,26 @@ class TdLibTelegramClient(
         }
 
         subscribed.await()
+        SafeLog.d(
+            TAG,
+            "Upload send issued: chatId=$chatId file=$fileName " +
+                "size=${runCatching { File(localPath).length() }.getOrNull() ?: -1} " +
+                "mime=$mimeType"
+        )
         val pending: TdApi.Message =
             paced { send(TdApi.SendMessage(chatId, null, null, null, null, content)) }
         sentMessageId = pending.id
-        pendingFile.complete((pending.content as? TdApi.MessageDocument)?.document?.document?.id)
+        val pendingFileId =
+            (pending.content as? TdApi.MessageDocument)?.document?.document?.id
+        pendingFile.complete(pendingFileId)
         pendingMessageId.complete(pending.id)
+        SafeLog.d(
+            TAG,
+            "Upload send accepted: file=$fileName messageId=${pending.id} " +
+                "sendingState=${pending.sendingState?.javaClass?.simpleName ?: "sent"} " +
+                "content=${pending.content?.javaClass?.simpleName} " +
+                "tdlibFileId=$pendingFileId"
+        )
         trySend(TelegramUploadEvent.Started(pending.id))
 
         awaitClose {
