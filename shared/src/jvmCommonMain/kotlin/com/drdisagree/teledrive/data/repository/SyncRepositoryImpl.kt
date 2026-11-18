@@ -495,32 +495,6 @@ class SyncRepositoryImpl(
         val incomingBase = manifest?.let { FileBase.of(it) }
         val currentBase = existing?.let { FileBase.of(it) }
 
-        // A local edit can land between a DB mutation and its pendingPublish marker (legacy
-        // move/trash paths did this in separate statements). If the remote baseline is unchanged
-        // but the local row differs from it, recover the dirty marker instead of rolling back.
-        // With no baseline, recognize the high-signal move/trash cases by their folder/trash
-        // fields and the local modification clock.
-        val localChangedSincePublishedBase =
-            existing != null &&
-                !existing.pendingPublish &&
-                publishedBase != null &&
-                currentBase != null &&
-                currentBase != publishedBase
-        val localMoveOrTrashWithoutBaseline =
-            existing != null &&
-                !existing.pendingPublish &&
-                publishedBase == null &&
-                incomingBase != null &&
-                currentBase != null &&
-                currentBase != incomingBase &&
-                (
-                    currentBase.folderId != incomingBase.folderId ||
-                        (currentBase.trashedAt != null && currentBase.trashedAt != incomingBase.trashedAt) ||
-                        existing.modifiedAt >= (manifest?.modifiedAt ?: Long.MAX_VALUE)
-                )
-        val recoveredLocalPublish =
-            localChangedSincePublishedBase || localMoveOrTrashWithoutBaseline
-
         val stalePublishedManifest = existing != null &&
             !existing.pendingPublish &&
             publishedBase != null &&
@@ -532,9 +506,6 @@ class SyncRepositoryImpl(
             // A delayed Telegram update can deliver the pre-move caption after the local
             // publish succeeded. Preserve any unqueued local delta and let the outbox publish
             // it again; otherwise ignore the stale remote event.
-            if (recoveredLocalPublish) {
-                existing?.let { fileDao.markPendingPublish(listOf(it.id)) }
-            }
             return ReconcileResult.UNCHANGED
         }
 
@@ -552,7 +523,7 @@ class SyncRepositoryImpl(
         val laterPart = manifest != null && manifest.isPart && manifest.partIndex != 0
         if (laterPart && existing != null) return ReconcileResult.UNCHANGED
 
-        val local = existing?.takeIf { it.pendingPublish || recoveredLocalPublish }
+        val local = existing?.takeIf { it.pendingPublish }
         val hasPendingLocalMoveWithoutBaseline = local != null &&
             existing?.remoteBase.isNullOrBlank() &&
             manifest != null &&
@@ -650,7 +621,7 @@ class SyncRepositoryImpl(
             } else {
                 existing?.preTrashFolderId
             },
-            pendingPublish = existing?.pendingPublish == true || recoveredLocalPublish || queueCaptionRepair,
+            pendingPublish = existing?.pendingPublish == true || queueCaptionRepair,
             createdAt = manifest?.createdAt ?: existing?.createdAt
             ?: (document.dateSeconds * 1000L),
             modifiedAt = maxOf(
