@@ -280,8 +280,32 @@ class FilesViewModel(
             }
         }
 
-    val uiState: StateFlow<FilesUiState> = combine(
+    // Pinch zoom is a temporary, in-session adjustment only (same reconciliation as the
+    // Gallery fix): the persisted Settings value (gridSize) stays the single source of
+    // truth for the Files column count — a pinch records an override here instead of
+    // rewriting the setting, and any later Settings change clears the override so the
+    // new value applies immediately.
+    private val gridZoomOverride = MutableStateFlow<Int?>(null)
+
+    init {
+        viewModelScope.launch {
+            settingsRepository.preferences
+                .map { it.gridSize }
+                .distinctUntilChanged()
+                .collect { gridZoomOverride.value = null }
+        }
+    }
+
+    private val effectivePreferences: Flow<UserPreferences> = combine(
         settingsRepository.preferences,
+        gridZoomOverride
+    ) { prefs, override ->
+        if (override == null || override == prefs.gridSize) prefs
+        else prefs.copy(gridSize = override)
+    }
+
+    val uiState: StateFlow<FilesUiState> = combine(
+        effectivePreferences,
         selectionCapabilities,
         folderSelection,
         currentFolder,
@@ -503,9 +527,20 @@ class FilesViewModel(
 
     fun zoomOut() = applyZoom(GridZoomLevel::zoomedOut)
 
-    private fun applyZoom(transform: (GridZoomLevel) -> GridZoomLevel) = updatePrefs { prefs ->
-        val next = transform(GridZoomLevel(prefs.viewMode, prefs.gridSize))
-        prefs.copy(viewMode = next.viewMode, gridSize = next.gridSize)
+    private fun applyZoom(transform: (GridZoomLevel) -> GridZoomLevel) {
+        viewModelScope.launch {
+            val prefs = settingsRepository.preferences.first()
+            val next = transform(
+                GridZoomLevel(prefs.viewMode, gridZoomOverride.value ?: prefs.gridSize)
+            )
+            // Only the grid/list mode switch stays persisted (it is the view-mode
+            // setting); the column count itself becomes a session-local override so a
+            // stray pinch can never silently rewrite the Settings value.
+            gridZoomOverride.value = next.gridSize
+            if (next.viewMode != prefs.viewMode) {
+                settingsRepository.update { it.copy(viewMode = next.viewMode) }
+            }
+        }
     }
 
     fun setViewMode(mode: ViewMode) =
