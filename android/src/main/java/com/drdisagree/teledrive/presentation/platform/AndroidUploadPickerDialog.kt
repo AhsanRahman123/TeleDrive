@@ -286,7 +286,10 @@ fun AndroidUploadPickerDialog(
     BackHandler(enabled = true) { navigateBack() }
 
     Dialog(
-        onDismissRequest = onDismiss,
+        // System back is delivered to the dialog window and arrives here, not at the
+        // activity-level BackHandler above, so route it through the same step-up logic
+        // as the top bar arrow: one folder level at a time, dismiss only at a root.
+        onDismissRequest = { navigateBack() },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false
