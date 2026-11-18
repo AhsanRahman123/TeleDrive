@@ -102,6 +102,18 @@ class AppNotifications(
                     Manifest.permission.POST_NOTIFICATIONS
                 ) == PackageManager.PERMISSION_GRANTED
 
+    /**
+     * Removes the publish worker's foreground banner. That banner is posted only by
+     * PublishOutboxWorker and nothing else in the app ever removes it, so the worker
+     * clears it on every exit — a run that ended without draining (or a process that
+     * died mid-run) must not leave it frozen on screen.
+     */
+    fun cancelPublish() {
+        runCatching {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID_PUBLISH)
+        }
+    }
+
     fun createChannels() {
         val manager = NotificationManagerCompat.from(context)
         manager.createNotificationChannel(

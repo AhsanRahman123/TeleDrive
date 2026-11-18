@@ -47,6 +47,34 @@ class PublishOutboxDrainer(
         onProgress: suspend (published: Int, total: Int) -> Unit = { _, _ -> },
         onWaiting: suspend (secondsLeft: Int) -> Unit = {}
     ): Boolean {
+        var lastPublished = 0
+        var lastTotal = 0
+        SafeLog.d(
+            TAG,
+            "Drain started: ${fileDao.pendingPublishCount()} files and " +
+                "${folderDao.pendingPublishCount()} folders pending"
+        )
+        val drained = drainOutbox(
+            isStopped = isStopped,
+            onProgress = { publishedNow, total ->
+                lastPublished = publishedNow
+                lastTotal = total
+                onProgress(publishedNow, total)
+            },
+            onWaiting = onWaiting
+        )
+        SafeLog.d(
+            TAG,
+            "Drain finished: drained=$drained, published $lastPublished of $lastTotal"
+        )
+        return drained
+    }
+
+    private suspend fun drainOutbox(
+        isStopped: () -> Boolean,
+        onProgress: suspend (published: Int, total: Int) -> Unit,
+        onWaiting: suspend (secondsLeft: Int) -> Unit
+    ): Boolean {
         if (!replayDeletes(isStopped)) return false
 
         val published = AtomicInteger(0)
@@ -58,6 +86,10 @@ class PublishOutboxDrainer(
             if (!publishBatch(batch, published, isStopped, onProgress, onWaiting)) return false
         }
 
+        SafeLog.d(
+            TAG,
+            "Folder phase started: ${folderDao.pendingPublishCount()} folders pending"
+        )
         repeat(MAX_FOLDER_PUSHES) {
             if (folderDao.pendingPublishCount() == 0) return true
             val before = folderSnapshot()

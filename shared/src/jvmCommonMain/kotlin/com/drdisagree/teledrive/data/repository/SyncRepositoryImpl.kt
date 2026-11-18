@@ -474,6 +474,14 @@ class SyncRepositoryImpl(
         folderCache: MutableMap<String, String?>,
         known: KnownRows
     ): ReconcileResult {
+        if (InFlightForwardedCopies.isRegistered(document.chatId, document.messageId)) {
+            // A copy operation owns this message right now: it was forwarded moments
+            // ago and is still caption-less, and the copy will either relabel and
+            // record it or delete it. Adopting it here would file it as a stray root
+            // duplicate of its source — the failure that once created ~200 stray
+            // rows from a single copy. Leave it entirely alone for this pass.
+            return ReconcileResult.UNCHANGED
+        }
         val manifest = known.manifests[document]
         val indexedExisting = manifest?.let { known.byId[it.fileId] }
             ?: known.byUniqueId[document.uniqueFileId]?.takeIf { row ->

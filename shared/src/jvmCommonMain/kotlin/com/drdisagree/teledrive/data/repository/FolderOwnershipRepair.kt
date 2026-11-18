@@ -34,8 +34,11 @@ class FolderOwnershipRepair(
         val moved = runCatching { refile() }
             .onFailure { SafeLog.w(TAG, "Refiling files into their own drive failed", it) }
             .getOrDefault(0)
+        // Logged unconditionally, zero included: this count is the only evidence that
+        // can clear (or convict) the repair when a publish drain appears at app start,
+        // and a "> 0 only" line once left a whole day's log with no trace of it.
+        SafeLog.d(TAG, "Moved $moved files back into their own drive")
         if (moved > 0) {
-            SafeLog.d(TAG, "Moved $moved files back into their own drive")
             publishScheduler.kick()
         }
     }

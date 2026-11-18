@@ -157,13 +157,16 @@ interface TelegramClient {
      * original sender and no caption, so each copy is born blank and its owner can relabel it
      * with its own manifest. [messageIds] must be in strictly increasing order (at most 100
      * per call). Results are returned in the same order as [messageIds]; a null entry marks a
-     * message Telegram could not forward. The default implementation cannot forward, so
-     * simple/test clients keep compiling.
+     * slot Telegram created nothing for. A non-null entry always carries the new message's
+     * id, but its document can still be null while Telegram fills in the forwarded file's
+     * remote identity — re-read it with [getDocument] rather than treating the forward as
+     * failed. The default implementation cannot forward, so simple/test clients keep
+     * compiling.
      */
     suspend fun forwardDocuments(
         chatId: Long,
         messageIds: List<Long>
-    ): List<RemoteDocument?> =
+    ): List<ForwardedMessage?> =
         throw TelegramException(501, "Forwarding is not supported by this client")
 
     /**

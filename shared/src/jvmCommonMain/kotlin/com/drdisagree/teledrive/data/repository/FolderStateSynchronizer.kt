@@ -24,6 +24,7 @@ import java.io.File
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * File captions only carry a folder path, so this document keeps empty folders, ids and flags
@@ -55,6 +56,7 @@ class FolderStateSynchronizer(
     suspend fun pointIndexAt(messageId: Long) = mutex.withLock { publish(pointIndexAt = messageId) }
 
     private suspend fun publish(pointIndexAt: Long?) {
+        SafeLog.d(TAG, "Folder state publish started")
         val chatId = storageChatId()
         val existing = findStateDocuments(chatId)
         var remote: RemoteFolderState? = null
@@ -78,15 +80,21 @@ class FolderStateSynchronizer(
             if (prefs.encryptFiles && prefs.keyBackupCreated) seal(payload) else payload
         )
         try {
-            telegramClient.uploadDocument(
-                chatId = chatId,
-                localPath = staging.absolutePath,
-                fileName = RemoteFolderState.FILE_NAME,
-                mimeType = "application/json",
-                caption = RemoteFolderState.MARKER
-            ).collect { event ->
-                if (event is TelegramUploadEvent.Completed) Unit
+            // Bounded: an upload flow that never completes must fail the publish, not
+            // hold the publish worker (and its notification) open forever.
+            val uploaded = withTimeoutOrNull(UPLOAD_TIMEOUT_MS) {
+                telegramClient.uploadDocument(
+                    chatId = chatId,
+                    localPath = staging.absolutePath,
+                    fileName = RemoteFolderState.FILE_NAME,
+                    mimeType = "application/json",
+                    caption = RemoteFolderState.MARKER
+                ).collect { event ->
+                    if (event is TelegramUploadEvent.Completed) Unit
+                }
+                true
             }
+            if (uploaded == null) error("Folder state upload timed out")
             if (existing.isNotEmpty()) {
                 telegramClient.deleteMessages(chatId, existing.map { it.messageId })
             }
@@ -95,6 +103,7 @@ class FolderStateSynchronizer(
         }
         tombstoneDao.deleteOlderThan(deletionCutoff())
         indexMessageId = state.indexMessageId
+        SafeLog.d(TAG, "Folder state publish finished")
     }
 
     /**
@@ -135,8 +144,17 @@ class FolderStateSynchronizer(
 
     private suspend fun read(document: RemoteDocument): RemoteFolderRead {
         var localPath: String? = null
-        telegramClient.downloadDocument(document.remoteFileId).collect { event ->
-            if (event is TelegramDownloadEvent.Completed) localPath = event.localPath
+        // Bounded for the same reason as the upload: a download flow that never
+        // completes reads as Unavailable (via the missing local path) instead of
+        // stalling the caller forever.
+        val downloaded = withTimeoutOrNull(DOWNLOAD_TIMEOUT_MS) {
+            telegramClient.downloadDocument(document.remoteFileId).collect { event ->
+                if (event is TelegramDownloadEvent.Completed) localPath = event.localPath
+            }
+            true
+        }
+        if (downloaded == null) {
+            SafeLog.w(TAG, "Folder state download timed out for message ${document.messageId}")
         }
         val blob = localPath?.let(::File)?.takeIf { it.exists() }?.readBytes()
             ?: return RemoteFolderRead.Unavailable
@@ -323,5 +341,9 @@ class FolderStateSynchronizer(
         private const val EXTRA_PAGES = 1
         private const val SAME_BURST_SECONDS = 600
         private const val DELETION_RETENTION_MS = 180L * 24 * 60 * 60 * 1000
+
+        /** The folder document is a small JSON; a minute per transfer is generous. */
+        private const val UPLOAD_TIMEOUT_MS = 60_000L
+        private const val DOWNLOAD_TIMEOUT_MS = 60_000L
     }
 }

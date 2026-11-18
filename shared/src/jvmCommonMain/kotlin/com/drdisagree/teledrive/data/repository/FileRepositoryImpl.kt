@@ -6,6 +6,7 @@ import androidx.paging.PagingData
 import androidx.paging.map
 import com.drdisagree.teledrive.core.common.AppError
 import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
@@ -22,6 +23,7 @@ import com.drdisagree.teledrive.core.publish.PublishScheduler
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.core.telegram.TelegramException
+import com.drdisagree.teledrive.core.telegram.ForwardedMessage
 import com.drdisagree.teledrive.core.telegram.RemoteDocument
 import com.drdisagree.teledrive.core.telegram.TelegramDocumentCopyRequest
 import com.drdisagree.teledrive.core.transfer.FileParts
@@ -52,6 +54,7 @@ import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.usecase.FolderCycleCheck
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -334,6 +337,10 @@ class FileRepositoryImpl(
         if (targetFolderId != null && folderDao.byId(targetFolderId) == null) {
             return AppResult.Failure(AppError.NotFound)
         }
+        SafeLog.d(
+            TAG,
+            "Copy started: ${ids.size} files into folder ${targetFolderId ?: "root"}"
+        )
 
         val existingNames = fileDao.namesInFolder(targetFolderId).toMutableList()
         val localCopies = mutableListOf<FileEntity>()
@@ -399,7 +406,10 @@ class FileRepositoryImpl(
         }
 
         // Local-only copies require no Telegram round trip. Persist them together.
-        if (localCopies.isNotEmpty()) fileDao.upsertAll(localCopies)
+        if (localCopies.isNotEmpty()) {
+            fileDao.upsertAll(localCopies)
+            SafeLog.d(TAG, "Copy: ${localCopies.size} local copies recorded")
+        }
         var copied = localCopies.size
         var lastError: AppError? = null
 
@@ -419,7 +429,13 @@ class FileRepositoryImpl(
                             fileDao.upsert(result.value)
                             copied++
                         }
-                        is AppResult.Failure -> lastError = result.error
+                        is AppResult.Failure -> {
+                            lastError = result.error
+                            SafeLog.d(
+                                TAG,
+                                "Copy: '${candidate.copy.name}' failed on the send path: ${result.error}"
+                            )
+                        }
                     }
                 }
             }
@@ -430,6 +446,7 @@ class FileRepositoryImpl(
             }
         }
 
+        SafeLog.d(TAG, "Copy finished: $copied of ${ids.size} files copied")
         return if (copied == 0 && lastError != null) {
             AppResult.Failure(lastError)
         } else {
@@ -579,9 +596,16 @@ class FileRepositoryImpl(
      * Forwards every candidate's source messages inside [chatId], relabels each new message
      * with the copy's own manifest, and only then records the copy — with the baseline a
      * successful publish would have sealed, because the caption already carries exactly
-     * this copy's state. A candidate whose messages do not all arrive, or whose relabel
-     * fails, is deleted again and counted as failed, so a copy attempt never leaves behind
-     * a message that still claims to be the source file.
+     * this copy's state. A candidate whose messages do not all arrive, whose forwarded
+     * messages never gain their file identity, or whose relabel fails, is deleted again —
+     * by the raw forwarded message ids, whether or not they could ever be read back — and
+     * counted as failed, so a copy attempt never leaves behind a message that still claims
+     * to be the source file.
+     *
+     * The forwarded ids are registered in [InFlightForwardedCopies] the moment they land
+     * and stay registered until the copy is recorded or the messages are deleted, so a
+     * sync running alongside cannot adopt the still caption-less messages as stray root
+     * files in between.
      */
     private suspend fun forwardRemoteCopies(
         chatId: Long,
@@ -589,123 +613,220 @@ class FileRepositoryImpl(
     ): Pair<Int, AppError?> {
         var copied = 0
         var lastError: AppError? = null
+        SafeLog.d(TAG, "Copy: forwarding ${forwardable.size} files inside chat $chatId")
 
         val slots = forwardable.flatMapIndexed { candidateIndex, (_, messageIds) ->
             messageIds.map { ForwardSlot(candidateIndex, it) }
         }
         // TDLib forwards at most 100 messages per call and wants their ids strictly
-        // increasing, so flatten everything and answer per message id.
-        val documents = HashMap<Long, RemoteDocument>()
-        for (chunk in slots.chunked(MAX_FORWARD_BATCH)) {
-            val chunkIds = chunk.map { it.messageId }.distinct().sorted()
-            var chunkError: TelegramException? = null
-            val resolved = try {
-                telegramClient.forwardDocuments(chatId, chunkIds)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: TelegramException) {
-                chunkError = error
-                null
-            }
-            if (resolved != null) {
-                chunkIds.forEachIndexed { index, messageId ->
-                    resolved.getOrNull(index)?.let { documents[messageId] = it }
+        // increasing, so flatten everything and answer per message id. Only the raw new
+        // message ids are collected here: the answer's documents can lag behind the
+        // forwards (a just-forwarded file may have no remote identity in it yet), and
+        // reading that lag as "not arrived" once failed every copy in an operation.
+        // Identities are re-read per candidate below, from the ids themselves.
+        val forwardedIds = HashMap<Long, Long>()
+        val registeredHere = mutableSetOf<Long>()
+        fun recordLanded(sourceIds: List<Long>, answers: List<ForwardedMessage?>) {
+            val landed = mutableListOf<Long>()
+            sourceIds.forEachIndexed { index, sourceId ->
+                answers.getOrNull(index)?.let { forwarded ->
+                    forwardedIds[sourceId] = forwarded.messageId
+                    landed += forwarded.messageId
                 }
-                continue
             }
-            if (chunk.map { it.candidateIndex }.distinct().size == 1) {
-                if (lastError == null) lastError = chunkError?.toAppError()
-                continue
+            if (landed.isNotEmpty()) {
+                InFlightForwardedCopies.register(chatId, landed)
+                registeredHere += landed
             }
-            // One bad message can fail the whole call. Retry per candidate so a single
-            // unforwardable file does not take the rest of the chunk down with it.
-            for ((_, candidateSlots) in chunk.groupBy { it.candidateIndex }) {
-                val ids = candidateSlots.map { it.messageId }.distinct().sorted()
-                try {
-                    val retried = telegramClient.forwardDocuments(chatId, ids)
-                    ids.forEachIndexed { index, messageId ->
-                        retried.getOrNull(index)?.let { documents[messageId] = it }
+        }
+        try {
+            for (chunk in slots.chunked(MAX_FORWARD_BATCH)) {
+                val chunkIds = chunk.map { it.messageId }.distinct().sorted()
+                var chunkError: TelegramException? = null
+                val resolved = try {
+                    telegramClient.forwardDocuments(chatId, chunkIds)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: TelegramException) {
+                    chunkError = error
+                    null
+                }
+                if (resolved != null) {
+                    recordLanded(chunkIds, resolved)
+                    continue
+                }
+                if (chunk.map { it.candidateIndex }.distinct().size == 1) {
+                    if (lastError == null) lastError = chunkError?.toAppError()
+                    continue
+                }
+                // One bad message can fail the whole call. Retry per candidate so a single
+                // unforwardable file does not take the rest of the chunk down with it.
+                for ((_, candidateSlots) in chunk.groupBy { it.candidateIndex }) {
+                    val ids = candidateSlots.map { it.messageId }.distinct().sorted()
+                    try {
+                        recordLanded(ids, telegramClient.forwardDocuments(chatId, ids))
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: TelegramException) {
+                        if (lastError == null) lastError = error.toAppError()
                     }
+                }
+            }
+
+            for ((candidate, messageIds) in forwardable) {
+                val newIds = messageIds.map { forwardedIds[it] }
+                if (newIds.any { it == null }) {
+                    // The copy is incomplete: remove whatever did arrive — by its raw
+                    // forwarded id, read back or not — so it cannot linger in the
+                    // channel as an unlabelled orphan.
+                    val arrivedIds = newIds.filterNotNull()
+                    deleteQuietly(chatId, arrivedIds)
+                    InFlightForwardedCopies.unregister(chatId, arrivedIds)
+                    if (lastError == null) {
+                        lastError = AppError.TelegramError(
+                            500,
+                            "Telegram could not forward every message"
+                        )
+                    }
+                    SafeLog.d(
+                        TAG,
+                        "Copy: '${candidate.copy.name}' failed — the forward did not " +
+                            "arrive; deleted ${arrivedIds.size} forwarded messages"
+                    )
+                    continue
+                }
+                val candidateIds = newIds.filterNotNull()
+
+                // The identity re-read: a forwarded message whose file has no remote
+                // identity yet is re-read until the identity lands (bounded), never
+                // re-forwarded — forwarding again would duplicate the message, and
+                // retry rounds doing exactly that once multiplied the strays that
+                // sync then adopted.
+                val forwarded = awaitForwardedDocuments(chatId, candidateIds)
+                if (forwarded == null) {
+                    deleteQuietly(chatId, candidateIds)
+                    InFlightForwardedCopies.unregister(chatId, candidateIds)
+                    if (lastError == null) {
+                        lastError = AppError.TelegramError(
+                            500,
+                            "Telegram did not confirm the forwarded messages"
+                        )
+                    }
+                    SafeLog.d(
+                        TAG,
+                        "Copy: '${candidate.copy.name}' failed — forwarded messages " +
+                            "never gained an identity; deleted ${candidateIds.size}"
+                    )
+                    continue
+                }
+
+                val relabelled = try {
+                    val manifests = copyPartManifests(candidate)
+                    forwarded.forEachIndexed { index, document ->
+                        telegramClient.editCaption(
+                            chatId,
+                            document.messageId,
+                            manifestCodec.encode(manifests[index], candidate.copy.isEncrypted)
+                        )
+                    }
+                    true
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: TelegramException) {
                     if (lastError == null) lastError = error.toAppError()
+                    false
                 }
-            }
-        }
-
-        for ((candidate, messageIds) in forwardable) {
-            val arrived = messageIds.map { documents[it] }
-            if (arrived.any { it == null }) {
-                // The copy is incomplete: remove whatever did arrive, so it cannot linger
-                // in the channel as an unlabelled orphan.
-                deleteQuietly(chatId, arrived.filterNotNull().map { it.messageId })
-                if (lastError == null) {
-                    lastError = AppError.TelegramError(
-                        500,
-                        "Telegram could not forward every message"
+                if (!relabelled) {
+                    // The safeguard: a forwarded message that could not be relabelled is
+                    // deleted at once, inside the copy operation itself.
+                    deleteQuietly(chatId, candidateIds)
+                    InFlightForwardedCopies.unregister(chatId, candidateIds)
+                    SafeLog.d(
+                        TAG,
+                        "Copy: '${candidate.copy.name}' failed — relabel failed; " +
+                            "deleted ${candidateIds.size} forwarded messages"
                     )
+                    continue
                 }
-                continue
-            }
-            val forwarded = arrived.filterNotNull()
 
-            val relabelled = try {
-                val manifests = copyPartManifests(candidate)
-                forwarded.forEachIndexed { index, document ->
-                    telegramClient.editCaption(
-                        chatId,
-                        document.messageId,
-                        manifestCodec.encode(manifests[index], candidate.copy.isEncrypted)
-                    )
-                }
-                true
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: TelegramException) {
-                if (lastError == null) lastError = error.toAppError()
-                false
-            }
-            if (!relabelled) {
-                // The safeguard: a forwarded message that could not be relabelled is
-                // deleted at once, inside the copy operation itself.
-                deleteQuietly(chatId, forwarded.map { it.messageId })
-                continue
-            }
-
-            val stored = withRemoteDocument(candidate.copy, forwarded.first()).copy(
-                partCount = if (candidate.partTotal > 1) {
-                    candidate.partTotal
-                } else {
-                    candidate.copy.partCount
-                },
-                pendingPublish = false,
-                remoteBase = FileBase.of(candidate.copy).toText()
-            )
-            fileDao.upsert(stored)
-            if (candidate.partTotal > 1) {
-                forwarded.forEachIndexed { index, document ->
-                    val sourcePart = candidate.sourceParts[index]
-                    filePartDao.upsert(
-                        FilePartEntity(
-                            fileId = candidate.copy.id,
-                            partIndex = index,
-                            chatId = document.chatId,
-                            messageId = document.messageId,
-                            remoteFileId = document.remoteFileId,
-                            remoteUniqueId = document.uniqueFileId,
-                            plainOffset = sourcePart.plainOffset,
-                            plainSize = sourcePart.plainSize,
-                            storedSize = document.sizeBytes,
-                            uploadedAt = document.dateSeconds.toLong() * 1000L,
-                            plainHash = sourcePart.plainHash
+                val stored = withRemoteDocument(candidate.copy, forwarded.first()).copy(
+                    partCount = if (candidate.partTotal > 1) {
+                        candidate.partTotal
+                    } else {
+                        candidate.copy.partCount
+                    },
+                    pendingPublish = false,
+                    remoteBase = FileBase.of(candidate.copy).toText()
+                )
+                fileDao.upsert(stored)
+                if (candidate.partTotal > 1) {
+                    forwarded.forEachIndexed { index, document ->
+                        val sourcePart = candidate.sourceParts[index]
+                        filePartDao.upsert(
+                            FilePartEntity(
+                                fileId = candidate.copy.id,
+                                partIndex = index,
+                                chatId = document.chatId,
+                                messageId = document.messageId,
+                                remoteFileId = document.remoteFileId,
+                                remoteUniqueId = document.uniqueFileId,
+                                plainOffset = sourcePart.plainOffset,
+                                plainSize = sourcePart.plainSize,
+                                storedSize = document.sizeBytes,
+                                uploadedAt = document.dateSeconds.toLong() * 1000L,
+                                plainHash = sourcePart.plainHash
+                            )
                         )
-                    )
+                    }
+                }
+                InFlightForwardedCopies.unregister(chatId, candidateIds)
+                copied++
+                SafeLog.d(
+                    TAG,
+                    "Copy: '${candidate.copy.name}' copied as forwarded messages $candidateIds"
+                )
+            }
+        } finally {
+            // The in-flight window closes with the operation: any id still registered
+            // here belongs to a message that was neither recorded nor deleted above
+            // (the operation was cancelled or failed midway). Unregistering cannot
+            // resurrect such a message — sync may adopt the orphan later, exactly as
+            // it treats any other caption-less message — but the registry must never
+            // outlive the operation that created it.
+            if (registeredHere.isNotEmpty()) {
+                InFlightForwardedCopies.unregister(chatId, registeredHere)
+            }
+        }
+        SafeLog.d(TAG, "Copy: forward pass copied $copied of ${forwardable.size} files")
+        return copied to lastError
+    }
+
+    /**
+     * Re-reads forwarded messages until each one's file carries its remote identity.
+     * The forward answer itself can beat the identity, so a missing identity is retried
+     * by re-reading the same messages — never by forwarding again, which would create
+     * a second copy of each message. Returns the documents in the order of
+     * [messageIds], or null when the bounded wait runs out.
+     */
+    private suspend fun awaitForwardedDocuments(
+        chatId: Long,
+        messageIds: List<Long>
+    ): List<RemoteDocument>? {
+        val found = HashMap<Long, RemoteDocument>()
+        var attempts = 0
+        while (true) {
+            for (messageId in messageIds) {
+                if (messageId in found) continue
+                telegramClient.getDocument(chatId, messageId)?.let { document ->
+                    found[messageId] = document
                 }
             }
-            copied++
+            if (found.size == messageIds.size) {
+                return messageIds.map { found.getValue(it) }
+            }
+            if (++attempts > MAX_FORWARD_READ_ATTEMPTS) return null
+            delay(FORWARD_READ_DELAY_MS)
         }
-        return copied to lastError
     }
 
     /**
@@ -1229,12 +1350,21 @@ class FileRepositoryImpl(
     }
 
     companion object {
+        private const val TAG = "FileRepository"
         private const val MAX_FOLDER_DEPTH = 64
         private const val FOLDER_SEARCH_LIMIT = 200
         private const val NOTE_TITLE_LIMIT = 60
 
         /** TDLib forwards at most 100 messages in one call. */
         private const val MAX_FORWARD_BATCH = 100
+
+        /**
+         * How long the copy flow keeps re-reading a forwarded message whose file has
+         * no remote identity yet before giving up on that copy: a bounded few seconds,
+         * spent re-reading — never re-forwarding.
+         */
+        private const val MAX_FORWARD_READ_ATTEMPTS = 10
+        private const val FORWARD_READ_DELAY_MS = 500L
     }
 
     private fun escapeLike(value: String): String =

@@ -1084,13 +1084,14 @@ class TdLibTelegramClient(
      * Forwards messages back into the same chat as clean copies (send_copy): Telegram
      * duplicates them server-side, with no forward header and — via remove_caption — no
      * caption, so a copy never carries its source's manifest even briefly. The answer lists
-     * the new messages in the order the ids were passed; a slot Telegram left empty (or a
-     * message that is not a document) becomes null.
+     * the new messages in the order the ids were passed; a slot Telegram left empty becomes
+     * null. A filled slot keeps the new message's id even when its document cannot be read
+     * yet, so the caller can re-read or delete that exact message either way.
      */
     override suspend fun forwardDocuments(
         chatId: Long,
         messageIds: List<Long>
-    ): List<RemoteDocument?> {
+    ): List<ForwardedMessage?> {
         if (messageIds.isEmpty()) return emptyList()
         val forwarded = paced {
             send<TdApi.Messages>(
@@ -1107,7 +1108,9 @@ class TdLibTelegramClient(
         }
         val messages = forwarded.messages
         return messageIds.indices.map { index ->
-            messages.getOrNull(index)?.toRemoteDocument()
+            messages.getOrNull(index)?.let { message ->
+                ForwardedMessage(message.id, message.toRemoteDocument())
+            }
         }
     }
 

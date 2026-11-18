@@ -20,29 +20,36 @@ class PublishOutboxWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        if (!telegramSession.ensureReady()) return Result.retry()
-        var channelsReady = false
-        var lastPublished = 0
-        var lastTotal = 0
-        suspend fun show(info: ForegroundInfo) {
-            if (!channelsReady) {
-                appNotifications.createChannels()
-                channelsReady = true
+        try {
+            if (!telegramSession.ensureReady()) return Result.retry()
+            var channelsReady = false
+            var lastPublished = 0
+            var lastTotal = 0
+            suspend fun show(info: ForegroundInfo) {
+                if (!channelsReady) {
+                    appNotifications.createChannels()
+                    channelsReady = true
+                }
+                runCatching { setForeground(info) }
             }
-            runCatching { setForeground(info) }
+            val drained = drainer.drain(
+                isStopped = { isStopped },
+                onProgress = { published, total ->
+                    lastPublished = published
+                    lastTotal = total
+                    if (total >= FOREGROUND_MIN_FILES) show(foregroundInfo(published, total))
+                },
+                onWaiting = { secondsLeft ->
+                    show(foregroundInfo(lastPublished, lastTotal, secondsLeft))
+                }
+            )
+            return if (drained) Result.success() else Result.retry()
+        } finally {
+            // The banner this worker posts has no other owner and no other removal
+            // path: whatever made this run end — drained, retrying, failed, or an
+            // exception on the way out — the banner ends with the run.
+            appNotifications.cancelPublish()
         }
-        val drained = drainer.drain(
-            isStopped = { isStopped },
-            onProgress = { published, total ->
-                lastPublished = published
-                lastTotal = total
-                if (total >= FOREGROUND_MIN_FILES) show(foregroundInfo(published, total))
-            },
-            onWaiting = { secondsLeft ->
-                show(foregroundInfo(lastPublished, lastTotal, secondsLeft))
-            }
-        )
-        return if (drained) Result.success() else Result.retry()
     }
 
     private fun foregroundInfo(
