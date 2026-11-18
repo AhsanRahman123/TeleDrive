@@ -28,6 +28,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -440,5 +441,136 @@ class DragSelectPointerTest {
         rule.waitForIdle()
 
         assertEquals(setOf(0, 1, 2, 3, 4), selected)
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Test
+    fun `touch long press then one fast slide paints the whole crossed range`() {
+        var selected by mutableStateOf(emptySet<Int>())
+        var rangeBase by mutableStateOf(emptySet<Int>())
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                // Files-style wiring: nearest-item hit testing, no release-position opt-in.
+                resolveNearestVisibleItem = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 360.dp)
+                    .testTag("touch-selection-grid")
+                    .then(dragSelect)
+            ) {
+                items((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                            .testTag("touch-item-$index")
+                            // Real rows carry a combinedClickable whose no-op long-click
+                            // leaves the long-press to the container gesture.
+                            .combinedClickable(onClick = {}, onLongClick = {})
+                    )
+                }
+            }
+        }
+
+        // Press and hold on the first row: the long-press anchors the gesture there.
+        rule.onNodeWithTag("touch-selection-grid").performTouchInput {
+            down(Offset(90f, 30f))
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0), selected)
+
+        // One fast slide straight to the fourth row, the way a quick flick after a hold
+        // reaches the app as very few move events: every crossed row must be painted,
+        // not just the anchor and the row under the finger at the end.
+        rule.onNodeWithTag("touch-selection-grid").performTouchInput {
+            moveBy(Offset(0f, 180f))
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0, 1, 2, 3), selected)
+
+        rule.onNodeWithTag("touch-selection-grid").performTouchInput {
+            up()
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0, 1, 2, 3), selected)
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Test
+    fun `touch long press slide from a selected row erases the crossed range`() {
+        var selected by mutableStateOf(setOf(0, 1, 2, 3))
+        var rangeBase by mutableStateOf(setOf(0, 1, 2, 3))
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                resolveNearestVisibleItem = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 360.dp)
+                    .testTag("touch-erase-grid")
+                    .then(dragSelect)
+            ) {
+                items((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                            .combinedClickable(onClick = {}, onLongClick = {})
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("touch-erase-grid").performTouchInput {
+            down(Offset(90f, 30f))
+        }
+        rule.waitForIdle()
+        // The anchor row alone is re-applied from the snapshot: still fully selected.
+        assertEquals(setOf(0, 1, 2, 3), selected)
+
+        rule.onNodeWithTag("touch-erase-grid").performTouchInput {
+            moveBy(Offset(0f, 120f))
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(3), selected)
+
+        rule.onNodeWithTag("touch-erase-grid").performTouchInput {
+            up()
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(3), selected)
     }
 }

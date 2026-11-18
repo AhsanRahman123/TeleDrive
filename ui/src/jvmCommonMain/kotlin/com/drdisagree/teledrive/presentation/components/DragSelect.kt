@@ -149,7 +149,15 @@ private fun dragSelect(
     var activeAnchor by remember { mutableIntStateOf(-1) }
     var activeShouldSelect by remember { mutableStateOf(true) }
     var latestPointerPosition by remember { mutableStateOf<Offset?>(null) }
+    var touchPainting by remember { mutableStateOf(false) }
     val scrolling = autoScroll != 0f
+    // The frame loop below runs for the whole of a touch painting gesture, not only while
+    // edge auto-scroll is active. On a busy device the move events of a fast slide can be
+    // batched so the gesture loop only ever sees the final finger position; re-applying the
+    // anchor..current range every frame from the latest known position is what keeps the
+    // painted block contiguous. It is the same mechanism that already made edge auto-scroll
+    // painting reliable, extended to the whole gesture.
+    val framePainting = scrolling || touchPainting
 
     val currentIndexAt by rememberUpdatedState(indexAt)
     val currentOnStart by rememberUpdatedState(onStart)
@@ -159,14 +167,17 @@ private fun dragSelect(
     val currentMultiTouchEnabled by rememberUpdatedState(multiTouchEnabled)
     val currentOnMultiTouchSelect by rememberUpdatedState(onMultiTouchSelect)
 
-    LaunchedEffect(scrolling, scrollable) {
-        while (scrolling) {
+    LaunchedEffect(framePainting, scrollable) {
+        while (framePainting) {
             withFrameNanos { }
             scrollable.scrollBy(autoScroll)
 
-            // Keep extending the range while the pointer is stationary near an edge.
-            // Files opts into nearest-item hit testing so the range continues through the
-            // collection's bottom content padding instead of scrolling without selecting.
+            // Keep extending the range while the pointer is stationary: near an edge the
+            // list scrolls under the finger, and within the viewport this re-application
+            // is the safety net that fills the range even when the gesture loop received
+            // no intermediate move events. Files opts into nearest-item hit testing so the
+            // range continues through the collection's bottom content padding instead of
+            // scrolling without selecting.
             val anchor = activeAnchor
             val pointer = latestPointerPosition
             val current = if (anchor >= 0 && pointer != null) {
@@ -213,6 +224,9 @@ private fun dragSelect(
                 var anchor = currentIndexAt(down.position)
                 currentOnStart()
                 selectionStarted = true
+                // Touch painting is additionally driven by the per-frame loop above;
+                // mouse keeps its event-driven painting plus the auto-scroll loop.
+                if (down.type == PointerType.Touch) touchPainting = true
                 val clampPosition: (Offset) -> Offset = { point ->
                     Offset(
                         x = point.x.coerceIn(0f, (size.width - 1).coerceAtLeast(0).toFloat()),
@@ -225,8 +239,13 @@ private fun dragSelect(
                 val selectionAnchor = anchor ?: initialIndex
                 // Keep the resolved fallback anchor for the whole gesture. Without this,
                 // a drag that starts outside an item can re-anchor on its next event after
-                // the initial range has already changed the selection state.
-                if (selectionAnchor != null && processReleasePosition) {
+                // the initial range has already changed the selection state, and only the
+                // endpoint of the drag gets painted. Touch gestures always keep it: a
+                // long-press starts on (or nearest to) a row, and that row must remain
+                // the anchor for the whole slide.
+                if (selectionAnchor != null &&
+                    (processReleasePosition || down.type == PointerType.Touch)
+                ) {
                     anchor = selectionAnchor
                 }
                 val additiveMouseRange = down.type == PointerType.Mouse && mouseDragAddsToSelection
@@ -274,7 +293,14 @@ private fun dragSelect(
                     }
                     val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
                     val released = !change.pressed
-                    if (released && !processReleasePosition) break
+                    // Touch always processes the release position below, so the row the
+                    // finger lifts from is included even when it arrived as the only event
+                    // of a fast slide. Mouse keeps the caller's processReleasePosition opt-in.
+                    if (released && !processReleasePosition &&
+                        down.type != PointerType.Touch
+                    ) {
+                        break
+                    }
                     if (!released) change.consume()
 
                     // The release event can carry the final pointer coordinate. Process it
@@ -299,6 +325,7 @@ private fun dragSelect(
                 // Always release the selection/auto-scroll state if the pointer gesture is
                 // cancelled by focus changes, recomposition, or navigation.
                 autoScroll = 0f
+                touchPainting = false
                 activeAnchor = -1
                 latestPointerPosition = null
                 if (selectionStarted) currentOnEnd()
