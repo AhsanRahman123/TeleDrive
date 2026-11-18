@@ -13,9 +13,11 @@ import android.view.Window
 import android.util.LruCache
 import android.os.storage.StorageManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,9 +36,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -93,6 +97,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.picker_folder_mode_title
 import com.drdisagree.teledrive.resources.picker_files_mode_title
@@ -272,6 +277,47 @@ fun AndroidUploadPickerDialog(
         val path = entry.file.absolutePath
         selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
     }
+
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+    var dragBase by remember { mutableStateOf<Set<String>?>(null) }
+
+    // The same long-press drag-painting the Files screen uses (#64), shared via
+    // rememberDragSelect: a long-press anchors on a row, then dragging paints the whole
+    // range (starting on a selected row erases instead), with edge auto-scroll. The helper
+    // consumes nothing before the long-press lands, so taps, checkboxes and ordinary
+    // scrolling are untouched. Painting is snapshot-based: rows that fall out of the range
+    // mid-drag return to their pre-drag state. Folder mode is single-choice, so these
+    // modifiers are only attached in file mode.
+    val listDragSelect = rememberDragSelect(
+        listState = listState,
+        onStart = { dragBase = selectedPaths },
+        isSelected = { index ->
+            entries.getOrNull(index)?.let { it.file.absolutePath in selectedPaths } == true
+        },
+        onRange = { range, shouldSelect ->
+            val base = dragBase ?: selectedPaths
+            val paths = range.mapNotNull { entries.getOrNull(it)?.file?.absolutePath }
+            selectedPaths = if (shouldSelect) base + paths else base - paths.toSet()
+        },
+        onEnd = { dragBase = null },
+        resolveNearestVisibleItem = true,
+        processReleasePosition = true
+    )
+    val gridDragSelect = rememberDragSelect(
+        gridState = gridState,
+        onStart = { dragBase = selectedPaths },
+        isSelected = { index ->
+            entries.getOrNull(index)?.let { it.file.absolutePath in selectedPaths } == true
+        },
+        onRange = { range, shouldSelect ->
+            val base = dragBase ?: selectedPaths
+            val paths = range.mapNotNull { entries.getOrNull(it)?.file?.absolutePath }
+            selectedPaths = if (shouldSelect) base + paths else base - paths.toSet()
+        },
+        onEnd = { dragBase = null },
+        resolveNearestVisibleItem = true
+    )
 
     fun navigateBack() {
         if (parentPath != null) {
@@ -492,8 +538,10 @@ fun AndroidUploadPickerDialog(
                             contentAlignment = Alignment.Center
                         ) { Text(stringResource(Res.string.picker_no_items), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         gridView -> LazyVerticalGrid(
+                            state = gridState,
                             columns = GridCells.Adaptive(minSize = 156.dp),
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                                .then(if (folderMode) Modifier else gridDragSelect),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -515,7 +563,9 @@ fun AndroidUploadPickerDialog(
                             }
                         }
                         else -> LazyColumn(
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                            state = listState,
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                                .then(if (folderMode) Modifier else listDragSelect),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
@@ -606,6 +656,7 @@ private fun ApplyPreferredRefreshRateToDialogWindow(refreshRate: Float?) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun UploadPickerListItem(
     entry: UploadPickerEntry,
@@ -614,8 +665,17 @@ private fun UploadPickerListItem(
     onClick: () -> Unit,
     onToggle: () -> Unit
 ) {
+    // In file mode the row is combinedClickable with a no-op long-click: the container's
+    // drag-select gesture owns long-presses, and combinedClickable keeps a long-press
+    // release from also firing the row click (the same arrangement as Files rows).
+    // Folder mode keeps the plain clickable it has always had.
+    val rowClick = if (showSelection) {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = {})
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 7.dp),
+        modifier = Modifier.fillMaxWidth().then(rowClick).padding(vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (showSelection) {
@@ -653,6 +713,7 @@ private fun UploadPickerListItem(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun UploadPickerGridItem(
     entry: UploadPickerEntry,
@@ -661,8 +722,15 @@ private fun UploadPickerGridItem(
     onClick: () -> Unit,
     onToggle: () -> Unit
 ) {
+    // See UploadPickerListItem: combinedClickable in file mode so drag-select owns
+    // long-presses without the release also firing the card click.
+    val cardClick = if (showSelection) {
+        Modifier.combinedClickable(onClick = onClick, onLongClick = {})
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+        modifier = Modifier.fillMaxWidth().then(cardClick)
     ) {
         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Box(

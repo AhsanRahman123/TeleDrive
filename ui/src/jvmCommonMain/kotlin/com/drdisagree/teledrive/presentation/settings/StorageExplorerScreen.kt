@@ -1,6 +1,8 @@
 package com.drdisagree.teledrive.presentation.settings
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -55,6 +58,7 @@ import com.drdisagree.teledrive.domain.repository.StorageExplorerRepository
 import com.drdisagree.teledrive.domain.repository.StorageExplorerRoot
 import com.drdisagree.teledrive.domain.repository.StorageExplorerSnapshot
 import com.drdisagree.teledrive.presentation.common.Formatters
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -101,6 +105,28 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
     var sorting by remember { mutableStateOf(false) }
     var filteredEntries by remember { mutableStateOf(emptyList<StorageExplorerEntry>()) }
     var selectedPaths by remember { mutableStateOf(emptySet<String>()) }
+    val entryListState = rememberLazyListState()
+    var dragBase by remember { mutableStateOf<Set<String>?>(null) }
+
+    // The same long-press drag-painting Files uses (#64), shared via rememberDragSelect:
+    // long-press anchors on a row, dragging paints the range (from a selected row it
+    // erases), with edge auto-scroll. Nothing is consumed before the long-press lands, so
+    // taps, checkboxes and scrolling are unchanged; painting is snapshot-based.
+    val entryDragSelect = rememberDragSelect(
+        listState = entryListState,
+        onStart = { dragBase = selectedPaths },
+        isSelected = { index ->
+            filteredEntries.getOrNull(index)?.let { it.path in selectedPaths } == true
+        },
+        onRange = { range, shouldSelect ->
+            val base = dragBase ?: selectedPaths
+            val paths = range.mapNotNull { filteredEntries.getOrNull(it)?.path }
+            selectedPaths = if (shouldSelect) base + paths else base - paths.toSet()
+        },
+        onEnd = { dragBase = null },
+        resolveNearestVisibleItem = true,
+        processReleasePosition = true
+    )
     var selectedEntry by remember { mutableStateOf<StorageExplorerEntry?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmTelegramClear by remember { mutableStateOf(false) }
@@ -491,7 +517,8 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
             }
 
             else -> LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                state = entryListState,
+                modifier = Modifier.weight(1f).fillMaxWidth().then(entryDragSelect),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(filteredEntries, key = { it.path }) { entry ->
@@ -694,6 +721,7 @@ private fun StorageRootRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun StorageEntryRow(
     entry: StorageExplorerEntry,
@@ -718,7 +746,12 @@ private fun StorageEntryRow(
             )
             Spacer(Modifier.width(9.dp))
             Column(
-                modifier = Modifier.weight(1f).clickable(onClick = onOpen).padding(vertical = 5.dp)
+                // combinedClickable with a no-op long-click: the list's drag-select
+                // gesture owns long-presses, and this keeps a long-press release from
+                // also firing Open (the same arrangement as Files rows).
+                modifier = Modifier.weight(1f)
+                    .combinedClickable(onClick = onOpen, onLongClick = {})
+                    .padding(vertical = 5.dp)
             ) {
                 Text(
                     entry.name,
