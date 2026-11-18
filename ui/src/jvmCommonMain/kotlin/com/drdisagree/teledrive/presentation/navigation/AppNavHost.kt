@@ -4,12 +4,15 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import org.jetbrains.compose.resources.stringResource
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
+import org.koin.compose.viewmodel.koinViewModel
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.album_not_in_folder
 import com.drdisagree.teledrive.presentation.channels.ChannelsScreen
@@ -17,10 +20,10 @@ import com.drdisagree.teledrive.presentation.common.LocalOpenTransfers
 import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.collection.CollectionScreen
 import com.drdisagree.teledrive.presentation.files.FilesScreen
+import com.drdisagree.teledrive.presentation.files.FilesWorkspaceViewModel
 import com.drdisagree.teledrive.presentation.gallery.GalleryScreen
 import com.drdisagree.teledrive.presentation.home.HomeScreen
 import com.drdisagree.teledrive.presentation.platform.LocalPlatformScreens
-import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.presentation.navigation.NavigationTransitions.isPeerSwitch
 import com.drdisagree.teledrive.presentation.navigation.NavigationTransitions.movesForward
 import com.drdisagree.teledrive.presentation.note.NoteEditorScreen
@@ -44,7 +47,6 @@ fun AppNavHost(
     verticalTabMotion: Boolean = false
 ) {
     val androidLayout = LocalAndroidLayout.current
-    val savesCollectionScrollOnPreview = LocalPlatformCapabilities.current.savesCollectionScrollOnPreview
     CompositionLocalProvider(
         LocalOpenTransfers provides { navController.navigateOnce(Route.Transfers) }
     ) {
@@ -109,9 +111,22 @@ fun AppNavHost(
             UnderBottomBar {
                 val filesRoute = entry.toRoute<Route.Files>()
                 val isRoot = filesRoute.folderId == null
+                // The workspace tabs belong to the whole Files back stack, not to one
+                // folder destination: their holder is scoped to the bottom-most Files
+                // entry, so every folder destination above it shares the same tabs and
+                // the tabs die with the stack — the lifetime they had when one screen
+                // swapped folders in place. The entry below a live destination can
+                // never be popped first, so this owner is stable for the destination.
+                val tabsOwner = remember(navController) {
+                    navController.currentBackStack.value.firstOrNull { backEntry ->
+                        backEntry.destination.hasRoute(Route.Files::class)
+                    } ?: entry
+                }
+                val workspaceViewModel: FilesWorkspaceViewModel =
+                    koinViewModel(viewModelStoreOwner = tabsOwner)
                 FilesScreen(
                     focusFileId = filesRoute.focusFileId,
-                    savePositionBeforeOpeningPreview = savesCollectionScrollOnPreview,
+                    workspaceViewModel = workspaceViewModel,
                     onOpenFolder = { navController.navigateOnce(Route.Files(it)) },
                     onOpenCrumb = { folderId ->
                         val route = Route.Files(folderId)
