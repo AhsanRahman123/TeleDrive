@@ -1610,16 +1610,13 @@ private fun FilesContent(
         // The starting row determines the gesture: selected anchor = deselect range;
         // unselected anchor = select range. Do not force every mouse drag to be additive.
         mouseDragAddsToSelection = false,
-        resolveNearestVisibleItem = true,
-        multiTouchEnabled = touchRangeSelection && selectionMode,
-        onMultiTouchSelect = { index ->
-            if (index < state.folders.size) {
-                viewModel.selectFolderForMultiTouch(state.folders[index].id)
-            } else {
-                files.peek(index - state.folders.size)
-                    ?.let { viewModel.selectFileForMultiTouch(it.id) }
-            }
-        }
+        resolveNearestVisibleItem = true
+        // Multi-touch selection stays OFF here (the helper's default, same as the
+        // picker and every other surface): with it on, any second finger touching
+        // the list during a hold or drag silently added that row to the selection
+        // outside the drag range, and the addition stuck for the rest of the
+        // gesture. Selection here changes only by tapping a row or by the
+        // contiguous drag range.
     )
     Box(modifier = Modifier.fillMaxSize()) {
         LazyVerticalGrid(
