@@ -504,8 +504,8 @@ class SyncRepositoryImpl(
             manifest.modifiedAt < existing.modifiedAt
         if (stalePublishedManifest) {
             // A delayed Telegram update can deliver the pre-move caption after the local
-            // publish succeeded. Preserve any unqueued local delta and let the outbox publish
-            // it again; otherwise ignore the stale remote event.
+            // publish succeeded. Ignore the stale remote event; a genuine local delta is
+            // protected by its own pendingPublish marker, set atomically by every writer.
             return ReconcileResult.UNCHANGED
         }
 
