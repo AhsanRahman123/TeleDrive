@@ -335,7 +335,12 @@ fun AndroidUploadPickerDialog(
             selectedPaths = if (shouldSelect) base + paths else base - paths.toSet()
         },
         onEnd = { dragBase = null },
-        resolveNearestVisibleItem = true
+        resolveNearestVisibleItem = true,
+        // Same opt-in the list above already had: this surface's drags keep painting
+        // the row under the lift point. (It previously received this behaviour from
+        // the helper's touch-wide release handling, now an explicit per-caller opt-in
+        // again, so making it explicit here changes nothing for the picker.)
+        processReleasePosition = true
     )
 
     fun navigateBack() {

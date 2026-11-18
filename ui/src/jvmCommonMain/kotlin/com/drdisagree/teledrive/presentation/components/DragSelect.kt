@@ -299,19 +299,24 @@ private fun dragSelect(
                     }
                     val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
                     val released = !change.pressed
-                    // Touch always processes the release position below, so the row the
-                    // finger lifts from is included even when it arrived as the only event
-                    // of a fast slide. Mouse keeps the caller's processReleasePosition opt-in.
-                    if (released && !processReleasePosition &&
-                        down.type != PointerType.Touch
-                    ) {
-                        break
-                    }
+                    // The release position is painted only for callers that opt in via
+                    // processReleasePosition (picker list, Storage Explorer, Trash).
+                    // For the other surfaces (Files above all) the lift-off point of a
+                    // hold is thumb-peel noise, not a drag endpoint: a thumb resting in
+                    // the anchor row's lower half peels downward as it lifts, and the
+                    // release event can land past the next row's center, adding that
+                    // row to a selection the user never dragged over. Painting it made
+                    // a plain hold-and-lift select the row under the anchor. Drags on
+                    // these surfaces are painted from move events and the per-frame
+                    // loop above, so the gesture's last move position is its final
+                    // range and the release adds nothing.
+                    if (released && !processReleasePosition) break
                     if (!released) change.consume()
 
-                    // The release event can carry the final pointer coordinate. Process it
-                    // before ending the gesture so the last row is included for both select
-                    // and deselect drags.
+                    // For callers that opted into release processing, the release event
+                    // can carry the final pointer coordinate. Process it before ending
+                    // the gesture so the last row is included for both select and
+                    // deselect drags.
                     val position = clampPosition(change.position)
                     latestPointerPosition = position
                     // Once the anchor is known, touch resolves the range end with
