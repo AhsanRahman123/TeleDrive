@@ -17,7 +17,7 @@ Gallery must reuse the existing file repository, transfer queue, preview resolve
 - Thumbnail loading through ThumbnailModel and the existing thumbnail store/cache.
 - Day headers when sorted by date added or date modified.
 - Sort by name, size, date modified, date added, type and backup status.
-- Grid-size changes through pinch zoom; gallery view mode is stored in user preferences.
+- Grid-size changes through pinch zoom; gallery view mode is stored in user preferences. Pinch zoom is a session-local adjustment only (updated 2026-11-19): the Settings column values are the single persisted source of truth, a pinch never rewrites them, changing the setting clears any pinch override, and the rendered column count always equals the selected count (no hidden wide-window bonus columns).
 - Multi-selection, right-click, persistent checkboxes, range selection and edge auto-scroll.
 - Bulk move, trash, download, upload, favorite, offline availability, hide and archive.
 - Open a selected media item through PreviewSequence. The existing preview resolver supports image preview and local/remote video streaming when the platform player is available; it falls back to download/external playback when needed.

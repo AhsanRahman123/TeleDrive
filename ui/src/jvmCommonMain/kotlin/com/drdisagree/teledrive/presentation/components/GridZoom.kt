@@ -16,7 +16,9 @@ const val MIN_GRID_COLUMNS = 2
 const val MAX_GRID_COLUMNS = 12
 
 fun galleryGridColumnsForWindow(gridSize: Int, wideWindow: Boolean): Int =
-    (gridSize + if (wideWindow) 2 else 0).coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
+    // The gallery always renders the selected column count. Wide windows used to add two
+    // hidden columns here, which made the rendered grid disagree with the Settings value.
+    gridSize.coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
 
 fun GridZoomLevel.zoomedIn(): GridZoomLevel = when {
     viewMode == ViewMode.LIST || viewMode == ViewMode.DETAILS ->
@@ -64,21 +66,29 @@ fun Modifier.pinchZoom(onZoomIn: () -> Unit, onZoomOut: () -> Unit): Modifier {
         awaitEachGesture {
             var accumulated = 1f
             var multitouch = false
+            // One zoom step per gesture: a long two-finger scroll can cross the span
+            // threshold several times, and stepping on every crossing made grid column
+            // counts run away (e.g. straight to the densest level) during ordinary
+            // browsing. A deliberate pinch still steps exactly once; lift and pinch
+            // again for another step.
+            var stepped = false
             do {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
                 val pressed = event.changes.count { it.pressed }
                 if (pressed >= 2) {
                     multitouch = true
                     accumulated *= event.calculateZoom()
-                    when {
-                        accumulated >= STEP_THRESHOLD -> {
-                            zoomIn()
-                            accumulated = 1f
-                        }
+                    if (!stepped) {
+                        when {
+                            accumulated >= STEP_THRESHOLD -> {
+                                zoomIn()
+                                stepped = true
+                            }
 
-                        accumulated <= 1f / STEP_THRESHOLD -> {
-                            zoomOut()
-                            accumulated = 1f
+                            accumulated <= 1f / STEP_THRESHOLD -> {
+                                zoomOut()
+                                stepped = true
+                            }
                         }
                     }
                 }

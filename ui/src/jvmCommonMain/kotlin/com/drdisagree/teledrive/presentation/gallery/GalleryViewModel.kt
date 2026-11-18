@@ -194,6 +194,38 @@ class GalleryViewModel(
         .map { it.gallerySortField to it.gallerySortDirection }
         .distinctUntilChanged()
     private val filters = MutableStateFlow(GalleryFilters())
+
+    // Pinch zoom is a temporary, in-session adjustment only. The persisted Settings values
+    // (galleryGridSize / albumGridSize) stay the single source of truth for the column counts:
+    // a pinch records an override here instead of rewriting the setting, and any later
+    // Settings change clears the override so the new value applies immediately.
+    private val mediaZoomOverride = MutableStateFlow<Int?>(null)
+    private val albumZoomOverride = MutableStateFlow<Int?>(null)
+
+    init {
+        viewModelScope.launch {
+            settingsRepository.preferences
+                .map { it.galleryGridSize }
+                .distinctUntilChanged()
+                .collect { mediaZoomOverride.value = null }
+        }
+        viewModelScope.launch {
+            settingsRepository.preferences
+                .map { it.albumGridSize }
+                .distinctUntilChanged()
+                .collect { albumZoomOverride.value = null }
+        }
+    }
+
+    private val effectiveGridSizes: Flow<Pair<Int, Int>> = combine(
+        settingsRepository.preferences
+            .map { it.galleryGridSize to it.albumGridSize }
+            .distinctUntilChanged(),
+        mediaZoomOverride,
+        albumZoomOverride
+    ) { persisted, mediaOverride, albumOverride ->
+        (mediaOverride ?: persisted.first) to (albumOverride ?: persisted.second)
+    }
     private val debouncedQuery = filters
         .map { it.searchQuery }
         .debounce(250.milliseconds)
@@ -315,9 +347,7 @@ class GalleryViewModel(
         browseState,
         selectionCapabilities,
         albumSelection,
-        settingsRepository.preferences
-            .map { it.galleryGridSize to it.albumGridSize }
-            .distinctUntilChanged(),
+        effectiveGridSizes,
         combine(
             albums,
             settingsRepository.preferences.map { it.galleryViewMode }.distinctUntilChanged()
@@ -465,20 +495,27 @@ class GalleryViewModel(
 
     private fun stepAlbumColumns(step: Int) {
         viewModelScope.launch {
-            settingsRepository.update { prefs ->
-                prefs.copy(
-                    albumGridSize = (prefs.albumGridSize + step)
-                        .coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
-                )
-            }
+            val persisted = settingsRepository.preferences.first().albumGridSize
+            albumZoomOverride.value = ((albumZoomOverride.value ?: persisted) + step)
+                .coerceIn(MIN_GRID_COLUMNS, MAX_GRID_COLUMNS)
         }
     }
 
     private fun applyZoom(transform: (GridZoomLevel) -> GridZoomLevel) {
         viewModelScope.launch {
-            settingsRepository.update { prefs ->
-                val next = transform(GridZoomLevel(prefs.galleryViewMode, prefs.galleryGridSize))
-                prefs.copy(galleryViewMode = next.viewMode, galleryGridSize = next.gridSize)
+            val prefs = settingsRepository.preferences.first()
+            val next = transform(
+                GridZoomLevel(
+                    prefs.galleryViewMode,
+                    mediaZoomOverride.value ?: prefs.galleryGridSize
+                )
+            )
+            // Only the grid/list mode switch stays persisted (it is the view-mode setting);
+            // the column count itself becomes a session-local override so a stray pinch can
+            // never silently rewrite the Settings value again.
+            mediaZoomOverride.value = next.gridSize
+            if (next.viewMode != prefs.galleryViewMode) {
+                settingsRepository.update { it.copy(galleryViewMode = next.viewMode) }
             }
         }
     }

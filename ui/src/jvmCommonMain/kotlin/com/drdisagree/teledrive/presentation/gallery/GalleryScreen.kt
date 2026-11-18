@@ -432,7 +432,8 @@ fun GalleryScreen(
     val selectionMode = state.selectionMode || selectionModeEnabled
     val media = viewModel.pagedMedia.collectAsLazyPagingItems()
     val galleryFiltersScrollState = rememberScrollState()
-    // Fit more media previews on wide windows while keeping phone grids unchanged.
+    // The gallery renders exactly the selected column count on every window size;
+    // galleryGridColumnsForWindow no longer adds hidden wide-window columns.
     val isWideWindow = currentWindowAdaptiveInfoV2().windowSizeClass
         .isWidthAtLeastBreakpoint(WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND)
     val mediaGridColumns = galleryGridColumnsForWindow(state.gridSize, isWideWindow)

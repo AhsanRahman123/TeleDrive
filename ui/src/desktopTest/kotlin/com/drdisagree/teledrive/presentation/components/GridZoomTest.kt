@@ -44,9 +44,9 @@ class GridZoomTest {
         )
     }
     @Test
-    fun `wide gallery grids receive two extra columns but never exceed the shared cap`() {
-        assertEquals(8, galleryGridColumnsForWindow(6, wideWindow = true))
-        assertEquals(MAX_GRID_COLUMNS, galleryGridColumnsForWindow(10, wideWindow = true))
+    fun `wide gallery grids keep the selected column count`() {
+        assertEquals(6, galleryGridColumnsForWindow(6, wideWindow = true))
+        assertEquals(10, galleryGridColumnsForWindow(10, wideWindow = true))
         assertEquals(MAX_GRID_COLUMNS, galleryGridColumnsForWindow(12, wideWindow = true))
     }
 
