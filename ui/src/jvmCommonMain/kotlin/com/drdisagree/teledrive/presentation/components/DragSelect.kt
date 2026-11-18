@@ -4,7 +4,9 @@ import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridItemInfo
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,6 +43,14 @@ import androidx.compose.ui.util.fastFirstOrNull
  *
  * [resolveNearestVisibleItem] lets a desktop drag keep extending through spacing and the padded
  * edge area of a lazy collection, including while edge auto-scroll is moving the visible items.
+ *
+ * For touch gestures the END of the painted range uses center-crossing hit testing: a row only
+ * joins the range once the finger has crossed that row's center. A stationary long-press hold
+ * therefore paints the anchor row alone — the small downward drift a thumb makes during the
+ * hold (or on lift-off) stays inside the anchor's half of the boundary and can no longer tick
+ * the neighbouring row the way raw bounds hit testing did. The anchor itself still comes from
+ * plain bounds hit testing (the row actually pressed), and mouse drags keep bounds hit testing
+ * throughout.
  */
 @Composable
 fun rememberDragSelect(
@@ -59,25 +69,10 @@ fun rememberDragSelect(
 ): Modifier = dragSelect(
     scrollable = gridState,
     indexAt = { offset ->
-        val visibleItems = gridState.layoutInfo.visibleItemsInfo
-        visibleItems.fastFirstOrNull { item ->
-            offset.x >= item.offset.x &&
-                    offset.x <= item.offset.x + item.size.width &&
-                    offset.y >= item.offset.y &&
-                    offset.y <= item.offset.y + item.size.height
-        }?.index ?: if (resolveNearestVisibleItem) {
-            visibleItems.minByOrNull { item ->
-                distanceToItemSquared(
-                    point = offset,
-                    left = item.offset.x.toFloat(),
-                    top = item.offset.y.toFloat(),
-                    right = (item.offset.x + item.size.width).toFloat(),
-                    bottom = (item.offset.y + item.size.height).toFloat()
-                )
-            }?.index
-        } else {
-            null
-        }
+        gridItemAt(gridState, offset, resolveNearestVisibleItem)?.index
+    },
+    endIndexAt = { offset, anchorIndex ->
+        gridEndIndexAt(gridState, offset, anchorIndex, resolveNearestVisibleItem)
     },
     onStart = onStart,
     isSelected = isSelected,
@@ -106,16 +101,10 @@ fun rememberDragSelect(
 ): Modifier = dragSelect(
     scrollable = listState,
     indexAt = { offset ->
-        val visibleItems = listState.layoutInfo.visibleItemsInfo
-        visibleItems.fastFirstOrNull { item ->
-            offset.y >= item.offset && offset.y <= item.offset + item.size
-        }?.index ?: if (resolveNearestVisibleItem) {
-            visibleItems.minByOrNull { item ->
-                distanceToInterval(offset.y, item.offset, item.offset + item.size)
-            }?.index
-        } else {
-            null
-        }
+        listItemAt(listState, offset, resolveNearestVisibleItem)?.index
+    },
+    endIndexAt = { offset, anchorIndex ->
+        listEndIndexAt(listState, offset, anchorIndex, resolveNearestVisibleItem)
     },
     onStart = onStart,
     isSelected = isSelected,
@@ -131,6 +120,7 @@ fun rememberDragSelect(
 private fun dragSelect(
     scrollable: ScrollableState,
     indexAt: (Offset) -> Int?,
+    endIndexAt: (Offset, Int) -> Int?,
     onStart: () -> Unit,
     isSelected: (Int) -> Boolean,
     onRange: (IntRange, shouldSelect: Boolean) -> Unit,
@@ -160,6 +150,7 @@ private fun dragSelect(
     val framePainting = scrolling || touchPainting
 
     val currentIndexAt by rememberUpdatedState(indexAt)
+    val currentEndIndexAt by rememberUpdatedState(endIndexAt)
     val currentOnStart by rememberUpdatedState(onStart)
     val currentIsSelected by rememberUpdatedState(isSelected)
     val currentOnRange by rememberUpdatedState(onRange)
@@ -181,7 +172,15 @@ private fun dragSelect(
             val anchor = activeAnchor
             val pointer = latestPointerPosition
             val current = if (anchor >= 0 && pointer != null) {
-                currentIndexAt(pointer)
+                // Touch painting resolves the range end with center-crossing hit
+                // testing so a held finger resting near a row boundary cannot pull
+                // the neighbouring row into the range; the mouse auto-scroll loop
+                // keeps plain bounds hit testing.
+                if (touchPainting) {
+                    currentEndIndexAt(pointer, anchor)
+                } else {
+                    currentIndexAt(pointer)
+                }
             } else {
                 null
             }
@@ -255,7 +254,14 @@ private fun dragSelect(
                     // already-selected row must not invert the gesture and erase the range.
                     // Touch long-press keeps its previous selected/unselected toggle semantics.
                     activeShouldSelect = additiveMouseRange || !currentIsSelected(selectionAnchor)
-                    val current = initialIndex ?: selectionAnchor
+                    // The initial position is the anchor's own press point, so the
+                    // center-crossing end test resolves it back to the anchor itself;
+                    // routing touch through it keeps every painted end consistent.
+                    val current = if (down.type == PointerType.Touch) {
+                        currentEndIndexAt(initialPosition, selectionAnchor) ?: selectionAnchor
+                    } else {
+                        initialIndex ?: selectionAnchor
+                    }
                     currentOnRange(
                         dragSelectionRange(selectionAnchor, current),
                         activeShouldSelect
@@ -308,7 +314,18 @@ private fun dragSelect(
                     // and deselect drags.
                     val position = clampPosition(change.position)
                     latestPointerPosition = position
-                    val current = currentIndexAt(position)
+                    // Once the anchor is known, touch resolves the range end with
+                    // center-crossing hit testing (see endIndexAt): a finger resting
+                    // in the anchor row, or drifted just past its boundary during the
+                    // hold, keeps the end on the anchor instead of also painting the
+                    // next row. Before an anchor exists (a press that started in a
+                    // gap) and for mouse drags, plain bounds hit testing applies.
+                    val knownAnchor = anchor
+                    val current = if (knownAnchor != null && down.type == PointerType.Touch) {
+                        currentEndIndexAt(position, knownAnchor)
+                    } else {
+                        currentIndexAt(position)
+                    }
                     if (current != null) {
                         val start = anchor ?: current.also {
                             anchor = it
@@ -331,6 +348,110 @@ private fun dragSelect(
                 if (selectionStarted) currentOnEnd()
             }
         }
+    }
+}
+
+/**
+ * Plain bounds hit testing for grids: the item whose bounds contain [offset], or — when
+ * [resolveNearest] is set — the nearest visible item, so drags keep resolving through
+ * spacing and content padding. Used for anchors and for mouse drags.
+ */
+private fun gridItemAt(
+    gridState: LazyGridState,
+    offset: Offset,
+    resolveNearest: Boolean
+): LazyGridItemInfo? {
+    val visibleItems = gridState.layoutInfo.visibleItemsInfo
+    return visibleItems.fastFirstOrNull { item ->
+        offset.x >= item.offset.x &&
+                offset.x <= item.offset.x + item.size.width &&
+                offset.y >= item.offset.y &&
+                offset.y <= item.offset.y + item.size.height
+    } ?: if (resolveNearest) {
+        visibleItems.minByOrNull { item ->
+            distanceToItemSquared(
+                point = offset,
+                left = item.offset.x.toFloat(),
+                top = item.offset.y.toFloat(),
+                right = (item.offset.x + item.size.width).toFloat(),
+                bottom = (item.offset.y + item.size.height).toFloat()
+            )
+        }
+    } else {
+        null
+    }
+}
+
+/**
+ * Center-crossing hit testing for the END of a touch-painted grid range. The candidate is
+ * the bounds (or nearest) item under the finger, but it only becomes the range end once
+ * the finger has crossed its center in the direction away from the anchor; until then the
+ * end stays one item back. A stationary hold inside the anchor item therefore resolves to
+ * the anchor alone, and a slow slide extends the range one deliberate row at a time. While
+ * edge auto-scroll moves items under a stationary finger, each arriving item's center
+ * sweeps past the finger in turn, so the range keeps extending exactly as before.
+ */
+private fun gridEndIndexAt(
+    gridState: LazyGridState,
+    offset: Offset,
+    anchorIndex: Int,
+    resolveNearest: Boolean
+): Int? {
+    val candidate = gridItemAt(gridState, offset, resolveNearest) ?: return null
+    if (anchorIndex < 0 || candidate.index == anchorIndex) return candidate.index
+    val anchorItem = gridState.layoutInfo.visibleItemsInfo
+        .fastFirstOrNull { it.index == anchorIndex }
+    val centerX = candidate.offset.x + candidate.size.width / 2
+    val centerY = candidate.offset.y + candidate.size.height / 2
+    val crossed = when {
+        anchorItem != null && candidate.offset.y > anchorItem.offset.y -> offset.y >= centerY
+        anchorItem != null && candidate.offset.y < anchorItem.offset.y -> offset.y <= centerY
+        anchorItem == null && candidate.index > anchorIndex -> offset.y >= centerY
+        anchorItem == null && candidate.index < anchorIndex -> offset.y <= centerY
+        candidate.index > anchorIndex -> offset.x >= centerX
+        else -> offset.x <= centerX
+    }
+    return when {
+        crossed -> candidate.index
+        candidate.index > anchorIndex -> candidate.index - 1
+        else -> candidate.index + 1
+    }
+}
+
+/** Plain bounds hit testing for lists; see [gridItemAt]. */
+private fun listItemAt(
+    listState: LazyListState,
+    offset: Offset,
+    resolveNearest: Boolean
+): LazyListItemInfo? {
+    val visibleItems = listState.layoutInfo.visibleItemsInfo
+    return visibleItems.fastFirstOrNull { item ->
+        offset.y >= item.offset && offset.y <= item.offset + item.size
+    } ?: if (resolveNearest) {
+        visibleItems.minByOrNull { item ->
+            distanceToInterval(offset.y, item.offset, item.offset + item.size)
+        }
+    } else {
+        null
+    }
+}
+
+/** Center-crossing hit testing for the END of a touch-painted list range; see [gridEndIndexAt]. */
+private fun listEndIndexAt(
+    listState: LazyListState,
+    offset: Offset,
+    anchorIndex: Int,
+    resolveNearest: Boolean
+): Int? {
+    val candidate = listItemAt(listState, offset, resolveNearest) ?: return null
+    if (anchorIndex < 0 || candidate.index == anchorIndex) return candidate.index
+    val centerY = candidate.offset + candidate.size / 2
+    return when {
+        candidate.index > anchorIndex ->
+            if (offset.y >= centerY) candidate.index else candidate.index - 1
+
+        offset.y <= centerY -> candidate.index
+        else -> candidate.index + 1
     }
 }
 

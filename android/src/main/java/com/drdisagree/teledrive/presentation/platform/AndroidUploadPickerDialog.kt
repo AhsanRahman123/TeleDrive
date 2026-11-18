@@ -278,6 +278,25 @@ fun AndroidUploadPickerDialog(
         selectedPaths = if (path in selectedPaths) selectedPaths - path else selectedPaths + path
     }
 
+    fun openEntry(entry: UploadPickerEntry) {
+        currentPath = entry.file.absolutePath
+        selectedPaths = emptySet()
+        search = ""
+    }
+
+    // Row tap semantics: a folder opens only when nothing is selected (folder mode
+    // never has a selection, so there it always opens). While a selection is active,
+    // tapping any row — folder or file — toggles it instead, so an item can be
+    // un-selected without being navigated into. The row's "Open" button always opens
+    // (UploadPickerListItem's onOpen), regardless of the selection.
+    fun entryTap(entry: UploadPickerEntry) {
+        if (entry.isDirectory && (folderMode || selectedPaths.isEmpty())) {
+            openEntry(entry)
+        } else if (!folderMode) {
+            toggleEntry(entry)
+        }
+    }
+
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
     var dragBase by remember { mutableStateOf<Set<String>?>(null) }
@@ -551,13 +570,7 @@ fun AndroidUploadPickerDialog(
                                     entry = entry,
                                     selected = entry.file.absolutePath in selectedPaths,
                                     showSelection = !folderMode,
-                                    onClick = {
-                                        if (entry.isDirectory) {
-                                            currentPath = entry.file.absolutePath
-                                            selectedPaths = emptySet()
-                                            search = ""
-                                        } else if (!folderMode) toggleEntry(entry)
-                                    },
+                                    onClick = { entryTap(entry) },
                                     onToggle = { toggleEntry(entry) }
                                 )
                             }
@@ -574,13 +587,8 @@ fun AndroidUploadPickerDialog(
                                     entry = entry,
                                     selected = entry.file.absolutePath in selectedPaths,
                                     showSelection = !folderMode,
-                                    onClick = {
-                                        if (entry.isDirectory) {
-                                            currentPath = entry.file.absolutePath
-                                            selectedPaths = emptySet()
-                                            search = ""
-                                        } else if (!folderMode) toggleEntry(entry)
-                                    },
+                                    onClick = { entryTap(entry) },
+                                    onOpen = { openEntry(entry) },
                                     onToggle = { toggleEntry(entry) }
                                 )
                             }
@@ -663,6 +671,7 @@ private fun UploadPickerListItem(
     selected: Boolean,
     showSelection: Boolean,
     onClick: () -> Unit,
+    onOpen: () -> Unit,
     onToggle: () -> Unit
 ) {
     // In file mode the row is combinedClickable with a no-op long-click: the container's
@@ -708,7 +717,9 @@ private fun UploadPickerListItem(
             )
         }
         if (entry.isDirectory) {
-            TextButton(onClick = onClick) { Text("Open") }
+            // "Open" always navigates, even while a selection is active; only the
+            // row tap itself switches to toggling during a selection.
+            TextButton(onClick = onOpen) { Text("Open") }
         }
     }
 }

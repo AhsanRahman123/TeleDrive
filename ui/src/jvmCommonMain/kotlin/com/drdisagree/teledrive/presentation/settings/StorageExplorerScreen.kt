@@ -529,6 +529,22 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
                             selectedPaths = if (checked) selectedPaths + entry.path
                             else selectedPaths - entry.path
                         },
+                        // While a selection is active, tapping the entry toggles it
+                        // (the same rule as the upload picker) instead of opening it;
+                        // the row's Open/Info button always opens.
+                        onTap = {
+                            if (selectedPaths.isNotEmpty()) {
+                                selectedPaths = if (entry.path in selectedPaths) {
+                                    selectedPaths - entry.path
+                                } else {
+                                    selectedPaths + entry.path
+                                }
+                            } else if (entry.isDirectory) {
+                                openFolder(entry)
+                            } else {
+                                selectedEntry = entry
+                            }
+                        },
                         onOpen = {
                             if (entry.isDirectory) {
                                 openFolder(entry)
@@ -727,6 +743,7 @@ private fun StorageEntryRow(
     entry: StorageExplorerEntry,
     selected: Boolean,
     onSelect: (Boolean) -> Unit,
+    onTap: () -> Unit,
     onOpen: () -> Unit
 ) {
     Card {
@@ -748,9 +765,11 @@ private fun StorageEntryRow(
             Column(
                 // combinedClickable with a no-op long-click: the list's drag-select
                 // gesture owns long-presses, and this keeps a long-press release from
-                // also firing Open (the same arrangement as Files rows).
+                // also firing Open (the same arrangement as Files rows). The tap goes
+                // through onTap, which toggles instead of opening while a selection
+                // is active; the Open/Info button keeps the unconditional onOpen.
                 modifier = Modifier.weight(1f)
-                    .combinedClickable(onClick = onOpen, onLongClick = {})
+                    .combinedClickable(onClick = onTap, onLongClick = {})
                     .padding(vertical = 5.dp)
             ) {
                 Text(

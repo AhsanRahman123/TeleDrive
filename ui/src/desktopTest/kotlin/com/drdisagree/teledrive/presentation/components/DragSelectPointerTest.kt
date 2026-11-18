@@ -514,6 +514,80 @@ class DragSelectPointerTest {
 
     @OptIn(ExperimentalFoundationApi::class)
     @Test
+    fun `touch hold selects only the anchor until the next row center is crossed`() {
+        var selected by mutableStateOf(emptySet<Int>())
+        var rangeBase by mutableStateOf(emptySet<Int>())
+
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                resolveNearestVisibleItem = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 360.dp)
+                    .testTag("touch-overshoot-grid")
+                    .then(dragSelect)
+            ) {
+                items((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                            .combinedClickable(onClick = {}, onLongClick = {})
+                    )
+                }
+            }
+        }
+
+        // Hold in the LOWER half of the first row (row 0 spans y 0..60, center 30).
+        // A stationary hold must select exactly that one row.
+        rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
+            down(Offset(90f, 50f))
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0), selected)
+
+        // The thumb settles a few pixels into the next row's upper half (row 1 spans
+        // y 60..120, center 90). The row's center has not been crossed, so the range
+        // must still end at the anchor — this is the "hold one row, two get ticked"
+        // defect from the V2 test video.
+        rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
+            moveBy(Offset(0f, 15f))
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0), selected)
+
+        // Sliding deliberately past the next row's center extends the range to it.
+        rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
+            moveBy(Offset(0f, 30f))
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0, 1), selected)
+
+        rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
+            up()
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0, 1), selected)
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Test
     fun `touch long press slide from a selected row erases the crossed range`() {
         var selected by mutableStateOf(setOf(0, 1, 2, 3))
         var rangeBase by mutableStateOf(setOf(0, 1, 2, 3))
