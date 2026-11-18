@@ -47,6 +47,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -80,6 +81,11 @@ fun PlayerGestureArea(
     subtitlePosition: Float = DEFAULT_SUBTITLE_VERTICAL_POSITION,
     subtitleHitWidthFraction: Float = DEFAULT_SUBTITLE_HIT_WIDTH_FRACTION,
     onSubtitlePositionChange: (Float) -> Unit = {},
+    zoomEnabled: Boolean = false,
+    zoomScale: Float = 1f,
+    zoomOffsetX: Float = 0f,
+    zoomOffsetY: Float = 0f,
+    onZoomChanged: (scale: Float, offsetX: Float, offsetY: Float) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -92,7 +98,12 @@ fun PlayerGestureArea(
     val currentSubtitlePosition by rememberUpdatedState(subtitlePosition)
     val currentSubtitleHitWidth by rememberUpdatedState(subtitleHitWidthFraction)
     val updateSubtitlePosition by rememberUpdatedState(onSubtitlePositionChange)
+    val applyZoom by rememberUpdatedState(onZoomChanged)
+    val currentZoomScale by rememberUpdatedState(zoomScale)
+    val currentZoomOffsetX by rememberUpdatedState(zoomOffsetX)
+    val currentZoomOffsetY by rememberUpdatedState(zoomOffsetY)
     var subtitleDragging by remember { mutableStateOf(false) }
+    var zoomPercent by remember { mutableStateOf<Int?>(null) }
 
     val audioManager = remember(context) { context.getSystemService(AudioManager::class.java) }
     val maxVolume = remember(audioManager) {
@@ -120,11 +131,143 @@ fun PlayerGestureArea(
         adjustment = null
     }
 
+    LaunchedEffect(zoomPercent) {
+        if (zoomPercent == null) return@LaunchedEffect
+        delay(HUD_TIMEOUT_MS.milliseconds)
+        zoomPercent = null
+    }
+
     val toggleControlsLabel = stringResource(Res.string.player_toggle_controls)
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .matchParentSize()
+                // MX-style pinch zoom, first in the Initial pass (ahead of the subtitle-band
+                // block below). It watches every gesture without consuming until a two-finger
+                // span change crosses the claim threshold; from then on it consumes all
+                // changes, which starves the Main-pass tap/drag detectors for this gesture
+                // only. While zoomed in, a one-finger drag pans instead of adjusting
+                // brightness/volume (those detectors are likewise starved once the pan
+                // passes touch slop and this watcher consumes).
+                .pointerInput(zoomEnabled) {
+                    if (!zoomEnabled) return@pointerInput
+                    awaitEachGesture {
+                        awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Initial
+                        )
+                        var scale = currentZoomScale
+                        var panX = currentZoomOffsetX
+                        var panY = currentZoomOffsetY
+                        var pinching = false
+                        var panning = false
+                        var twoPointers = false
+                        var initialSpan = 0f
+                        var startScale = scale
+                        var lastCentroid: Offset? = null
+                        var lastPanPosition: Offset? = null
+
+                        fun clampedPan(x: Float, y: Float, atScale: Float): Pair<Float, Float> {
+                            val maxX = size.width * (atScale - 1f) / 2f
+                            val maxY = size.height * (atScale - 1f) / 2f
+                            return x.coerceIn(-maxX, maxX) to y.coerceIn(-maxY, maxY)
+                        }
+
+                        var finished = false
+                        while (!finished) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pressed = event.changes.filter { it.pressed }
+                            when {
+                                pressed.size >= 2 -> {
+                                    val first = pressed[0].position
+                                    val second = pressed[1].position
+                                    val span = (first - second).getDistance()
+                                    val centroid = (first + second) / 2f
+                                    if (!twoPointers) {
+                                        // A (new) second finger landed: re-base the pinch.
+                                        twoPointers = true
+                                        initialSpan = span
+                                        startScale = scale
+                                        lastCentroid = centroid
+                                    }
+                                    if (!pinching && initialSpan > 0f) {
+                                        val factor = span / initialSpan
+                                        if (factor >= PINCH_CLAIM_FACTOR ||
+                                            factor <= 1f / PINCH_CLAIM_FACTOR
+                                        ) {
+                                            pinching = true
+                                        }
+                                    }
+                                    if (pinching) {
+                                        event.changes.forEach { it.consume() }
+                                        val factor = if (initialSpan > 0f) {
+                                            span / initialSpan
+                                        } else {
+                                            1f
+                                        }
+                                        scale = (startScale * factor)
+                                            .coerceIn(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
+                                        lastCentroid?.let { previous ->
+                                            val delta = centroid - previous
+                                            panX += delta.x
+                                            panY += delta.y
+                                        }
+                                        val (clampedX, clampedY) = clampedPan(panX, panY, scale)
+                                        panX = clampedX
+                                        panY = clampedY
+                                        applyZoom(scale, panX, panY)
+                                        zoomPercent = (scale * 100).roundToInt()
+                                    }
+                                    lastCentroid = centroid
+                                }
+
+                                pressed.size == 1 -> {
+                                    val change = pressed[0]
+                                    if (twoPointers) {
+                                        // Dropped from two fingers to one mid-gesture: the
+                                        // remaining finger pans from wherever it is now.
+                                        twoPointers = false
+                                        pinching = false
+                                        panning = scale > 1f
+                                        lastPanPosition = change.position
+                                        if (panning) change.consume()
+                                    } else if (scale > 1f) {
+                                        val previous = lastPanPosition
+                                        if (previous == null) {
+                                            lastPanPosition = change.position
+                                        } else {
+                                            val delta = change.position - previous
+                                            if (panning ||
+                                                delta.getDistance() > viewConfiguration.touchSlop
+                                            ) {
+                                                panning = true
+                                                panX += delta.x
+                                                panY += delta.y
+                                                val (clampedX, clampedY) =
+                                                    clampedPan(panX, panY, scale)
+                                                panX = clampedX
+                                                panY = clampedY
+                                                change.consume()
+                                                applyZoom(scale, panX, panY)
+                                            }
+                                            lastPanPosition = change.position
+                                        }
+                                    }
+                                }
+                            }
+                            if (event.changes.all { !it.pressed }) {
+                                finished = true
+                                // Snap back: a zoom that settles at (or below) ~100% is no
+                                // zoom at all — return to exactly 1x with no offset.
+                                if (scale <= ZOOM_SNAP_BACK_SCALE &&
+                                    (scale != 1f || panX != 0f || panY != 0f)
+                                ) {
+                                    applyZoom(1f, 0f, 0f)
+                                }
+                            }
+                        }
+                    }
+                }
                 // This runs in the Initial pass, ahead of the general tap/long-press detector.
                 // Only a touch on the visible subtitle band is claimed; all other touches continue
                 // to the regular player gestures, including the 2x long-press speed boost.
@@ -262,6 +405,30 @@ fun PlayerGestureArea(
         ) {
             adjustment?.let { AdjustmentHud(it) }
         }
+        AnimatedVisibility(
+            visible = zoomPercent != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            zoomPercent?.let { ZoomHud(it) }
+        }
+    }
+}
+
+/** Live pinch-zoom readout ("123%"), modelled on the brightness/volume [AdjustmentHud]. */
+@Composable
+private fun ZoomHud(percent: Int) {
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = Color.Black.copy(alpha = HUD_ALPHA),
+        contentColor = Color.White
+    ) {
+        Text(
+            text = "$percent%",
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 14.dp),
+            style = MaterialTheme.typography.titleLarge
+        )
     }
 }
 
@@ -335,6 +502,10 @@ private fun applyBrightness(activity: Activity?, value: Float) {
 }
 
 private const val DRAG_RANGE = 0.7f
+private const val PINCH_CLAIM_FACTOR = 1.08f
+private const val MIN_ZOOM_SCALE = 0.4f
+private const val MAX_ZOOM_SCALE = 2.5f
+private const val ZOOM_SNAP_BACK_SCALE = 1.02f
 private const val MIN_SUBTITLE_VERTICAL_POSITION = 0.08f
 private const val MAX_SUBTITLE_VERTICAL_POSITION = 0.92f
 internal const val MIN_SUBTITLE_HIT_WIDTH_FRACTION = 0.22f

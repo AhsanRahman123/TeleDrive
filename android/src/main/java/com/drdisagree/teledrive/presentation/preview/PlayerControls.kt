@@ -2,10 +2,8 @@ package com.drdisagree.teledrive.presentation.preview
 
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,8 +11,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,10 +34,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
@@ -71,6 +66,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -90,11 +86,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalContext
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import android.provider.Settings
 import android.view.WindowManager
@@ -104,7 +98,6 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.player_audio_track
-import com.drdisagree.teledrive.resources.player_fewer_controls
 import com.drdisagree.teledrive.resources.player_hide_subtitles
 import com.drdisagree.teledrive.resources.player_lock_controls
 import com.drdisagree.teledrive.resources.player_more_controls
@@ -133,7 +126,7 @@ import kotlin.time.Duration.Companion.milliseconds
  * Not the Media3 controller: it ignores window insets, leaves no side padding and anchors its popup
  * to the top.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerControls(
     player: Player,
@@ -176,7 +169,7 @@ fun PlayerControls(
     }
     var tracks by remember(player) { mutableStateOf(player.currentTracks) }
     var subtitlesOn by remember(player) { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
     var showSpeeds by remember { mutableStateOf(false) }
     var showSeekSteps by remember { mutableStateOf(false) }
     var showResizeHint by remember { mutableStateOf(false) }
@@ -271,7 +264,7 @@ fun PlayerControls(
     }
 
     LaunchedEffect(visible) {
-        if (!visible) expanded = false
+        if (!visible) showMore = false
     }
     LaunchedEffect(sleepTimerDeadlineMillis, player) {
         val deadline = sleepTimerDeadlineMillis
@@ -303,6 +296,25 @@ fun PlayerControls(
                 WindowInsets.systemBars.only(WindowInsetsSides.Horizontal)
             )
         ) {
+            // MX-style chrome: the screen's app bar above this overlay carries the back
+            // button, the title and the queue position. This is the player's ONE action
+            // row under it, over a gradient scrim — the old wrapping grid of three rows
+            // of unlabeled icons is gone; everything beyond these few actions lives in
+            // the labelled "More" sheet.
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(TOP_BAR_HEIGHT + 64.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = TOP_SCRIM_ALPHA),
+                                Color.Black.copy(alpha = 0f)
+                            )
+                        )
+                    )
+            )
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -310,226 +322,61 @@ fun PlayerControls(
                     .padding(top = TOP_BAR_HEIGHT, start = 12.dp, end = 12.dp)
                     .fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                    FlowRow(
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.Start),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CompositionLocalProvider(
-                            LocalLayoutDirection provides LayoutDirection.Ltr
-                        ) {
-                            ExtraControl(expanded || audioOnly) {
-                                ControlButton(
-                                    icon = if (muted) {
-                                        Icons.AutoMirrored.Filled.VolumeOff
-                                    } else {
-                                        Icons.AutoMirrored.Filled.VolumeUp
-                                    },
-                                    description = if (muted) {
-                                        stringResource(Res.string.player_unmute)
-                                    } else {
-                                        stringResource(Res.string.player_mute)
-                                    },
-                                    active = muted,
-                                    onClick = {
-                                        onInteraction()
-                                        muted = !muted
-                                        player.volume = if (muted) 0f else 1f
-                                    }
-                                )
-                            }
-                            if (onEnterPip != null) {
-                                ControlButton(
-                                    icon = Icons.Filled.PictureInPictureAlt,
-                                    description = stringResource(
-                                        Res.string.player_picture_in_picture
-                                    ),
-                                    onClick = {
-                                        onInteraction()
-                                        onEnterPip()
-                                    }
-                                )
-                            }
-                            if (!audioOnly) {
-                                ControlButton(
-                                    icon = Icons.Filled.Lock,
-                                    description = stringResource(Res.string.player_lock_controls),
-                                    onClick = {
-                                        onInteraction()
-                                        onLock()
-                                    }
-                                )
-                            }
-                            ExtraControl(expanded) {
-                                ControlButton(
-                                    icon = rotation.icon,
-                                    description = rotation.description,
-                                    active = rotation != PlayerRotation.AUTO,
-                                    onClick = {
-                                        onInteraction()
-                                        rotation = rotation.next()
-                                        activity?.requestedOrientation = rotation.orientation
-                                    }
-                                )
-                            }
-                            if (!audioOnly) {
-                                ExtraControl(expanded) {
-                                    ControlButton(
-                                        icon = resizeMode.icon,
-                                        description = resizeMode.description,
-                                        onClick = {
-                                            onInteraction()
-                                            onCycleResizeMode()
-                                            showResizeHint = true
-                                        }
-                                    )
-                                }
-                            }
-                            ExtraControl(expanded) {
-                                ControlButton(
-                                    icon = Icons.Filled.Forward10,
-                                    description = "Double-tap seek interval: ${seekStepSeconds}s",
-                                    active = seekStepSeconds == 5,
-                                    onClick = {
-                                        onInteraction()
-                                        showSeekSteps = true
-                                    }
-                                )
-                            }
-                            ExtraControl(expanded) {
-                                ControlButton(
-                                    icon = Icons.Filled.Tune,
-                                    description = "Volume and brightness",
-                                    onClick = {
-                                        onInteraction()
-                                        showAdjustments = true
-                                    }
-                                )
-                            }
-                            ExtraControl(expanded) {
-                                ControlButton(
-                                    icon = Icons.Filled.Shuffle,
-                                    description = if (shuffle) "Shuffle on" else "Shuffle off",
-                                    active = shuffle,
-                                    onClick = {
-                                        onInteraction()
-                                        shuffle = !shuffle
-                                    }
-                                )
-                            }
-                            ExtraControl(expanded) {
-                                ControlButton(
-                                    icon = Icons.Filled.Repeat,
-                                    description = if (repeatAll) "Repeat all on" else "Repeat all off",
-                                    active = repeatAll,
-                                    onClick = {
-                                        onInteraction()
-                                        repeatAll = !repeatAll
-                                    }
-                                )
-                            }
-                            ExtraControl(expanded) {
-                                ControlButton(
-                                    icon = Icons.Filled.Timer,
-                                    description = if (sleepTimerDeadlineMillis > 0L) "Sleep timer active" else "Sleep timer",
-                                    active = sleepTimerDeadlineMillis > 0L,
-                                    onClick = {
-                                        onInteraction()
-                                        showSleepTimer = true
-                                    }
-                                )
-                            }
-                            ExtraControl(expanded || queueItems.isNotEmpty()) {
-                                ControlButton(
-                                    icon = Icons.Filled.QueueMusic,
-                                    description = "Preview queue",
-                                    enabled = queueItems.isNotEmpty(),
-                                    onClick = {
-                                        onInteraction()
-                                        showQueue = true
-                                    }
-                                )
-                            }
-                            ExtraControl(expanded) {
-                                ControlButton(
-                                    icon = Icons.Filled.SlowMotionVideo,
-                                    description = stringResource(Res.string.preview_playback_speed),
-                                    active = speed != 1f,
-                                    onClick = {
-                                        onInteraction()
-                                        showSpeeds = true
-                                    }
-                                )
-                            }
-                            ExtraControl(expanded) {
-                                ControlButton(
-                                    icon = if (repeatOne) {
-                                        Icons.Filled.RepeatOne
-                                    } else {
-                                        Icons.Filled.Repeat
-                                    },
-                                    description = if (repeatOne) stringResource(Res.string.player_repeat_off) else stringResource(
-                                        Res.string.player_repeat_one
-                                    ),
-                                    active = repeatOne,
-                                    onClick = {
-                                        onInteraction()
-                                        repeatOne = !repeatOne
-                                        player.repeatMode = if (repeatOne) {
-                                            Player.REPEAT_MODE_ONE
-                                        } else {
-                                            Player.REPEAT_MODE_OFF
-                                        }
-                                    }
-                                )
-                            }
-                            if (!audioOnly) {
-                                ExtraControl(true) {
-                                    ControlButton(
-                                        icon = if (subtitlesOn) {
-                                            Icons.Filled.Subtitles
-                                        } else {
-                                            Icons.Filled.SubtitlesOff
-                                        },
-                                        description = if (subtitlesOn) {
-                                            stringResource(Res.string.player_hide_subtitles)
-                                        } else {
-                                            stringResource(Res.string.player_show_subtitles)
-                                        },
-                                        active = subtitlesOn,
-                                        enabled = true,
-                                        onClick = {
-                                            onInteraction()
-                                            showTextTracks = true
-                                        }
-                                    )
-                                }
-                            }
-                            ExtraControl(expanded || audioTracks.size > 1) {
-                                ControlButton(
-                                    icon = Icons.Filled.Audiotrack,
-                                    description = stringResource(Res.string.player_audio_track),
-                                    enabled = audioTracks.isNotEmpty(),
-                                    onClick = {
-                                        onInteraction()
-                                        showAudioTracks = true
-                                    }
-                                )
-                            }
+                if (!audioOnly) {
+                    AspectButton(
+                        mode = resizeMode,
+                        onClick = {
+                            onInteraction()
+                            onCycleResizeMode()
+                            showResizeHint = true
                         }
-                    }
+                    )
+                    ControlButton(
+                        icon = if (subtitlesOn) {
+                            Icons.Filled.Subtitles
+                        } else {
+                            Icons.Filled.SubtitlesOff
+                        },
+                        description = if (subtitlesOn) {
+                            stringResource(Res.string.player_hide_subtitles)
+                        } else {
+                            stringResource(Res.string.player_show_subtitles)
+                        },
+                        active = subtitlesOn,
+                        onClick = {
+                            onInteraction()
+                            showTextTracks = true
+                        }
+                    )
+                }
+                if (onEnterPip != null) {
+                    ControlButton(
+                        icon = Icons.Filled.PictureInPictureAlt,
+                        description = stringResource(Res.string.player_picture_in_picture),
+                        onClick = {
+                            onInteraction()
+                            onEnterPip()
+                        }
+                    )
+                }
+                if (!audioOnly) {
+                    ControlButton(
+                        icon = Icons.Filled.Lock,
+                        description = stringResource(Res.string.player_lock_controls),
+                        onClick = {
+                            onInteraction()
+                            onLock()
+                        }
+                    )
                 }
                 ControlButton(
-                    icon = if (expanded) Icons.Filled.ChevronRight else Icons.Filled.ChevronLeft,
-                    description = if (expanded) stringResource(Res.string.player_fewer_controls) else stringResource(
-                        Res.string.player_more_controls
-                    ),
+                    icon = Icons.Filled.MoreVert,
+                    description = stringResource(Res.string.player_more_controls),
                     onClick = {
                         onInteraction()
-                        expanded = !expanded
+                        showMore = true
                     }
                 )
             }
@@ -549,7 +396,21 @@ fun PlayerControls(
                 }
             }
 
-            if (!audioOnly) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = 0f),
+                                Color.Black.copy(alpha = BOTTOM_SCRIM_ALPHA)
+                            )
+                        )
+                    )
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
                 TransportRow(
                     player = player,
                     playing = playing,
@@ -560,92 +421,235 @@ fun PlayerControls(
                     onNextFile = onNextFile,
                     hasPreviousFile = hasPreviousFile,
                     hasNextFile = hasNextFile,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            }
-
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.scrim.copy(alpha = 0f),
-                                MaterialTheme.colorScheme.scrim.copy(alpha = SCRIM_ALPHA)
-                            )
-                        )
-                    )
-                    .navigationBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                if (audioOnly) {
-                    TransportRow(
-                        player = player,
-                        playing = playing,
-                        ended = ended,
-                        waiting = waitingForData,
-                        onInteraction = onInteraction,
-                        onPreviousFile = onPreviousFile,
-                        onNextFile = onNextFile,
-                        hasPreviousFile = hasPreviousFile,
-                        hasNextFile = hasNextFile,
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .padding(bottom = 8.dp)
-                    )
-                }
-                Slider(
-                    value = scrubTarget ?: position.toFloat(),
-                    onValueChange = { value ->
-                        onInteraction()
-                        scrubTarget = value
-                    },
-                    onValueChangeFinished = {
-                        scrubTarget?.let { target ->
-                            val millis = target.toLong()
-                            position = millis
-                            pendingSeek = millis
-                            player.seekTo(millis)
-                        }
-                        scrubTarget = null
-                    },
-                    valueRange = 0f..duration.coerceAtLeast(1).toFloat(),
-                    thumb = {
-                        Box(
-                            modifier = Modifier
-                                .size(width = THUMB_WIDTH, height = THUMB_HEIGHT)
-                                .background(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    shape = CircleShape
-                                )
-                        )
-                    }
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(bottom = 2.dp)
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = {
+                            onInteraction()
+                            muted = !muted
+                            player.volume = if (muted) 0f else 1f
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (muted) {
+                                Icons.AutoMirrored.Filled.VolumeOff
+                            } else {
+                                Icons.AutoMirrored.Filled.VolumeUp
+                            },
+                            contentDescription = if (muted) {
+                                stringResource(Res.string.player_unmute)
+                            } else {
+                                stringResource(Res.string.player_mute)
+                            },
+                            tint = playerContentColor()
+                        )
+                    }
                     Text(
                         text = Formatters.duration(scrubTarget?.toLong() ?: position),
                         style = MaterialTheme.typography.labelLarge,
-                        color = playerContentColor()
+                        color = playerContentColor(),
+                        modifier = Modifier.padding(start = 4.dp)
                     )
-                    Spacer(modifier = Modifier.weight(1f))
+                    Slider(
+                        value = scrubTarget ?: position.toFloat(),
+                        onValueChange = { value ->
+                            onInteraction()
+                            scrubTarget = value
+                        },
+                        onValueChangeFinished = {
+                            scrubTarget?.let { target ->
+                                val millis = target.toLong()
+                                position = millis
+                                pendingSeek = millis
+                                player.seekTo(millis)
+                            }
+                            scrubTarget = null
+                        },
+                        valueRange = 0f..duration.coerceAtLeast(1).toFloat(),
+                        thumb = {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = THUMB_WIDTH, height = THUMB_HEIGHT)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        shape = CircleShape
+                                    )
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 10.dp)
+                    )
                     if (speed != 1f) {
                         Text(
                             text = speedLabel(speed),
                             style = MaterialTheme.typography.labelLarge,
-                            color = playerSecondaryColor()
+                            color = playerSecondaryColor(),
+                            modifier = Modifier.padding(end = 8.dp)
                         )
-                        Spacer(modifier = Modifier.weight(1f))
                     }
                     Text(
                         text = Formatters.duration(duration),
                         style = MaterialTheme.typography.labelLarge,
                         color = playerSecondaryColor()
                     )
+                    if (!audioOnly) {
+                        IconButton(
+                            onClick = {
+                                onInteraction()
+                                rotation = rotation.next()
+                                activity?.requestedOrientation = rotation.orientation
+                            },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .padding(start = 4.dp)
+                        ) {
+                            Icon(
+                                imageVector = rotation.icon,
+                                contentDescription = rotation.description,
+                                tint = if (rotation != PlayerRotation.AUTO) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    playerContentColor()
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
       }
+    }
+
+    if (showMore) {
+        ModalBottomSheet(onDismissRequest = { showMore = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
+                    .padding(bottom = 12.dp)
+            ) {
+                Text(
+                    text = stringResource(Res.string.player_more_controls),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+                MoreRow(
+                    icon = Icons.Filled.SlowMotionVideo,
+                    label = stringResource(Res.string.preview_playback_speed),
+                    value = speedLabel(speed),
+                    onClick = {
+                        showMore = false
+                        showSpeeds = true
+                    }
+                )
+                if (!audioOnly) {
+                    MoreRow(
+                        icon = if (subtitlesOn) Icons.Filled.Subtitles else Icons.Filled.SubtitlesOff,
+                        label = stringResource(Res.string.player_subtitles),
+                        value = if (subtitlesOn) "On" else "Off",
+                        onClick = {
+                            showMore = false
+                            showTextTracks = true
+                        }
+                    )
+                }
+                MoreRow(
+                    icon = Icons.Filled.Audiotrack,
+                    label = stringResource(Res.string.player_audio_track),
+                    value = audioTracks.firstOrNull { it.selected }?.label,
+                    enabled = audioTracks.isNotEmpty(),
+                    onClick = {
+                        showMore = false
+                        showAudioTracks = true
+                    }
+                )
+                MoreRow(
+                    icon = Icons.Filled.Tune,
+                    label = "Volume and brightness",
+                    onClick = {
+                        showMore = false
+                        showAdjustments = true
+                    }
+                )
+                MoreRow(
+                    icon = Icons.Filled.Forward10,
+                    label = "Double-tap seek interval",
+                    value = "$seekStepSeconds seconds",
+                    onClick = {
+                        showMore = false
+                        showSeekSteps = true
+                    }
+                )
+                MoreRow(
+                    icon = Icons.Filled.Timer,
+                    label = "Sleep timer",
+                    value = if (sleepTimerDeadlineMillis > 0L) "On" else "Off",
+                    onClick = {
+                        showMore = false
+                        showSleepTimer = true
+                    }
+                )
+                if (queueItems.isNotEmpty()) {
+                    MoreRow(
+                        icon = Icons.Filled.QueueMusic,
+                        label = "Preview queue",
+                        value = "${currentQueueIndex + 1} / ${queueItems.size}",
+                        onClick = {
+                            showMore = false
+                            showQueue = true
+                        }
+                    )
+                }
+                MoreToggleRow(
+                    icon = Icons.Filled.Shuffle,
+                    label = "Shuffle",
+                    checked = shuffle,
+                    onCheckedChange = {
+                        shuffle = it
+                        onInteraction()
+                    }
+                )
+                MoreToggleRow(
+                    icon = Icons.Filled.Repeat,
+                    label = "Repeat all",
+                    checked = repeatAll,
+                    onCheckedChange = {
+                        repeatAll = it
+                        onInteraction()
+                    }
+                )
+                MoreToggleRow(
+                    icon = Icons.Filled.RepeatOne,
+                    label = "Repeat one",
+                    checked = repeatOne,
+                    onCheckedChange = { enabled ->
+                        repeatOne = enabled
+                        player.repeatMode = if (enabled) {
+                            Player.REPEAT_MODE_ONE
+                        } else {
+                            Player.REPEAT_MODE_OFF
+                        }
+                        onInteraction()
+                    }
+                )
+                MoreRow(
+                    icon = rotation.icon,
+                    label = "Screen rotation",
+                    value = rotation.description,
+                    onClick = {
+                        onInteraction()
+                        rotation = rotation.next()
+                        activity?.requestedOrientation = rotation.orientation
+                    }
+                )
+            }
+        }
     }
 
     if (showAdjustments) {
@@ -1044,14 +1048,105 @@ private fun TransportRow(
     }
 }
 
+/** The aspect-cycle button in the header row, showing the current mode's name, MX-style. */
 @Composable
-private fun ExtraControl(visible: Boolean, content: @Composable () -> Unit) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
-        exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut()
+private fun AspectButton(mode: PlayerResizeMode, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = MaterialTheme.shapes.extraLarge,
+        color = playerSurfaceColor().copy(alpha = SURFACE_ALPHA),
+        contentColor = playerContentColor()
     ) {
-        content()
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = mode.icon,
+                contentDescription = mode.description,
+                modifier = Modifier.size(18.dp)
+            )
+            Text(text = mode.shortLabel, style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+/** One labelled row in the "More" sheet: icon + name + current value, tap to open its picker. */
+@Composable
+private fun MoreRow(
+    icon: ImageVector,
+    label: String,
+    value: String? = null,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (enabled) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+            },
+            modifier = Modifier.size(22.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+            },
+            modifier = Modifier.padding(start = 16.dp)
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        if (value != null) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** One labelled toggle row in the "More" sheet. */
+@Composable
+private fun MoreToggleRow(
+    icon: ImageVector,
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 24.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(start = 16.dp)
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -1108,7 +1203,8 @@ private val SPEEDS = listOf(
 private const val SEEK_STEP_MS = 10_000L
 private const val PROGRESS_INTERVAL_MS = 250L
 private const val SEEK_TOLERANCE_MS = 500L
-private const val SCRIM_ALPHA = 0.35f
+private const val TOP_SCRIM_ALPHA = 0.5f
+private const val BOTTOM_SCRIM_ALPHA = 0.55f
 private const val SURFACE_ALPHA = 0.35f
 private const val SECONDARY_ALPHA = 0.7f
 private const val TRANSPORT_ALPHA = 0.7f

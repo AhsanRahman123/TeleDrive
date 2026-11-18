@@ -47,7 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -253,6 +253,10 @@ fun MediaPlayer(
     }
 
     var interactionTick by remember { mutableIntStateOf(0) }
+
+    // Pinch zoom is per-track: a new file always starts at exactly 100%.
+    LaunchedEffect(fileId) { session.resetZoom() }
+
     var locked by remember(content) { mutableStateOf(false) }
     var lockHintVisible by remember(content) { mutableStateOf(false) }
     val visibleControls by rememberUpdatedState(controlsVisible)
@@ -404,12 +408,12 @@ fun MediaPlayer(
         }
     }
 
-    val darkTheme = MaterialTheme.colorScheme.surface.luminance() < LIGHT_LUMINANCE
+    // Video always plays on a black stage, MX-style: in the light theme the themed stage
+    // left the letterbox area near-white, so the overlaid controls read as a detached
+    // white strip under the picture instead of chrome over the video.
     val stageColor = when {
         audioOnly -> ComposeColor.Transparent
-        previewBackgroundMode == PreviewBackgroundMode.BLACK -> ComposeColor.Black
-        darkTheme -> ComposeColor.Black
-        else -> MaterialTheme.colorScheme.surfaceContainerLowest
+        else -> ComposeColor.Black
     }
 
     Box(
@@ -460,7 +464,16 @@ fun MediaPlayer(
                         view.requestLayout()
                     }
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Pinch zoom transforms the whole PlayerView; the subtitle view is a
+                    // child of PlayerView, so subtitles scale with the picture.
+                    .graphicsLayer {
+                        scaleX = session.zoomScale
+                        scaleY = session.zoomScale
+                        translationX = session.zoomOffsetX
+                        translationY = session.zoomOffsetY
+                    }
             )
         }
         if (!audioOnly && !sized) {
@@ -576,6 +589,15 @@ fun MediaPlayer(
                 },
                 onAdjustStart = { if (visibleControls) notifyControls(false) },
                 dragEnabled = !locked && !audioOnly,
+                zoomEnabled = !locked && !audioOnly,
+                zoomScale = session.zoomScale,
+                zoomOffsetX = session.zoomOffsetX,
+                zoomOffsetY = session.zoomOffsetY,
+                onZoomChanged = { scale, offsetX, offsetY ->
+                    session.zoomScale = scale
+                    session.zoomOffsetX = offsetX
+                    session.zoomOffsetY = offsetY
+                },
                 chromeVisible = controlsVisible,
                 subtitleDragEnabled = hasActiveSubtitles && !locked && !audioOnly && !inPipMode,
                 subtitlePosition = subtitleAppearance.verticalPosition,
@@ -638,7 +660,10 @@ fun MediaPlayer(
                         !playbackFailed,
                 audioOnly = audioOnly,
                 resizeMode = resizeMode,
-                onCycleResizeMode = { resizeMode = resizeMode.next() },
+                onCycleResizeMode = {
+                    resizeMode = resizeMode.next()
+                    session.resetZoom()
+                },
                 onInteraction = { interactionTick++ },
                 onEnterPip = activity
                     ?.takeIf { pipAvailable }
@@ -773,7 +798,6 @@ private fun VideoSize.toRational(): Rational? =
 
 private const val CONTROLLER_TIMEOUT_MS = 3_000L
 private const val LOCK_ALPHA = 0.7f
-private const val LIGHT_LUMINANCE = 0.5f
 
 private val AUDIO_ICON_SIZE = 96.dp
 
