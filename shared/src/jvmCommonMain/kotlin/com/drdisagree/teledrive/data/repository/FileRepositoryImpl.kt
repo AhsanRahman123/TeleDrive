@@ -24,7 +24,6 @@ import com.drdisagree.teledrive.core.telegram.TelegramDownloadEvent
 import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.core.telegram.RemoteDocument
 import com.drdisagree.teledrive.core.telegram.TelegramDocumentCopyRequest
-import com.drdisagree.teledrive.core.telegram.TelegramDocumentCopyResult
 import com.drdisagree.teledrive.data.local.FileQueryBuilder
 import com.drdisagree.teledrive.data.local.OffsetRefreshPagingSource
 import com.drdisagree.teledrive.data.local.dao.FileDao
@@ -394,60 +393,21 @@ class FileRepositoryImpl(
         var copied = localCopies.size
         var lastError: AppError? = null
 
-        // A document album carries up to ten independent document captions/manifests.
-        // Batch by source chat because Telegram cannot mix channels in one album.
-        for ((chatId, chatCopies) in remoteCopies.groupBy { it.sourceChatId }) {
-            for (batch in chatCopies.chunked(10)) {
-                if (batch.size == 1) {
-                    val candidate = batch.single()
-                    when (val result = copyRemote(candidate.copy, candidate.remoteFileId, chatId)) {
-                        is AppResult.Success -> {
-                            fileDao.upsert(result.value)
-                            copied++
-                        }
-                        is AppResult.Failure -> lastError = result.error
-                    }
-                    continue
+        // Copy one by one through the same single-send path a lone file uses (the
+        // TelegramClient default behavior, identical to official). The album batch path
+        // (copyDocuments) silently lost whole batches, so copyFiles no longer routes
+        // through it; the album code stays in the platform clients, unused, for possible
+        // future debugging. Each success is persisted as soon as it lands, so one failed
+        // file only skips itself and a retry only needs the copies that did not make it.
+        for (candidate in remoteCopies) {
+            when (
+                val result = copyRemote(candidate.copy, candidate.remoteFileId, candidate.sourceChatId)
+            ) {
+                is AppResult.Success -> {
+                    fileDao.upsert(result.value)
+                    copied++
                 }
-
-                val outcomes = try {
-                    telegramClient.copyDocuments(
-                        chatId,
-                        batch.map { candidate ->
-                            remoteCopyRequest(candidate.copy, candidate.remoteFileId)
-                        }
-                    )
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    val telegramError = error as? TelegramException
-                        ?: TelegramException(500, error.message ?: "Telegram album copy failed")
-                    List(batch.size) { TelegramDocumentCopyResult(error = telegramError) }
-                }
-
-                val successfulCopies = mutableListOf<FileEntity>()
-                batch.forEachIndexed { index, candidate ->
-                    val outcome = outcomes.getOrNull(index)
-                    val document = outcome?.document
-                    if (document != null) {
-                        successfulCopies += withRemoteDocument(candidate.copy, document)
-                    } else {
-                        val error = outcome?.error
-                            ?: TelegramException(500, "Telegram returned an incomplete album result")
-                        lastError = if (error.isRateLimit) {
-                            AppError.RateLimited(error.retryAfterSeconds ?: 0)
-                        } else {
-                            AppError.TelegramError(error.code, error.message)
-                        }
-                    }
-                }
-
-                // Persist successes even when another album item failed. A retry only needs
-                // to create the copies that did not make it.
-                if (successfulCopies.isNotEmpty()) {
-                    fileDao.upsertAll(successfulCopies)
-                    copied += successfulCopies.size
-                }
+                is AppResult.Failure -> lastError = result.error
             }
         }
 
