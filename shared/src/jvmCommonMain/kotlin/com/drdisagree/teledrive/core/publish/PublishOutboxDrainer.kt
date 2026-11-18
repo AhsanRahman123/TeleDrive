@@ -15,8 +15,17 @@ import com.drdisagree.teledrive.data.local.entity.FileEntity
 import com.drdisagree.teledrive.data.repository.FileBase
 import com.drdisagree.teledrive.data.repository.FileManifestPublisher
 import com.drdisagree.teledrive.data.repository.FolderStateSynchronizer
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * Rows keep their flag until the caption is accepted, so a failed edit is retried rather than
@@ -40,40 +49,13 @@ class PublishOutboxDrainer(
     ): Boolean {
         if (!replayDeletes(isStopped)) return false
 
-        var published = 0
+        val published = AtomicInteger(0)
         while (true) {
             if (isStopped()) return false
             val batch = fileDao.pendingPublish(BATCH_SIZE)
             if (batch.isEmpty()) break
-            onProgress(published, published + fileDao.pendingPublishCount())
-
-            var index = 0
-            while (index < batch.size) {
-                val entity = batch[index++]
-                if (isStopped()) return false
-                if (!awaitInteractionWindow(isStopped)) return false
-                when (val result = manifestPublisher.publish(entity)) {
-                    is AppResult.Success -> {
-                        clearIfUnchanged(entity, accepted = true)
-                        onProgress(++published, published + fileDao.pendingPublishCount())
-                    }
-                    is AppResult.Failure -> {
-                        val error = result.error
-                        if (error is AppError.RateLimited) {
-                            if (error.retryAfterSeconds > INLINE_WAIT_LIMIT) return false
-                            if (!waitOut(error.retryAfterSeconds + 1, isStopped, onWaiting)) {
-                                return false
-                            }
-                            index--
-                            continue
-                        }
-                        if (!isPermanent(error)) return false
-                        SafeLog.w(TAG, "Dropping unpublishable manifest: $error")
-                        clearIfUnchanged(entity, accepted = false)
-                        onProgress(++published, published + fileDao.pendingPublishCount())
-                    }
-                }
-            }
+            onProgress(published.get(), published.get() + fileDao.pendingPublishCount())
+            if (!publishBatch(batch, published, isStopped, onProgress, onWaiting)) return false
         }
 
         repeat(MAX_FOLDER_PUSHES) {
@@ -88,6 +70,77 @@ class PublishOutboxDrainer(
             }
         }
         return folderDao.pendingPublishCount() == 0
+    }
+
+    /**
+     * Publishes one batch with up to [MAX_PARALLEL_PUBLISHES] caption edits in flight at
+     * once. Everything on the publish path already tolerates concurrent callers: the
+     * manifest publisher is stateless per file, the Telegram pacer serializes edit starts
+     * and holds an account-wide flood deadline, and [clearIfUnchanged] seals each file
+     * inside its own transaction. Per-file outcomes match the old one-by-one loop exactly:
+     * success seals and clears the row, a short rate limit waits and retries the same
+     * file, a permanent rejection is dead-lettered, and a transient failure or an
+     * over-long rate limit stops the drain with unstarted files still flagged for the
+     * next run.
+     */
+    private suspend fun publishBatch(
+        batch: List<FileEntity>,
+        published: AtomicInteger,
+        isStopped: () -> Boolean,
+        onProgress: suspend (published: Int, total: Int) -> Unit,
+        onWaiting: suspend (secondsLeft: Int) -> Unit
+    ): Boolean = coroutineScope {
+        val slots = Semaphore(MAX_PARALLEL_PUBLISHES)
+        val aborted = AtomicBoolean(false)
+        val progressLock = Mutex()
+
+        suspend fun reportProgress() {
+            val done = published.incrementAndGet()
+            progressLock.withLock { onProgress(done, done + fileDao.pendingPublishCount()) }
+        }
+
+        val jobs = batch.map { entity ->
+            async {
+                slots.withPermit {
+                    while (true) {
+                        if (aborted.get() || isStopped()) return@withPermit
+                        if (!awaitInteractionWindow(isStopped)) {
+                            aborted.set(true)
+                            return@withPermit
+                        }
+                        when (val result = manifestPublisher.publish(entity)) {
+                            is AppResult.Success -> {
+                                clearIfUnchanged(entity, accepted = true)
+                                reportProgress()
+                                return@withPermit
+                            }
+                            is AppResult.Failure -> {
+                                val error = result.error
+                                if (error is AppError.RateLimited) {
+                                    if (error.retryAfterSeconds > INLINE_WAIT_LIMIT ||
+                                        !waitOut(error.retryAfterSeconds + 1, isStopped, onWaiting)
+                                    ) {
+                                        aborted.set(true)
+                                        return@withPermit
+                                    }
+                                    // Waited out: loop retries the same file.
+                                } else if (isPermanent(error)) {
+                                    SafeLog.w(TAG, "Dropping unpublishable manifest: $error")
+                                    clearIfUnchanged(entity, accepted = false)
+                                    reportProgress()
+                                    return@withPermit
+                                } else {
+                                    aborted.set(true)
+                                    return@withPermit
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        jobs.awaitAll()
+        !aborted.get() && !isStopped()
     }
 
     /**
@@ -189,6 +242,7 @@ class PublishOutboxDrainer(
     private companion object {
         const val TAG = "PublishOutbox"
         const val BATCH_SIZE = 100
+        const val MAX_PARALLEL_PUBLISHES = 4
         const val INLINE_WAIT_LIMIT = 900
         const val WAIT_TICK_SECONDS = 15
         const val MAX_FOLDER_PUSHES = 3

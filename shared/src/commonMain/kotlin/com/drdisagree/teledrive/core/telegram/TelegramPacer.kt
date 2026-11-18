@@ -65,8 +65,9 @@ class TelegramPacer {
 
     /**
      * Caption edits update existing Telegram messages rather than creating new ones, so they use
-     * a separate conservative one-per-second lane. Server FLOOD_WAIT responses still pause every
-     * Telegram mutation through the shared account-wide deadline.
+     * a separate lane whose starts are spaced [EDIT_INTERVAL_MS] apart — up to four edits a
+     * second, matching the publish outbox's four in-flight publishes. Server FLOOD_WAIT
+     * responses still pause every Telegram mutation through the shared account-wide deadline.
      */
     suspend fun <T> pacedEdit(block: suspend () -> T): T {
         awaitEditClearance()
@@ -109,6 +110,6 @@ class TelegramPacer {
         const val TOKENS_PER_MS = PER_MINUTE / 60_000.0
         const val MIN_WAIT_MS = 50L
         const val FALLBACK_SECONDS = 5
-        const val EDIT_INTERVAL_MS = 1_000L
+        const val EDIT_INTERVAL_MS = 250L
     }
 }
