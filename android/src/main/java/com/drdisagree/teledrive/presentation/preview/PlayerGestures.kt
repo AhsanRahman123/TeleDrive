@@ -9,10 +9,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.AwaitPointerEventScope
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -59,6 +59,7 @@ import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.player_brightness
 import com.drdisagree.teledrive.resources.player_toggle_controls
 import com.drdisagree.teledrive.resources.player_volume
+import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
@@ -343,34 +344,132 @@ fun PlayerGestureArea(
                         }
                     )
                 }
+                // Brightness (left half) / volume (right half) vertical drag. Hand-rolled
+                // instead of detectVerticalDragGestures so two-finger gestures are
+                // EXCLUSIVE: the stock detector starts on the first finger alone (a pinch
+                // begins as one finger moving, then the second finger lands) and its drag
+                // loop then keeps tracking that finger for the whole pinch — the Initial-
+                // pass pinch watcher's consumption does not stop it — so volume drifted
+                // mid-pinch (Pranto's test video: volume 66% -> 68% while the ZoomHud
+                // showed 250% -> 111%). This detector cancels the moment a second pointer
+                // is pressed, or the Initial pass claims the gesture, and restores the
+                // pre-drag brightness/volume, so a cancelled adjustment applies nothing.
+                // While zoomed in it never starts at all — a one-finger drag there pans
+                // (the pinch watcher owns it) — so the drag-start side effect (chrome
+                // hide via onAdjustStart) cannot fire while zoomed either.
                 .pointerInput(dragEnabled, maxVolume) {
                     if (!dragEnabled) return@pointerInput
-                    var onLeftHalf = false
-                    detectVerticalDragGestures(
-                        onDragStart = { offset ->
-                            onLeftHalf = offset.x < size.width / 2f
-                            volume = currentVolume(audioManager, maxVolume)
-                            adjustStart()
-                        },
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            val travel = (size.height * DRAG_RANGE).coerceAtLeast(1f)
-                            val step = -dragAmount / travel
-                            if (onLeftHalf) {
-                                brightness = (brightness + step).coerceIn(MIN_BRIGHTNESS, 1f)
-                                applyBrightness(activity, brightness)
-                                adjustment = AdjustmentLevel(Adjustment.BRIGHTNESS, brightness)
-                            } else {
-                                volume = (volume + step).coerceIn(0f, 1f)
-                                audioManager?.setStreamVolume(
-                                    AudioManager.STREAM_MUSIC,
-                                    (volume * maxVolume).roundToInt(),
-                                    0
-                                )
-                                adjustment = AdjustmentLevel(Adjustment.VOLUME, volume)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(
+                            requireUnconsumed = false,
+                            pass = PointerEventPass.Main
+                        )
+                        if (down.isConsumed || currentZoomScale > 1f) {
+                            // The subtitle-band block claimed this touch, or the picture
+                            // is zoomed and one-finger drags pan: stay out entirely.
+                            drainUntilAllPointersUp()
+                            return@awaitEachGesture
+                        }
+                        var onLeftHalf = false
+                        var started = false
+                        var cancelled = false
+                        var snapshotBrightness = 0f
+                        var snapshotVolume = 0f
+                        var accumulatedX = 0f
+                        var accumulatedY = 0f
+                        var lastPosition = down.position
+
+                        fun restoreAdjustment() {
+                            brightness = snapshotBrightness
+                            applyBrightness(activity, snapshotBrightness)
+                            volume = snapshotVolume
+                            audioManager?.setStreamVolume(
+                                AudioManager.STREAM_MUSIC,
+                                (snapshotVolume * maxVolume).roundToInt(),
+                                0
+                            )
+                            adjustment = null
+                        }
+
+                        var finished = false
+                        while (!finished) {
+                            val event = awaitPointerEvent(PointerEventPass.Main)
+                            // A second finger makes this a pinch, never an adjustment.
+                            if (event.changes.count { it.pressed } >= 2) {
+                                cancelled = true
+                                break
+                            }
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                            if (change == null) {
+                                finished = true
+                                continue
+                            }
+                            if (!change.pressed) {
+                                // A system-cancelled pointer also undoes the adjustment.
+                                if (change.isCanceled) cancelled = true
+                                finished = true
+                                continue
+                            }
+                            // The Initial pass claimed this gesture (pinch watcher or
+                            // subtitle band): it is not a brightness/volume drag.
+                            if (change.isConsumed) {
+                                cancelled = true
+                                break
+                            }
+                            val delta = change.position - lastPosition
+                            lastPosition = change.position
+                            if (!started) {
+                                accumulatedX += delta.x
+                                accumulatedY += delta.y
+                                when {
+                                    accumulatedY.absoluteValue > viewConfiguration.touchSlop &&
+                                        accumulatedY.absoluteValue >=
+                                        accumulatedX.absoluteValue -> {
+                                        started = true
+                                        onLeftHalf = down.position.x < size.width / 2f
+                                        volume = currentVolume(audioManager, maxVolume)
+                                        snapshotBrightness = brightness
+                                        snapshotVolume = volume
+                                        adjustStart()
+                                    }
+
+                                    accumulatedX.absoluteValue > viewConfiguration.touchSlop &&
+                                        accumulatedX.absoluteValue >
+                                        accumulatedY.absoluteValue -> {
+                                        // Horizontal-dominant: not an adjustment gesture.
+                                        finished = true
+                                    }
+                                }
+                            } else if (delta != Offset.Zero) {
+                                change.consume()
+                                if (delta.y != 0f) {
+                                    val travel = (size.height * DRAG_RANGE).coerceAtLeast(1f)
+                                    val step = -delta.y / travel
+                                    if (onLeftHalf) {
+                                        brightness =
+                                            (brightness + step).coerceIn(MIN_BRIGHTNESS, 1f)
+                                        applyBrightness(activity, brightness)
+                                        adjustment =
+                                            AdjustmentLevel(Adjustment.BRIGHTNESS, brightness)
+                                    } else {
+                                        volume = (volume + step).coerceIn(0f, 1f)
+                                        audioManager?.setStreamVolume(
+                                            AudioManager.STREAM_MUSIC,
+                                            (volume * maxVolume).roundToInt(),
+                                            0
+                                        )
+                                        adjustment = AdjustmentLevel(Adjustment.VOLUME, volume)
+                                    }
+                                }
                             }
                         }
-                    )
+                        if (cancelled) {
+                            if (started) restoreAdjustment()
+                            // Swallow the rest of this touch sequence so the second
+                            // finger cannot start a fresh adjustment inside it.
+                            drainUntilAllPointersUp()
+                        }
+                    }
                 }
         )
         if (subtitleDragging) {
@@ -478,6 +577,15 @@ private fun AdjustmentHud(adjustment: AdjustmentLevel) {
                 style = MaterialTheme.typography.labelLarge
             )
         }
+    }
+}
+
+/** Awaits (without acting on) the rest of the current gesture, until every pointer is up. */
+private suspend fun AwaitPointerEventScope.drainUntilAllPointersUp() {
+    var allUp = false
+    while (!allUp) {
+        val event = awaitPointerEvent(PointerEventPass.Main)
+        if (event.changes.all { !it.pressed }) allUp = true
     }
 }
 
