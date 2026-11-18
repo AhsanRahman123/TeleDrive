@@ -153,6 +153,20 @@ interface TelegramClient {
     }
 
     /**
+     * Forwards existing messages into the same chat as clean copies: no reference to the
+     * original sender and no caption, so each copy is born blank and its owner can relabel it
+     * with its own manifest. [messageIds] must be in strictly increasing order (at most 100
+     * per call). Results are returned in the same order as [messageIds]; a null entry marks a
+     * message Telegram could not forward. The default implementation cannot forward, so
+     * simple/test clients keep compiling.
+     */
+    suspend fun forwardDocuments(
+        chatId: Long,
+        messageIds: List<Long>
+    ): List<RemoteDocument?> =
+        throw TelegramException(501, "Forwarding is not supported by this client")
+
+    /**
      * Downloads a Telegram message through TDLib's persistent download queue when the source
      * message identifiers are available. Null identifiers use the legacy single-file path.
      */

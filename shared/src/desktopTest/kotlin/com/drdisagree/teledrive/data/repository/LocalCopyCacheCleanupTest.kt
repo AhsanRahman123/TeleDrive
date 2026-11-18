@@ -122,6 +122,7 @@ class LocalCopyCacheCleanupTest {
     private fun repository() = FileRepositoryImpl(
         fileDao = fileDao,
         folderDao = harness.database.folderDao(),
+        filePartDao = harness.database.filePartDao(),
         publishScheduler = harness.scheduler,
         localCopyDeleter = localCopyDeleter,
         telegramClient = harness.telegram,
