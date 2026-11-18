@@ -5,6 +5,7 @@ import com.drdisagree.teledrive.presentation.channels.ChannelsViewModel
 import com.drdisagree.teledrive.presentation.collection.CollectionViewModel
 import com.drdisagree.teledrive.presentation.files.FileClipboard
 import com.drdisagree.teledrive.presentation.files.FilesViewModel
+import com.drdisagree.teledrive.presentation.files.FilesWorkspaceViewModel
 import com.drdisagree.teledrive.presentation.gallery.GalleryViewModel
 import com.drdisagree.teledrive.presentation.home.HomeViewModel
 import com.drdisagree.teledrive.presentation.onboarding.OnboardingViewModel
@@ -29,6 +30,7 @@ val sharedUiModule = module {
     viewModelOf(::ChannelsViewModel)
     viewModelOf(::CollectionViewModel)
     viewModelOf(::FilesViewModel)
+    viewModelOf(::FilesWorkspaceViewModel)
     viewModelOf(::GalleryViewModel)
     viewModelOf(::HomeViewModel)
     viewModelOf(::OnboardingViewModel)
