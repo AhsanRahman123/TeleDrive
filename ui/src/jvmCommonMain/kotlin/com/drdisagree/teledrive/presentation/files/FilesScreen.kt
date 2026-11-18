@@ -83,7 +83,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -124,7 +123,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.LoadState
@@ -141,6 +139,7 @@ import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.isInitialLoad
+import com.drdisagree.teledrive.presentation.common.rememberPosition
 import com.drdisagree.teledrive.presentation.common.resolve
 import com.drdisagree.teledrive.presentation.components.ActionMenu
 import com.drdisagree.teledrive.presentation.components.BlockingProgressDialog
@@ -275,7 +274,7 @@ fun FilesScreen(
     onNewNote: (String?) -> Unit,
     onEditNote: (String, String) -> Unit,
     onBack: (() -> Unit)?,
-    savePositionBeforeOpeningPreview: Boolean = false,
+    workspaceViewModel: FilesWorkspaceViewModel,
     viewModel: FilesViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -291,9 +290,8 @@ fun FilesScreen(
     val storageAudit by viewModel.storageAudit.collectAsStateWithLifecycle()
     val refreshing by viewModel.refreshing.collectAsStateWithLifecycle()
     val allSelected = selectionSnapshot.allSelected
-    val activeFolderId by viewModel.activeFolderId.collectAsStateWithLifecycle()
-    val tabs by viewModel.workspaceTabs.collectAsStateWithLifecycle()
-    val selectedTabId by viewModel.selectedWorkspaceTabId.collectAsStateWithLifecycle()
+    val tabs by workspaceViewModel.workspaceTabs.collectAsStateWithLifecycle()
+    val selectedTabId by workspaceViewModel.selectedWorkspaceTabId.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showCreateFolder by remember { mutableStateOf(false) }
@@ -499,25 +497,27 @@ fun FilesScreen(
         }
     }
     val filesCommandFocusRequester = rememberCollectionCommandFocusRequester()
-    fun saveCurrentTabPosition() {
-        viewModel.saveFileListPosition(
-            tabId = selectedTabId,
-            folderId = state.folderId,
-            firstVisibleItemIndex = gridState.firstVisibleItemIndex,
-            firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset
-        )
+    // Folder changes are navigation now: each folder is its own destination with its
+    // own ViewModel and grid state, so the screen that was left behind is never
+    // emptied or reloaded. These handlers are the only places this screen asks to
+    // change the visible folder. Each one marks the publish gate busy first: a
+    // folder change makes the incoming list load and settle over the next few
+    // seconds, and publish-outbox writes stay out of that window (F1), exactly as
+    // they did when the folder swap happened in place.
+    fun openFolder(folderId: String) {
+        PublishInteractionGate.markBusy(4_000L)
+        onOpenFolder(folderId)
     }
-    fun navigateToFolder(folderId: String?) {
-        saveCurrentTabPosition()
-        viewModel.setActiveFolder(folderId)
+
+    fun openCrumb(folderId: String?) {
+        PublishInteractionGate.markBusy(4_000L)
+        onOpenCrumb(folderId)
     }
+
     fun navigateBackOneStep() {
-        if (state.folderId != null) {
-            val parentFolderId = state.breadcrumbs.dropLast(1).lastOrNull()?.id
-            navigateToFolder(parentFolderId)
-        } else {
-            onBack?.invoke()
-        }
+        val back = onBack ?: return
+        PublishInteractionGate.markBusy(4_000L)
+        back()
     }
 
     AppBackHandler(
@@ -532,78 +532,68 @@ fun FilesScreen(
     }
     fun activateTab(tab: FilesTabState) {
         if (tab.id == selectedTabId) return
-        saveCurrentTabPosition()
-        viewModel.activateWorkspaceTab(tab.id)
+        viewModel.clearSelection()
+        workspaceViewModel.selectWorkspaceTab(tab.id)
+        PublishInteractionGate.markBusy(4_000L)
+        onOpenCrumb(tab.folderId)
     }
     fun createTab() {
-        saveCurrentTabPosition()
-        viewModel.createWorkspaceTab()
+        viewModel.clearSelection()
+        workspaceViewModel.createWorkspaceTab()
+        PublishInteractionGate.markBusy(4_000L)
+        onOpenCrumb(null)
     }
     fun closeTab(tab: FilesTabState) {
         if (tabs.size <= 1) return
-        viewModel.clearFileListPositionsForTab(tab.id)
-        viewModel.closeWorkspaceTab(tab.id)
+        val replacement = workspaceViewModel.closeWorkspaceTab(tab.id) ?: return
+        viewModel.clearSelection()
+        PublishInteractionGate.markBusy(4_000L)
+        onOpenCrumb(replacement.folderId)
     }
     fun closeAllTabs() {
-        viewModel.clearAllFileListPositions()
-        viewModel.closeAllWorkspaceTabs()
+        workspaceViewModel.closeAllWorkspaceTabs()
+        viewModel.clearSelection()
+        PublishInteractionGate.markBusy(4_000L)
+        onOpenCrumb(null)
     }
-    val activeFolderLabel = if (activeFolderId == null) {
+    val activeFolderLabel = if (state.folderId == null) {
         stringResource(Res.string.files)
     } else {
         state.breadcrumbs.lastOrNull()?.name?.resolve() ?: "Folder"
     }
-    LaunchedEffect(activeFolderId, activeFolderLabel, selectedTabId) {
-        viewModel.updateSelectedWorkspaceTab(activeFolderId, activeFolderLabel)
-    }
-    val selectedWorkspaceTabFolderId =
-        tabs.firstOrNull { it.id == selectedTabId }?.folderId
-
-    // Files stays on the navigation back stack while Preview is shown. Save the current
-    // position when leaving and trigger a restore when this entry becomes active again.
+    // The visible screen owns the selected tab's home: while this destination is the
+    // resumed one, the tab tracks the folder it is showing, so switching away and
+    // back lands where the browsing left off. Covered screens must not rewrite it,
+    // so the sync waits until this entry's lifecycle reaches RESUMED.
     val lifecycleOwner = LocalLifecycleOwner.current
-    var returnFromPreviewTick by remember { mutableIntStateOf(0) }
-    DisposableEffect(lifecycleOwner, selectedTabId, state.folderId, viewModel) {
-        var hasLeftFiles = false
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
-                    hasLeftFiles = true
-                    saveCurrentTabPosition()
-                }
-                Lifecycle.Event.ON_RESUME -> {
-                    if (hasLeftFiles) {
-                        hasLeftFiles = false
-                        returnFromPreviewTick++
-                    }
-                }
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    LaunchedEffect(selectedTabId, state.folderId, activeFolderLabel, state.loaded, lifecycleOwner) {
+        if (!state.loaded) return@LaunchedEffect
+        snapshotFlow { lifecycleOwner.lifecycle.currentState }
+            .first { it.isAtLeast(Lifecycle.State.RESUMED) }
+        workspaceViewModel.updateSelectedWorkspaceTab(state.folderId, activeFolderLabel)
     }
 
-    // Restore a tab/folder position only when navigation changes. Do not key this effect
-    // to Paging itemCount: every appended page changes that count, and re-running
-    // scrollToItem(0) was snapping the user back to the top while they scrolled.
-    // Restore once, clamped to what is already loaded (official-style): never force-page
-    // to reach a deep saved position, so the list settles immediately after navigation.
-    LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId, returnFromPreviewTick) {
-        val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
-        if (currentTab.folderId != state.folderId) return@LaunchedEffect
-
-        snapshotFlow { files.loadState.refresh }
-            .first { it !is LoadState.Loading }
-
-        val target = viewModel.fileListPosition(selectedTabId, state.folderId) ?: (0 to 0)
-        val targetIndex = target.first.coerceAtLeast(0)
-
-        val count = state.folders.size + files.itemCount
-        if (count > 0) {
-            gridState.scrollToItem(targetIndex.coerceIn(0, count - 1), target.second)
-        }
+    // Scroll positions are kept per tab and folder in the workspace store, because a
+    // folder's destination is destroyed when it is popped (for example by a tab
+    // switch) and the store is what puts the recreated screen back at the place the
+    // user left. The restore itself is the patient one: it steps down page by page
+    // as paging loads more, never scrolls when the saved place is the top, and the
+    // position is written back continuously once restored.
+    val storedPosition = remember(selectedTabId, state.folderId) {
+        workspaceViewModel.fileListPosition(selectedTabId, state.folderId) ?: (0 to 0)
     }
+    gridState.rememberPosition(
+        initial = storedPosition,
+        itemCount = state.folders.size + files.itemCount,
+        onRemember = { index, offset ->
+            workspaceViewModel.saveFileListPosition(
+                selectedTabId,
+                state.folderId,
+                index,
+                offset
+            )
+        }
+    )
     var fabVisible by remember { mutableStateOf(true) }
     val listScrolls by remember {
         derivedStateOf { gridState.canScrollForward || gridState.canScrollBackward }
@@ -1107,7 +1097,7 @@ fun FilesScreen(
                         }
                     }
                     if (state.breadcrumbs.size > 1) {
-                        Breadcrumbs(crumbs = state.breadcrumbs, onOpen = ::navigateToFolder)
+                        Breadcrumbs(crumbs = state.breadcrumbs, onOpen = ::openCrumb)
                     }
                     RefreshableContent(
                         isRefreshing = refreshing,
@@ -1145,14 +1135,12 @@ fun FilesScreen(
                                     bottom = padding.calculateBottomPadding() +
                                             LocalBottomBarInset.current
                                 ),
-                                onOpenFolder = ::navigateToFolder,
-                                onSaveScrollPosition = {
-                                    if (!savePositionBeforeOpeningPreview) saveCurrentTabPosition()
-                                },
-                                onOpenFile = { fileId, sequence ->
-                                    if (savePositionBeforeOpeningPreview) saveCurrentTabPosition()
-                                    onOpenFile(fileId, sequence)
-                                },
+                                onOpenFolder = ::openFolder,
+                                // Scroll positions are saved continuously by the
+                                // rememberPosition wiring above, so opening a preview
+                                // needs no save-on-exit step on any platform.
+                                onSaveScrollPosition = {},
+                                onOpenFile = onOpenFile,
                                 onRequestTrash = { confirmTrash = true },
                                 onCreateFolder = { showCreateFolder = true },
                                 onCreateTab = ::createTab,

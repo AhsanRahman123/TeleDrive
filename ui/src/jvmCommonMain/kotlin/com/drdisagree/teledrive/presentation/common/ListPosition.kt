@@ -7,6 +7,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.SavedStateHandle
@@ -53,6 +54,39 @@ fun LazyGridState.rememberPosition(position: ListPosition, itemCount: Int) {
     LaunchedEffect(this) {
         snapshotFlow { firstVisibleItemIndex to firstVisibleItemScrollOffset }
             .collect { (index, offset) -> if (restored) position.remember(index, offset) }
+    }
+}
+
+/**
+ * The same patient restore as [rememberPosition], for a position held in an external store
+ * instead of saved state — the Files workspace store, keyed by tab and folder, which has to
+ * outlive the folder's own navigation destination. [initial] is the stored position read
+ * once when the screen appears; [onRemember] receives the position continuously once the
+ * restore has settled, exactly as the saved-state version writes back to its [ListPosition].
+ */
+@Composable
+fun LazyGridState.rememberPosition(
+    initial: Pair<Int, Int>,
+    itemCount: Int,
+    onRemember: (index: Int, offset: Int) -> Unit
+) {
+    var restored by remember { mutableStateOf(false) }
+    val rememberCallback = rememberUpdatedState(onRemember)
+
+    LaunchedEffect(this, itemCount, restored) {
+        if (restored || itemCount == 0) return@LaunchedEffect
+        val (target, offset) = initial
+        if (target == 0 && offset == 0) {
+            restored = true
+            return@LaunchedEffect
+        }
+        scrollToItem(minOf(target, itemCount - 1), offset)
+        if (itemCount > target) restored = true
+    }
+
+    LaunchedEffect(this) {
+        snapshotFlow { firstVisibleItemIndex to firstVisibleItemScrollOffset }
+            .collect { (index, offset) -> if (restored) rememberCallback.value(index, offset) }
     }
 }
 

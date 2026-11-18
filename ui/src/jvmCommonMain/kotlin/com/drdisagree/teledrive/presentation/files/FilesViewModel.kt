@@ -7,7 +7,6 @@ import androidx.navigation.toRoute
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import com.drdisagree.teledrive.core.common.AppResult
-import com.drdisagree.teledrive.core.publish.PublishInteractionGate
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
@@ -111,12 +110,6 @@ internal fun keepFilesSelectionMode(
     selectedFolderCount: Int
 ): Boolean = rangeSelectionActive || selectedFileCount > 0 || selectedFolderCount > 0
 
-data class FilesTabState(
-    val id: Int,
-    val folderId: String?,
-    val label: String
-)
-
 @OptIn(ExperimentalCoroutinesApi::class)
 class FilesViewModel(
     private val savedStateHandle: SavedStateHandle,
@@ -134,172 +127,14 @@ class FilesViewModel(
     private val telegramClient: TelegramClient
 ) : ViewModel() {
 
-    private val initialFolderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
-
-    private fun restoreWorkspaceTabs(): List<FilesTabState> {
-        val encoded = savedStateHandle.get<ArrayList<String>>(KEY_WORKSPACE_TABS).orEmpty()
-        return encoded.chunked(3).mapNotNull { fields ->
-            if (fields.size != 3) return@mapNotNull null
-            val id = fields[0].toIntOrNull() ?: return@mapNotNull null
-            FilesTabState(id, fields[1].ifEmpty { null }, fields[2])
-        }.distinctBy { it.id }
-    }
-
-    private val _workspaceTabs = MutableStateFlow(
-        restoreWorkspaceTabs().ifEmpty {
-            listOf(FilesTabState(0, initialFolderId, "Files"))
-        }
-    )
-    internal val workspaceTabs: StateFlow<List<FilesTabState>> = _workspaceTabs.asStateFlow()
-
-    private val _selectedWorkspaceTabId = MutableStateFlow(
-        savedStateHandle.get<Int>(KEY_SELECTED_WORKSPACE_TAB_ID)
-            ?.takeIf { id -> _workspaceTabs.value.any { it.id == id } }
-            ?: _workspaceTabs.value.first().id
-    )
-    val selectedWorkspaceTabId: StateFlow<Int> = _selectedWorkspaceTabId.asStateFlow()
-
-    // On process recreation, resume the selected workspace tab rather than the route's
-    // original folder. The tab strip and the active folder must describe the same tab.
-    private val _activeFolderId = MutableStateFlow(
-        _workspaceTabs.value.firstOrNull { it.id == _selectedWorkspaceTabId.value }?.folderId
-            ?: initialFolderId
-    )
-    val activeFolderId: StateFlow<String?> = _activeFolderId.asStateFlow()
-
-    // Scroll positions belong to the Files back-stack entry, not only to the current
-    // composition. SavedStateHandle keeps them across Preview navigation and recreation.
-    private fun restoreFileListPositions(): MutableMap<Pair<Int, String?>, Pair<Int, Int>> =
-        savedStateHandle.get<ArrayList<String>>(KEY_FILE_LIST_POSITIONS).orEmpty()
-            .chunked(4)
-            .mapNotNull { fields ->
-                if (fields.size != 4) return@mapNotNull null
-                val tabId = fields[0].toIntOrNull() ?: return@mapNotNull null
-                val itemIndex = fields[2].toIntOrNull() ?: return@mapNotNull null
-                val scrollOffset = fields[3].toIntOrNull() ?: return@mapNotNull null
-                (tabId to fields[1].ifEmpty { null }) to
-                    (itemIndex.coerceAtLeast(0) to scrollOffset.coerceAtLeast(0))
-            }
-            .toMap()
-            .toMutableMap()
-
-    private val fileListPositions = restoreFileListPositions()
-
-    private fun persistFileListPositions() {
-        savedStateHandle[KEY_FILE_LIST_POSITIONS] = ArrayList(
-            fileListPositions.flatMap { (key, position) ->
-                listOf(
-                    key.first.toString(),
-                    key.second.orEmpty(),
-                    position.first.toString(),
-                    position.second.toString()
-                )
-            }
-        )
-    }
-
-    fun fileListPosition(tabId: Int, folderId: String?): Pair<Int, Int>? =
-        fileListPositions[tabId to folderId]
-
-    fun saveFileListPosition(
-        tabId: Int,
-        folderId: String?,
-        firstVisibleItemIndex: Int,
-        firstVisibleItemScrollOffset: Int
-    ) {
-        fileListPositions[tabId to folderId] =
-            firstVisibleItemIndex.coerceAtLeast(0) to firstVisibleItemScrollOffset.coerceAtLeast(0)
-        persistFileListPositions()
-    }
-
-    fun clearFileListPositionsForTab(tabId: Int) {
-        if (fileListPositions.keys.removeAll { it.first == tabId }) {
-            persistFileListPositions()
-        }
-    }
-
-    fun clearAllFileListPositions() {
-        if (fileListPositions.isNotEmpty()) {
-            fileListPositions.clear()
-            persistFileListPositions()
-        }
-    }
-
-    private var nextWorkspaceTabId = maxOf(
-        savedStateHandle.get<Int>(KEY_NEXT_WORKSPACE_TAB_ID) ?: 1,
-        (_workspaceTabs.value.maxOfOrNull { it.id } ?: 0) + 1
-    )
-
-    private fun persistWorkspaceTabs() {
-        savedStateHandle[KEY_WORKSPACE_TABS] = ArrayList(
-            _workspaceTabs.value.flatMap { tab ->
-                listOf(tab.id.toString(), tab.folderId.orEmpty(), tab.label)
-            }
-        )
-        savedStateHandle[KEY_SELECTED_WORKSPACE_TAB_ID] = _selectedWorkspaceTabId.value
-        savedStateHandle[KEY_NEXT_WORKSPACE_TAB_ID] = nextWorkspaceTabId
-    }
-
-    fun updateSelectedWorkspaceTab(folderId: String?, label: String) {
-        val selectedId = _selectedWorkspaceTabId.value
-        val current = _workspaceTabs.value
-        val updated = current.map { tab ->
-            if (tab.id == selectedId) tab.copy(folderId = folderId, label = label) else tab
-        }
-        if (updated != current) {
-            _workspaceTabs.value = updated
-            persistWorkspaceTabs()
-        }
-    }
-
-    fun createWorkspaceTab() {
-        val newTab = FilesTabState(nextWorkspaceTabId++, null, "Files")
-        _workspaceTabs.value = _workspaceTabs.value + newTab
-        _selectedWorkspaceTabId.value = newTab.id
-        persistWorkspaceTabs()
-        setActiveFolder(null)
-    }
-
-    fun activateWorkspaceTab(tabId: Int) {
-        val tab = _workspaceTabs.value.firstOrNull { it.id == tabId } ?: return
-        if (_selectedWorkspaceTabId.value == tabId) return
-        _selectedWorkspaceTabId.value = tabId
-        persistWorkspaceTabs()
-        setActiveFolder(tab.folderId)
-    }
-
-    fun closeWorkspaceTab(tabId: Int) {
-        val current = _workspaceTabs.value
-        if (current.size <= 1) return
-        val oldIndex = current.indexOfFirst { it.id == tabId }
-        if (oldIndex < 0) return
-        val nextTabs = current.filterNot { it.id == tabId }
-        _workspaceTabs.value = nextTabs
-        if (_selectedWorkspaceTabId.value == tabId) {
-            val replacement = nextTabs[oldIndex.coerceAtMost(nextTabs.lastIndex)]
-            _selectedWorkspaceTabId.value = replacement.id
-            setActiveFolder(replacement.folderId)
-        }
-        persistWorkspaceTabs()
-    }
-
-    /** Close every open Files tab and leave one fresh root tab ready to use. */
-    fun closeAllWorkspaceTabs() {
-        val freshTab = FilesTabState(nextWorkspaceTabId++, null, "Files")
-        _workspaceTabs.value = listOf(freshTab)
-        _selectedWorkspaceTabId.value = freshTab.id
-        persistWorkspaceTabs()
-        setActiveFolder(null)
-    }
-
-    fun setActiveFolder(folderId: String?) {
-        clearSelection()
-        if (_activeFolderId.value == folderId) return
-        // A folder/tab change makes the list reload and settle over the next
-        // few seconds; keep publish-outbox writes out of that window (F1).
-        PublishInteractionGate.markBusy(4_000L)
-        _activeFolderId.value = folderId
-    }
+    /**
+     * This screen's folder, fixed by its navigation route: one destination (and one
+     * ViewModel) per folder, as in the official app. Opening another folder is
+     * navigation to a new destination, never a swap of this value. The workspace tabs
+     * and their scroll positions live in [FilesWorkspaceViewModel], which outlives
+     * any single folder destination.
+     */
+    private val folderId: String? = savedStateHandle.toRoute<Route.Files>().folderId
 
     val listPosition = ListPosition(savedStateHandle)
 
@@ -391,19 +226,14 @@ class FilesViewModel(
         }
     }
 
-    private val currentFolderState: Flow<Pair<String?, DriveFolder?>> =
-        _activeFolderId.flatMapLatest { activeId ->
-            if (activeId == null) {
-                flowOf(activeId to null)
-            } else {
-                fileRepository.observeFolder(activeId).map { folder -> activeId to folder }
-            }
-        }
+    private val currentFolder: Flow<DriveFolder?> =
+        folderId?.let { fileRepository.observeFolder(it) }
+            ?: MutableStateFlow<DriveFolder?>(null)
 
     private val querySpec: Flow<FileQuerySpec> =
-        combine(settingsRepository.preferences, currentFolderState) { prefs, (activeId, folder) ->
+        combine(settingsRepository.preferences, currentFolder) { prefs, folder ->
             FileQuerySpec(
-                folderId = activeId,
+                folderId = folderId,
                 filterByFolder = true,
                 showHidden = folder?.isHidden == true,
                 showArchived = folder?.isArchived == true,
@@ -414,14 +244,14 @@ class FilesViewModel(
 
     private val currentFolders = combine(
         settingsRepository.preferences,
-        currentFolderState
-    ) { prefs, (activeId, folder) ->
-        prefs to (activeId to folder)
-    }.flatMapLatest { (prefs, context) ->
+        currentFolder
+    ) { prefs, folder ->
+        prefs to folder
+    }.flatMapLatest { (prefs, folder) ->
         fileRepository.observeFolders(
-            parentId = context.first,
-            showHidden = context.second?.isHidden == true,
-            showArchived = context.second?.isArchived == true,
+            parentId = folderId,
+            showHidden = folder?.isHidden == true,
+            showArchived = folder?.isArchived == true,
             sortField = prefs.sortField,
             sortDirection = prefs.sortDirection
         )
@@ -454,13 +284,12 @@ class FilesViewModel(
         settingsRepository.preferences,
         selectionCapabilities,
         folderSelection,
-        currentFolderState,
+        currentFolder,
         currentFolders
-    ) { prefs: UserPreferences, selectionState, selectedFolders, folderState, folders ->
-        val (activeId, folder) = folderState
+    ) { prefs: UserPreferences, selectionState, selectedFolders, folder, folders ->
         val (selected, capabilities) = selectionState
         FilesUiState(
-            folderId = activeId,
+            folderId = folderId,
             folderName = folder?.name?.let(UiText::Plain)
                 ?: UiText.Resource(Res.string.files_root_name),
             breadcrumbs = breadcrumbsFor(folder),
@@ -696,7 +525,7 @@ class FilesViewModel(
 
     fun createFolder(name: String) {
         viewModelScope.launch {
-            when (val result = fileRepository.createFolder(_activeFolderId.value, name)) {
+            when (val result = fileRepository.createFolder(folderId, name)) {
                 is AppResult.Success -> Unit
                 is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
             }
@@ -955,11 +784,11 @@ class FilesViewModel(
         if (items.isCut) {
             // Keep the cut payload until every requested move succeeds. If a destination
             // conflict or repository failure occurs, the user can retry without reselecting.
-            move(items.fileIds, items.folderIds, _activeFolderId.value) {
+            move(items.fileIds, items.folderIds, folderId) {
                 clipboard.clearIfMatches(items)
             }
         } else {
-            copyItems(items.fileIds, items.folderIds, _activeFolderId.value)
+            copyItems(items.fileIds, items.folderIds, folderId)
         }
     }
 
@@ -1311,7 +1140,7 @@ class FilesViewModel(
     private val _folderConflict = MutableStateFlow<FolderConflict?>(null)
     val folderConflict: StateFlow<FolderConflict?> = _folderConflict.asStateFlow()
 
-    fun importAndUpload(uris: List<String>, target: String? = _activeFolderId.value) {
+    fun importAndUpload(uris: List<String>, target: String? = folderId) {
         if (uris.isEmpty()) return
         importScope.launch {
             // Capture before expanding or showing the folder-conflict dialog. Cancel all
@@ -1532,9 +1361,5 @@ class FilesViewModel(
     companion object {
         private const val MIN_REFRESH_VISIBLE_MS = 700L
         private const val MAX_BREADCRUMB_DEPTH = 64
-        private const val KEY_WORKSPACE_TABS = "files_workspace_tabs"
-        private const val KEY_SELECTED_WORKSPACE_TAB_ID = "files_workspace_selected_tab_id"
-        private const val KEY_NEXT_WORKSPACE_TAB_ID = "files_workspace_next_tab_id"
-        private const val KEY_FILE_LIST_POSITIONS = "files_list_scroll_positions"
     }
 }
