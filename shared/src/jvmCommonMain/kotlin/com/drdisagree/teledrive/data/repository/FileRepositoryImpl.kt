@@ -244,6 +244,9 @@ class FileRepositoryImpl(
     override fun observeFolder(id: String): Flow<DriveFolder?> =
         folderDao.observeById(id).map { it?.toDomain() }
 
+    override fun observeAllFolders(): Flow<List<DriveFolder>> =
+        folderDao.observeAll().map { list -> list.map { it.toDomain() } }
+
     override suspend fun getFolder(id: String): DriveFolder? = folderDao.byId(id)?.toDomain()
 
     override fun observeFavoriteFolders(): Flow<List<DriveFolder>> =

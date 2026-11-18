@@ -53,6 +53,9 @@ interface FileRepository {
 
     fun observeFolder(id: String): Flow<DriveFolder?>
 
+    /** Every folder, for structure-sensitive caches that must invalidate on rename/move. */
+    fun observeAllFolders(): Flow<List<DriveFolder>>
+
     suspend fun getFolder(id: String): DriveFolder?
 
     fun observeFavoriteFolders(): Flow<List<DriveFolder>>

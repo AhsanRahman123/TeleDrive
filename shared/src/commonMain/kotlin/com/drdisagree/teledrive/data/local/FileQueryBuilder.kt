@@ -83,6 +83,13 @@ object FileQueryBuilder {
         if (spec.notBackedUpOnly) where.append(" AND backupState != 'BACKED_UP'")
         if (spec.favoritesOnly) where.append(" AND isFavorite = 1")
         if (spec.availableOfflineOnly) where.append(" AND isAvailableOffline = 1")
+        if (spec.missingThumbnailOnly) {
+            // "No thumbnail" separation: a file counts as having a thumbnail only when a
+            // generated/cached row exists in the thumbnails table. This covers both
+            // never-generated and generation-failed items — the model does not record a
+            // durable distinction between those two for files whose jobs expired.
+            where.append(" AND id NOT IN (SELECT fileId FROM thumbnails)")
+        }
         if (spec.hiddenOnly) where.append(" AND isHidden = 1")
         if (spec.archivedOnly) where.append(" AND isArchived = 1")
         coveringColumn(spec)?.let { column ->

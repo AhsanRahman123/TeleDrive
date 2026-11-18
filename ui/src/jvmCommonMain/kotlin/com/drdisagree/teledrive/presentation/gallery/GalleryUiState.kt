@@ -12,6 +12,7 @@ data class GalleryFilters(
     val availableOfflineOnly: Boolean = false,
     val backedUpOnly: Boolean = false,
     val notBackedUpOnly: Boolean = false,
+    val missingThumbnailOnly: Boolean = false,
     val extensionQuery: String = "",
     val minSizeMb: String = "",
     val maxSizeMb: String = "",
@@ -45,6 +46,7 @@ data class GalleryUiState(
                 filters.availableOfflineOnly ||
                 filters.backedUpOnly ||
                 filters.notBackedUpOnly ||
+                filters.missingThumbnailOnly ||
                 filters.extensionQuery.isNotBlank() ||
                 filters.minSizeMb.isNotBlank() ||
                 filters.maxSizeMb.isNotBlank() ||

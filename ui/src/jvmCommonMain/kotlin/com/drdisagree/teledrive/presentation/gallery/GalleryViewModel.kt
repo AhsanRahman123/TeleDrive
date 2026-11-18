@@ -150,13 +150,22 @@ class GalleryViewModel(
     val infoTarget: StateFlow<DriveFile?> = _infoTarget.asStateFlow()
     private val _infoFolderPath = MutableStateFlow<String?>(null)
     val infoFolderPath: StateFlow<String?> = _infoFolderPath.asStateFlow()
-    private val folderPathCache = mutableMapOf<String, String>()
+    // Location labels are cached per folder id, but a cached path goes stale the moment any
+    // folder on the path is renamed or moved (C4). The cache is therefore cleared whenever
+    // the folder structure (id -> name/parent) changes — see the collector in init — and is
+    // concurrent + size-capped so it can neither corrupt nor grow without bound.
+    private val folderPathCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun cacheFolderPath(folderId: String, path: String) {
+        if (folderPathCache.size >= MAX_FOLDER_PATH_CACHE_ENTRIES) folderPathCache.clear()
+        folderPathCache[folderId] = path
+    }
 
     suspend fun folderPathLabel(folderId: String?): String {
         if (folderId == null) return "Drive root"
         folderPathCache[folderId]?.let { return it }
         return folderPathFor(folderId).orEmpty().ifBlank { "Unknown folder" }
-            .also { folderPathCache[folderId] = it }
+            .also { cacheFolderPath(folderId, it) }
     }
 
     private suspend fun folderPathFor(folderId: String?): String? {
@@ -171,7 +180,7 @@ class GalleryViewModel(
             currentId = folder.parentId
         }
         return segments.asReversed().joinToString(" / ").takeIf { it.isNotBlank() }
-            ?.also { folderPathCache[folderId] = it }
+            ?.also { cacheFolderPath(folderId, it) }
     }
 
     private fun report(error: AppError) {
@@ -214,6 +223,17 @@ class GalleryViewModel(
                 .map { it.albumGridSize }
                 .distinctUntilChanged()
                 .collect { albumZoomOverride.value = null }
+        }
+        // C4: folder location labels must follow renames/moves immediately, not at the
+        // next process restart. Any change to the folder structure invalidates the
+        // cached paths; unchanged emissions are filtered out by the signature.
+        viewModelScope.launch {
+            fileRepository.observeAllFolders()
+                .map { folders ->
+                    folders.mapTo(HashSet()) { Triple(it.id, it.name, it.parentId) }
+                }
+                .distinctUntilChanged()
+                .collect { folderPathCache.clear() }
         }
     }
 
@@ -265,6 +285,7 @@ class GalleryViewModel(
             availableOfflineOnly = currentFilters.availableOfflineOnly,
             backedUpOnly = currentFilters.backedUpOnly,
             notBackedUpOnly = currentFilters.notBackedUpOnly,
+            missingThumbnailOnly = currentFilters.missingThumbnailOnly,
             extension = currentFilters.extensionQuery.trim().removePrefix(".")
                 .takeIf { it.isNotBlank() },
             minSizeBytes = currentFilters.minSizeMb.toSizeBytes(),
@@ -310,6 +331,7 @@ class GalleryViewModel(
             availableOfflineOnly = currentFilters.availableOfflineOnly,
             backedUpOnly = currentFilters.backedUpOnly,
             notBackedUpOnly = currentFilters.notBackedUpOnly,
+            missingThumbnailOnly = currentFilters.missingThumbnailOnly,
             extension = currentFilters.extensionQuery.trim().removePrefix(".")
                 .takeIf { it.isNotBlank() },
             minSizeBytes = currentFilters.minSizeMb.toSizeBytes(),
@@ -434,6 +456,11 @@ class GalleryViewModel(
     fun setFavoritesFilter(enabled: Boolean) {
         clearSelection()
         filters.update { it.copy(favoritesOnly = enabled) }
+    }
+
+    fun setMissingThumbnailFilter(enabled: Boolean) {
+        clearSelection()
+        filters.update { it.copy(missingThumbnailOnly = enabled) }
     }
 
     fun setOfflineFilter(enabled: Boolean) {
@@ -919,5 +946,6 @@ class GalleryViewModel(
 
     companion object {
         private const val MIN_REFRESH_VISIBLE_MS = 700L
+        private const val MAX_FOLDER_PATH_CACHE_ENTRIES = 512
     }
 }

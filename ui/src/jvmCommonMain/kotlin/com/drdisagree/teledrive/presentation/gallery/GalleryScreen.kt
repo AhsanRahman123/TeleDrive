@@ -166,6 +166,7 @@ import com.drdisagree.teledrive.resources.gallery_no_albums
 import com.drdisagree.teledrive.resources.gallery_no_media
 import com.drdisagree.teledrive.resources.gallery_new_album
 import com.drdisagree.teledrive.resources.gallery_filter_backed_up
+import com.drdisagree.teledrive.resources.gallery_filter_no_thumbnail
 import com.drdisagree.teledrive.resources.gallery_filter_not_backed_up
 import com.drdisagree.teledrive.resources.gallery_view_grid
 import com.drdisagree.teledrive.resources.gallery_view_list
@@ -1076,6 +1077,11 @@ fun GalleryScreen(
                         selected = state.filters.notBackedUpOnly,
                         onClick = { viewModel.setNotBackedUpFilter(!state.filters.notBackedUpOnly) },
                         label = { Text(stringResource(Res.string.gallery_filter_not_backed_up)) }
+                    )
+                    FilterChip(
+                        selected = state.filters.missingThumbnailOnly,
+                        onClick = { viewModel.setMissingThumbnailFilter(!state.filters.missingThumbnailOnly) },
+                        label = { Text(stringResource(Res.string.gallery_filter_no_thumbnail)) }
                     )
                     FilterChip(
                         selected = advancedFiltersExpanded,

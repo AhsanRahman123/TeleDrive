@@ -457,6 +457,7 @@
     <string name="gallery_new_album">New album</string>
     <string name="gallery_filter_backed_up">Backed up</string>
     <string name="gallery_filter_not_backed_up">Not backed up</string>
+    <string name="gallery_filter_no_thumbnail">No thumbnail</string>
     <string name="gallery_view_grid">Grid view</string>
     <string name="gallery_view_list">List view</string>
     <string name="gallery_search_hint">Search photos and videos</string>
