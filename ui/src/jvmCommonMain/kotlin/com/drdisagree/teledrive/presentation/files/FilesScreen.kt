@@ -29,7 +29,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
@@ -485,12 +484,18 @@ fun FilesScreen(
     working?.let { BlockingProgressDialog(message = it.resolve()) }
 
 
-    val gridState = rememberLazyGridState()
+    // One scroll state per tab+folder, kept for the life of this screen. Switching
+    // folders swaps which state the grid uses instead of pointing the previous
+    // folder's single shared state at the new folder's items — that drew the wrong
+    // slice for the first frames and then visibly jumped. Positions also live in
+    // the ViewModel store, which restores them after this screen is recreated.
+    val gridStates = remember { mutableMapOf<Pair<Int, String?>, LazyGridState>() }
+    val gridState = gridStates.getOrPut(selectedTabId to state.folderId) { LazyGridState() }
     // While this list is scrolling, keep the publish outbox from writing to
     // the files table: each write invalidates this list's paging source and
     // forces a reload mid-gesture (F1). The gate expires on its own shortly
     // after scrolling stops, so nothing has to clear it.
-    LaunchedEffect(gridState.isScrollInProgress) {
+    LaunchedEffect(gridState, gridState.isScrollInProgress) {
         if (gridState.isScrollInProgress) {
             while (gridState.isScrollInProgress) {
                 PublishInteractionGate.keepBusy()
@@ -556,56 +561,53 @@ fun FilesScreen(
     LaunchedEffect(activeFolderId, activeFolderLabel, selectedTabId) {
         viewModel.updateSelectedWorkspaceTab(activeFolderId, activeFolderLabel)
     }
-    val selectedWorkspaceTabFolderId =
-        tabs.firstOrNull { it.id == selectedTabId }?.folderId
-
     // Files stays on the navigation back stack while Preview is shown. Save the current
-    // position when leaving and trigger a restore when this entry becomes active again.
+    // position when leaving. No restore is triggered on return: the per-folder grid
+    // state never lost the position, and if this screen was recreated while away,
+    // the restore effect below rebuilds it from the saved position on its own.
     val lifecycleOwner = LocalLifecycleOwner.current
-    var returnFromPreviewTick by remember { mutableIntStateOf(0) }
     DisposableEffect(lifecycleOwner, selectedTabId, state.folderId, viewModel) {
-        var hasLeftFiles = false
         val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
-                    hasLeftFiles = true
-                    saveCurrentTabPosition()
-                }
-                Lifecycle.Event.ON_RESUME -> {
-                    if (hasLeftFiles) {
-                        hasLeftFiles = false
-                        returnFromPreviewTick++
-                    }
-                }
-                else -> Unit
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                saveCurrentTabPosition()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Restore a tab/folder position only when navigation changes. Do not key this effect
-    // to Paging itemCount: every appended page changes that count, and re-running
-    // scrollToItem(0) was snapping the user back to the top while they scrolled.
-    // Restore once, clamped to what is already loaded (official-style): never force-page
-    // to reach a deep saved position, so the list settles immediately after navigation.
-    LaunchedEffect(selectedTabId, state.folderId, selectedWorkspaceTabFolderId, returnFromPreviewTick) {
+    // Restore the saved position for a tab/folder the way the official app's
+    // rememberPosition does: patiently. The effect re-runs as more items load and
+    // steps toward the saved index until the loaded list truly reaches it;
+    // scrolling to the last loaded item is what asks Paging for the next page, so
+    // a deep saved position is reached page by page instead of the old single
+    // clamped jump that landed at the end of page one and never corrected itself.
+    // A saved position of (0, 0) makes no scroll call at all, and a folder with no
+    // saved position is left exactly where it is — never snapped to the top.
+    val positionKey = selectedTabId to state.folderId
+    var restoredPositionKey by remember { mutableStateOf<Pair<Int, String?>?>(null) }
+    val loadedCount = state.folders.size + files.itemCount
+    LaunchedEffect(positionKey, loadedCount) {
+        if (restoredPositionKey == positionKey) return@LaunchedEffect
         val currentTab = tabs.firstOrNull { it.id == selectedTabId } ?: return@LaunchedEffect
         if (currentTab.folderId != state.folderId) return@LaunchedEffect
+        if (loadedCount == 0) return@LaunchedEffect
 
-        snapshotFlow { files.loadState.refresh }
-            .first { it !is LoadState.Loading }
-
-        val target = viewModel.fileListPosition(selectedTabId, state.folderId) ?: (0 to 0)
-        val targetIndex = target.first.coerceAtLeast(0)
-
-        val count = state.folders.size + files.itemCount
-        if (count > 0) {
-            gridState.scrollToItem(targetIndex.coerceIn(0, count - 1), target.second)
+        val target = viewModel.fileListPosition(selectedTabId, state.folderId)
+        if (target == null) {
+            restoredPositionKey = positionKey
+            return@LaunchedEffect
         }
+        val targetIndex = target.first.coerceAtLeast(0)
+        if (targetIndex == 0 && target.second == 0) {
+            restoredPositionKey = positionKey
+            return@LaunchedEffect
+        }
+        gridState.scrollToItem(minOf(targetIndex, loadedCount - 1), target.second)
+        if (loadedCount > targetIndex) restoredPositionKey = positionKey
     }
     var fabVisible by remember { mutableStateOf(true) }
-    val listScrolls by remember {
+    val listScrolls by remember(gridState) {
         derivedStateOf { gridState.canScrollForward || gridState.canScrollBackward }
     }
     LaunchedEffect(listScrolls) { if (!listScrolls) fabVisible = true }
