@@ -48,13 +48,13 @@ enum class VideoScalePreset(
  * of [stageWidth] x [stageHeight], given the picture the current [resizeMode] aspect
  * setting produces as the base.
  *
- * [stageWidth]/[stageHeight] must be the size of the area the picture is
- * actually drawn in — the image's own (post-inset) layout size — never the
- * outer window or player size. The returned factors are applied as a centre
- * scale of that same area, so if the two disagree, target boxes are sized
- * for one area and rendered in another: the picture overflows asymmetrically
- * and its edges crop (this is how portrait videos lost their top edge while
- * the subtitle safe-area inset was active).
+ * [stageWidth]/[stageHeight] must be the size of the single area both
+ * boxes are computed against: if they disagree with the area the factors
+ * are rendered into, target boxes are sized for one area and rendered in
+ * another and the picture overflows asymmetrically. The player no longer
+ * calls this directly with an inset area — it uses [videoPictureTransform],
+ * which composes this primitive across the full stage and the inset draw
+ * area analytically. This function remains the pinned single-area form.
  *
  * Composition with the aspect modes is deliberate and simple: the preset defines a
  * TARGET picture box inside (or, for Center / Fit screen, possibly beyond) the stage,
@@ -73,8 +73,29 @@ internal fun videoScaleFactors(
     videoHeight: Int,
     resizeMode: VideoScaling
 ): Pair<Float, Float> {
+    val boxes = pictureBoxes(preset, stageWidth, stageHeight, videoWidth, videoHeight, resizeMode)
+        ?: return 1f to 1f
+    val (baseW, baseH) = boxes.first
+    val (targetW, targetH) = boxes.second
+    return (targetW / baseW) to (targetH / baseH)
+}
+
+/**
+ * The (base, target) picture boxes for [preset] on a stage of
+ * [stageWidth] x [stageHeight]: the box the aspect mode renders before any
+ * preset scaling, and the box the preset wants that picture to end up as.
+ * Null for degenerate input (a size not known yet).
+ */
+private fun pictureBoxes(
+    preset: VideoScalePreset,
+    stageWidth: Int,
+    stageHeight: Int,
+    videoWidth: Int,
+    videoHeight: Int,
+    resizeMode: VideoScaling
+): Pair<Pair<Float, Float>, Pair<Float, Float>>? {
     if (stageWidth <= 0 || stageHeight <= 0 || videoWidth <= 0 || videoHeight <= 0) {
-        return 1f to 1f
+        return null
     }
     val stageW = stageWidth.toFloat()
     val stageH = stageHeight.toFloat()
@@ -85,15 +106,15 @@ internal fun videoScaleFactors(
     val coverScale = max(stageW / videoW, stageH / videoH)
 
     // The picture the aspect mode renders today, before any preset scaling.
-    val (baseW, baseH) = when (resizeMode) {
+    val base = when (resizeMode) {
         VideoScaling.FIT -> (videoW * fitScale) to (videoH * fitScale)
         VideoScaling.ZOOM -> (videoW * coverScale) to (videoH * coverScale)
         VideoScaling.FILL -> stageW to stageH
     }
 
     val ratio = preset.aspectRatio
-    val (targetW, targetH) = when {
-        preset == VideoScalePreset.BEST_FIT -> baseW to baseH
+    val target = when {
+        preset == VideoScalePreset.BEST_FIT -> base
         preset == VideoScalePreset.FIT_SCREEN -> (videoW * coverScale) to (videoH * coverScale)
         preset == VideoScalePreset.FILL -> stageW to stageH
         preset == VideoScalePreset.CENTER -> videoW to videoH
@@ -103,8 +124,67 @@ internal fun videoScaleFactors(
             boxW to (boxW / ratio)
         }
 
-        else -> baseW to baseH
+        else -> base
     }
 
-    return (targetW / baseW) to (targetH / baseH)
+    return base to target
+}
+
+/** A centre scale plus a vertical shift for the video picture layer. */
+internal data class VideoPictureTransform(
+    val scaleX: Float,
+    val scaleY: Float,
+    val translationYPx: Float
+)
+
+/**
+ * The transform that renders [preset] inside the stage area ABOVE a bottom
+ * inset (the subtitle safe area while the control bar is visible), for a
+ * video surface whose layout box is the FULL stage and never changes.
+ *
+ * Why this exists (PC-8): the safe area used to be a layout padding on the
+ * video image, so showing/hiding the controls resized the image's layout
+ * box; the scale factors were computed from a measured size that lagged a
+ * layout pass behind, and for one or more frames the picture was scaled
+ * for the wrong area — it jumped, and on hide it expanded past the stage
+ * top over the title bar. Here the surface is fixed and everything is
+ * derived analytically from the stage size in the same pass that knows the
+ * inset:
+ *
+ * - the aspect mode's base picture is computed against the FULL stage
+ *   (that is what the surface's own content scale renders), while the
+ *   preset's target box is computed against the DRAW area (stage minus the
+ *   bottom inset);
+ * - the layer scale maps base → target per axis, and the translation moves
+ *   the picture's centre from the stage centre to the draw-area centre
+ *   (−inset/2 vertically; the inset is bottom-only, so x never shifts).
+ *
+ * With a zero inset this reduces exactly to [videoScaleFactors] against
+ * the full stage with no translation. The rendered picture — subtitles
+ * included, since VLC paints cues into the frame — sits entirely inside
+ * the draw area for the in-stage presets, so cues are never under the
+ * overlaid control bar and the frame's bottom edge is never cropped by
+ * the stage, in fullscreen or windowed.
+ */
+internal fun videoPictureTransform(
+    preset: VideoScalePreset,
+    stageWidth: Int,
+    stageHeight: Int,
+    bottomInsetPx: Int,
+    videoWidth: Int,
+    videoHeight: Int,
+    resizeMode: VideoScaling
+): VideoPictureTransform {
+    val inset = bottomInsetPx.coerceAtLeast(0)
+    val drawHeight = stageHeight - inset
+    val full = pictureBoxes(preset, stageWidth, stageHeight, videoWidth, videoHeight, resizeMode)
+    val draw = pictureBoxes(preset, stageWidth, drawHeight, videoWidth, videoHeight, resizeMode)
+    if (full == null || draw == null) return VideoPictureTransform(1f, 1f, 0f)
+    val (baseW, baseH) = full.first
+    val (targetW, targetH) = draw.second
+    return VideoPictureTransform(
+        scaleX = targetW / baseW,
+        scaleY = targetH / baseH,
+        translationYPx = -inset / 2f
+    )
 }

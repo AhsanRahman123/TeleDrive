@@ -274,6 +274,113 @@ class VideoScaleTest {
         }
     }
 
+    // -- Picture transform (PC-8): fixed surface, analytical inset ---------
+    // The player surface is the full stage and never resizes; the subtitle
+    // safe-area inset is a pure transform. These tests pin that the rendered
+    // picture (base box of the FULL stage, scaled, then translated) lands
+    // exactly in the draw area above the inset.
+
+    private fun transform(
+        preset: VideoScalePreset,
+        stageW: Int = 1920,
+        stageH: Int = 1080,
+        inset: Int = 0,
+        videoW: Int = 1920,
+        videoH: Int = 1080,
+        mode: VideoScaling = VideoScaling.FIT
+    ) = videoPictureTransform(preset, stageW, stageH, inset, videoW, videoH, mode)
+
+    /** The rendered picture box (w, h) and its top edge, in stage coordinates. */
+    private fun renderedWithInset(
+        preset: VideoScalePreset,
+        stageW: Int = 1920,
+        stageH: Int = 1080,
+        inset: Int,
+        videoW: Int,
+        videoH: Int,
+        mode: VideoScaling = VideoScaling.FIT
+    ): Triple<Float, Float, Float> {
+        val t = transform(preset, stageW, stageH, inset, videoW, videoH, mode)
+        val (baseW, baseH) = baseBox(stageW, stageH, videoW, videoH, mode)
+        val w = baseW * t.scaleX
+        val h = baseH * t.scaleY
+        val centreY = stageH / 2f + t.translationYPx
+        return Triple(w, h, centreY - h / 2f)
+    }
+
+    @Test
+    fun `zero inset transform is exactly the single-area factors`() {
+        VideoScalePreset.entries.forEach { preset ->
+            VideoScaling.entries.forEach { mode ->
+                val t = transform(preset, inset = 0, videoW = 1440, videoH = 1080, mode = mode)
+                val (fx, fy) = factors(preset, videoW = 1440, videoH = 1080, mode = mode)
+                assertEquals("$preset/$mode scaleX", fx, t.scaleX, 0.001f)
+                assertEquals("$preset/$mode scaleY", fy, t.scaleY, 0.001f)
+                assertEquals("$preset/$mode translation", 0f, t.translationYPx, 0.001f)
+            }
+        }
+    }
+
+    @Test
+    fun `fit with an inset renders the draw-area fit centred in the draw area`() {
+        // Stage 1920x1080, inset 200 -> draw area 1920x880. A 1440x1080 video
+        // fits the draw area at 1173.3x880; its centre must be the draw
+        // area's centre (440), not the stage's (540).
+        val (w, h, top) = renderedWithInset(
+            VideoScalePreset.BEST_FIT, inset = 200, videoW = 1440, videoH = 1080
+        )
+        assertEquals(880f * (1440f / 1080f), w, 0.5f)
+        assertEquals(880f, h, 0.5f)
+        assertEquals(0f, top, 0.5f)
+    }
+
+    @Test
+    fun `fit screen with an inset covers the draw area`() {
+        val (w, h, _) = renderedWithInset(
+            VideoScalePreset.FIT_SCREEN, inset = 200, videoW = 1440, videoH = 1080
+        )
+        // Cover of the 1920x880 draw area by a 4:3 video is 1920x1440.
+        assertEquals(1920f, w, 0.5f)
+        assertEquals(1440f, h, 0.5f)
+    }
+
+    @Test
+    fun `in-stage presets with an inset never spill past the stage edges`() {
+        val stages = listOf(1920 to 1080, 1080 to 1920, 1366 to 768)
+        val videos = listOf(720 to 1280, 1920 to 1080, 1000 to 1000, 3840 to 2160)
+        val inStage = listOf(VideoScalePreset.BEST_FIT) +
+            VideoScalePreset.entries.filter { it.aspectRatio != null }
+        for ((stageW, stageH) in stages) {
+            for ((videoW, videoH) in videos) {
+                for (preset in inStage) {
+                    val (w, h, top) = renderedWithInset(
+                        preset, stageW, stageH, inset = 180, videoW, videoH
+                    )
+                    assertTrue(
+                        "$preset of ${videoW}x$videoH spills above ${stageW}x$stageH: top=$top",
+                        top >= -0.5f
+                    )
+                    assertTrue(
+                        "$preset of ${videoW}x$videoH spills below ${stageW}x$stageH: bottom=${top + h}",
+                        top + h <= stageH + 0.5f
+                    )
+                    assertTrue(
+                        "$preset of ${videoW}x$videoH wider than stage: $w",
+                        w <= stageW + 1f
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `degenerate transform is the identity`() {
+        val t = transform(VideoScalePreset.FILL, stageW = 0, stageH = 0, inset = 100, videoW = 0, videoH = 0)
+        assertEquals(1f, t.scaleX, 0.001f)
+        assertEquals(1f, t.scaleY, 0.001f)
+        assertEquals(0f, t.translationYPx, 0.001f)
+    }
+
     @Test
     fun `every preset label matches the reference list`() {
         assertEquals(

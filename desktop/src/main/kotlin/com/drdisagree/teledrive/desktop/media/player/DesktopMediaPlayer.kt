@@ -81,6 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -279,13 +280,6 @@ internal fun DesktopMediaPlayer(
     var styleRestart by remember { mutableStateOf<StyleRestart?>(null) }
     var scalePreset by remember(mrl) { mutableStateOf(VideoScalePreset.BEST_FIT) }
     var stageSize by remember { mutableStateOf(IntSize.Zero) }
-    // The area the video picture is actually drawn in: the image's size
-    // after the subtitle safe-area inset. The scale presets must be
-    // calculated against this area, not the full stage — the stage is
-    // taller by the inset while the controls are visible, and boxes
-    // calculated against it overflow the drawn area and crop the picture
-    // (portrait videos lost their top edge this way).
-    var pictureSize by remember { mutableStateOf(IntSize.Zero) }
     val startPausedArmed = remember { AtomicBoolean(false) }
     var resumeSavedPosition by remember(mrl) { mutableStateOf<Long?>(null) }
     var resumeTarget by remember(mrl) { mutableStateOf<Long?>(null) }
@@ -1078,6 +1072,9 @@ internal fun DesktopMediaPlayer(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            // Oversized pictures (Fit screen / Center presets) crop at the
+            // stage edge, never past it onto the surrounding chrome (PC-8).
+            .clipToBounds()
             .onSizeChanged { stageSize = it }
             .focusRequester(playerFocusRequester)
             .onPreviewKeyEvent { event ->
@@ -1420,22 +1417,14 @@ internal fun DesktopMediaPlayer(
                     bitmap = current,
                     contentDescription = null,
                     modifier = Modifier
+                        // The video surface fills the fixed stage region and
+                        // NEVER changes layout size: showing/hiding the
+                        // controls must not resize or move it (PC-8). The
+                        // subtitle safe area is applied purely as a layer
+                        // transform below (see videoPictureTransform), in the
+                        // same pass that knows the controls are visible — no
+                        // measured size can lag behind and overflow the stage.
                         .fillMaxSize()
-                        // Subtitle safe area: VLC paints cues inside the frame,
-                        // so while the control bar is visible the frame is
-                        // inset above it instead of the cue hiding behind the
-                        // bar (and being cropped at the fullscreen bottom edge).
-                        .padding(
-                            bottom = if (controlsVisible) {
-                                SUBTITLE_SAFE_AREA_WITH_CONTROLS
-                            } else {
-                                0.dp
-                            }
-                        )
-                        // Measure the drawn picture area (post-inset) so the
-                        // scale presets below compose against the same area
-                        // the bitmap is fitted into.
-                        .onSizeChanged { pictureSize = it }
                         .pointerInput(subtitleTrackActive, subtitleAppearance.verticalPosition) {
                             var dragActive = false
                             var startY = 0f
@@ -1485,25 +1474,33 @@ internal fun DesktopMediaPlayer(
                         }
                         .graphicsLayer {
                             // Manual scale presets (the VLC-style replacement for
-                            // the removed pinch zoom): a pure centre scale of the
-                            // whole picture, composed with the FIT/ZOOM/FILL mode.
-                            // The stage here is the measured picture area (the
-                            // image's post-inset size); until the first layout
-                            // lands, fall back to the outer stage size.
-                            val areaWidth = pictureSize.width.takeIf { it > 0 }
-                                ?: stageSize.width
-                            val areaHeight = pictureSize.height.takeIf { it > 0 }
-                                ?: stageSize.height
-                            val (factorX, factorY) = videoScaleFactors(
+                            // the removed pinch zoom), composed with the
+                            // FIT/ZOOM/FILL mode and with the subtitle safe
+                            // area: while the controls are visible the picture
+                            // is rendered into the area above them, so cues
+                            // painted into the frame are never hidden behind
+                            // the bar — but the surface itself is the full
+                            // fixed stage, and the transform is computed
+                            // analytically from the stage size (see
+                            // videoPictureTransform), so it cannot jump or
+                            // spill over the stage edge when the bar toggles.
+                            val insetPx = if (controlsVisible) {
+                                SUBTITLE_SAFE_AREA_WITH_CONTROLS.toPx()
+                            } else {
+                                0f
+                            }
+                            val transform = videoPictureTransform(
                                 preset = scalePreset,
-                                stageWidth = areaWidth,
-                                stageHeight = areaHeight,
+                                stageWidth = stageSize.width,
+                                stageHeight = stageSize.height,
+                                bottomInsetPx = insetPx.roundToInt(),
                                 videoWidth = current.width,
                                 videoHeight = current.height,
                                 resizeMode = scaling
                             )
-                            scaleX = factorX
-                            scaleY = factorY
+                            scaleX = transform.scaleX
+                            scaleY = transform.scaleY
+                            translationY = transform.translationYPx
                         },
                     contentScale = scaling.contentScale
                 )
