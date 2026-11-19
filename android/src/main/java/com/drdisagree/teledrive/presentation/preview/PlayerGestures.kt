@@ -157,8 +157,9 @@ fun PlayerGestureArea(
                 // MX Player's zoom is built on that detector: the scale is NEVER recomputed
                 // from a baseline captured when the second finger landed. Each event
                 // contributes only its own small span ratio (span / previous span), applied
-                // through [pinchZoomStep], which also re-anchors the pan so the content
-                // point under the fingers stays under the fingers as the scale changes.
+                // through [pinchZoomStep], which scales about the stage centre: the pan
+                // is never re-anchored to the fingers, so the picture stays planted
+                // while pinching, exactly like MX Player (see [pinchZoomStep]).
                 // Any event that changes the pointer set (a finger lands or lifts, or the
                 // tracked pair changes) only re-baselines — it applies nothing — so the
                 // span collapse as fingers lift off, and digitiser pair swaps, cannot
@@ -637,17 +638,24 @@ internal data class ZoomTransform(val scale: Float, val panX: Float, val panY: F
  * step toward 1, so the zoom follows the fingers at a reduced, steadier rate while the
  * product of the steps still telescopes exactly onto the (damped) total span change —
  * no drift is introduced. Damping is multiplicative in log space, so it shrinks fast
- * flicks and slow pinches alike, and a factor of exactly 1 (pure centroid movement)
- * still pans one-to-one.
+ * flicks and slow pinches alike.
  *
- * Anchoring: the graphicsLayer scales about the stage centre O, so a content point p
- * renders at `O + (p - O) * s + t`. The pan is recomputed so the content point that was
- * under the previous centroid C ends up under the current centroid C':
- * `t' = C' - O - (C - O - t) * (s' / s)`, using the ratio that was ACTUALLY applied
- * after clamping to the zoom range (using the raw factor would drift the picture every
- * time a bound is hit). With no scale change the formula reduces to `t + (C' - C)`:
- * the pan simply follows the fingers. The result is clamped by [clampZoomPan], so the
- * below-100% crash fix applies to every step.
+ * Anchoring: the zoom scales about the STAGE CENTRE, never about the fingers. The
+ * graphicsLayer scales about the stage centre O, so a content point p renders at
+ * `O + (p - O) * s + t`; keeping the content point that sits at the centre on the
+ * centre means the pan scales with the applied ratio: `t' = t * (s' / s)`, using the
+ * ratio that was ACTUALLY applied after clamping to the zoom range. An un-panned
+ * picture (t = 0) therefore stays exactly centred through any pinch, wherever the
+ * fingers are and however they glide, and a pan the user made deliberately (one
+ * finger, while zoomed) is preserved proportionally. The centroid arguments are
+ * deliberately unused: earlier builds re-anchored the pan to the moving centroid on
+ * every event, which converted ordinary finger spread and glide into picture
+ * translation — frame measurement of the MX Player reference showed its picture
+ * centre never leaves the stage centre (within ~2 recording px across full-range
+ * sweeps), while this build's portrait pinch-in carried the picture centre ~24
+ * recording px off centre by 123% zoom. MX-style stillness is centre anchoring.
+ * The result is clamped by [clampZoomPan], so the below-100% crash fix applies to
+ * every step.
  *
  * A span ratio outside [MIN_EVENT_SPAN_FACTOR, MAX_EVENT_SPAN_FACTOR] cannot be real
  * finger motion at touch sampling rates — it means the digitiser glitched or the
@@ -670,12 +678,11 @@ internal fun pinchZoomStep(
     val dampedFactor = factor.pow(ZOOM_SENSITIVITY)
     val newScale = (current.scale * dampedFactor).coerceIn(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
     val appliedRatio = newScale / current.scale
-    val originX = width / 2f
-    val originY = height / 2f
-    val anchoredX = centroid.x - originX -
-        (prevCentroid.x - originX - current.panX) * appliedRatio
-    val anchoredY = centroid.y - originY -
-        (prevCentroid.y - originY - current.panY) * appliedRatio
+    // Centre anchoring: the pan scales with the applied ratio, so the content point
+    // at the stage centre stays at the stage centre and an un-panned picture never
+    // acquires a pan from a pinch, wherever the fingers are.
+    val anchoredX = current.panX * appliedRatio
+    val anchoredY = current.panY * appliedRatio
     val (clampedX, clampedY) = clampZoomPan(anchoredX, anchoredY, width, height, newScale)
     return ZoomTransform(newScale, clampedX, clampedY)
 }
