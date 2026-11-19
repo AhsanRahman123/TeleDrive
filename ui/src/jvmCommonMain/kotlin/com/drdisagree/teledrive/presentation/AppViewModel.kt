@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.data.repository.LocalDataWiper
+import com.drdisagree.teledrive.presentation.platform.PlatformCapabilities
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
@@ -42,7 +43,8 @@ class AppViewModel(
     private val channelRepository: ChannelRepository,
     private val appLockManager: AppLockManager,
     private val localDataWiper: LocalDataWiper,
-    private val updateChecker: UpdateChecker
+    private val updateChecker: UpdateChecker,
+    private val platformCapabilities: PlatformCapabilities
 ) : ViewModel() {
 
     private val _sessionBroken = MutableStateFlow(false)
@@ -112,6 +114,11 @@ class AppViewModel(
 
     /** Folders live with the active drive, so the check has to ask the channel. */
     private suspend fun catchUpBackup() {
+        // Platforms without auto-backup (desktop since 2026-11-20) must not
+        // run this: the folder set lives in the shared channel, so without
+        // the capability gate the desktop app started a backup scan at every
+        // launch for folders another device had configured.
+        if (!platformCapabilities.supportsAutoBackup) return
         val chatId = settingsRepository.preferences.first().storageChatId ?: return
         if (channelRepository.backupFolders(chatId).isEmpty()) return
         backupRepository.startBackup(BackupTrigger.SCHEDULED)

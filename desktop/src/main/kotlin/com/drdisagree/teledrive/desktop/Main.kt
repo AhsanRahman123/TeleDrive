@@ -110,11 +110,13 @@ fun main() {
         getKoin().get<PublishScheduler>().kick()
         runCatching { getKoin().get<TrashRepository>().repairTrashTree() }
     }
-    // Auto-backup arming, mirroring Android's TeleDriveApplication.onCreate:
-    // without this startup call the desktop schedulers would only arm after
-    // the user opened Settings. The resume scheduler's kick target is wired
-    // here because it cannot be a constructor dependency (Koin cycle through
-    // the transfer drainer).
+    // Maintenance arming, mirroring Android's TeleDriveApplication.onCreate:
+    // without this startup call the desktop scheduler would only arm after
+    // the user opened Settings. (Folder auto-backup itself was removed from
+    // desktop on 2026-11-20; the scheduler now arms cleanup + update checks
+    // only.) The resume scheduler's kick target is wired here because it
+    // cannot be a constructor dependency (Koin cycle through the transfer
+    // drainer).
     getKoin().get<DesktopBackupResumeScheduler>().kickAction = { allowMetered ->
         getKoin().get<TransferScheduler>().kick(allowMetered)
     }
@@ -125,7 +127,11 @@ fun main() {
         runCatching {
             val prefs = getKoin().get<SettingsRepository>().preferences.first()
             getKoin().get<MaintenanceScheduler>().scheduleAll(
-                backupEnabled = prefs.autoBackupEnabled && prefs.backupIntervalHours > 0,
+                // Desktop auto-backup is removed (2026-11-20): never arm it,
+                // whatever an earlier watch-list left in the preferences.
+                // The call itself stays — it also arms the cache/trash
+                // cleanup loop and the daily update check.
+                backupEnabled = false,
                 backupIntervalHours = prefs.backupIntervalHours,
                 wifiOnly = prefs.backupWifiOnly,
                 chargingOnly = prefs.backupChargingOnly,
