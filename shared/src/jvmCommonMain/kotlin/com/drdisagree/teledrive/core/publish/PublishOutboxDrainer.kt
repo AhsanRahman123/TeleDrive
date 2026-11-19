@@ -124,6 +124,8 @@ class PublishOutboxDrainer(
     ): Boolean = coroutineScope {
         val slots = Semaphore(MAX_PARALLEL_PUBLISHES)
         val aborted = AtomicBoolean(false)
+        val deferred = AtomicInteger(0)
+        val publishedAtStart = published.get()
         val progressLock = Mutex()
 
         suspend fun reportProgress() {
@@ -166,6 +168,7 @@ class PublishOutboxDrainer(
                                         TAG,
                                         "Deferring publish for local-only file ${entity.id}"
                                     )
+                                    deferred.incrementAndGet()
                                     return@withPermit
                                 } else if (isPermanent(error)) {
                                     // Never dead-letter into silence: the row
@@ -193,7 +196,12 @@ class PublishOutboxDrainer(
             }
         }
         jobs.awaitAll()
-        !aborted.get() && !isStopped()
+        // A batch in which every file was deferred (local-only, nothing could
+        // be published) must stop the drain: the rows stay pending, so
+        // refetching the batch would spin forever. The scheduler retries
+        // later; once the upload lands, the publish proceeds normally.
+        val madeProgress = published.get() > publishedAtStart
+        !aborted.get() && !isStopped() && !(deferred.get() > 0 && !madeProgress)
     }
 
     /**
