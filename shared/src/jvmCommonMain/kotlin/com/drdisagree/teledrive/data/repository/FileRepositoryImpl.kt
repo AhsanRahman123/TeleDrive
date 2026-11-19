@@ -62,6 +62,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -197,13 +198,19 @@ class FileRepositoryImpl(
         sortDirection: SortDirection
     ): Flow<List<DriveFolder>> =
         activeChannel.observe().flatMapLatest { chatId ->
-            folderDao.observeChildrenWithCountsScoped(parentId, chatId, showHidden, showArchived)
+            combine(
+                folderDao.observeChildrenWithCountsScoped(parentId, chatId, showHidden, showArchived),
+                folderDao.observeFolderTotalSizes(chatId)
+            ) { list, sizes ->
+                val totals = sizes.associate { it.folderId to it.totalBytes }
+                list.map { it.toDomain().copy(totalSizeBytes = totals[it.folder.id] ?: 0L) }
+            }
                 .distinctUntilChanged()
-                .map { list -> list.map { it.toDomain() }.sortedBy(sortField, sortDirection) }
+                .map { list -> list.sortedBy(sortField, sortDirection) }
         }
 
     /**
-     * Folders carry no size, type or backup state, so those fields fall back to
+     * Folders carry a recursive total size; type and backup state fall back to
      * the name while still honouring the chosen direction.
      */
     private fun List<DriveFolder>.sortedBy(
@@ -213,7 +220,7 @@ class FileRepositoryImpl(
         val ordered = when (field) {
             FileSortField.DATE_MODIFIED -> sortedBy { it.modifiedAt }
             FileSortField.DATE_ADDED -> sortedBy { it.createdAt }
-            FileSortField.SIZE -> sortedBy { it.fileCount + it.folderCount }
+            FileSortField.SIZE -> sortedBy { it.totalSizeBytes }
             else -> sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
         }
         return if (direction == SortDirection.ASCENDING) ordered else ordered.reversed()
@@ -225,13 +232,19 @@ class FileRepositoryImpl(
         showArchived: Boolean
     ): Flow<List<DriveFolder>> =
         activeChannel.observe().flatMapLatest { chatId ->
-            folderDao.observeMatchingWithCountsScoped(
-                pattern = "%${escapeLike(nameQuery)}%",
-                chatId = chatId,
-                showHidden = showHidden,
-                showArchived = showArchived,
-                limit = FOLDER_SEARCH_LIMIT
-            ).map { list -> list.map { it.toDomain() } }
+            combine(
+                folderDao.observeMatchingWithCountsScoped(
+                    pattern = "%${escapeLike(nameQuery)}%",
+                    chatId = chatId,
+                    showHidden = showHidden,
+                    showArchived = showArchived,
+                    limit = FOLDER_SEARCH_LIMIT
+                ),
+                folderDao.observeFolderTotalSizes(chatId)
+            ) { list, sizes ->
+                val totals = sizes.associate { it.folderId to it.totalBytes }
+                list.map { it.toDomain().copy(totalSizeBytes = totals[it.folder.id] ?: 0L) }
+            }
         }
 
     override fun observeStorageByCategory(): Flow<List<StorageSlice>> =

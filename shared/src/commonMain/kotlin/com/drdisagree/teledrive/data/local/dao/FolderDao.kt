@@ -303,4 +303,44 @@ interface FolderDao {
 
     @Query("UPDATE folders SET chatId = :chatId WHERE id = :id")
     suspend fun setChatId(id: String, chatId: Long?)
+
+    /**
+     * Recursive per-folder totals: for every folder in the drive, the sum of
+     * files.sizeBytes over the folder itself and all descendant folders.
+     * Trashed files and trashed folders are excluded (matching the counts).
+     * UNION (not UNION ALL) keeps a parent cycle from recursing forever.
+     */
+    @Query(
+        """WITH RECURSIVE folder_tree(rootId, id) AS (
+               SELECT id, id FROM folders WHERE chatId IS :chatId AND trashedAt IS NULL
+               UNION
+               SELECT folder_tree.rootId, child.id FROM folders AS child
+               JOIN folder_tree ON child.parentId = folder_tree.id
+               WHERE child.trashedAt IS NULL
+           )
+           SELECT folder_tree.rootId AS folderId,
+                  COALESCE(SUM(files.sizeBytes), 0) AS totalBytes
+             FROM folder_tree
+             LEFT JOIN files ON files.folderId = folder_tree.id
+               AND files.trashedAt IS NULL AND files.chatId IS :chatId
+            GROUP BY folder_tree.rootId"""
+    )
+    fun observeFolderTotalSizes(chatId: Long?): Flow<List<FolderTotalSize>>
+
+    @Query(
+        """WITH RECURSIVE folder_tree(rootId, id) AS (
+               SELECT id, id FROM folders WHERE chatId IS :chatId AND trashedAt IS NULL
+               UNION
+               SELECT folder_tree.rootId, child.id FROM folders AS child
+               JOIN folder_tree ON child.parentId = folder_tree.id
+               WHERE child.trashedAt IS NULL
+           )
+           SELECT folder_tree.rootId AS folderId,
+                  COALESCE(SUM(files.sizeBytes), 0) AS totalBytes
+             FROM folder_tree
+             LEFT JOIN files ON files.folderId = folder_tree.id
+               AND files.trashedAt IS NULL AND files.chatId IS :chatId
+            GROUP BY folder_tree.rootId"""
+    )
+    suspend fun folderTotalSizes(chatId: Long?): List<FolderTotalSize>
 }

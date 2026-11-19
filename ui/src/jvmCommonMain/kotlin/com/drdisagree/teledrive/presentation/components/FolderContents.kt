@@ -18,6 +18,9 @@ fun DriveFolder.contentsLabel(): String {
         if (fileCount > 0) {
             add(pluralStringResource(Res.plurals.file_count, fileCount, fileCount))
         }
+        if (totalSizeBytes > 0) {
+            add(com.drdisagree.teledrive.presentation.common.Formatters.bytes(totalSizeBytes))
+        }
     }
     return if (parts.isEmpty()) stringResource(Res.string.common_empty) else parts.joinToString(" · ")
 }
