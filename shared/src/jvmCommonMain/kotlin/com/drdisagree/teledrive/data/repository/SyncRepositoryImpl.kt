@@ -625,11 +625,15 @@ class SyncRepositoryImpl(
                 folderPathResolver.exists(it, document.chatId)
             } ?: existing?.folderId
             // An unresolved folder reference must not silently demote a file
-            // that already has a folder to the root listing: keep the current
-            // placement when resolution fails (e.g. a trashed manifest whose
-            // path no longer resolves). Brand-new rows still resolve normally.
+            // that already has a folder to the root listing: when the manifest
+            // actually names a folder but resolution fails (e.g. a trashed
+            // manifest whose path no longer resolves), keep the current
+            // placement. A manifest that names no folder legitimately means
+            // root, and a remote move back to root must still apply.
             else -> resolveFolder(manifest, folderCache, document.chatId, document.messageId)
-                ?: existing?.folderId
+                ?: existing?.folderId?.takeIf {
+                    manifest.folderId != null || manifest.folderPath.isNotBlank()
+                }
         }
         val folderTrashedAt = folderId?.let { folderDao.byId(it)?.trashedAt }
 

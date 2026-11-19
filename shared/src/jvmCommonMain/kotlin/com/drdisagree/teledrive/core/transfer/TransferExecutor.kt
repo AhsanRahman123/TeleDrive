@@ -851,7 +851,9 @@ class TransferExecutor(
             return TransferOutcome.Failed(messages.verifyFailed)
         }
         val savedPath = target.finish() ?: return TransferOutcome.Failed(messages.saveFailed)
-        transferDao.setLocalPath(transfer.id, savedPath)
+        // The transfer row's localPath pointed at the partial download; the
+        // finished row is back-filled from the file row's path instead.
+        transferDao.setLocalPath(transfer.id, null)
         fileDao.setLocalPath(entity.id, savedPath)
         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
         refreshDownloadedMediaThumbnail(entity)
