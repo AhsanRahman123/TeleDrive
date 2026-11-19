@@ -291,7 +291,12 @@ class AndroidThumbnailStore(
     private suspend fun effectivePolicy(fileId: String): ThumbnailPolicy =
         thumbnailPolicyDao.effectivePolicy(fileId)
             ?.let { runCatching { ThumbnailPolicy.valueOf(it) }.getOrNull() }
-            ?: ThumbnailPolicy.MANUAL_ONLY
+            // Same rule as this store's display path (and DesktopThumbnailStore):
+            // a file with no explicit policy row generates; only an explicit
+            // MANUAL_ONLY rule suppresses it. The old MANUAL_ONLY default made
+            // the queue discard non-forced jobs for synced files, which have no
+            // policy row at all, so background warm-up could never fill them.
+            ?: ThumbnailPolicy.AUTOMATIC
 
     override suspend fun cacheUploadedThumbnail(
         fileId: String,
