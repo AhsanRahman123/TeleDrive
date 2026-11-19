@@ -21,10 +21,16 @@ internal object VideoResumeStore {
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lastPersisted = ConcurrentHashMap<String, Long>()
 
-    fun loadPosition(mediaId: String): Long = runCatching {
+    fun loadPosition(mediaId: String): Long = loadPosition(preferences, lastPersisted, mediaId)
+
+    internal fun loadPosition(
+        source: Preferences,
+        cache: ConcurrentHashMap<String, Long>,
+        mediaId: String
+    ): Long = runCatching {
         val key = keyFor(mediaId)
-        preferences.getLong(key, 0L).coerceAtLeast(0L).also { saved ->
-            if (saved > 0L) lastPersisted[key] = saved
+        source.getLong(key, 0L).coerceAtLeast(0L).also { saved ->
+            if (saved > 0L) cache[key] = saved
         }
     }.getOrDefault(0L)
 
@@ -33,51 +39,66 @@ internal object VideoResumeStore {
         positionMs: Long,
         durationMs: Long,
         force: Boolean = false
+    ) = savePosition(preferences, lastPersisted, mediaId, positionMs, durationMs, force)
+
+    internal fun savePosition(
+        target: Preferences,
+        cache: ConcurrentHashMap<String, Long>,
+        mediaId: String,
+        positionMs: Long,
+        durationMs: Long,
+        force: Boolean = false
     ) {
         if (positionMs <= 0L) return
         if (durationMs > 0L && durationMs - positionMs <= COMPLETION_CLEAR_MARGIN_MS) {
-            clear(mediaId)
+            clear(target, cache, mediaId)
             return
         }
 
         val key = keyFor(mediaId)
-        val previous = lastPersisted[key]
+        val previous = cache[key]
         if (!force && previous != null && abs(positionMs - previous) < MIN_PERSIST_DELTA_MS) return
-        lastPersisted[key] = positionMs
+        cache[key] = positionMs
 
         ioScope.launch {
             runCatching {
-                synchronized(preferences) {
+                synchronized(target) {
                     // An older write can be scheduled before a newer time event but run later
                     // on the IO pool. Skip it if the in-memory latest value has moved on.
-                    if (lastPersisted[key] == positionMs) {
-                        preferences.putLong(key, positionMs)
-                        preferences.flush()
+                    if (cache[key] == positionMs) {
+                        target.putLong(key, positionMs)
+                        target.flush()
                     }
                 }
             }.onFailure {
-                lastPersisted.remove(key, positionMs)
+                cache.remove(key, positionMs)
             }
         }
     }
 
-    fun clear(mediaId: String) {
+    fun clear(mediaId: String) = clear(preferences, lastPersisted, mediaId)
+
+    internal fun clear(
+        target: Preferences,
+        cache: ConcurrentHashMap<String, Long>,
+        mediaId: String
+    ) {
         val key = keyFor(mediaId)
-        lastPersisted.remove(key)
+        cache.remove(key)
         ioScope.launch {
             runCatching {
-                synchronized(preferences) {
+                synchronized(target) {
                     // Do not let a delayed clear delete a newer position from a replayed video.
-                    if (!lastPersisted.containsKey(key)) {
-                        preferences.remove(key)
-                        preferences.flush()
+                    if (!cache.containsKey(key)) {
+                        target.remove(key)
+                        target.flush()
                     }
                 }
             }
         }
     }
 
-    private fun keyFor(mediaId: String): String {
+    internal fun keyFor(mediaId: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(mediaId.toByteArray(StandardCharsets.UTF_8))
         val hex = digest.joinToString("") { "%02x".format(it) }
