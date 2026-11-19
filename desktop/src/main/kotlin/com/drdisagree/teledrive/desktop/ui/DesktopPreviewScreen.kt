@@ -1044,6 +1044,7 @@ private fun PreviewPane(
     onPlayerControlsVisibilityChange: (Boolean) -> Unit
 ) {
     val content by viewModel.contentFor(file).collectAsState()
+    val backgroundPlayback by viewModel.backgroundPlayback.collectAsState()
     // Keep the old local media source mounted while the next queued video resolves. This
     // preserves the single VLC surface across the transient Loading state and prevents the
     // black flash that otherwise occurs between adjacent local videos.
@@ -1639,7 +1640,8 @@ private fun PreviewPane(
                 onClearSleepTimer = onClearSleepTimer,
                 onPlaybackFinished = onPlaybackFinished,
                 onControlsVisibilityChange = onPlayerControlsVisibilityChange,
-                onDelete = onDelete
+                onDelete = onDelete,
+                backgroundPlayback = backgroundPlayback
             )
         }
     }

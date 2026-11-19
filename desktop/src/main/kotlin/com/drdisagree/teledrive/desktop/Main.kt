@@ -117,6 +117,9 @@ fun main() {
     getKoin().get<DesktopBackupResumeScheduler>().kickAction = { allowMetered ->
         getKoin().get<TransferScheduler>().kick(allowMetered)
     }
+    // Proxy auto-failover, mirroring TeleDriveApplication: rotate to the
+    // next saved proxy when the connection stays CONNECTING too long.
+    getKoin().get<ProxyFailover>().start(backgroundScope)
     backgroundScope.launch {
         runCatching {
             val prefs = getKoin().get<SettingsRepository>().preferences.first()

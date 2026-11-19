@@ -184,7 +184,8 @@ internal fun DesktopMediaPlayer(
     onClearSleepTimer: () -> Unit = {},
     onPlaybackFinished: () -> Unit = {},
     onControlsVisibilityChange: (Boolean) -> Unit = {},
-    onDelete: () -> Unit = {}
+    onDelete: () -> Unit = {},
+    backgroundPlayback: Boolean = false
 ) {
     // Subtitle appearance: freetype options are LibVLC instance options, so a
     // non-default appearance gets its own factory and the player is recreated
@@ -202,7 +203,7 @@ internal fun DesktopMediaPlayer(
     DisposableEffect(appearanceFactory) {
         onDispose {
             val retired = appearanceFactory
-            if (retired != null) {
+            if (retired != null && !BackgroundPlayback.ownsFactory(retired)) {
                 // The player built from this factory is released by its own
                 // DisposableEffect (declared later, so it is disposed first);
                 // release the retired LibVLC instance shortly afterwards, off
@@ -270,6 +271,9 @@ internal fun DesktopMediaPlayer(
     val latestSleepAtTrackEnd = rememberUpdatedState(sleepAtTrackEnd)
     val latestOnPlaybackFinished = rememberUpdatedState(onPlaybackFinished)
     val latestOnControlsVisibilityChange = rememberUpdatedState(onControlsVisibilityChange)
+    val latestBackgroundPlayback = rememberUpdatedState(backgroundPlayback)
+    val latestPlaying = rememberUpdatedState(playing)
+    val latestFinished = rememberUpdatedState(finished)
     val playerScope = rememberCoroutineScope()
     // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
     // media. The new source becomes active only after VLC reports that it has started playing.
@@ -318,6 +322,9 @@ internal fun DesktopMediaPlayer(
     // One native VLC instance is retained for the lifetime of this media viewer. The
     // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
     val player = remember(factory, isAudio) {
+        // A new preview replaces any background-playback session parked by a
+        // previous preview (see BackgroundPlayback).
+        BackgroundPlayback.stopParked()
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
@@ -567,6 +574,9 @@ internal fun DesktopMediaPlayer(
             acceptsCurrentMediaEvents.set(false)
             acceptsCurrentVideoFrames.set(false)
             expectedMediaGeneration.set(-1L)
+            // The viewer-level effect below may have parked this player for
+            // background playback; a parked player must not be released here.
+            if (BackgroundPlayback.isParked(player)) return@onDispose
             // Keep teardown serialized with pending play/seek/track commands. Disposing the
             // composable must not race a queued media replacement against native player release.
             runCatching {
@@ -574,6 +584,21 @@ internal fun DesktopMediaPlayer(
                     runCatching { player.controls().stop() }
                     runCatching { player.release() }
                 }
+            }
+        }
+    }
+
+    // Background playback: declared after the per-player effect so it is
+    // disposed first when the whole viewer leaves (navigation). It parks the
+    // current player instead of letting the teardown above release it. A
+    // player swap inside this viewer (subtitle appearance restart) does not
+    // run this effect, so the outgoing player is still released normally.
+    val latestPlayer = rememberUpdatedState(player)
+    val latestAppearanceFactory = rememberUpdatedState(appearanceFactory)
+    DisposableEffect(Unit) {
+        onDispose {
+            if (latestBackgroundPlayback.value && latestPlaying.value && !latestFinished.value) {
+                BackgroundPlayback.park(latestPlayer.value, latestAppearanceFactory.value)
             }
         }
     }

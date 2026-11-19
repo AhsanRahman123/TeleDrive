@@ -128,6 +128,7 @@ val desktopModule = module {
     singleOf(::KeyBackupCodec)
     singleOf(::TelegramPacer)
     singleOf(::ProxyProbe)
+    singleOf(::ProxyFailover)
     singleOf(::AppLockManager)
     single { UpdateChecker(BuildInfo.VERSION) }
     singleOf(::DesktopPermissionChecker) bind PermissionChecker::class
