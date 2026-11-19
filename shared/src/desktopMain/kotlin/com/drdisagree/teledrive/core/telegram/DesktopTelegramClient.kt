@@ -1591,7 +1591,7 @@ class DesktopTelegramClient(
 
     override suspend fun editCaption(chatId: Long, messageId: Long, caption: String) {
         ownWrites.wroteCaption(messageId, caption)
-        paced {
+        pacedEdit {
             send(
                 TdApi.EditMessageCaption(
                     chatId,
@@ -1664,6 +1664,14 @@ class DesktopTelegramClient(
      */
     private suspend fun <T> paced(block: suspend () -> T): T =
         pacer.paced { withRateLimitRetry(block) }
+
+    /**
+     * Caption edits update existing messages rather than creating new ones, so they take the
+     * pacer's dedicated edit lane (~4 edits/second) instead of the 20/minute creation lane —
+     * the same lane Android's editCaption uses. Bulk moves/renames publish through here.
+     */
+    private suspend fun <T> pacedEdit(block: suspend () -> T): T =
+        pacer.pacedEdit { withRateLimitRetry(block) }
 
     private suspend fun <T> withRateLimitRetry(block: suspend () -> T): T {
         var attempt = 0
