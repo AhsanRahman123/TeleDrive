@@ -48,6 +48,14 @@ enum class VideoScalePreset(
  * of [stageWidth] x [stageHeight], given the picture the current [resizeMode] aspect
  * setting produces as the base.
  *
+ * [stageWidth]/[stageHeight] must be the size of the area the picture is
+ * actually drawn in — the image's own (post-inset) layout size — never the
+ * outer window or player size. The returned factors are applied as a centre
+ * scale of that same area, so if the two disagree, target boxes are sized
+ * for one area and rendered in another: the picture overflows asymmetrically
+ * and its edges crop (this is how portrait videos lost their top edge while
+ * the subtitle safe-area inset was active).
+ *
  * Composition with the aspect modes is deliberate and simple: the preset defines a
  * TARGET picture box inside (or, for Center / Fit screen, possibly beyond) the stage,
  * and the returned factors map the aspect mode's base picture exactly onto that box.

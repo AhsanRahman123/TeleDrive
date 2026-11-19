@@ -280,6 +280,13 @@ internal fun DesktopMediaPlayer(
     var styleRestart by remember { mutableStateOf<StyleRestart?>(null) }
     var scalePreset by remember(mrl) { mutableStateOf(VideoScalePreset.BEST_FIT) }
     var stageSize by remember { mutableStateOf(IntSize.Zero) }
+    // The area the video picture is actually drawn in: the image's size
+    // after the subtitle safe-area inset. The scale presets must be
+    // calculated against this area, not the full stage — the stage is
+    // taller by the inset while the controls are visible, and boxes
+    // calculated against it overflow the drawn area and crop the picture
+    // (portrait videos lost their top edge this way).
+    var pictureSize by remember { mutableStateOf(IntSize.Zero) }
     val startPausedArmed = remember { AtomicBoolean(false) }
     var resumeSavedPosition by remember(mrl) { mutableStateOf<Long?>(null) }
     var resumeTarget by remember(mrl) { mutableStateOf<Long?>(null) }
@@ -1397,6 +1404,10 @@ internal fun DesktopMediaPlayer(
                                 0.dp
                             }
                         )
+                        // Measure the drawn picture area (post-inset) so the
+                        // scale presets below compose against the same area
+                        // the bitmap is fitted into.
+                        .onSizeChanged { pictureSize = it }
                         .pointerInput(subtitleTrackActive, subtitleAppearance.verticalPosition) {
                             var dragActive = false
                             var startY = 0f
@@ -1448,10 +1459,17 @@ internal fun DesktopMediaPlayer(
                             // Manual scale presets (the VLC-style replacement for
                             // the removed pinch zoom): a pure centre scale of the
                             // whole picture, composed with the FIT/ZOOM/FILL mode.
+                            // The stage here is the measured picture area (the
+                            // image's post-inset size); until the first layout
+                            // lands, fall back to the outer stage size.
+                            val areaWidth = pictureSize.width.takeIf { it > 0 }
+                                ?: stageSize.width
+                            val areaHeight = pictureSize.height.takeIf { it > 0 }
+                                ?: stageSize.height
                             val (factorX, factorY) = videoScaleFactors(
                                 preset = scalePreset,
-                                stageWidth = stageSize.width,
-                                stageHeight = stageSize.height,
+                                stageWidth = areaWidth,
+                                stageHeight = areaHeight,
                                 videoWidth = current.width,
                                 videoHeight = current.height,
                                 resizeMode = scaling
