@@ -139,7 +139,6 @@ import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -313,29 +312,28 @@ internal fun DesktopMediaPlayer(
     val latestPlaying = rememberUpdatedState(playing)
     val latestFinished = rememberUpdatedState(finished)
     val playerScope = rememberCoroutineScope()
-    // Drop late callbacks from the outgoing MRL while VLC is stopping it and attaching the next
-    // media. The new source becomes active only after VLC reports that it has started playing.
-    val acceptsCurrentMediaEvents = remember(factory, isAudio) { AtomicBoolean(false) }
-    // Render callbacks can finish copying/decoding after a media switch. Tag each accepted
-    // frame with the active generation so an outgoing frame can never replace the new one.
-    val currentVideoFrameGeneration = remember(factory, isAudio) { AtomicLong(0L) }
-    val expectedMediaGeneration = remember(factory, isAudio) { AtomicLong(-1L) }
-    val acceptsCurrentVideoFrames = remember(factory, isAudio) { AtomicBoolean(false) }
+    // Which player's events and frames may touch this viewer's state. The gate
+    // outlives individual players on purpose: an appearance Apply recreates
+    // the player, and the retired player's late events must be rejected by
+    // identity, not by guard flags the retired teardown itself maintained
+    // (see PlayerEventGate). Render callbacks can also finish copying after
+    // a media switch, so frames are tagged with the gate's generation.
+    val eventGate = remember(isAudio) { PlayerEventGate<MediaPlayer>() }
 
     // VLC calls its render callback from a native thread. Conflate pending frames before
     // publishing them to Compose so a slow UI frame cannot build an unbounded render backlog.
     // Each ImageBitmap already owns an independent pixel buffer (see ComposeVideoSurface).
-    val frameUpdates = remember(factory, isAudio) {
+    val frameUpdates = remember(isAudio) {
         Channel<Pair<Long, VideoFramePixels>>(capacity = Channel.CONFLATED)
     }
-    LaunchedEffect(frameUpdates, currentVideoFrameGeneration) {
+    LaunchedEffect(frameUpdates) {
         for ((generation, nextFrame) in frameUpdates) {
             // Bitmap installation can be expensive for full-resolution frames. Keep that work
             // off the UI dispatcher; only publish a frame if it still belongs to this MRL.
             val image = withContext(Dispatchers.Default) {
                 nextFrame.toImageBitmap()
             } ?: continue
-            if (generation == currentVideoFrameGeneration.get()) {
+            if (generation == eventGate.generation()) {
                 frame = image
                 hasCurrentMediaFrame = true
                 buffering = false
@@ -347,7 +345,7 @@ internal fun DesktopMediaPlayer(
     }
 
     // Keep high-frequency playback position notifications bounded as well.
-    val timeUpdates = remember(factory, isAudio) {
+    val timeUpdates = remember(isAudio) {
         Channel<Long>(capacity = Channel.CONFLATED)
     }
     LaunchedEffect(timeUpdates) {
@@ -364,13 +362,17 @@ internal fun DesktopMediaPlayer(
         // previous preview (see BackgroundPlayback).
         BackgroundPlayback.stopParked()
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
+            // From this moment only this player's events and frames are live;
+            // a retired player's listener can still fire during its async
+            // teardown and must be rejected by identity (see PlayerEventGate).
+            eventGate.attach(this)
             // Track the player against its per-appearance factory so the
             // factory is only released after this player has been released.
             appearanceFactory?.let { VlcFactoryLifecycle.register(it, this) }
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
-                    val generation = currentVideoFrameGeneration.get()
-                    if (acceptsCurrentVideoFrames.get()) {
+                    val generation = eventGate.generation()
+                    if (eventGate.acceptsFrames()) {
                         frameUpdates.trySend(generation to image)
                     }
                 })
@@ -379,8 +381,9 @@ internal fun DesktopMediaPlayer(
                 // vlcj event callbacks run on native/event threads. Compose state is only
                 // mutated from the player scope, never directly from those callback threads.
                 override fun playing(mediaPlayer: MediaPlayer) {
-                    if (expectedMediaGeneration.get() != currentVideoFrameGeneration.get()) return
-                    acceptsCurrentMediaEvents.set(true)
+                    if (!eventGate.isCurrent(mediaPlayer)) return
+                    if (!eventGate.isExpectedGeneration()) return
+                    eventGate.openEvents()
                     playerScope.launch {
                         // A style restart of a paused video starts via
                         // :start-paused; VLC still emits a playing event for
@@ -408,6 +411,7 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun audioDeviceChanged(mediaPlayer: MediaPlayer, audioDevice: String) {
+                    if (!eventGate.isCurrent(mediaPlayer)) return
                     // Windows can replace the default output when USB/Bluetooth earphones are
                     // attached. Re-apply audio state from the Compose scope.
                     playerScope.launch { trackTick++ }
@@ -418,21 +422,44 @@ internal fun DesktopMediaPlayer(
                     type: TrackType,
                     id: Int
                 ) {
+                    if (!eventGate.isCurrent(mediaPlayer)) return
                     playerScope.launch { trackTick++ }
                 }
 
                 override fun paused(mediaPlayer: MediaPlayer) {
-                    if (
-                        expectedMediaGeneration.get() == currentVideoFrameGeneration.get() &&
-                        acceptsCurrentMediaEvents.get()
-                    ) {
-                        playerScope.launch { playing = false }
+                    if (!eventGate.isCurrent(mediaPlayer)) return
+                    if (!eventGate.isExpectedGeneration()) return
+                    if (latestFinished.value) return
+                    // A :start-paused load (subtitle Apply while paused) may
+                    // never emit a playing event in libVLC, so this paused
+                    // report is what opens the event gate for it — under the
+                    // same identity + generation checks as playing(). Without
+                    // it, the live player's time/length reports were dropped
+                    // forever and the transport controls desynced (PC-11).
+                    eventGate.openEvents()
+                    playerScope.launch {
+                        playing = false
+                        // Mirror the playing() fallbacks so a start-paused
+                        // load still gets its duration (the seek bar and the
+                        // style-restart seek both key off it) and position.
+                        val reportedLength = runCatching { mediaPlayer.status().length() }
+                            .getOrNull()
+                        if (reportedLength != null && reportedLength > 0L) {
+                            durationMs = reportedLength
+                        }
+                        val reportedTime = runCatching { mediaPlayer.status().time() }
+                            .getOrNull()
+                        if (reportedTime != null && reportedTime >= 0L) {
+                            timeMs = reportedTime
+                        }
+                        if (isAudio) buffering = false
                     }
                 }
 
                 override fun finished(mediaPlayer: MediaPlayer) {
-                    if (expectedMediaGeneration.get() != currentVideoFrameGeneration.get()) return
-                    if (!acceptsCurrentMediaEvents.getAndSet(false)) return
+                    if (!eventGate.isCurrent(mediaPlayer)) return
+                    if (!eventGate.isExpectedGeneration()) return
+                    if (!eventGate.closeEvents()) return
                     playerScope.launch {
                         playing = false
                         finished = true
@@ -444,8 +471,9 @@ internal fun DesktopMediaPlayer(
 
                 override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
                     if (
-                        expectedMediaGeneration.get() == currentVideoFrameGeneration.get() &&
-                        acceptsCurrentMediaEvents.get()
+                        eventGate.isCurrent(mediaPlayer) &&
+                        eventGate.isExpectedGeneration() &&
+                        eventGate.eventsOpen()
                     ) {
                         playerScope.launch {
                             buffering = newCache < 100f || (!isAudio && !hasCurrentMediaFrame)
@@ -454,11 +482,13 @@ internal fun DesktopMediaPlayer(
                 }
 
                 override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
-                    if (acceptsCurrentMediaEvents.get()) timeUpdates.trySend(newTime)
+                    if (eventGate.isCurrent(mediaPlayer) && eventGate.eventsOpen()) {
+                        timeUpdates.trySend(newTime)
+                    }
                 }
 
                 override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
-                    if (acceptsCurrentMediaEvents.get()) {
+                    if (eventGate.isCurrent(mediaPlayer) && eventGate.eventsOpen()) {
                         playerScope.launch { durationMs = newLength }
                     }
                 }
@@ -466,9 +496,10 @@ internal fun DesktopMediaPlayer(
                 override fun error(mediaPlayer: MediaPlayer) {
                     // Errors before the incoming item reaches playing are returned by
                     // MediaApi.start(); ignore late errors from the outgoing source.
-                    if (expectedMediaGeneration.get() != currentVideoFrameGeneration.get()) return
-                    if (!acceptsCurrentMediaEvents.getAndSet(false)) return
-                    acceptsCurrentVideoFrames.set(false)
+                    if (!eventGate.isCurrent(mediaPlayer)) return
+                    if (!eventGate.isExpectedGeneration()) return
+                    if (!eventGate.closeEvents()) return
+                    eventGate.setAcceptsFrames(false)
                     playerScope.launch {
                         playing = false
                         finished = true
@@ -537,10 +568,7 @@ internal fun DesktopMediaPlayer(
         // its render/event channels for every MRL caused the previously-fixed flash/black frame
         // when moving to the next video. Close the event gate while swapping sources so late
         // callbacks from the outgoing item cannot update the incoming item's state.
-        acceptsCurrentMediaEvents.set(false)
-        acceptsCurrentVideoFrames.set(false)
-        val mediaGeneration = currentVideoFrameGeneration.incrementAndGet()
-        expectedMediaGeneration.set(-1L)
+        val mediaGeneration = eventGate.beginMedia()
         hasCurrentMediaFrame = false
         while (frameUpdates.tryReceive().isSuccess) Unit
         while (timeUpdates.tryReceive().isSuccess) Unit
@@ -576,15 +604,15 @@ internal fun DesktopMediaPlayer(
         player.submit {
             // A newer selection can arrive while this command is waiting in VLC's serial
             // executor. Never start an obsolete MRL after a newer generation was requested.
-            if (currentVideoFrameGeneration.get() == mediaGeneration) {
+            if (eventGate.generation() == mediaGeneration) {
                 // Stop the outgoing source before attaching another item. MediaApi.start()
                 // waits until the incoming source reports playing or an error.
                 runCatching { player.controls().stop() }
-                if (currentVideoFrameGeneration.get() == mediaGeneration) {
-                    expectedMediaGeneration.set(mediaGeneration)
+                if (eventGate.generation() == mediaGeneration) {
+                    eventGate.expectGeneration(mediaGeneration)
                     // stop() has completed the outgoing native transition; only now allow
                     // this source's render callbacks into the generation-tagged frame channel.
-                    acceptsCurrentVideoFrames.set(true)
+                    eventGate.setAcceptsFrames(true)
                     val restart = activeRestart
                     val started = if (restart != null && !restart.wasPlaying) {
                         runCatching { player.media().play(mrl, ":start-paused") }
@@ -592,12 +620,12 @@ internal fun DesktopMediaPlayer(
                     } else {
                         runCatching { player.media().start(mrl) }.getOrDefault(false)
                     }
-                    val stillCurrent = currentVideoFrameGeneration.get() == mediaGeneration
+                    val stillCurrent = eventGate.generation() == mediaGeneration
                     if (!started || !stillCurrent) {
-                        acceptsCurrentMediaEvents.set(false)
+                        eventGate.closeEvents()
                         if (!stillCurrent) {
-                            acceptsCurrentVideoFrames.set(false)
-                            expectedMediaGeneration.compareAndSet(mediaGeneration, -1L)
+                            eventGate.setAcceptsFrames(false)
+                            eventGate.clearExpected(mediaGeneration)
                             // A newer MRL was requested while start() was waiting. Stop this
                             // stale source before the next queued command attaches its media.
                             runCatching { player.controls().stop() }
@@ -605,7 +633,7 @@ internal fun DesktopMediaPlayer(
                             // Keep this generation associated with the selected MRL so the
                             // user can retry playback with the normal Play control. Its render
                             // callbacks must remain accepted during that retry.
-                            acceptsCurrentVideoFrames.set(true)
+                            eventGate.setAcceptsFrames(true)
                             playerScope.launch {
                                 playing = false
                                 finished = true
@@ -624,9 +652,9 @@ internal fun DesktopMediaPlayer(
         // singleton, which is never released).
         val playerFactory = appearanceFactory
         onDispose {
-            acceptsCurrentMediaEvents.set(false)
-            acceptsCurrentVideoFrames.set(false)
-            expectedMediaGeneration.set(-1L)
+            // Conditional: on a player swap the new player is already
+            // attached, and its gates are its own to manage (see gate docs).
+            eventGate.detach(player)
             // The viewer-level effect below may have parked this player for
             // background playback; a parked player must not be released here.
             if (BackgroundPlayback.isParked(player)) return@onDispose
@@ -1105,8 +1133,8 @@ internal fun DesktopMediaPlayer(
                         true
                     }
                     key == Key.MediaStop || (key == Key.S && !shift && !ctrl && !alt) -> {
-                        acceptsCurrentMediaEvents.set(false)
-            acceptsCurrentVideoFrames.set(false)
+                        eventGate.closeEvents()
+                        eventGate.setAcceptsFrames(false)
                         player.submit { runCatching { player.controls().stop() } }
                         playing = false
                         finished = true

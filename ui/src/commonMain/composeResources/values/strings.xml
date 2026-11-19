@@ -571,6 +571,7 @@
     <string name="subtitle_custom_hint">Customize subtitle text, background, edge and position.</string>
     <string name="subtitle_size_position">Size and position</string>
     <string name="subtitle_text_size">Text size</string>
+    <string name="subtitle_size_custom_only">Text size is part of the Custom style — in VLC defaults mode VLC picks the size itself. The vertical position below still applies in both styles.</string>
     <string name="subtitle_vertical_position">Vertical position</string>
     <string name="subtitle_drag_hint">You can also drag the subtitle directly on the video.</string>
     <string name="subtitle_font">Font</string>

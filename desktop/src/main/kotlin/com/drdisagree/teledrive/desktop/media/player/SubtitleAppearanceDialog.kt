@@ -96,6 +96,7 @@ import com.drdisagree.teledrive.resources.subtitle_preview_note
 import com.drdisagree.teledrive.resources.subtitle_reset
 import com.drdisagree.teledrive.resources.subtitle_settings_note
 import com.drdisagree.teledrive.resources.subtitle_settings_title
+import com.drdisagree.teledrive.resources.subtitle_size_custom_only
 import com.drdisagree.teledrive.resources.subtitle_size_position
 import com.drdisagree.teledrive.resources.subtitle_style
 import com.drdisagree.teledrive.resources.subtitle_text_color
@@ -221,6 +222,11 @@ internal fun SubtitleAppearanceDialog(
                 )
 
                 SectionTitle(stringResource(Res.string.subtitle_size_position))
+                // Text size is a freetype option: it exists only in Custom
+                // mode. VLC-defaults mode emits no size argument at all, so
+                // the control is disabled there instead of pretending to
+                // apply (PC-11). Vertical position stays live in both modes
+                // because --sub-margin is emitted for either style.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         stringResource(Res.string.subtitle_text_size),
@@ -232,24 +238,37 @@ internal fun SubtitleAppearanceDialog(
                             draft = current.copy(
                                 textScale = (current.textScale - 0.1f).coerceAtLeast(0.5f)
                             )
-                        }
+                        },
+                        enabled = !current.useSystemDefaults
                     ) { Icon(Icons.Filled.Remove, contentDescription = null) }
                     Slider(
                         value = current.textScale,
                         onValueChange = { draft = current.copy(textScale = it) },
                         valueRange = 0.5f..2.5f,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        enabled = !current.useSystemDefaults
                     )
                     IconButton(
                         onClick = {
                             draft = current.copy(
                                 textScale = (current.textScale + 0.1f).coerceAtMost(2.5f)
                             )
-                        }
+                        },
+                        enabled = !current.useSystemDefaults
                     ) { Icon(Icons.Filled.Add, contentDescription = null) }
-                    PercentField(fraction = current.textScale) {
+                    PercentField(
+                        fraction = current.textScale,
+                        enabled = !current.useSystemDefaults
+                    ) {
                         draft = current.copy(textScale = it)
                     }
+                }
+                if (current.useSystemDefaults) {
+                    Text(
+                        stringResource(Res.string.subtitle_size_custom_only),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 PercentSliderRow(
                     label = stringResource(Res.string.subtitle_vertical_position),
@@ -528,7 +547,11 @@ private fun PercentSliderRow(
 
 /** Editable percentage (0–100 for opacities/position, up to 250 for text size). */
 @Composable
-private fun PercentField(fraction: Float, onCommit: (Float) -> Unit) {
+private fun PercentField(
+    fraction: Float,
+    enabled: Boolean = true,
+    onCommit: (Float) -> Unit
+) {
     var text by remember(fraction) {
         mutableStateOf((fraction * 100).roundToInt().toString())
     }
@@ -540,6 +563,7 @@ private fun PercentField(fraction: Float, onCommit: (Float) -> Unit) {
         value = text,
         onValueChange = { text = it.filter(Char::isDigit).take(3) },
         singleLine = true,
+        enabled = enabled,
         suffix = { Text("%") },
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Number,
