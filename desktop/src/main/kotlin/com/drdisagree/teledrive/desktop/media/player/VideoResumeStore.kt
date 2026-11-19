@@ -84,12 +84,23 @@ internal object VideoResumeStore {
         mediaId: String
     ) {
         val key = keyFor(mediaId)
+        // Snapshot what is stored right now: the delayed removal below may only
+        // delete that value. The previous guard ("remove only while the cache
+        // has no entry") could never fire once anything re-read the position —
+        // loadPosition re-seeds the cache from the stored value, so a reopened
+        // video (or any read between scheduling and execution) resurrected the
+        // cleared resume point permanently.
+        val storedValue = runCatching { target.getLong(key, 0L) }.getOrDefault(0L)
         cache.remove(key)
         ioScope.launch {
             runCatching {
                 synchronized(target) {
-                    // Do not let a delayed clear delete a newer position from a replayed video.
-                    if (!cache.containsKey(key)) {
+                    // Do not let a delayed clear delete a newer position from a
+                    // replayed video: a save after this clear supersedes it,
+                    // whether its write has landed yet (cache holds the newer
+                    // value) or already replaced the stored one.
+                    val superseded = cache[key]?.let { it != storedValue } == true
+                    if (!superseded && target.getLong(key, 0L) == storedValue) {
                         target.remove(key)
                         target.flush()
                     }
