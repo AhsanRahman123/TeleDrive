@@ -231,6 +231,12 @@ class TransferExecutor(
                 entity.id,
                 if (e.paused) BackupState.QUEUED else BackupState.NONE
             )
+            if (!e.paused && fileDao.byId(entity.id)?.messageId == null) {
+                // Cancellation detected during preparation never reaches uploadInParts,
+                // whose catch drops a first upload's already-sent parts. Mirror that here
+                // so an early cancel cannot leak orphan part messages in the channel.
+                partUploader.discardParts(entity.id)
+            }
             if (e.paused) TransferOutcome.Paused else TransferOutcome.Canceled
         }
     }

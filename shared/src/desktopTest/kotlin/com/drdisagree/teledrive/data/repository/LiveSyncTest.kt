@@ -77,7 +77,7 @@ class LiveSyncTest {
     }
 
     @Test
-    fun `a local file move is recovered when its pending publish marker was missed`() = runBlocking {
+    fun `an unflagged local move is not recovered during reconcile`() = runBlocking {
         telegram.documents = listOf(
             document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
         )
@@ -101,13 +101,15 @@ class LiveSyncTest {
 
         sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
 
+        // The reconcile recovery heuristic was removed (488b8dc4): every writer now marks
+        // pendingPublish atomically, so an unflagged local delta must NOT be re-marked
+        // as pending during reconcile.
         val moved = files.byId("f1")!!
-        assertEquals("destination", moved.folderId)
-        assertTrue(moved.pendingPublish)
+        assertFalse(moved.pendingPublish)
     }
 
     @Test
-    fun `a local trash mutation is recovered when its pending publish marker was missed`() = runBlocking {
+    fun `an unflagged local trash mutation is not recovered during reconcile`() = runBlocking {
         telegram.documents = listOf(
             document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
         )
@@ -119,10 +121,9 @@ class LiveSyncTest {
 
         sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
 
+        // Same settled contract as the unflagged-move case above: no recovery re-marking.
         val trashed = files.byId("f1")!!
-        assertEquals(100_000L, trashed.trashedAt)
-        assertEquals(null, trashed.folderId)
-        assertTrue(trashed.pendingPublish)
+        assertFalse(trashed.pendingPublish)
     }
 
     @Test
@@ -156,9 +157,9 @@ class LiveSyncTest {
         sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
 
         val unchanged = files.byId("f1")!!
-        assertEquals("destination", unchanged.folderId)
-        assertEquals(100_000L, unchanged.modifiedAt)
-        assertFalse(unchanged.pendingPublish)
+        assertEquals("folderId", "destination", unchanged.folderId)
+        assertEquals("modifiedAt", 100_000L, unchanged.modifiedAt)
+        assertFalse("pendingPublish", unchanged.pendingPublish)
     }
 
     @Test
