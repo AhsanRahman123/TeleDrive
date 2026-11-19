@@ -141,13 +141,16 @@ class AppViewModel(
     }
 
     /**
-     * Runs at most once a day whatever the notification setting says;
-     * [force] is for the notification tap, which asks for the answer now.
+     * Runs at most once a day. The automatic run (startup) honours the user's
+     * "Check for updates automatically" switch; [force] is for the notification
+     * tap, which asks for the answer now and always runs. The manual check in
+     * Settings is a separate path and is likewise unaffected by the switch.
      */
     fun checkForUpdate(force: Boolean = false) {
         viewModelScope.launch {
             val prefs = settingsRepository.preferences.first()
             if (!prefs.onboardingComplete) return@launch
+            if (!force && !prefs.updateCheckEnabled) return@launch
             val elapsed = System.currentTimeMillis() - prefs.lastUpdateCheckAt
             if (!force && elapsed < UPDATE_CHECK_INTERVAL_MS) return@launch
 
