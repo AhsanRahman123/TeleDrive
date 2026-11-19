@@ -36,6 +36,17 @@ jobs:
           path: desktop/build/vlc
           key: vlc-natives-${{ hashFiles('desktop/build.gradle.kts') }}
 
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: |
+            shared/build/test-results/**/*.xml
+            ui/build/test-results/**/*.xml
+            desktop/build/test-results/**/*.xml
+          if-no-files-found: ignore
+
       - name: Package installer
         run: ./gradlew :desktop:packageMsi
 
