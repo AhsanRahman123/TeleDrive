@@ -278,7 +278,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Dmg)
             appResourcesRootDir.set(layout.buildDirectory.dir("appResources"))
-            packageName = if (ciBuild) "TeleDrive CI" else "TeleDrive"
+            packageName = if (ciBuild) "TeleDrive CI" else "Pranto Drive"
             packageVersion = libs.versions.appVersion.get()
                 .split(".")
                 .let { parts -> (parts + List(3) { "0" }).take(3) }
@@ -297,9 +297,9 @@ compose.desktop {
             licenseFile.set(rootProject.file("LICENSE"))
 
             windows {
-                iconFile.set(project.file("icons/TeleDrive.ico"))
+                iconFile.set(project.file("icons/PrantoDrive.ico"))
                 perUserInstall = true
-                menuGroup = "TeleDrive"
+                menuGroup = "Pranto Drive"
                 shortcut = true
                 dirChooser = true
                 upgradeUuid = if (ciBuild) {

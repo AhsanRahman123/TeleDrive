@@ -1,6 +1,6 @@
 <resources>
     <!-- App-wide -->
-    <string name="app_name">TeleDrive</string>
+    <string name="app_name">Pranto Drive</string>
     <string name="app_already_running">TeleDrive уже запущен.</string>
 
     <!-- Navigation -->
