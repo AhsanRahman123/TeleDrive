@@ -68,6 +68,24 @@ class PlayerVolumeStateTest {
     }
 
     @Test
+    fun `remembered volume tracks the latest update in memory and clamps it`() {
+        try {
+            RememberedPlayerVolume.update(37, persist = false)
+            assertEquals(37, RememberedPlayerVolume.currentVolume())
+
+            RememberedPlayerVolume.update(250, persist = false)
+            assertEquals(200, RememberedPlayerVolume.currentVolume())
+
+            RememberedPlayerVolume.update(-5, persist = false)
+            assertEquals(0, RememberedPlayerVolume.currentVolume())
+        } finally {
+            // Leave the process-wide holder at the standard default for any
+            // other test that reads it in this JVM.
+            RememberedPlayerVolume.update(100, persist = false)
+        }
+    }
+
+    @Test
     fun `debounced persistence saves only the final volume after input settles`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val saved = CopyOnWriteArrayList<Int>()

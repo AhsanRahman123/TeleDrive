@@ -54,6 +54,37 @@ class PlayerControlPreferencesStoreTest {
         assertEquals(200, loaded.volume)
     }
 
+    @Test
+    fun `saveVolume writes only the volume key and leaves the other preferences intact`() =
+        withTemporaryPreferences { node ->
+            PlayerControlPreferencesStore.save(
+                node,
+                PlayerControlPreferences(
+                    autoHideVolumeSlider = true,
+                    showPlayerControls = false,
+                    rememberVolume = true,
+                    volume = 30
+                )
+            )
+
+            PlayerControlPreferencesStore.saveVolume(node, 55)
+
+            val loaded = PlayerControlPreferencesStore.load(node)
+            assertEquals(55, loaded.volume)
+            assertTrue(loaded.autoHideVolumeSlider)
+            assertFalse(loaded.showPlayerControls)
+            assertTrue(loaded.rememberVolume)
+        }
+
+    @Test
+    fun `saveVolume clamps to the supported slider range`() = withTemporaryPreferences { node ->
+        PlayerControlPreferencesStore.saveVolume(node, 999)
+        assertEquals(200, PlayerControlPreferencesStore.load(node).volume)
+
+        PlayerControlPreferencesStore.saveVolume(node, -3)
+        assertEquals(0, PlayerControlPreferencesStore.load(node).volume)
+    }
+
     private fun withTemporaryPreferences(block: (Preferences) -> Unit) {
         val node = Preferences.userRoot().node("teledrive-tests/player-volume-${UUID.randomUUID()}")
         try {

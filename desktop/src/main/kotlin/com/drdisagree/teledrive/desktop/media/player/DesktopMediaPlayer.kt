@@ -770,13 +770,20 @@ internal fun DesktopMediaPlayer(
         muted = !muted
         player.submitAudioState(volume, muted)
     }
+    // A full save rewrites every preference key, including the volume. Always
+    // carry the live volume into it: the snapshot in controlPreferences can be
+    // older than the value the debounced volume writer already persisted (or
+    // is about to), and an unrelated toggle must never revert it.
+    fun persistControlPreferences(updated: PlayerControlPreferences) {
+        val synced = updated.copy(volume = volume)
+        controlPreferences = synced
+        PlayerControlPreferencesStore.save(synced)
+    }
     val toggleControlsVisibility: () -> Unit = {
         val showControls = !(controlsVisible || seekFeedbackVisible)
-        val updated = controlPreferences.copy(showPlayerControls = showControls)
-        controlPreferences = updated
+        persistControlPreferences(controlPreferences.copy(showPlayerControls = showControls))
         controlsPinned = false
         seekFeedbackVisible = false
-        PlayerControlPreferencesStore.save(updated)
         controlsVisible = showControls
         latestOnControlsVisibilityChange.value(showControls)
         interactionTick++
@@ -1063,9 +1070,8 @@ internal fun DesktopMediaPlayer(
                         val updated = controlPreferences.copy(
                             showPlayerControls = !controlPreferences.showPlayerControls
                         )
-                        controlPreferences = updated
+                        persistControlPreferences(updated)
                         controlsPinned = updated.showPlayerControls
-                        PlayerControlPreferencesStore.save(updated)
                         interactionTick++
                         true
                     }
@@ -1230,10 +1236,10 @@ internal fun DesktopMediaPlayer(
                         // Toggle the actual visibility, not only the saved preference:
                         // controls can also be hidden by the auto-hide timer.
                         val showControls = !controlsVisible
-                        val updated = controlPreferences.copy(showPlayerControls = showControls)
-                        controlPreferences = updated
+                        persistControlPreferences(
+                            controlPreferences.copy(showPlayerControls = showControls)
+                        )
                         controlsPinned = false
-                        PlayerControlPreferencesStore.save(updated)
                         controlsVisible = showControls
                         latestOnControlsVisibilityChange.value(showControls)
                         interactionTick++
@@ -1475,10 +1481,10 @@ internal fun DesktopMediaPlayer(
                 },
                 onControlsKeepVisible = { controlsPinned = it },
                 onToggleControlsVisibility = {
-                    val updated = controlPreferences.copy(showPlayerControls = false)
-                    controlPreferences = updated
+                    persistControlPreferences(
+                        controlPreferences.copy(showPlayerControls = false)
+                    )
                     controlsPinned = false
-                    PlayerControlPreferencesStore.save(updated)
                     controlsVisible = false
                     latestOnControlsVisibilityChange.value(false)
                     lastVisibilityInteractionTick = interactionTick
@@ -1500,10 +1506,8 @@ internal fun DesktopMediaPlayer(
                 onControlPreferencesChange = { updated ->
                     // Setting changes are infrequent, so persist them normally. Enabling
                     // memory captures the current slider value for future media/app launches.
-                    val withCurrentVolume = updated.copy(volume = volume)
-                    controlPreferences = withCurrentVolume
-                    PlayerControlPreferencesStore.save(withCurrentVolume)
-                    if (withCurrentVolume.rememberVolume) {
+                    persistControlPreferences(updated)
+                    if (controlPreferences.rememberVolume) {
                         RememberedPlayerVolume.update(volume, persist = true)
                     }
                     interactionTick++

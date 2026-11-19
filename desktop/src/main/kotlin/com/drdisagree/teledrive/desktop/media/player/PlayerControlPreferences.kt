@@ -39,10 +39,12 @@ internal object PlayerControlPreferencesStore {
      * Persist only the last volume value. Called by the debounced IO writer, never by
      * the slider callback or keyboard handler.
      */
-    fun saveVolume(value: Int) {
+    fun saveVolume(value: Int) = saveVolume(preferences, value)
+
+    internal fun saveVolume(target: Preferences, value: Int) {
         runCatching {
-            preferences.putInt(KEY_VOLUME, value.coerceIn(0, MAX_VOLUME))
-            preferences.flush()
+            target.putInt(KEY_VOLUME, value.coerceIn(0, MAX_VOLUME))
+            target.flush()
         }
     }
 
