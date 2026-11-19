@@ -510,7 +510,15 @@ internal fun DesktopMediaPlayer(
         buffering = true
         timeMs = 0L
         durationMs = 0L
-        val savedResume = if (styleRestart == null) {
+        // A pending subtitle style restart belongs to the file it was captured on. If the
+        // user moved to another file before the restarted player came up, drop it here:
+        // the new file starts from its own resume position, never the old file's.
+        val pendingRestart = styleRestart
+        if (pendingRestart != null && pendingRestart.mediaId != mediaId) {
+            styleRestart = null
+        }
+        val activeRestart = styleRestart
+        val savedResume = if (activeRestart == null) {
             VideoResumeStore.loadPosition(mediaId)
         } else {
             // A subtitle style restart resumes at the position captured when
@@ -536,7 +544,7 @@ internal fun DesktopMediaPlayer(
                     // stop() has completed the outgoing native transition; only now allow
                     // this source's render callbacks into the generation-tagged frame channel.
                     acceptsCurrentVideoFrames.set(true)
-                    val restart = styleRestart
+                    val restart = activeRestart
                     val started = if (restart != null && !restart.wasPlaying) {
                         runCatching { player.media().play(mrl, ":start-paused") }
                             .getOrDefault(false)
@@ -605,6 +613,12 @@ internal fun DesktopMediaPlayer(
 
     LaunchedEffect(player, durationMs) {
         val restart = styleRestart ?: return@LaunchedEffect
+        if (restart.mediaId != mediaId) {
+            // The pending restart was captured for a file that is no longer current;
+            // never seek this file to another file's position.
+            styleRestart = null
+            return@LaunchedEffect
+        }
         if (durationMs <= 0L) return@LaunchedEffect
         styleRestart = null
         val target = restart.positionMs
@@ -798,7 +812,7 @@ internal fun DesktopMediaPlayer(
         // the player; afterwards they would read the new player's zeroed state.
         // The retained frame bitmap is deliberately left alone so the restart
         // does not flash black.
-        styleRestart = StyleRestart(positionMs = timeMs, wasPlaying = playing)
+        styleRestart = StyleRestart(mediaId = mediaId, positionMs = timeMs, wasPlaying = playing)
         if (!playing) startPausedArmed.set(true)
         VideoResumeStore.savePosition(mediaId, timeMs, durationMs, force = true)
         SubtitleAppearanceStore.save(normalized)
@@ -2461,4 +2475,9 @@ private val THUMB_WIDTH = 5.dp
 private val THUMB_HEIGHT = 26.dp
 
 /** A subtitle-appearance change captured just before the player is recreated. */
-private data class StyleRestart(val positionMs: Long, val wasPlaying: Boolean)
+private data class StyleRestart(
+    /** The media the position was captured on; a restart must never seek a different file. */
+    val mediaId: String,
+    val positionMs: Long,
+    val wasPlaying: Boolean
+)
