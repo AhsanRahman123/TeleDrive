@@ -263,20 +263,8 @@ class BackupRepositoryImpl(
         }
     }
 
-    private fun relativeToStorageRoot(absolutePath: String): String {
-        val normalized = absolutePath.trimEnd('/')
-        val primary = storagePaths.externalStorageRoot?.absolutePath?.trimEnd('/')
-        if (primary != null) {
-            if (normalized == primary) return ""
-            if (normalized.startsWith("$primary/")) return normalized.removePrefix("$primary/")
-        }
-        if (normalized.startsWith(VOLUME_MOUNT_ROOT)) {
-            val rest = normalized.removePrefix(VOLUME_MOUNT_ROOT)
-            val separator = rest.indexOf('/')
-            return if (separator >= 0) rest.substring(separator + 1) else ""
-        }
-        return normalized.trimStart('/')
-    }
+    private fun relativeToStorageRoot(absolutePath: String): String =
+        backupFolderPath(absolutePath, storagePaths.externalStorageRoot?.absolutePath)
 
     /**
      * Refreshes size, timestamp and hash first, or the backup record is stale and every later scan
@@ -420,5 +408,35 @@ class BackupRepositoryImpl(
         private const val TAG = "BackupRepository"
         private const val ENQUEUE_BATCH = 500
         private const val VOLUME_MOUNT_ROOT = "/storage/"
+
+        /**
+         * The in-drive folder path for a backed-up file's parent directory:
+         * the parent path relative to the device storage root, so a backup
+         * lands in the same folder tree shape on every platform.
+         *
+         * Separators are normalised first — on Windows [absolutePath] arrives
+         * with backslashes, and without this the whole raw path became ONE
+         * flat folder named `C:\Users\…` instead of a tree. A Windows drive
+         * root is that device's storage root, so the tree starts below it,
+         * exactly like Android below /storage/emulated/0. Pure string logic
+         * so Windows paths are testable on any OS.
+         */
+        internal fun backupFolderPath(absolutePath: String, externalStorageRoot: String?): String {
+            val normalized = absolutePath.replace('\\', '/').trimEnd('/')
+            val primary = externalStorageRoot?.replace('\\', '/')?.trimEnd('/')
+            if (primary != null) {
+                if (normalized == primary) return ""
+                if (normalized.startsWith("$primary/")) return normalized.removePrefix("$primary/")
+            }
+            if (normalized.startsWith(VOLUME_MOUNT_ROOT)) {
+                val rest = normalized.removePrefix(VOLUME_MOUNT_ROOT)
+                val separator = rest.indexOf('/')
+                return if (separator >= 0) rest.substring(separator + 1) else ""
+            }
+            if (normalized.length >= 2 && normalized[0].isLetter() && normalized[1] == ':') {
+                return normalized.drop(2).trimStart('/')
+            }
+            return normalized.trimStart('/')
+        }
     }
 }

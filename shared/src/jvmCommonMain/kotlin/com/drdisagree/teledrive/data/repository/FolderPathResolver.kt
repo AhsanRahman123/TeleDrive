@@ -35,7 +35,7 @@ class FolderPathResolver(
         if (path.isBlank()) return null
         val owner = chatId ?: activeChannel.id()
         var parentId: String? = null
-        for (segment in path.split('/').filter { it.isNotBlank() }.take(MAX_DEPTH)) {
+        for (segment in segmentsOf(path)) {
             val match = folderDao.childrenOf(parentId, owner)
                 .firstOrNull { it.name.equals(segment, ignoreCase = true) }
                 ?: return null
@@ -66,7 +66,7 @@ class FolderPathResolver(
                 tombstoneDao.idIfDeleted(it) == null && folderDao.byId(it) == null
             }
             var parentId: String? = startParentId
-            val segments = path.split('/').filter { it.isNotBlank() }.take(MAX_DEPTH)
+            val segments = segmentsOf(path)
             for ((index, segment) in segments.withIndex()) {
                 val existing = folderDao.childrenOf(parentId, owner)
                     .firstOrNull { it.name.equals(segment, ignoreCase = true) }
@@ -88,6 +88,15 @@ class FolderPathResolver(
             parentId
         }
     }
+
+    /**
+     * '/' is the library's canonical separator (see [pathOf]); Windows-style
+     * backslashes in an incoming path are normalised so a path produced on
+     * Windows resolves to the same tree everywhere instead of one flat
+     * folder whose name contains backslashes.
+     */
+    private fun segmentsOf(path: String): List<String> =
+        path.replace('\\', '/').split('/').filter { it.isNotBlank() }.take(MAX_DEPTH)
 
     companion object {
         private const val MAX_DEPTH = 64
