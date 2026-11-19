@@ -339,7 +339,6 @@ interface FileDao {
              AND id IN (
                  SELECT fileId FROM transfers
                   WHERE fileId IS NOT NULL
-                    AND backupSessionId IS NOT NULL
                     AND state = 'CANCELLED'
              )
              AND id NOT IN (
@@ -353,6 +352,7 @@ interface FileDao {
         """UPDATE files SET chatId = :chatId, messageId = :messageId,
            remoteFileId = :remoteFileId, remoteUniqueId = :remoteUniqueId,
            iconFileId = COALESCE(:iconFileId, iconFileId),
+           modifiedAt = CASE WHEN :modifiedAt > 0 THEN :modifiedAt ELSE modifiedAt END,
            backupState = :state WHERE id = :id"""
     )
     suspend fun setRemoteMapping(
@@ -362,7 +362,10 @@ interface FileDao {
         remoteFileId: String?,
         remoteUniqueId: String?,
         state: BackupState,
-        iconFileId: String? = null
+        iconFileId: String? = null,
+        // Upload completion stamps the file as modified now, so DATE_MODIFIED
+        // sorting puts fresh uploads on top instead of using the source mtime.
+        modifiedAt: Long = 0
     )
 
     @Query(
