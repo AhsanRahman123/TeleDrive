@@ -493,6 +493,9 @@ class DragSelectPointerTest {
         rule.onNodeWithTag("touch-selection-grid").performTouchInput {
             down(Offset(90f, 30f))
         }
+        // Desktop's test clock does not auto-advance through the long-press timeout
+        // the way Android's does; advance it explicitly so the hold registers.
+        rule.mainClock.advanceBy(1_100)
         rule.waitForIdle()
         assertEquals(setOf(0), selected)
 
@@ -559,6 +562,9 @@ class DragSelectPointerTest {
         rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
             down(Offset(90f, 50f))
         }
+        // Desktop's test clock does not auto-advance through the long-press timeout
+        // the way Android's does; advance it explicitly so the hold registers.
+        rule.mainClock.advanceBy(1_100)
         rule.waitForIdle()
         assertEquals(setOf(0), selected)
 
@@ -634,6 +640,9 @@ class DragSelectPointerTest {
         rule.onNodeWithTag("touch-liftoff-grid").performTouchInput {
             down(Offset(90f, 50f))
         }
+        // Desktop's test clock does not auto-advance through the long-press timeout
+        // the way Android's does; advance it explicitly so the hold registers.
+        rule.mainClock.advanceBy(1_100)
         rule.waitForIdle()
         assertEquals(setOf(0), selected)
 
@@ -695,6 +704,9 @@ class DragSelectPointerTest {
         rule.onNodeWithTag("touch-erase-grid").performTouchInput {
             down(Offset(90f, 30f))
         }
+        // Desktop's test clock does not auto-advance through the long-press timeout
+        // the way Android's does; advance it explicitly so the hold registers.
+        rule.mainClock.advanceBy(1_100)
         rule.waitForIdle()
         // The anchor row alone is re-applied from the snapshot: still fully selected.
         assertEquals(setOf(0, 1, 2, 3), selected)

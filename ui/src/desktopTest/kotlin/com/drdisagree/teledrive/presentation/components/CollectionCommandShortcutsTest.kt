@@ -11,6 +11,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
@@ -32,6 +33,8 @@ class CollectionCommandShortcutsTest {
 
     @get:Rule
     val rule = createComposeRule()
+
+    private val shortcutKeys = setOf(Key.A, Key.C, Key.X, Key.V, Key.N, Key.T)
 
     @Test
     fun `workspace preview shortcuts run before focused child controls`() {
@@ -59,7 +62,11 @@ class CollectionCommandShortcutsTest {
                         .size(100.dp)
                         .testTag("shortcut-child")
                         .onKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.isCtrlPressed) {
+                            // Only a real shortcut key counts; the bare CtrlLeft press
+                            // that opens the chord is not itself a shortcut.
+                            if (event.type == KeyEventType.KeyDown && event.isCtrlPressed &&
+                                event.key in shortcutKeys
+                            ) {
                                 childConsumedShortcutCount++
                                 true
                             } else {

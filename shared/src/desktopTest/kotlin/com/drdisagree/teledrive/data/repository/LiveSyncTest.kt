@@ -127,7 +127,7 @@ class LiveSyncTest {
     }
 
     @Test
-    fun `a stale manifest after successful publish cannot revert a local folder move`() = runBlocking {
+    fun `a remote manifest is applied after publish while the local row matches the published base`() = runBlocking {
         telegram.documents = listOf(
             document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
         )
@@ -156,9 +156,52 @@ class LiveSyncTest {
 
         sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
 
+        // Settled contract (38737759, from production SYNCDBG logs: every stale drop had
+        // currentBase == publishedBase, i.e. genuine remote state was being discarded):
+        // the stale-manifest guard only protects a local row that has DIVERGED from the
+        // published base. While the row still equals what was published, a differing
+        // remote manifest is authoritative — another device may have moved it back.
+        val applied = files.byId("f1")!!
+        assertEquals("folderId", null, applied.folderId)
+        assertFalse("pendingPublish", applied.pendingPublish)
+    }
+
+    @Test
+    fun `a stale manifest cannot revert a local row that diverged after publish`() = runBlocking {
+        telegram.documents = listOf(
+            document(20, harness.caption(manifest("f1", "a.jpg", modifiedAt = 50_000)))
+        )
+        sync.fullResync()
+
+        database.folderDao().upsert(
+            com.drdisagree.teledrive.data.local.entity.FolderEntity(
+                id = "destination",
+                chatId = TEST_CHAT,
+                parentId = null,
+                name = "Destination",
+                createdAt = 1_000,
+                modifiedAt = 1_000,
+                changedAt = 1_000
+            )
+        )
+        val files = database.fileDao()
+        files.moveAndMarkPendingPublish(listOf("f1"), "destination", modifiedAt = 100_000)
+
+        val published = files.byId("f1")!!
+        files.setRemoteBase("f1", FileBase.of(published).toText())
+        files.clearPendingPublish("f1")
+
+        // The local row then diverges from the published base (a rename whose publish
+        // has not landed yet). The delayed pre-move manifest must now be ignored.
+        val diverged = files.byId("f1")!!
+        files.upsert(diverged.copy(name = "renamed.jpg", modifiedAt = 110_000))
+
+        sync.applyRemoteChanges(TEST_CHAT, setOf(20), emptySet())
+
         val unchanged = files.byId("f1")!!
         assertEquals("folderId", "destination", unchanged.folderId)
-        assertEquals("modifiedAt", 100_000L, unchanged.modifiedAt)
+        assertEquals("name", "renamed.jpg", unchanged.name)
+        assertEquals("modifiedAt", 110_000L, unchanged.modifiedAt)
         assertFalse("pendingPublish", unchanged.pendingPublish)
     }
 
