@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.desktop.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,12 +10,15 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -31,30 +35,54 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.io.File
 
+/** What the built-in desktop picker is choosing. */
+internal enum class DesktopPickerMode {
+    /** Files: single-click (single) or checkbox multi-selection. */
+    FILES,
+
+    /** One folder: navigate the tree, then take a folder row or the open folder. */
+    FOLDER
+}
+
 /**
- * Built-in file picker for desktop uploads, modelled on the Android app's
- * upload picker: browse folders, tick any number of files, confirm. Shown
- * unless the user turns on "Use Windows native file picker" in Settings.
+ * Built-in file/folder picker for desktop uploads, modelled on the Android
+ * app's upload picker: browse folders, tick any number of files, confirm.
+ *
+ * Every filesystem root on the machine (on Windows: every drive letter) is
+ * offered in the drive row — the tree is never trapped on the drive it
+ * started from. The dialog opens at [initialDirectory] (the remembered
+ * position) and reports every navigation through [onDirectoryChanged] so
+ * the caller can persist it for the next open.
  */
 @Composable
 internal fun DesktopUploadPickerDialog(
+    mode: DesktopPickerMode,
     multiSelect: Boolean,
+    initialDirectory: File,
+    onDirectoryChanged: (File) -> Unit,
     onPicked: (List<File>) -> Unit,
     onCancel: () -> Unit
 ) {
-    var currentDir by remember {
-        mutableStateOf(File(System.getProperty("user.home") ?: "/"))
-    }
+    var currentDir by remember { mutableStateOf(initialDirectory) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
-    val entries = remember(currentDir) {
+    val roots = remember { fileSystemRoots() }
+    val entries = remember(currentDir, mode) {
         runCatching {
             currentDir.listFiles().orEmpty()
-                .filter { it.isDirectory || it.isFile }
+                .filter {
+                    it.isDirectory || (mode == DesktopPickerMode.FILES && it.isFile)
+                }
                 .sortedWith(
                     compareByDescending<File> { it.isDirectory }
                         .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
                 )
         }.getOrDefault(emptyList())
+    }
+
+    fun navigateTo(directory: File) {
+        currentDir = directory
+        selected = emptySet()
+        onDirectoryChanged(directory)
     }
 
     AlertDialog(
@@ -63,8 +91,7 @@ internal fun DesktopUploadPickerDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (currentDir.parentFile != null) {
                     IconButton(onClick = {
-                        currentDir = currentDir.parentFile
-                        selected = emptySet()
+                        currentDir.parentFile?.let { navigateTo(it) }
                     }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up")
                     }
@@ -78,66 +105,115 @@ internal fun DesktopUploadPickerDialog(
             }
         },
         text = {
-            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
-                items(entries, key = { it.absolutePath }) { entry ->
+            Column {
+                if (roots.size > 1) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                if (entry.isDirectory) {
-                                    currentDir = entry
-                                    selected = emptySet()
-                                } else if (multiSelect) {
-                                    selected = if (entry.absolutePath in selected) {
-                                        selected - entry.absolutePath
-                                    } else {
-                                        selected + entry.absolutePath
-                                    }
-                                } else {
-                                    onPicked(listOf(entry))
-                                }
-                            }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                            .horizontalScroll(rememberScrollState())
+                            .padding(bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = if (entry.isDirectory) {
-                                Icons.Filled.Folder
-                            } else {
-                                Icons.Filled.InsertDriveFile
-                            },
-                            contentDescription = null
-                        )
-                        Text(
-                            text = entry.name,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (multiSelect && entry.isFile) {
-                            Checkbox(
-                                checked = entry.absolutePath in selected,
-                                onCheckedChange = { checked ->
-                                    selected = if (checked) {
-                                        selected + entry.absolutePath
+                        roots.forEach { root ->
+                            FilterChip(
+                                selected = isOnRoot(currentDir, root),
+                                onClick = { if (currentDir != root) navigateTo(root) },
+                                label = { Text(root.absolutePath) }
+                            )
+                        }
+                    }
+                }
+                if (entries.isEmpty()) {
+                    Text(
+                        text = if (mode == DesktopPickerMode.FOLDER) {
+                            "No folders here"
+                        } else {
+                            "No files here"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                        items(entries, key = { it.absolutePath }) { entry ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        when {
+                                            entry.isDirectory -> navigateTo(entry)
+                                            multiSelect -> {
+                                                selected =
+                                                    if (entry.absolutePath in selected) {
+                                                        selected - entry.absolutePath
+                                                    } else {
+                                                        selected + entry.absolutePath
+                                                    }
+                                            }
+                                            else -> onPicked(listOf(entry))
+                                        }
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (entry.isDirectory) {
+                                        Icons.Filled.Folder
                                     } else {
-                                        selected - entry.absolutePath
+                                        Icons.Filled.InsertDriveFile
+                                    },
+                                    contentDescription = null
+                                )
+                                Text(
+                                    text = entry.name,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (mode == DesktopPickerMode.FOLDER && entry.isDirectory) {
+                                    IconButton(onClick = { onPicked(listOf(entry)) }) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = "Select this folder"
+                                        )
                                     }
                                 }
-                            )
+                                if (mode == DesktopPickerMode.FILES &&
+                                    multiSelect && entry.isFile
+                                ) {
+                                    Checkbox(
+                                        checked = entry.absolutePath in selected,
+                                        onCheckedChange = { checked ->
+                                            selected = if (checked) {
+                                                selected + entry.absolutePath
+                                            } else {
+                                                selected - entry.absolutePath
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         },
         confirmButton = {
-            if (multiSelect) {
-                TextButton(
-                    onClick = { onPicked(selected.sorted().map { File(it) }) },
-                    enabled = selected.isNotEmpty()
-                ) {
-                    Text("Select (${selected.size})")
+            when {
+                mode == DesktopPickerMode.FOLDER -> {
+                    TextButton(onClick = { onPicked(listOf(currentDir)) }) {
+                        Text("Use this folder")
+                    }
+                }
+                multiSelect -> {
+                    TextButton(
+                        onClick = { onPicked(selected.sorted().map { File(it) }) },
+                        enabled = selected.isNotEmpty()
+                    ) {
+                        Text("Select (${selected.size})")
+                    }
                 }
             }
         },
@@ -145,4 +221,18 @@ internal fun DesktopUploadPickerDialog(
             TextButton(onClick = onCancel) { Text("Cancel") }
         }
     )
+}
+
+/** Every filesystem root on this machine (on Windows: every drive letter). */
+internal fun fileSystemRoots(): List<File> =
+    File.listRoots()?.toList().orEmpty()
+
+/** True when [directory] is [root] itself or anywhere underneath it. */
+internal fun isOnRoot(directory: File, root: File): Boolean {
+    var current: File? = directory.absoluteFile
+    while (current != null) {
+        if (current == root.absoluteFile) return true
+        current = current.parentFile
+    }
+    return false
 }

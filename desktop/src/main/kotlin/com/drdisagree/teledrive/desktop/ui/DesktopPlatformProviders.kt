@@ -78,8 +78,11 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
             thread {
                 val chooser = JFileChooser().apply {
                     fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
+                    DesktopPickerStore.lastFolderDirectory()?.let { currentDirectory = it }
                 }
                 val result = if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+                    // Remember the view the folder was picked from.
+                    chooser.currentDirectory?.let { DesktopPickerStore.saveFolderDirectory(it) }
                     PickResult.Picked(chooser.selectedFile.absolutePath)
                 } else {
                     PickResult.Canceled
@@ -95,11 +98,13 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
             } else {
                 thread {
                     val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
+                    DesktopPickerStore.lastFileDirectory()?.let { dialog.directory = it.absolutePath }
                     dialog.isVisible = true
                     val file = dialog.file
                     val result = if (file == null) {
                         PickResult.Canceled
                     } else {
+                        dialog.directory?.let { DesktopPickerStore.saveFileDirectory(File(it)) }
                         PickResult.Picked(File(dialog.directory, file).absolutePath)
                     }
                     onPicked(result)
@@ -115,8 +120,13 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
                 thread {
                     val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
                     dialog.isMultipleMode = true
+                    DesktopPickerStore.lastFileDirectory()?.let { dialog.directory = it.absolutePath }
                     dialog.isVisible = true
-                    onPicked(dialog.files.orEmpty().map { it.absolutePath })
+                    val picked = dialog.files.orEmpty().map { it.absolutePath }
+                    if (picked.isNotEmpty()) {
+                        dialog.directory?.let { DesktopPickerStore.saveFileDirectory(File(it)) }
+                    }
+                    onPicked(picked)
                 }
             }
         }
@@ -181,7 +191,10 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
 
     pendingSinglePick?.let { onPicked ->
         DesktopUploadPickerDialog(
+            mode = DesktopPickerMode.FILES,
             multiSelect = false,
+            initialDirectory = pickerStartDirectory(folder = false),
+            onDirectoryChanged = { DesktopPickerStore.saveFileDirectory(it) },
             onPicked = { files ->
                 pendingSinglePick = null
                 val file = files.firstOrNull()
@@ -198,7 +211,10 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
     }
     pendingMultiPick?.let { onPicked ->
         DesktopUploadPickerDialog(
+            mode = DesktopPickerMode.FILES,
             multiSelect = true,
+            initialDirectory = pickerStartDirectory(folder = false),
+            onDirectoryChanged = { DesktopPickerStore.saveFileDirectory(it) },
             onPicked = { files ->
                 pendingMultiPick = null
                 onPicked(files.map { it.absolutePath })
@@ -209,4 +225,21 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
             }
         )
     }
+}
+
+/**
+ * Where a picker opens: the position remembered from last time, falling
+ * back to the user's home folder and then to the first filesystem root.
+ */
+internal fun pickerStartDirectory(folder: Boolean): File {
+    val remembered = if (folder) {
+        DesktopPickerStore.lastFolderDirectory()
+    } else {
+        DesktopPickerStore.lastFileDirectory()
+    }
+    return DesktopPickerStore.resolveStartDirectory(
+        remembered = remembered,
+        home = System.getProperty("user.home")?.let { File(it) },
+        roots = fileSystemRoots()
+    ) ?: File("/")
 }
