@@ -13,9 +13,13 @@ import com.drdisagree.teledrive.domain.model.BackupSession
 import com.drdisagree.teledrive.domain.model.BackupTrigger
 import com.drdisagree.teledrive.domain.model.CountryList
 import com.drdisagree.teledrive.domain.model.UserPreferences
+import com.drdisagree.teledrive.domain.model.TrashItem
 import com.drdisagree.teledrive.domain.repository.BackupRepository
+import com.drdisagree.teledrive.domain.repository.CacheRepository
+import com.drdisagree.teledrive.domain.repository.CacheStats
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TelegramAuthRepository
+import com.drdisagree.teledrive.domain.repository.TrashRepository
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -98,21 +102,77 @@ class DesktopMaintenanceSchedulerTest {
         assertEquals("disabling must stop further scans", settled, backups.starts.get())
     }
 
+    @Test
+    fun cleanupEnforcesTheCacheLimitAndClearsExpiredTrash() = runBlocking {
+        val cache = FakeCacheRepository()
+        val trash = FakeTrashRepository()
+        val scheduler = maintenanceScheduler(
+            FakeAuthRepository(TelegramAuthState.Ready),
+            FakeBackupRepository(),
+            settings = FakeSettingsRepository(
+                UserPreferences(maxCacheSizeMb = 250, trashAutoClearDays = 14)
+            ),
+            cache = cache,
+            trash = trash
+        )
+        scheduler.runCleanup()
+        assertEquals(250L * 1024 * 1024, cache.lastLimitBytes)
+        assertEquals(14, trash.lastClearedDays)
+    }
+
+    @Test
+    fun cleanupSkipsTrashWhenAutoClearIsOff() = runBlocking {
+        val trash = FakeTrashRepository()
+        val scheduler = maintenanceScheduler(
+            FakeAuthRepository(TelegramAuthState.Ready),
+            FakeBackupRepository(),
+            settings = FakeSettingsRepository(UserPreferences(trashAutoClearDays = 0)),
+            trash = trash
+        )
+        scheduler.runCleanup()
+        assertEquals(null, trash.lastClearedDays)
+    }
+
+    @Test
+    fun schedulingRunsACleanupPassImmediately() = runBlocking {
+        val cache = FakeCacheRepository()
+        val scheduler = maintenanceScheduler(
+            FakeAuthRepository(TelegramAuthState.Ready),
+            FakeBackupRepository(),
+            cache = cache
+        )
+        scheduler.scheduleAll(
+            backupEnabled = false,
+            backupIntervalHours = 24,
+            wifiOnly = false,
+            chargingOnly = false,
+            instantBackup = false,
+            updateChecks = false
+        )
+        assertTrue("cleanup runs at arm time even with backup off", awaitTrue { cache.enforceCalls.get() >= 1 })
+    }
+
     private fun maintenanceScheduler(
         auth: TelegramAuthRepository,
-        backups: BackupRepository
+        backups: BackupRepository,
+        settings: SettingsRepository = FakeSettingsRepository(),
+        cache: CacheRepository = FakeCacheRepository(),
+        trash: TrashRepository = FakeTrashRepository()
     ): DesktopMaintenanceScheduler {
         val scheduler = DesktopMaintenanceScheduler(
             backupRepository = backups,
             telegramAuthRepository = auth,
-            settingsRepository = FakeSettingsRepository(),
+            settingsRepository = settings,
             updateChecker = UpdateChecker(currentVersion = "999.0.0"),
             notifications = DesktopNotifications(),
+            cacheRepository = cache,
+            trashRepository = trash,
             dispatchers = TestDispatchers
         )
         scheduler.authWaitMs = 250
         scheduler.sweepIntervalMs = 60_000
         scheduler.updateIntervalMs = 60_000
+        scheduler.cleanupIntervalMs = 60_000
         return scheduler
     }
 }
@@ -195,8 +255,10 @@ private class FakeBackupRepository : BackupRepository {
     override suspend fun refreshActiveSession() = Unit
 }
 
-private class FakeSettingsRepository : SettingsRepository {
-    override val preferences: Flow<UserPreferences> = flowOf(UserPreferences())
+private class FakeSettingsRepository(
+    initial: UserPreferences = UserPreferences()
+) : SettingsRepository {
+    override val preferences: Flow<UserPreferences> = flowOf(initial)
 
     override suspend fun update(transform: (UserPreferences) -> UserPreferences) = Unit
 
@@ -207,6 +269,65 @@ private class FakeSettingsRepository : SettingsRepository {
     override suspend fun hasStoredTelegramCredentials(): Boolean = false
 
     override suspend fun clearTelegramCredentials() = Unit
+}
+
+private class FakeCacheRepository : CacheRepository {
+    val enforceCalls = AtomicInteger(0)
+
+    @Volatile
+    var lastLimitBytes: Long? = null
+
+    override fun observeStats(): Flow<CacheStats> = flowOf(CacheStats(0, 0, 0, 0, 0))
+
+    override suspend fun refreshStats() = Unit
+
+    override suspend fun clearThumbnails() = Unit
+
+    override suspend fun clearLinkThumbnails() = Unit
+
+    override suspend fun clearTemp() = Unit
+
+    override suspend fun clearAll() = Unit
+
+    override suspend fun enforceLimit(maxBytes: Long) {
+        enforceCalls.incrementAndGet()
+        lastLimitBytes = maxBytes
+    }
+}
+
+private class FakeTrashRepository : TrashRepository {
+    @Volatile
+    var lastClearedDays: Int? = null
+
+    override fun observeTrash(): Flow<List<TrashItem>> = flowOf(emptyList())
+
+    override suspend fun repairTrashTree() = Unit
+
+    override suspend fun trashedChildCounts(folderIds: List<String>): Map<String, Int> = emptyMap()
+
+    override suspend fun trashedChildren(folderId: String): List<TrashItem> = emptyList()
+
+    override suspend fun moveFilesToTrash(ids: List<String>): AppResult<Unit> =
+        AppResult.Success(Unit)
+
+    override suspend fun moveFolderToTrash(id: String): AppResult<Unit> = AppResult.Success(Unit)
+
+    override suspend fun restoreFiles(ids: List<String>): AppResult<Unit> = AppResult.Success(Unit)
+
+    override suspend fun restoreFolder(id: String): AppResult<Unit> = AppResult.Success(Unit)
+
+    override suspend fun deleteFilesPermanently(ids: List<String>): AppResult<Unit> =
+        AppResult.Success(Unit)
+
+    override suspend fun deleteFolderPermanently(id: String): AppResult<Unit> =
+        AppResult.Success(Unit)
+
+    override suspend fun emptyTrash(): AppResult<Unit> = AppResult.Success(Unit)
+
+    override suspend fun clearExpired(days: Int): AppResult<Int> {
+        lastClearedDays = days
+        return AppResult.Success(0)
+    }
 }
 
 private class FakeAuthRepository(state: TelegramAuthState) : TelegramAuthRepository {

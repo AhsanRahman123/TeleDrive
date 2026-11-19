@@ -13,8 +13,10 @@ import com.drdisagree.teledrive.desktop.resources.notification_update_available
 import com.drdisagree.teledrive.desktop.resources.notification_update_message
 import com.drdisagree.teledrive.domain.model.BackupTrigger
 import com.drdisagree.teledrive.domain.repository.BackupRepository
+import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TelegramAuthRepository
+import com.drdisagree.teledrive.domain.repository.TrashRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -39,7 +41,11 @@ import org.jetbrains.compose.resources.getString
  *   sweep is also what notices changed files between periodic scans);
  * - every scan first waits for the Telegram session to reach Ready, exactly
  *   like the Android workers, and quietly skips the cycle otherwise;
- * - update checks repeat daily and notify like Android's UpdateCheckWorker.
+ * - update checks repeat daily and notify like Android's UpdateCheckWorker;
+ * - cache-limit enforcement and expired-trash clearing run at arm time and
+ *   then daily, unconditionally, like Android's CacheCleanupWorker and
+ *   TrashCleanupWorker (both are enqueued by every Android scheduleAll) —
+ *   without this the desktop cache-limit slider did nothing at all.
  *
  * Wi-Fi/charging constraints do not gate anything here: the desktop network
  * and power monitors always report unmetered/charging, so Android's
@@ -51,6 +57,8 @@ class DesktopMaintenanceScheduler(
     private val settingsRepository: SettingsRepository,
     private val updateChecker: UpdateChecker,
     private val notifications: DesktopNotifications,
+    private val cacheRepository: CacheRepository,
+    private val trashRepository: TrashRepository,
     dispatchers: DispatcherProvider
 ) : MaintenanceScheduler {
 
@@ -59,9 +67,11 @@ class DesktopMaintenanceScheduler(
     private var backupJob: Job? = null
     private var sweepJob: Job? = null
     private var updateJob: Job? = null
+    private var cleanupJob: Job? = null
 
     internal var sweepIntervalMs: Long = SWEEP_INTERVAL_MS
     internal var updateIntervalMs: Long = UPDATE_INTERVAL_MS
+    internal var cleanupIntervalMs: Long = UPDATE_INTERVAL_MS
     internal var authWaitMs: Long = AUTH_WAIT_MS
 
     override fun scheduleUpdateCheck(enabled: Boolean) {
@@ -103,8 +113,28 @@ class DesktopMaintenanceScheduler(
                     }
                 }
             }
+            cleanupJob?.cancel()
+            cleanupJob = scope.launch {
+                runCleanup()
+                while (isActive) {
+                    delay(cleanupIntervalMs)
+                    runCleanup()
+                }
+            }
         }
         scheduleUpdateCheck(updateChecks)
+    }
+
+    /** One cache/trash maintenance pass, with Android's worker semantics. */
+    internal suspend fun runCleanup() {
+        val prefs = settingsRepository.preferences.first()
+        runCatching {
+            cacheRepository.enforceLimit(prefs.maxCacheSizeMb.toLong() * 1024L * 1024L)
+        }.onFailure { SafeLog.w(TAG, "Cache cleanup failed", it) }
+        if (prefs.trashAutoClearDays > 0) {
+            runCatching { trashRepository.clearExpired(prefs.trashAutoClearDays) }
+                .onFailure { SafeLog.w(TAG, "Trash cleanup failed", it) }
+        }
     }
 
     /** One scan cycle; returns false when the session is not Ready and the cycle is skipped. */
