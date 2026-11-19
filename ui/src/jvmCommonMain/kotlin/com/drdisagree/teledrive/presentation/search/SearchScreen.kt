@@ -258,7 +258,6 @@ fun SearchScreen(
                     )
                 }
 
-<<<<<<< HEAD
             val commandFocusRequester = rememberCollectionCommandFocusRequester()
             Box(
                 modifier = Modifier
@@ -272,9 +271,6 @@ fun SearchScreen(
                     )
             ) {
                 when {
-                state.searching -> LoadingState()
-=======
-            when {
                 state.searching -> CollectionSkeleton(
                     columns = 1,
                     contentPadding = PaddingValues(
@@ -284,7 +280,6 @@ fun SearchScreen(
                         bottom = 12.dp + padding.calculateBottomPadding()
                     )
                 )
->>>>>>> babce817 (Show shimmer skeletons that match each screen's layout while it loads)
                 !state.searched -> EmptyState(
                     icon = Icons.Outlined.Search,
                     title = stringResource(Res.string.app_search_drive),
