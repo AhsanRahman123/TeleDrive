@@ -24,7 +24,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,7 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** What the built-in desktop picker is choosing. */
 internal enum class DesktopPickerMode {
@@ -66,18 +71,50 @@ internal fun DesktopUploadPickerDialog(
     var currentDir by remember { mutableStateOf(initialDirectory) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
     val roots = remember { fileSystemRoots() }
-    val entries = remember(currentDir, mode) {
-        runCatching {
-            currentDir.listFiles().orEmpty()
-                .filter {
-                    it.isDirectory || (mode == DesktopPickerMode.FILES && it.isFile)
-                }
-                .sortedWith(
-                    compareByDescending<File> { it.isDirectory }
-                        .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
-                )
-        }.getOrDefault(emptyList())
+    // Directory listing is disk I/O: it runs off the UI thread (PC-7). It
+    // used to run inside remember() during composition, so opening the
+    // picker or stepping into a folder on a slow drive stalled the UI for
+    // the whole listFiles() call.
+    var entries by remember { mutableStateOf<List<File>>(emptyList()) }
+    var entriesLoaded by remember { mutableStateOf(false) }
+    LaunchedEffect(currentDir, mode) {
+        entriesLoaded = false
+        entries = withContext(Dispatchers.IO) {
+            runCatching {
+                currentDir.listFiles().orEmpty()
+                    .filter {
+                        it.isDirectory || (mode == DesktopPickerMode.FILES && it.isFile)
+                    }
+                    .sortedWith(
+                        compareByDescending<File> { it.isDirectory }
+                            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+                    )
+            }.getOrDefault(emptyList())
+        }
+        entriesLoaded = true
     }
+    val listState = rememberLazyListState()
+    // Drag multi-select (PC-5): the app's shared drag-selection machinery,
+    // with the same semantics as Files — the anchor row decides whether the
+    // range selects or deselects, gaps resolve to the nearest visible item,
+    // and the release position counts. Only file rows are selectable;
+    // folders in a range are skipped (they still navigate on click). The
+    // modifier is attached only in multi-select files mode.
+    val dragSelect = rememberDragSelect(
+        listState = listState,
+        onStart = {},
+        isSelected = { index ->
+            entries.getOrNull(index)
+                ?.let { it.isFile && it.absolutePath in selected } == true
+        },
+        onRange = { range, shouldSelect ->
+            selected = pickerRangeSelection(entries, selected, range, shouldSelect)
+        },
+        onEnd = {},
+        mouseDragAddsToSelection = false,
+        resolveNearestVisibleItem = true,
+        processReleasePosition = true
+    )
 
     fun navigateTo(directory: File) {
         currentDir = directory
@@ -123,7 +160,14 @@ internal fun DesktopUploadPickerDialog(
                         }
                     }
                 }
-                if (entries.isEmpty()) {
+                if (!entriesLoaded) {
+                    Text(
+                        text = "Loading…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                } else if (entries.isEmpty()) {
                     Text(
                         text = if (mode == DesktopPickerMode.FOLDER) {
                             "No folders here"
@@ -135,7 +179,19 @@ internal fun DesktopUploadPickerDialog(
                         modifier = Modifier.padding(vertical = 12.dp)
                     )
                 } else {
-                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp)
+                            .then(
+                                if (mode == DesktopPickerMode.FILES && multiSelect) {
+                                    dragSelect
+                                } else {
+                                    Modifier
+                                }
+                            )
+                    ) {
                         items(entries, key = { it.absolutePath }) { entry ->
                             Row(
                                 modifier = Modifier
@@ -221,6 +277,24 @@ internal fun DesktopUploadPickerDialog(
             TextButton(onClick = onCancel) { Text("Cancel") }
         }
     )
+}
+
+/**
+ * Applies a drag-selected index range to the picker's selection (PC-5).
+ * Only file rows are selectable — folders inside the range are skipped,
+ * because a folder row's click navigates rather than selects. Indices
+ * outside the current listing are ignored.
+ */
+internal fun pickerRangeSelection(
+    entries: List<File>,
+    selected: Set<String>,
+    range: IntRange,
+    shouldSelect: Boolean
+): Set<String> {
+    val paths = range.mapNotNull { index ->
+        entries.getOrNull(index)?.takeIf { it.isFile }?.absolutePath
+    }
+    return if (shouldSelect) selected + paths else selected - paths.toSet()
 }
 
 /** Every filesystem root on this machine (on Windows: every drive letter). */
