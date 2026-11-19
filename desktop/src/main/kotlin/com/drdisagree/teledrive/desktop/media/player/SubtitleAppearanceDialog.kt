@@ -85,7 +85,6 @@ import com.drdisagree.teledrive.resources.subtitle_font
 import com.drdisagree.teledrive.resources.subtitle_font_casual
 import com.drdisagree.teledrive.resources.subtitle_font_condensed
 import com.drdisagree.teledrive.resources.subtitle_font_cursive
-import com.drdisagree.teledrive.resources.subtitle_font_filter
 import com.drdisagree.teledrive.resources.subtitle_font_mono
 import com.drdisagree.teledrive.resources.subtitle_font_sans
 import com.drdisagree.teledrive.resources.subtitle_font_serif
@@ -292,7 +291,7 @@ internal fun SubtitleAppearanceDialog(
                             )
                         }
                     }
-                    InstalledFontPicker(current.fontFamily) { family ->
+                    CuratedFontPicker(current.fontFamily) { family ->
                         draft = current.copy(fontFamily = family)
                     }
 
@@ -462,9 +461,14 @@ private fun PreviewLine(
     )
 }
 
-/** Dropdown of every font family installed on this Windows machine, with a filter. */
+/**
+ * Dropdown of the curated subtitle font library (PC-10): the popular
+ * families in [resolveSubtitleFontLibrary], NOT a raw enumeration of every
+ * font installed on the machine. The system font list is read only to
+ * detect which of the extended (non-Windows-bundled) families are present.
+ */
 @Composable
-private fun InstalledFontPicker(selected: String, onSelected: (String) -> Unit) {
+private fun CuratedFontPicker(selected: String, onSelected: (String) -> Unit) {
     val installedFonts = remember {
         runCatching {
             GraphicsEnvironment.getLocalGraphicsEnvironment()
@@ -472,43 +476,32 @@ private fun InstalledFontPicker(selected: String, onSelected: (String) -> Unit) 
                 .toList()
         }.getOrDefault(emptyList())
     }
-    if (installedFonts.isEmpty()) return
+    val library = remember(installedFonts, selected) {
+        resolveSubtitleFontLibrary(installedFonts, selected)
+    }
 
     var menuOpen by remember { mutableStateOf(false) }
-    var filter by remember { mutableStateOf("") }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        OutlinedTextField(
-            value = filter,
-            onValueChange = { filter = it },
-            label = { Text(stringResource(Res.string.subtitle_font_filter)) },
-            singleLine = true,
+    Box {
+        OutlinedButton(
+            onClick = { menuOpen = true },
             modifier = Modifier.fillMaxWidth()
-        )
-        Box {
-            OutlinedButton(
-                onClick = { menuOpen = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(selected, modifier = Modifier.weight(1f))
-                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-            }
-            DropdownMenu(
-                expanded = menuOpen,
-                onDismissRequest = { menuOpen = false },
-                modifier = Modifier.heightIn(max = 320.dp)
-            ) {
-                installedFonts
-                    .filter { it.contains(filter, ignoreCase = true) }
-                    .take(80)
-                    .forEach { family ->
-                        DropdownMenuItem(
-                            text = { Text(family, fontFamily = previewFontFamily(family)) },
-                            onClick = {
-                                onSelected(family)
-                                menuOpen = false
-                            }
-                        )
+        ) {
+            Text(selected, modifier = Modifier.weight(1f))
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            modifier = Modifier.heightIn(max = 320.dp)
+        ) {
+            library.forEach { family ->
+                DropdownMenuItem(
+                    text = { Text(family, fontFamily = previewFontFamily(family)) },
+                    onClick = {
+                        onSelected(family)
+                        menuOpen = false
                     }
+                )
             }
         }
     }

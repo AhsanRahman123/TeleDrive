@@ -195,6 +195,75 @@ internal fun subtitleSubMargin(verticalPosition: Float, videoHeight: Int): Int =
         .roundToInt()
         .coerceIn(-videoHeight / 2, videoHeight * 4 / 5)
 
+/**
+ * The subtitle font library offered by the picker (PC-10).
+ *
+ * The picker used to enumerate every font family installed on the machine,
+ * which on the user's PC means a long list of Bengali shareware fonts he
+ * never picks for subtitles. The library is now a curated list of widely
+ * used families, in two tiers:
+ *
+ * - [SUBTITLE_FONT_CORE]: families that ship with Windows 10/11 by default,
+ *   so they resolve through freetype on any typical Windows machine. Always
+ *   offered, even if font enumeration fails.
+ * - [SUBTITLE_FONT_EXTENDED]: popular open-licensed families that do NOT
+ *   ship with Windows. Offered only when actually installed (detected
+ *   against the system font list), so the picker never names a font
+ *   freetype cannot resolve.
+ */
+internal val SUBTITLE_FONT_CORE: List<String> = listOf(
+    "Arial",
+    "Arial Narrow",
+    "Calibri",
+    "Cambria",
+    "Comic Sans MS",
+    "Consolas",
+    "Courier New",
+    "Georgia",
+    "Segoe UI",
+    "Tahoma",
+    "Times New Roman",
+    "Trebuchet MS",
+    "Verdana"
+)
+
+internal val SUBTITLE_FONT_EXTENDED: List<String> = listOf(
+    "Helvetica Neue",
+    "Lato",
+    "Montserrat",
+    "Noto Sans",
+    "Noto Sans Bengali",
+    "Open Sans",
+    "Roboto"
+)
+
+/**
+ * Resolves the library against the fonts actually installed: the core list
+ * verbatim, then each extended family that is installed — spelled exactly
+ * as the system reports it, so the name handed to `--freetype-font` is the
+ * name freetype will look up. A saved [currentSelection] that is not in the
+ * library (e.g. chosen before this list existed) is appended so an existing
+ * choice is never silently dropped from the picker.
+ */
+internal fun resolveSubtitleFontLibrary(
+    installedFamilyNames: Collection<String>,
+    currentSelection: String
+): List<String> {
+    val installedByLowercase = installedFamilyNames.associateBy { it.lowercase() }
+    val resolved = SUBTITLE_FONT_CORE.toMutableList()
+    SUBTITLE_FONT_EXTENDED.forEach { family ->
+        installedByLowercase[family.lowercase()]?.let { installedName ->
+            if (installedName !in resolved) resolved += installedName
+        }
+    }
+    if (currentSelection.isNotBlank() &&
+        resolved.none { it.equals(currentSelection, ignoreCase = true) }
+    ) {
+        resolved += currentSelection
+    }
+    return resolved
+}
+
 internal fun compositeSubtitleBackground(
     foregroundColor: Int,
     foregroundOpacity: Float,
