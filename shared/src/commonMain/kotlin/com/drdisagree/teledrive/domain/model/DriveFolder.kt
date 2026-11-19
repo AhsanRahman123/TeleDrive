@@ -12,7 +12,9 @@ data class DriveFolder(
     val createdAt: Long,
     val modifiedAt: Long,
     val fileCount: Int = 0,
-    val folderCount: Int = 0
+    val folderCount: Int = 0,
+    /** Recursive total of files.sizeBytes over this folder and all descendants. */
+    val totalSizeBytes: Long = 0
 ) {
     val isTrashed: Boolean get() = trashedAt != null
 }
