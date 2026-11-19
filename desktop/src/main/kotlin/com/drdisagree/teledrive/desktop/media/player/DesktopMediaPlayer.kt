@@ -177,7 +177,16 @@ internal fun DesktopMediaPlayer(
     var timeMs by remember { mutableLongStateOf(0L) }
     var durationMs by remember { mutableLongStateOf(0L) }
     var muted by remember { mutableStateOf(false) }
-    var volume by remember(mrl) { mutableIntStateOf(100) }
+    var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
+    var volume by remember(mrl) {
+        mutableIntStateOf(
+            if (controlPreferences.rememberVolume) {
+                RememberedPlayerVolume.currentVolume()
+            } else {
+                100
+            }
+        )
+    }
     var brightness by remember { mutableIntStateOf(100) }
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
@@ -189,7 +198,6 @@ internal fun DesktopMediaPlayer(
     var seekFeedbackVisible by remember { mutableStateOf(false) }
     var seekFeedbackTick by remember { mutableIntStateOf(0) }
     var hKeyPressed by remember { mutableStateOf(false) }
-    var controlPreferences by remember { mutableStateOf(PlayerControlPreferencesStore.load()) }
     var lastVisibilityInteractionTick by remember { mutableIntStateOf(0) }
     // MediaPlayerEventAdapter outlives individual recompositions; use updated state so
     // a play/resume event cannot reapply the initial 100% / unmuted values.
@@ -578,6 +586,12 @@ internal fun DesktopMediaPlayer(
         } else if (unmute) {
             muted = false
         }
+        // Update the shared in-memory volume immediately so a fast media switch uses
+        // the latest value; disk persistence is debounced on an IO thread.
+        RememberedPlayerVolume.update(
+            nextVolume,
+            persist = controlPreferences.rememberVolume
+        )
         player.submitAudioState(nextVolume, muted)
     }
     fun adjustPlayerVolume(delta: Int) {
@@ -1181,8 +1195,14 @@ internal fun DesktopMediaPlayer(
                 onScaling = { scaling = it },
                 controlPreferences = controlPreferences,
                 onControlPreferencesChange = { updated ->
-                    controlPreferences = updated
-                    PlayerControlPreferencesStore.save(updated)
+                    // Setting changes are infrequent, so persist them normally. Enabling
+                    // memory captures the current slider value for future media/app launches.
+                    val withCurrentVolume = updated.copy(volume = volume)
+                    controlPreferences = withCurrentVolume
+                    PlayerControlPreferencesStore.save(withCurrentVolume)
+                    if (withCurrentVolume.rememberVolume) {
+                        RememberedPlayerVolume.update(volume, persist = true)
+                    }
                     interactionTick++
                 }
             )
@@ -1527,6 +1547,23 @@ private fun PlayerControlsBar(
                                 )
                             )
                             onControlsKeepVisible(!controlPreferences.showPlayerControls)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Remember volume across media and restarts") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = controlPreferences.rememberVolume,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onControlPreferencesChange(
+                                controlPreferences.copy(
+                                    rememberVolume = !controlPreferences.rememberVolume
+                                )
+                            )
+                            onInteraction()
                         }
                     )
                     DropdownMenuItem(
