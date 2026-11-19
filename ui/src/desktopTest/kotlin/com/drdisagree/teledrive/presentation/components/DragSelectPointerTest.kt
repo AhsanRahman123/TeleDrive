@@ -728,8 +728,10 @@ class DragSelectPointerTest {
         // per-frame painting loop. Pump single frames instead: bounded and enough
         // for the timeout to fire and the anchor to be painted.
         repeat(45) { rule.mainClock.advanceTimeByFrame() }
-        // The anchor row alone is re-applied from the snapshot: still fully selected.
-        assertEquals(setOf(0, 1, 2, 3), selected)
+        // Touch long-press keeps toggle semantics: holding a selected anchor toggles
+        // that one row off at gesture start; the rest of the snapshot is untouched
+        // until the slide paints the crossed range.
+        assertEquals(setOf(1, 2, 3), selected)
 
         rule.onNodeWithTag("touch-erase-grid").performTouchInput {
             moveBy(Offset(0f, 120f))
