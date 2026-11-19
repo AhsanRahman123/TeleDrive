@@ -495,7 +495,7 @@ class DragSelectPointerTest {
         }
         // Desktop's test clock does not auto-advance through the long-press timeout
         // the way Android's does; advance it explicitly so the hold registers.
-        rule.mainClock.advanceBy(1_100)
+        rule.mainClock.advanceTimeBy(1_100)
         rule.waitForIdle()
         assertEquals(setOf(0), selected)
 
@@ -564,7 +564,7 @@ class DragSelectPointerTest {
         }
         // Desktop's test clock does not auto-advance through the long-press timeout
         // the way Android's does; advance it explicitly so the hold registers.
-        rule.mainClock.advanceBy(1_100)
+        rule.mainClock.advanceTimeBy(1_100)
         rule.waitForIdle()
         assertEquals(setOf(0), selected)
 
@@ -642,7 +642,7 @@ class DragSelectPointerTest {
         }
         // Desktop's test clock does not auto-advance through the long-press timeout
         // the way Android's does; advance it explicitly so the hold registers.
-        rule.mainClock.advanceBy(1_100)
+        rule.mainClock.advanceTimeBy(1_100)
         rule.waitForIdle()
         assertEquals(setOf(0), selected)
 
@@ -706,7 +706,7 @@ class DragSelectPointerTest {
         }
         // Desktop's test clock does not auto-advance through the long-press timeout
         // the way Android's does; advance it explicitly so the hold registers.
-        rule.mainClock.advanceBy(1_100)
+        rule.mainClock.advanceTimeBy(1_100)
         rule.waitForIdle()
         // The anchor row alone is re-applied from the snapshot: still fully selected.
         assertEquals(setOf(0, 1, 2, 3), selected)
