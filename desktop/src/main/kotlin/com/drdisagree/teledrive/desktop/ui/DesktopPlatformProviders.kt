@@ -6,6 +6,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.drdisagree.teledrive.desktop.BuildInfo
+import com.drdisagree.teledrive.desktop.files.DesktopFileOpener
 import com.drdisagree.teledrive.desktop.files.DesktopFileRevealer
 import com.drdisagree.teledrive.presentation.platform.DeleteConsentLauncher
 import com.drdisagree.teledrive.presentation.platform.DeviceOwnerGate
@@ -17,6 +18,7 @@ import com.drdisagree.teledrive.presentation.platform.LocalAppVersion
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.presentation.platform.LocalDeviceOwnerGate
 import com.drdisagree.teledrive.presentation.platform.LocalDownloadLocationConfigurable
+import com.drdisagree.teledrive.presentation.platform.LocalFileOpener
 import com.drdisagree.teledrive.presentation.platform.LocalFilePicker
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
@@ -107,6 +109,7 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
         DeleteConsentLauncher { _, onResult -> onResult(true) }
     }
     val fileRevealer = remember { DesktopFileRevealer() }
+    val fileOpener = remember { DesktopFileOpener() }
     val telegramLinkOpener = remember { DesktopTelegramLinkOpener() }
     val permissionRequester = remember {
         PermissionRequester { _, onDone -> onDone() }
@@ -146,6 +149,7 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
         LocalDownloadLocationConfigurable provides true,
         LocalPlatformScreens provides DesktopPlatformScreens,
         LocalFileRevealer provides fileRevealer,
+        LocalFileOpener provides fileOpener,
         LocalPlatformCapabilities provides capabilities,
         content = content
     )
