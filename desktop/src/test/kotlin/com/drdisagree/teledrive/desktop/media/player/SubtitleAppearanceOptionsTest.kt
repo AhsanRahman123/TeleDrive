@@ -44,7 +44,46 @@ class SubtitleAppearanceOptionsTest {
         ).toVlcFactoryArguments(videoHeight = 1080)
 
         assertTrue(options.contains("--text-renderer=freetype"))
-        assertTrue(options.contains("--no-libass"))
+    }
+
+    @Test
+    fun `no appearance ever emits an option outside the verified VLC 3-0-21 set`() {
+        // Regression guard for the "--no-libass" failure: that string names
+        // no config item in VLC 3.0.21, libvlc_new treats unknown instance
+        // options as fatal, and every custom appearance fell back to default
+        // rendering behind a permanent warning banner. Every option emitted
+        // for any appearance must be one verified in the bundled binaries.
+        val appearances = listOf(
+            SubtitleAppearance(),
+            SubtitleAppearance(useSystemDefaults = false),
+            SubtitleAppearance(
+                useSystemDefaults = false,
+                fontFamily = "Consolas",
+                textScale = 2.5f,
+                edgeType = EDGE_DEPRESSED,
+                verticalPosition = 0.08f
+            ),
+            SubtitleAppearance(
+                useSystemDefaults = false,
+                edgeType = EDGE_SHADOW,
+                verticalPosition = 0.92f
+            ),
+            SubtitleAppearance(verticalPosition = 0.5f)
+        )
+        val emitted = appearances.flatMap { appearance ->
+            appearance.toVlcFactoryArguments(videoHeight = 1080)
+        }
+        assertTrue(emitted.isNotEmpty())
+        emitted.forEach { argument ->
+            assertTrue(
+                "Unverified VLC option emitted: $argument",
+                vlcOptionName(argument) in VERIFIED_VLC_FACTORY_OPTIONS
+            )
+        }
+        assertTrue(
+            "The non-existent libass switch must never come back",
+            emitted.none { vlcOptionName(it) == "libass" || vlcOptionName(it) == "no-libass" }
+        )
     }
 
     @Test

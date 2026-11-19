@@ -93,13 +93,23 @@ internal fun SubtitleAppearance.toVlcFactoryArguments(videoHeight: Int = 1080): 
     val options = mutableListOf<String>()
 
     if (!value.useSystemDefaults) {
-        // Embedded MKV subtitles are usually ASS/SSA, which libass renders
-        // with the script's own styles — freetype options cannot affect them.
-        // Force the freetype text-rendering path for text subtitle tracks so
-        // the style below actually applies. VLC-defaults mode emits neither
-        // argument and keeps native (libass) rendering.
+        // Select VLC's freetype renderer for text subtitles so the style
+        // below actually applies to the tracks freetype renders (SRT and
+        // other plain-text formats). VLC-defaults mode emits no renderer
+        // argument and keeps VLC's own choice.
+        //
+        // There is deliberately NO attempt to disable libass here. VLC
+        // 3.0.21 has no such switch: no config item named "libass" exists in
+        // libvlccore or in the libass plugin (its only option is
+        // "ssa-fontsdir"), and libvlc treats an unknown instance option as
+        // fatal — libvlc_new returns NULL and factory creation throws.
+        // Emitting "--no-libass" therefore made EVERY custom appearance fail
+        // on real hardware (proven against the 3.0.21 binaries: the exact
+        // argument list below creates an instance; adding "--no-libass"
+        // makes libvlc_new return NULL). ASS/SSA tracks keep their script
+        // styling via libass — a VLC platform limit the settings dialog
+        // discloses — they are not broken, just not restylable.
         options += "--text-renderer=freetype"
-        options += "--no-libass"
         val (backgroundRgb, backgroundAlpha) = compositeSubtitleBackground(
             foregroundColor = value.backgroundColor,
             foregroundOpacity = value.backgroundOpacity,
@@ -160,6 +170,48 @@ internal fun compositeSubtitleBackground(
     val rgb = (channel(16) shl 16) or (channel(8) shl 8) or channel(0)
     return rgb to (outputAlpha * 255f).roundToInt().coerceIn(0, 255)
 }
+
+/**
+ * Every LibVLC instance option this app may emit, verified against the VLC
+ * 3.0.21 binaries the desktop build bundles: the core options live in
+ * libvlccore ("text-renderer", "sub-margin", "no-video-title-show", "quiet")
+ * and the rest are the config items of the shipped freetype text-renderer
+ * plugin (plugins/text_renderer/libfreetype_plugin.dll). This list exists
+ * because libvlc_new fails outright on an unknown option — an earlier build
+ * emitted the non-existent "--no-libass" and every custom subtitle
+ * appearance silently fell back to default rendering. The unit tests assert
+ * nothing outside this set is ever emitted; extend it only with options
+ * verified in the bundled VLC's binaries.
+ */
+internal val VERIFIED_VLC_FACTORY_OPTIONS: Set<String> = setOf(
+    "no-video-title-show",
+    "quiet",
+    "text-renderer",
+    "sub-margin",
+    "freetype-font",
+    "freetype-monofont",
+    "freetype-fontsize",
+    "freetype-rel-fontsize",
+    "freetype-color",
+    "freetype-opacity",
+    "freetype-background-color",
+    "freetype-background-opacity",
+    "freetype-outline-thickness",
+    "freetype-outline-color",
+    "freetype-outline-opacity",
+    "freetype-shadow-color",
+    "freetype-shadow-opacity",
+    "freetype-shadow-angle",
+    "freetype-shadow-distance",
+    "freetype-bold",
+    "freetype-effect",
+    "freetype-text-direction",
+    "freetype-yuvp"
+)
+
+/** The bare option name of one "--name=value" / "--name" factory argument. */
+internal fun vlcOptionName(argument: String): String =
+    argument.removePrefix("--").substringBefore('=')
 
 internal const val EDGE_NONE = 0
 internal const val EDGE_OUTLINE = 1
