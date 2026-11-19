@@ -469,7 +469,7 @@ fun ThumbnailManagerScreen(
             title = { Text("Remove unlinked thumbnails?") },
             text = {
                 Text(
-                    "These preview files no longer have a matching TeleDrive file record. " +
+                    "These preview files no longer have a matching Pranto Drive file record. " +
                         "Only the orphaned thumbnail cache files and metadata will be removed."
                 )
             },

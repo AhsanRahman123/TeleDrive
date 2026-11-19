@@ -1,6 +1,6 @@
 <resources>
     <!-- App-wide -->
-    <string name="app_name">TeleDrive</string>
+    <string name="app_name">Pranto Drive</string>
 
     <!-- Shared labels and dialogs -->
     <string name="common_actions">更多操作</string>
@@ -29,7 +29,7 @@
     <string name="transfer_error_save_failed">无法保存下载的文件</string>
     <string name="transfer_error_verify_failed">下载的文件与原文件不一致，请重新下载。</string>
     <string name="transfer_error_destination_full">下载保存位置的可用空间不足，还需要 %1$s。</string>
-    <string name="transfer_error_cache_full">TeleDrive 临时文件的可用空间不足，需要 %1$s。</string>
+    <string name="transfer_error_cache_full">Pranto Drive 临时文件的可用空间不足，需要 %1$s。</string>
     <string name="transfer_error_upload_ended">上传意外中断</string>
     <string name="transfer_error_upload_stalled">上传无响应</string>
 

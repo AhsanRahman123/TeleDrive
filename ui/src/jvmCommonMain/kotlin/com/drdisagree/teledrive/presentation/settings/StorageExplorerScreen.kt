@@ -280,7 +280,7 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
                     if (snapshot.scannedAt > 0L) {
                         "Scanned " + Formatters.dateTime(snapshot.scannedAt)
                     } else {
-                        "Scan to inspect files stored by TeleDrive on this device."
+                        "Scan to inspect files stored by Pranto Drive on this device."
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -580,7 +580,7 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
                     }
                     if (entry.canDelete) {
                         Text(
-                            "This item is inside a TeleDrive-managed cache or download folder and can be removed here.",
+                            "This item is inside a Pranto Drive-managed cache or download folder and can be removed here.",
                             color = MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -620,7 +620,7 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        deletableSelectionCount.toString() + " selected item(s) are inside approved cache or TeleDrive download folders."
+                        deletableSelectionCount.toString() + " selected item(s) are inside approved cache or Pranto Drive download folders."
                     )
                     if (protectedSelectionCount > 0) {
                         Text(
@@ -652,7 +652,7 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
             title = { Text("Clear Telegram downloaded cache?") },
             text = {
                 Text(
-                    "TeleDrive will ask TDLib to clear its downloaded local files. This does not delete Telegram cloud originals, but items marked Available Offline may need to be downloaded again."
+                    "Pranto Drive will ask TDLib to clear its downloaded local files. This does not delete Telegram cloud originals, but items marked Available Offline may need to be downloaded again."
                 )
             },
             confirmButton = {
@@ -831,7 +831,7 @@ private fun categoryLabel(category: String): String = when (category) {
     CATEGORY_TELEGRAM_DATABASE -> "Telegram database"
     CATEGORY_TELEGRAM_DOWNLOADS -> "Telegram downloads"
     CATEGORY_LOCAL_COPIES -> "Local copies"
-    CATEGORY_DOWNLOADS -> "TeleDrive downloads"
+    CATEGORY_DOWNLOADS -> "Pranto Drive downloads"
     CATEGORY_EXTERNAL_FILES -> "External app files"
     CATEGORY_DATABASE -> "App database"
     CATEGORY_SETTINGS -> "App settings"

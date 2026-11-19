@@ -114,7 +114,7 @@ fun SubtitleSettingsSheet(
                 if (current.useSystemDefaults) {
                     "Uses your Android caption font, colors, background and edge settings."
                 } else {
-                    "Customize the subtitle appearance inside TeleDrive."
+                    "Customize the subtitle appearance inside Pranto Drive."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant

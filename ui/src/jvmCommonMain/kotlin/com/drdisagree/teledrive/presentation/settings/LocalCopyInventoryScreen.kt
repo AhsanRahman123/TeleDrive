@@ -167,7 +167,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                         } else {
                             val cleanup = result.value
                             message = buildString {
-                                append("Removed ${cleanup.deletedCount} TeleDrive-managed local copies.")
+                                append("Removed ${cleanup.deletedCount} Pranto Drive-managed local copies.")
                                 if (cleanup.keptOffline > 0) append(" Kept ${cleanup.keptOffline} Available Offline files.")
                                 if (cleanup.keptUnmanaged > 0) append(" Preserved ${cleanup.keptUnmanaged} external/original files.")
                                 if (cleanup.unverifiedCount > 0) append(" Left ${cleanup.unverifiedCount} unverified files untouched.")
@@ -347,7 +347,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                                 Text(
                                     "${Formatters.bytes(if (row.exists) row.actualBytes else row.file.sizeBytes)} · " +
                                         if (row.file.isAvailableOffline) "Available Offline"
-                                        else if (row.exists && row.managedByTeleDrive) "TeleDrive-managed app copy"
+                                        else if (row.exists && row.managedByTeleDrive) "Pranto Drive-managed app copy"
                                         else if (row.exists) "External/original file (protected)"
                                         else "No app-managed local copy registered",
                                     style = MaterialTheme.typography.bodySmall,
@@ -458,7 +458,7 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
             title = { Text("Free up selected local copies?") },
             text = {
                 Text(
-                    "TeleDrive removes only its managed local copies after checking the Telegram backup. " +
+                    "Pranto Drive removes only its managed local copies after checking the Telegram backup. " +
                         "External/original files and Available Offline copies are preserved. " +
                         "Your Telegram cloud backups are not deleted."
                 )

@@ -51,10 +51,10 @@ fun StorageAuditDialog(
     if (confirmRemoval) {
         AlertDialog(
             onDismissRequest = { confirmRemoval = false },
-            title = { Text("Remove $deletableCount TeleDrive-managed copies?") },
+            title = { Text("Remove $deletableCount Pranto Drive-managed copies?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("TeleDrive-managed database copies and TDLib cache files inside managed folders will be removed. External TDLib paths, original files outside TeleDrive-managed folders, and Telegram cloud backups will be preserved.")
+                    Text("Pranto Drive-managed database copies and TDLib cache files inside managed folders will be removed. External TDLib paths, original files outside Pranto Drive-managed folders, and Telegram cloud backups will be preserved.")
                     snapshot.files.filter { file ->
                         file.localPath != null && file.localExists &&
                                 file.localIsTeleDriveManaged && file.telegramRemoteFileId != null &&
@@ -65,7 +65,7 @@ fun StorageAuditDialog(
                             Text(it, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
                         }
                     }
-                    Text("Original files outside TeleDrive-managed folders and Telegram cloud backups will be preserved.")
+                    Text("Original files outside Pranto Drive-managed folders and Telegram cloud backups will be preserved.")
                 }
             },
             confirmButton = {
@@ -105,7 +105,7 @@ fun StorageAuditDialog(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    "Every source-code checkout that uses this same profile path shares its database, settings and TDLib session. Compare this path with the other TeleDrive windows you have launched.",
+                    "Every source-code checkout that uses this same profile path shares its database, settings and TDLib session. Compare this path with the other Pranto Drive windows you have launched.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 AuditPath(
@@ -161,7 +161,7 @@ fun StorageAuditDialog(
                                 when {
                                     file.localPath == null -> "No local path recorded"
                                     !file.localExists -> "Recorded path is missing"
-                                    file.localIsTeleDriveManaged -> "TeleDrive-managed copy exists · ${file.localSizeBytes?.let { Formatters.bytes(it) }.orEmpty()}"
+                                    file.localIsTeleDriveManaged -> "Pranto Drive-managed copy exists · ${file.localSizeBytes?.let { Formatters.bytes(it) }.orEmpty()}"
                                     else -> "External/original file exists · ${file.localSizeBytes?.let { Formatters.bytes(it) }.orEmpty()} · protected from Free up space"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -199,9 +199,9 @@ fun StorageAuditDialog(
                                 )
                                 Text(
                                     if (file.tdlibPathIsTeleDriveManaged) {
-                                        "Ownership: inside a TeleDrive-managed storage folder"
+                                        "Ownership: inside a Pranto Drive-managed storage folder"
                                     } else {
-                                        "Ownership: outside TeleDrive-managed folders — protected"
+                                        "Ownership: outside Pranto Drive-managed folders — protected"
                                     },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (file.tdlibPathIsTeleDriveManaged) MaterialTheme.colorScheme.primary
@@ -246,7 +246,7 @@ fun StorageAuditDialog(
                     Text(snapshot.error, color = MaterialTheme.colorScheme.error)
                 }
                 Text(
-                    "Safety rule: Free up space only removes paths inside TeleDrive-managed folders. Original files selected from other drives or folders are preserved.",
+                    "Safety rule: Free up space only removes paths inside Pranto Drive-managed folders. Original files selected from other drives or folders are preserved.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

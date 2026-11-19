@@ -93,7 +93,7 @@ class TransferRepositoryImpl(
      * the saved path lives on the file's row (and split completion even clears the
      * transfer row's copy) — so a finished row would give the UI's open-with action
      * nothing to point at. Resolve it from the file row via fileId, the same source
-     * "Open in TeleDrive" already trusts.
+     * "Open in Pranto Drive" already trusts.
      */
     private suspend fun List<TransferTask>.withFileLocalPaths(): List<TransferTask> {
         val fileIds = mapNotNull { task ->

@@ -1,6 +1,6 @@
 <resources>
     <!-- App-wide -->
-    <string name="app_name">TeleDrive</string>
+    <string name="app_name">Pranto Drive</string>
     <string name="app_backed_up">已备份</string>
     <string name="app_drive_recreated">你的云端硬盘在 Telegram 中已被删除，因此创建了一个新的空硬盘</string>
     <string name="app_no_results">无结果</string>
@@ -120,8 +120,8 @@
 
     <!-- App lock -->
     <string name="lock_no_screen_lock">此设备不支持屏幕锁定，正在解锁。</string>
-    <string name="lock_prompt_title">解锁 TeleDrive</string>
-    <string name="lock_screen_title">TeleDrive 已锁定</string>
+    <string name="lock_prompt_title">解锁 Pranto Drive</string>
+    <string name="lock_screen_title">Pranto Drive 已锁定</string>
     <string name="lock_too_many_attempts">尝试次数过多，请稍后再试。</string>
     <string name="lock_unlock">解锁</string>
     <string name="session_broken_action">重新登录</string>
@@ -148,7 +148,7 @@
     <string name="onboarding_api_id">API ID</string>
     <string name="onboarding_api_id_number">API ID 必须是数字</string>
     <string name="onboarding_choose_api_dev_tools">选择 &quot;API development tools&quot; 并创建一个应用，名称随意。</string>
-    <string name="onboarding_copy_api_keys">把 api_id 和 api_hash 复制到 TeleDrive。</string>
+    <string name="onboarding_copy_api_keys">把 api_id 和 api_hash 复制到 Pranto Drive。</string>
     <string name="onboarding_get_api_keys">获取你的 API 密钥</string>
     <string name="onboarding_my_telegram_org">my.telegram.org</string>
     <string name="onboarding_one_time_setup_keys">一次性设置。你的密钥留在本机，并已加密。</string>
@@ -212,7 +212,7 @@
     <string name="onboarding_allow_media">允许访问媒体文件</string>
     <string name="onboarding_files_access_covers_documents">所有文件访问权限涵盖文档、下载和 SD 卡文件夹，没有它这些文件夹就无法备份。</string>
     <string name="onboarding_storage_access">存储访问权限</string>
-    <string name="onboarding_teledrive_needs_media_files">TeleDrive 需要你的媒体和文件权限才能备份它们，还需要通知权限以显示传输进度。</string>
+    <string name="onboarding_teledrive_needs_media_files">Pranto Drive 需要你的媒体和文件权限才能备份它们，还需要通知权限以显示传输进度。</string>
 
     <!-- Onboarding: drive setup -->
     <string name="onboarding_channel_files_in_channel">此频道中有 %1$d 个文件</string>
@@ -221,7 +221,7 @@
     <string name="onboarding_drive_ready">你的云端硬盘已就绪</string>
     <string name="onboarding_looking_for_drives">正在查找你的云端硬盘</string>
     <string name="onboarding_no_drive_yet">无法创建云端硬盘</string>
-    <string name="onboarding_pick_drive_desc">你的账号中已有 TeleDrive 频道，请选择要在此设备上打开的那个；你可以在设置中切换或添加更多。</string>
+    <string name="onboarding_pick_drive_desc">你的账号中已有 Pranto Drive 频道，请选择要在此设备上打开的那个；你可以在设置中切换或添加更多。</string>
     <string name="onboarding_single_drive_desc">文件将备份到你账号上的这个私密频道，之后可以在设置中添加更多云端硬盘。</string>
 
     <!-- Onboarding: backup setup -->
@@ -561,7 +561,7 @@
 
     <!-- Drives and channels -->
     <string name="channels_channel_container">channel-container</string>
-    <string name="channels_create_one_teledrive_store">创建一个频道，TeleDrive 就会把你的文件存放在那个私密频道中。</string>
+    <string name="channels_create_one_teledrive_store">创建一个频道，Pranto Drive 就会把你的文件存放在那个私密频道中。</string>
     <string name="channels_creates_private_channel_account">在你的账号上创建一个私密频道，名称用于区分不同的云端硬盘。</string>
     <string name="channels_creating_drive">正在创建云端硬盘</string>
     <string name="channels_delete_confirm_hint">输入 %1$s 以确认</string>
@@ -819,9 +819,9 @@
     <!-- Permissions -->
     <string name="permission_all_files_rationale">备份文档、下载和 SD 卡文件夹所需</string>
     <string name="permission_all_files_title">所有文件访问权限</string>
-    <string name="permission_battery_rationale">关闭 TeleDrive 后仍可继续上传和同步</string>
+    <string name="permission_battery_rationale">关闭 Pranto Drive 后仍可继续上传和同步</string>
     <string name="permission_battery_title">不限制电池使用</string>
-    <string name="permission_missing_message">未经授权，TeleDrive 无法读取你的%1$s。</string>
+    <string name="permission_missing_message">未经授权，Pranto Drive 无法读取你的%1$s。</string>
     <string name="permission_not_allowed">未授权 \u00b7 %1$s</string>
     <string name="permission_notifications_rationale">显示传输和备份进度</string>
     <string name="permission_notifications_title">通知</string>

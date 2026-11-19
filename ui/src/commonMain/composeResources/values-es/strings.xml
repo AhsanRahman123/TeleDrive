@@ -1,6 +1,6 @@
 <resources>
     <!-- App-wide -->
-    <string name="app_name">TeleDrive</string>
+    <string name="app_name">Pranto Drive</string>
     <string name="app_backed_up">Respaldado</string>
     <string name="app_drive_recreated">Tu unidad se eliminó en Telegram, así que se creó una nueva vacía</string>
     <string name="app_no_results">Sin resultados</string>
@@ -132,8 +132,8 @@
 
     <!-- App lock -->
     <string name="lock_no_screen_lock">El bloqueo de pantalla no está disponible en este dispositivo. Se desbloqueará.</string>
-    <string name="lock_prompt_title">Desbloquear TeleDrive</string>
-    <string name="lock_screen_title">TeleDrive está bloqueado</string>
+    <string name="lock_prompt_title">Desbloquear Pranto Drive</string>
+    <string name="lock_screen_title">Pranto Drive está bloqueado</string>
     <string name="lock_too_many_attempts">Demasiados intentos. Inténtalo más tarde.</string>
     <string name="lock_unlock">Desbloquear</string>
     <string name="session_broken_action">Iniciar sesión de nuevo</string>
@@ -160,7 +160,7 @@
     <string name="onboarding_api_id">ID de la API</string>
     <string name="onboarding_api_id_number">El ID de la API debe ser un número</string>
     <string name="onboarding_choose_api_dev_tools">Elige &quot;API development tools&quot; y crea una aplicación. Cualquier nombre sirve.</string>
-    <string name="onboarding_copy_api_keys">Copia api_id y api_hash en TeleDrive.</string>
+    <string name="onboarding_copy_api_keys">Copia api_id y api_hash en Pranto Drive.</string>
     <string name="onboarding_get_api_keys">Obtén tus claves de la API</string>
     <string name="onboarding_my_telegram_org">my.telegram.org</string>
     <string name="onboarding_one_time_setup_keys">Configuración única. Tus claves se quedan en este dispositivo, cifradas.</string>
@@ -224,7 +224,7 @@
     <string name="onboarding_allow_media">Permitir acceso a multimedia</string>
     <string name="onboarding_files_access_covers_documents">El acceso a todos los archivos abarca documentos, descargas y carpetas de la tarjeta SD. Sin él, esas carpetas no se pueden respaldar.</string>
     <string name="onboarding_storage_access">Acceso al almacenamiento</string>
-    <string name="onboarding_teledrive_needs_media_files">TeleDrive necesita tus archivos multimedia y tus archivos para respaldarlos, y notificaciones para mostrar el progreso de las transferencias.</string>
+    <string name="onboarding_teledrive_needs_media_files">Pranto Drive necesita tus archivos multimedia y tus archivos para respaldarlos, y notificaciones para mostrar el progreso de las transferencias.</string>
 
     <!-- Onboarding: drive setup -->
     <string name="onboarding_channel_files_in_channel">%1$d archivos en este canal</string>
@@ -233,7 +233,7 @@
     <string name="onboarding_drive_ready">Tu unidad está lista</string>
     <string name="onboarding_looking_for_drives">Buscando tus unidades</string>
     <string name="onboarding_no_drive_yet">No se pudo crear ninguna unidad</string>
-    <string name="onboarding_pick_drive_desc">Tu cuenta ya tiene canales de TeleDrive. Elige el que quieras abrir en este dispositivo; puedes cambiar o agregar más en Ajustes.</string>
+    <string name="onboarding_pick_drive_desc">Tu cuenta ya tiene canales de Pranto Drive. Elige el que quieras abrir en este dispositivo; puedes cambiar o agregar más en Ajustes.</string>
     <string name="onboarding_single_drive_desc">Los archivos se respaldan en este canal privado de tu cuenta. Puedes agregar más unidades después en Ajustes.</string>
 
     <!-- Onboarding: backup setup -->
@@ -573,7 +573,7 @@
 
     <!-- Drives and channels -->
     <string name="channels_channel_container">channel-container</string>
-    <string name="channels_create_one_teledrive_store">Crea una y TeleDrive guardará tus archivos en ese canal privado.</string>
+    <string name="channels_create_one_teledrive_store">Crea una y Pranto Drive guardará tus archivos en ese canal privado.</string>
     <string name="channels_creates_private_channel_account">Crea un canal privado en tu cuenta. El nombre te ayuda a distinguir tus unidades.</string>
     <string name="channels_creating_drive">Creando unidad</string>
     <string name="channels_delete_confirm_hint">Escribe %1$s para confirmar</string>
@@ -834,9 +834,9 @@
     <!-- Permissions -->
     <string name="permission_all_files_rationale">Necesario para respaldar documentos, descargas y carpetas de la tarjeta SD</string>
     <string name="permission_all_files_title">Acceso a todos los archivos</string>
-    <string name="permission_battery_rationale">Mantiene las subidas y la sincronización en marcha después de cerrar TeleDrive</string>
+    <string name="permission_battery_rationale">Mantiene las subidas y la sincronización en marcha después de cerrar Pranto Drive</string>
     <string name="permission_battery_title">Uso de batería sin restricciones</string>
-    <string name="permission_missing_message">TeleDrive no puede leer tus %1$s sin permiso.</string>
+    <string name="permission_missing_message">Pranto Drive no puede leer tus %1$s sin permiso.</string>
     <string name="permission_not_allowed">No permitido \u00b7 %1$s</string>
     <string name="permission_notifications_rationale">Muestra el progreso de las transferencias y los respaldos</string>
     <string name="permission_notifications_title">Notificaciones</string>

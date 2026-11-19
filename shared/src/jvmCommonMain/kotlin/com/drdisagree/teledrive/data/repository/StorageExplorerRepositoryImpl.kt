@@ -97,7 +97,7 @@ class StorageExplorerRepositoryImpl(
 
     /**
      * The private app data directory contains files/, cache/, databases/ and shared_prefs/.
-     * External app-specific folders and public TeleDrive downloads are added only when they do
+     * External app-specific folders and public Pranto Drive downloads are added only when they do
      * not overlap a directory already being scanned. This prevents double counting.
      */
     private fun buildRootSpecs(downloadRoot: File?): List<RootSpec> {
@@ -147,7 +147,7 @@ class StorageExplorerRepositoryImpl(
                 add(
                     RootSpec(
                         id = DOWNLOADS_ROOT_ID,
-                        name = "TeleDrive downloads",
+                        name = "Pranto Drive downloads",
                         file = directory,
                         kind = RootKind.DOWNLOADS,
                         isDirectory = true
@@ -535,7 +535,7 @@ class StorageExplorerRepositoryImpl(
         CATEGORY_LOCAL_COPIES ->
             "Use Free up space to verify the Telegram backup and preserve files marked Available Offline."
         CATEGORY_DATABASE ->
-            "TeleDrive's database is protected. Deleting it can break the app's local index."
+            "Pranto Drive's database is protected. Deleting it can break the app's local index."
         CATEGORY_SETTINGS ->
             "App preferences and credentials are protected."
         CATEGORY_APP_PACKAGE ->

@@ -980,7 +980,7 @@ class FilesViewModel(
                         val summary = buildString {
                             append("Removed ")
                             append(cleanup.deletedCount)
-                            append(" TeleDrive-managed local copies.")
+                            append(" Pranto Drive-managed local copies.")
                             if (cleanup.keptOffline > 0) {
                                 append(" Kept ")
                                 append(cleanup.keptOffline)
@@ -989,7 +989,7 @@ class FilesViewModel(
                             if (cleanup.keptUnmanaged > 0) {
                                 append(" Preserved ")
                                 append(cleanup.keptUnmanaged)
-                                append(" external/original locations because TeleDrive does not own those files.")
+                                append(" external/original locations because Pranto Drive does not own those files.")
                             }
                             if (cleanup.unverifiedCount > 0) {
                                 append(" Left ")
@@ -1083,14 +1083,14 @@ class FilesViewModel(
                 add(StorageAuditRoot("Settings file", File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").absolutePath, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").isFile, false, File(File(storagePaths.filesDir, "datastore"), "settings.preferences_pb").length()))
                 add(StorageAuditRoot("TDLib database", File(tdlibRoot, "db").absolutePath, File(tdlibRoot, "db").isDirectory, true))
                 add(StorageAuditRoot("TDLib local file cache", tdlibFiles.absolutePath, tdlibFiles.isDirectory, true))
-                add(StorageAuditRoot("TeleDrive-owned upload copies", File(storagePaths.filesDir, "local-copies").absolutePath, File(storagePaths.filesDir, "local-copies").isDirectory, true))
+                add(StorageAuditRoot("Pranto Drive-owned upload copies", File(storagePaths.filesDir, "local-copies").absolutePath, File(storagePaths.filesDir, "local-copies").isDirectory, true))
                 add(StorageAuditRoot("App cache", storagePaths.cacheDir.absolutePath, storagePaths.cacheDir.isDirectory, true))
                 add(StorageAuditRoot("Download destination", downloadsRoot.absolutePath, downloadsRoot.isDirectory, true))
             }
             val managedRoots = roots
                 .filter { it.label in setOf(
                     "TDLib local file cache",
-                    "TeleDrive-owned upload copies",
+                    "Pranto Drive-owned upload copies",
                     "Download destination"
                 ) }
                 .map { File(it.path) } +

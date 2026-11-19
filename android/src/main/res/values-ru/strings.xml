@@ -1,6 +1,6 @@
 <resources>
     <!-- App-wide -->
-    <string name="app_name">TeleDrive</string>
+    <string name="app_name">Pranto Drive</string>
 
     <!-- Shared labels and dialogs -->
     <string name="common_actions">Действия</string>
@@ -29,7 +29,7 @@
     <string name="transfer_error_save_failed">Не удалось сохранить скачанный файл</string>
     <string name="transfer_error_verify_failed">Скачанный файл не совпадает с оригиналом. Попробуйте скачать его снова.</string>
     <string name="transfer_error_destination_full">Недостаточно свободного места в папке загрузок. Нужно %1$s.</string>
-    <string name="transfer_error_cache_full">Недостаточно свободного места для временных файлов TeleDrive. Нужно %1$s.</string>
+    <string name="transfer_error_cache_full">Недостаточно свободного места для временных файлов Pranto Drive. Нужно %1$s.</string>
     <string name="transfer_error_upload_ended">Загрузка неожиданно завершилась</string>
     <string name="transfer_error_upload_stalled">Загрузка перестала отвечать</string>
 
