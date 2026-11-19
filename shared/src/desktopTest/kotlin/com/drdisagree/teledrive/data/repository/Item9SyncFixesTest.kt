@@ -67,9 +67,12 @@ class Item9SyncFixesTest {
     fun `a local-only file defers its publish instead of sealing it as published`() = runBlocking {
         files.upsert(file("local1", null).copy(pendingPublish = true))
 
+        // The drain reports not-drained (a deferred row remains, so the
+        // scheduler will retry after the upload lands) — and, critically,
+        // it returns at all instead of spinning on the deferred batch.
         val drained = drainer().drain(isStopped = { false })
 
-        assertTrue(drained)
+        assertFalse(drained)
         assertTrue(files.byId("local1")!!.pendingPublish)
         assertNull(files.byId("local1")!!.remoteBase)
     }
