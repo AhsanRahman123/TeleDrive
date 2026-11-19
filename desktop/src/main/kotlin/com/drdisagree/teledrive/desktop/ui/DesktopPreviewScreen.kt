@@ -1632,6 +1632,7 @@ private fun PreviewPane(
                 mrl = mediaMrl,
                 isAudio = mediaIsAudio,
                 mediaId = displayedFile.id,
+                mediaTitle = displayedFile.name,
                 preferredAudioLanguage = preferredAudioLanguage,
                 preferredSubtitleLanguage = preferredSubtitleLanguage,
                 onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,

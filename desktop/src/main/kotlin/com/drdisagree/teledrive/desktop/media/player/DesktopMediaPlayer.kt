@@ -63,6 +63,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -100,6 +101,7 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -187,7 +189,8 @@ internal fun DesktopMediaPlayer(
     onControlsVisibilityChange: (Boolean) -> Unit = {},
     onDelete: () -> Unit = {},
     backgroundPlayback: Boolean = false,
-    onBackgroundPlaybackChange: (Boolean) -> Unit = {}
+    onBackgroundPlaybackChange: (Boolean) -> Unit = {},
+    mediaTitle: String = ""
 ) {
     // Subtitle appearance: freetype options are LibVLC instance options, so a
     // non-default appearance gets its own factory and the player is recreated
@@ -1353,11 +1356,14 @@ internal fun DesktopMediaPlayer(
         contentAlignment = Alignment.Center
     ) {
         if (isAudio) {
-            Icon(
-                imageVector = Icons.Filled.Audiotrack,
-                contentDescription = null,
-                modifier = Modifier.size(96.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            AudioStage(
+                player = player,
+                mediaId = mediaId,
+                fallbackTitle = mediaTitle.ifBlank {
+                    queueItems.firstOrNull { it.id == currentQueueItemId }?.name
+                        ?: queueItems.firstOrNull()?.name
+                        ?: ""
+                }
             )
         } else {
             frame?.let { current ->
@@ -2567,3 +2573,98 @@ private data class StyleRestart(
     val positionMs: Long,
     val wasPlaying: Boolean
 )
+
+
+/**
+ * Desktop port of Android's AudioStage: album artwork (the file's thumbnail,
+ * which for audio is the embedded cover) above title / artist / album lines
+ * read from the playing media's metadata, falling back to the file name.
+ * Mouse/keyboard behaviour is unchanged — this is layout only; the shared
+ * control bar below remains the transport.
+ */
+@Composable
+private fun AudioStage(
+    player: MediaPlayer,
+    mediaId: String,
+    fallbackTitle: String
+) {
+    var metaTitle by remember(mediaId) { mutableStateOf("") }
+    var artist by remember(mediaId) { mutableStateOf("") }
+    var album by remember(mediaId) { mutableStateOf("") }
+    LaunchedEffect(player, mediaId) {
+        // Metadata lands shortly after playback starts; poll briefly for it.
+        repeat(12) {
+            val meta = runCatching { player.media().meta() }.getOrNull()
+            if (meta != null) {
+                metaTitle = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.TITLE) }
+                    .getOrNull().orEmpty()
+                artist = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.ARTIST) }
+                    .getOrNull().orEmpty()
+                album = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.ALBUM) }
+                    .getOrNull().orEmpty()
+                if (metaTitle.isNotBlank() || artist.isNotBlank()) return@LaunchedEffect
+            }
+            delay(500)
+        }
+    }
+    var artworkFailed by remember(mediaId) { mutableStateOf(false) }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.padding(horizontal = 24.dp)
+    ) {
+        Surface(
+            modifier = Modifier.size(260.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            if (!artworkFailed) {
+                coil3.compose.AsyncImage(
+                    model = com.drdisagree.teledrive.core.media.ThumbnailModel(mediaId),
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = { artworkFailed = true }
+                )
+            } else {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Filled.Audiotrack,
+                        contentDescription = null,
+                        modifier = Modifier.size(96.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        Text(
+            text = metaTitle.ifBlank { fallbackTitle },
+            style = MaterialTheme.typography.titleLarge,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+        if (artist.isNotBlank()) {
+            Text(
+                text = artist,
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White.copy(alpha = 0.75f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+        }
+        if (album.isNotBlank()) {
+            Text(
+                text = album,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.6f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
