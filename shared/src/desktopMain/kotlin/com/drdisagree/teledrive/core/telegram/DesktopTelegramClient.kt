@@ -1264,7 +1264,7 @@ class DesktopTelegramClient(
 
         // Subscribe before resolving/adding the file so the first UpdateFile cannot be lost.
         subscribed.await()
-        val file: TdApi.File = remoteFile(remoteFileId)
+        val file: TdApi.File = remoteFile(remoteFileId, chatId, messageId)
         val fileId = file.id
         downloadedFileId.complete(fileId)
 
@@ -1397,11 +1397,71 @@ class DesktopTelegramClient(
     }
 
     /** Telegram remote ids can identify documents, audio, video, stickers or photos. */
-    private suspend fun remoteFile(remoteFileId: String): TdApi.File =
-        send(TdApi.GetRemoteFile(remoteFileId, null))
+    private suspend fun remoteFile(remoteFileId: String): TdApi.File {
+        // Let TDLib resolve the typed remote ID first (document, audio, video, photo, sticker, etc.).
+        try {
+            return send(TdApi.GetRemoteFile(remoteFileId, null))
+        } catch (genericFailure: TelegramException) {
+            // Older TDLib paths may still require an explicit media type. Retain the typed
+            // fallbacks that were already used by the Android preview build.
+            val fileTypes = listOf(
+                TdApi.FileTypeDocument(),
+                TdApi.FileTypeVideo(),
+                TdApi.FileTypeAudio(),
+                TdApi.FileTypePhoto(),
+                TdApi.FileTypeAnimation(),
+                TdApi.FileTypeSticker(),
+                TdApi.FileTypeVideoNote(),
+                TdApi.FileTypeVoiceNote()
+            )
+            for (fileType in fileTypes) {
+                try {
+                    return send(TdApi.GetRemoteFile(remoteFileId, fileType))
+                } catch (_: TelegramException) {
+                    // Try the next known TDLib file type.
+                }
+            }
+            throw genericFailure
+        }
+    }
 
     override suspend fun resolveFile(remoteFileId: String): TelegramFileInfo =
         remoteFile(remoteFileId).toInfo()
+
+    private suspend fun remoteFile(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ): TdApi.File {
+        // A managed download must reference the exact file object attached to its source message.
+        // Resolving the stored remote ID first can produce a valid TDLib file ID that AddFileToDownloads
+        // then rejects as unrelated to the supplied chat/message ("Message has no specified file").
+        if (chatId != null && messageId != null) {
+            val messageFile = try {
+                send<TdApi.Message>(TdApi.GetMessage(chatId, messageId)).mediaFile()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+            if (messageFile != null && !messageFile.remote?.id.isNullOrBlank()) {
+                SafeLog.d(
+                    TAG,
+                    "Resolved download file from source message chat=$chatId message=$messageId"
+                )
+                return messageFile
+            }
+        }
+
+        // Legacy records may not retain source-message identifiers. Resolve those by remote ID.
+        return remoteFile(remoteFileId)
+    }
+
+    override suspend fun resolveFile(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ): TelegramFileInfo = remoteFile(remoteFileId, chatId, messageId).toInfo()
 
     override suspend fun getFileInfo(fileId: Int): TelegramFileInfo =
         send(TdApi.GetFile(fileId)).toInfo()
@@ -1423,7 +1483,7 @@ class DesktopTelegramClient(
         messageId: Long,
         priority: Int
     ) {
-        val file = remoteFile(remoteFileId)
+        val file = remoteFile(remoteFileId, chatId, messageId)
         send<TdApi.File>(
             TdApi.AddFileToDownloads(file.id, chatId, messageId, priority.coerceIn(1, 32))
         )

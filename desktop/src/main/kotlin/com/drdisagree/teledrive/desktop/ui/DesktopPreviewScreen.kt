@@ -1081,7 +1081,12 @@ private fun PreviewPane(
         streamedContent?.let { media ->
             streamServer.serve(displayedFile.name, displayedFile.mimeType) {
                 if (media.parts.isEmpty()) {
-                    TelegramMediaByteSource(telegramClient, media.remoteFileId)
+                    TelegramMediaByteSource(
+                        telegramClient,
+                        media.remoteFileId,
+                        media.chatId,
+                        media.messageId
+                    )
                 } else {
                     PartedMediaByteSource(
                         telegramClient = telegramClient,
@@ -1727,7 +1732,12 @@ private fun StreamState(
         Button(onClick = {
             val url = streamServer.serve(file.name, file.mimeType) {
                 if (content.parts.isEmpty()) {
-                    TelegramMediaByteSource(telegramClient, content.remoteFileId)
+                    TelegramMediaByteSource(
+                        telegramClient,
+                        content.remoteFileId,
+                        content.chatId,
+                        content.messageId
+                    )
                 } else {
                     PartedMediaByteSource(
                         telegramClient = telegramClient,
