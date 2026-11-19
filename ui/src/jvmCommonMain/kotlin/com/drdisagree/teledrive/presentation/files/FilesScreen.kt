@@ -184,7 +184,11 @@ import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalFolderPicker
+import com.drdisagree.teledrive.presentation.platform.LocalInAppFolderPicker
+import com.drdisagree.teledrive.presentation.platform.LocalInAppMultiFilePicker
 import com.drdisagree.teledrive.presentation.platform.LocalMultiFilePicker
+import com.drdisagree.teledrive.presentation.platform.LocalNativeFolderPicker
+import com.drdisagree.teledrive.presentation.platform.LocalNativeMultiFilePicker
 import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.presentation.platform.PickResult
 import com.drdisagree.teledrive.presentation.preview.PreviewSequence
@@ -215,7 +219,9 @@ import com.drdisagree.teledrive.resources.files_view_list
 import com.drdisagree.teledrive.resources.files_view_grid
 import com.drdisagree.teledrive.resources.files_change_view
 import com.drdisagree.teledrive.resources.files_add_files
+import com.drdisagree.teledrive.resources.files_add_files_windows
 import com.drdisagree.teledrive.resources.files_add_folder
+import com.drdisagree.teledrive.resources.files_add_folder_windows
 import com.drdisagree.teledrive.resources.files_archive
 import com.drdisagree.teledrive.resources.files_back_import_appear
 import com.drdisagree.teledrive.resources.files_copy
@@ -440,6 +446,37 @@ fun FilesScreen(
     val folderUploadPicker = LocalFolderPicker.current
     val onPickUploadFolder = {
         folderUploadPicker.pick { result ->
+            if (result is PickResult.Picked) viewModel.importAndUpload(listOf(result.path))
+        }
+    }
+    // Explicit picker variants: on platforms with two pickers (desktop) the
+    // create menu lists each upload action for the built-in picker and for
+    // the native Windows picker separately. The locals are null everywhere
+    // else (Android), where the menu keeps its classic two upload actions.
+    val inAppUploadPicker = LocalInAppMultiFilePicker.current
+    val inAppFolderUploadPicker = LocalInAppFolderPicker.current
+    val nativeUploadPicker = LocalNativeMultiFilePicker.current
+    val nativeFolderUploadPicker = LocalNativeFolderPicker.current
+    val showPickerChoice = LocalPlatformCapabilities.current.supportsExplicitPickerChoice &&
+        inAppUploadPicker != null && inAppFolderUploadPicker != null &&
+        nativeUploadPicker != null && nativeFolderUploadPicker != null
+    val onPickUploadsInApp = {
+        inAppUploadPicker?.pick { references ->
+            if (references.isNotEmpty()) viewModel.importAndUpload(references)
+        }
+    }
+    val onPickUploadFolderInApp = {
+        inAppFolderUploadPicker?.pick { result ->
+            if (result is PickResult.Picked) viewModel.importAndUpload(listOf(result.path))
+        }
+    }
+    val onPickUploadsNative = {
+        nativeUploadPicker?.pick { references ->
+            if (references.isNotEmpty()) viewModel.importAndUpload(references)
+        }
+    }
+    val onPickUploadFolderNative = {
+        nativeFolderUploadPicker?.pick { result ->
             if (result is PickResult.Picked) viewModel.importAndUpload(listOf(result.path))
         }
     }
@@ -974,27 +1011,76 @@ fun FilesScreen(
                                 }
                             }
                         ) {
-                            FloatingActionButtonMenuItem(
-                                onClick = {
-                                    showAddMenu = false
-                                    onPickUploads()
-                                },
-                                icon = { Icon(Icons.Filled.Upload, contentDescription = null) },
-                                text = { Text(stringResource(Res.string.files_add_files)) }
-                            )
-                            FloatingActionButtonMenuItem(
-                                onClick = {
-                                    showAddMenu = false
-                                    onPickUploadFolder()
-                                },
-                                icon = {
-                                    Icon(
-                                        Icons.Filled.DriveFolderUpload,
-                                        contentDescription = null
-                                    )
-                                },
-                                text = { Text(stringResource(Res.string.files_add_folder)) }
-                            )
+                            if (showPickerChoice) {
+                                FloatingActionButtonMenuItem(
+                                    onClick = {
+                                        showAddMenu = false
+                                        onPickUploadsInApp()
+                                    },
+                                    icon = { Icon(Icons.Filled.Upload, contentDescription = null) },
+                                    text = { Text(stringResource(Res.string.files_add_files)) }
+                                )
+                                FloatingActionButtonMenuItem(
+                                    onClick = {
+                                        showAddMenu = false
+                                        onPickUploadFolderInApp()
+                                    },
+                                    icon = {
+                                        Icon(
+                                            Icons.Filled.DriveFolderUpload,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    text = { Text(stringResource(Res.string.files_add_folder)) }
+                                )
+                                FloatingActionButtonMenuItem(
+                                    onClick = {
+                                        showAddMenu = false
+                                        onPickUploadsNative()
+                                    },
+                                    icon = { Icon(Icons.Filled.Upload, contentDescription = null) },
+                                    text = {
+                                        Text(stringResource(Res.string.files_add_files_windows))
+                                    }
+                                )
+                                FloatingActionButtonMenuItem(
+                                    onClick = {
+                                        showAddMenu = false
+                                        onPickUploadFolderNative()
+                                    },
+                                    icon = {
+                                        Icon(
+                                            Icons.Filled.DriveFolderUpload,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    text = {
+                                        Text(stringResource(Res.string.files_add_folder_windows))
+                                    }
+                                )
+                            } else {
+                                FloatingActionButtonMenuItem(
+                                    onClick = {
+                                        showAddMenu = false
+                                        onPickUploads()
+                                    },
+                                    icon = { Icon(Icons.Filled.Upload, contentDescription = null) },
+                                    text = { Text(stringResource(Res.string.files_add_files)) }
+                                )
+                                FloatingActionButtonMenuItem(
+                                    onClick = {
+                                        showAddMenu = false
+                                        onPickUploadFolder()
+                                    },
+                                    icon = {
+                                        Icon(
+                                            Icons.Filled.DriveFolderUpload,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    text = { Text(stringResource(Res.string.files_add_folder)) }
+                                )
+                            }
                             FloatingActionButtonMenuItem(
                                 onClick = {
                                     showAddMenu = false

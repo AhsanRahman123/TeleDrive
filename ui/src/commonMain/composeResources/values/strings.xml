@@ -348,6 +348,8 @@
     <string name="files_view_details">Details</string>
     <string name="files_add_files">Upload files</string>
     <string name="files_add_folder">Upload folder</string>
+    <string name="files_add_files_windows">Upload files (Windows)</string>
+    <string name="files_add_folder_windows">Upload folder (Windows)</string>
     <string name="files_archive">Archive</string>
     <string name="files_back_import_appear">Files you back up or import appear here.</string>
     <string name="files_copy">Copy to…</string>
