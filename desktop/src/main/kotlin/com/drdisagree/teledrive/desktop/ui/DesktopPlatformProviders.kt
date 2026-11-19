@@ -27,6 +27,10 @@ import com.drdisagree.teledrive.presentation.platform.LocalFilePicker
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalFolderPicker
+import com.drdisagree.teledrive.presentation.platform.LocalInAppFolderPicker
+import com.drdisagree.teledrive.presentation.platform.LocalInAppMultiFilePicker
+import com.drdisagree.teledrive.presentation.platform.LocalNativeFolderPicker
+import com.drdisagree.teledrive.presentation.platform.LocalNativeMultiFilePicker
 import com.drdisagree.teledrive.presentation.platform.LocalMultiFilePicker
 import com.drdisagree.teledrive.presentation.platform.LocalPermissionRequester
 import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
@@ -68,12 +72,28 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
     var pendingMultiPick by remember {
         mutableStateOf<((List<String>) -> Unit)?>(null)
     }
+    var pendingFolderPick by remember {
+        mutableStateOf<((PickResult) -> Unit)?>(null)
+    }
     val urlOpener = remember {
         UrlOpener { url ->
             runCatching { Desktop.getDesktop().browse(URI(url)) }
         }
     }
-    val folderPicker = remember {
+    // Built-in picker variants: always the in-app Compose dialog, whatever
+    // the Settings preference says. The create menu offers these explicitly.
+    val inAppFilePicker = remember {
+        FilePicker { onPicked -> pendingSinglePick = onPicked }
+    }
+    val inAppMultiFilePicker = remember {
+        MultiFilePicker { onPicked -> pendingMultiPick = onPicked }
+    }
+    val inAppFolderPicker = remember {
+        FolderPicker { onPicked -> pendingFolderPick = onPicked }
+    }
+    // Native Windows picker variants: always the OS dialogs. The create
+    // menu offers these explicitly too.
+    val nativeFolderPicker = remember {
         FolderPicker { onPicked ->
             thread {
                 val chooser = JFileChooser().apply {
@@ -91,46 +111,45 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
             }
         }
     }
-    val filePicker = remember(useNativePicker) {
+    val nativeFilePicker = remember {
         FilePicker { onPicked ->
-            if (!useNativePicker) {
-                pendingSinglePick = onPicked
-            } else {
-                thread {
-                    val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
-                    DesktopPickerStore.lastFileDirectory()?.let { dialog.directory = it.absolutePath }
-                    dialog.isVisible = true
-                    val file = dialog.file
-                    val result = if (file == null) {
-                        PickResult.Canceled
-                    } else {
-                        dialog.directory?.let { DesktopPickerStore.saveFileDirectory(File(it)) }
-                        PickResult.Picked(File(dialog.directory, file).absolutePath)
-                    }
-                    onPicked(result)
+            thread {
+                val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
+                DesktopPickerStore.lastFileDirectory()?.let { dialog.directory = it.absolutePath }
+                dialog.isVisible = true
+                val file = dialog.file
+                val result = if (file == null) {
+                    PickResult.Canceled
+                } else {
+                    dialog.directory?.let { DesktopPickerStore.saveFileDirectory(File(it)) }
+                    PickResult.Picked(File(dialog.directory, file).absolutePath)
                 }
+                onPicked(result)
             }
         }
     }
-    val multiFilePicker = remember(useNativePicker) {
+    val nativeMultiFilePicker = remember {
         MultiFilePicker { onPicked ->
-            if (!useNativePicker) {
-                pendingMultiPick = onPicked
-            } else {
-                thread {
-                    val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
-                    dialog.isMultipleMode = true
-                    DesktopPickerStore.lastFileDirectory()?.let { dialog.directory = it.absolutePath }
-                    dialog.isVisible = true
-                    val picked = dialog.files.orEmpty().map { it.absolutePath }
-                    if (picked.isNotEmpty()) {
-                        dialog.directory?.let { DesktopPickerStore.saveFileDirectory(File(it)) }
-                    }
-                    onPicked(picked)
+            thread {
+                val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
+                dialog.isMultipleMode = true
+                DesktopPickerStore.lastFileDirectory()?.let { dialog.directory = it.absolutePath }
+                dialog.isVisible = true
+                val picked = dialog.files.orEmpty().map { it.absolutePath }
+                if (picked.isNotEmpty()) {
+                    dialog.directory?.let { DesktopPickerStore.saveFileDirectory(File(it)) }
                 }
+                onPicked(picked)
             }
         }
     }
+    // The classic pickers follow the "Use Windows native file picker"
+    // setting — it stays the default for every entry point that does not
+    // choose a variant explicitly (the create menu does; Exclusions, the
+    // download-location setting and other flows do not).
+    val filePicker = if (useNativePicker) nativeFilePicker else inAppFilePicker
+    val multiFilePicker = if (useNativePicker) nativeMultiFilePicker else inAppMultiFilePicker
+    val folderPicker = if (useNativePicker) nativeFolderPicker else inAppFolderPicker
     val fileSharer = remember {
         FileSharer { paths, _, _ ->
             paths.firstOrNull()?.let { path ->
@@ -175,6 +194,10 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
         LocalFolderPicker provides folderPicker,
         LocalFilePicker provides filePicker,
         LocalMultiFilePicker provides multiFilePicker,
+        LocalInAppMultiFilePicker provides inAppMultiFilePicker,
+        LocalInAppFolderPicker provides inAppFolderPicker,
+        LocalNativeMultiFilePicker provides nativeMultiFilePicker,
+        LocalNativeFolderPicker provides nativeFolderPicker,
         LocalFileSharer provides fileSharer,
         LocalDeleteConsentLauncher provides deleteConsentLauncher,
         LocalPermissionRequester provides permissionRequester,
@@ -222,6 +245,26 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
             onCancel = {
                 pendingMultiPick = null
                 onPicked(emptyList())
+            }
+        )
+    }
+    pendingFolderPick?.let { onPicked ->
+        DesktopUploadPickerDialog(
+            mode = DesktopPickerMode.FOLDER,
+            multiSelect = false,
+            initialDirectory = pickerStartDirectory(folder = true),
+            onDirectoryChanged = { DesktopPickerStore.saveFolderDirectory(it) },
+            onPicked = { files ->
+                pendingFolderPick = null
+                val folder = files.firstOrNull()
+                onPicked(
+                    if (folder == null) PickResult.Canceled
+                    else PickResult.Picked(folder.absolutePath)
+                )
+            },
+            onCancel = {
+                pendingFolderPick = null
+                onPicked(PickResult.Canceled)
             }
         )
     }

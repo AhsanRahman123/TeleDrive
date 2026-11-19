@@ -22,4 +22,8 @@ class DesktopPlatformCapabilities : PlatformCapabilities {
     override val supportsDynamicColor: Boolean = false
 
     override val supportsMeteredTransfers: Boolean = false
+
+    // Desktop has both the built-in picker and the native Windows dialogs,
+    // so the create menu lists each upload action in both variants.
+    override val supportsExplicitPickerChoice: Boolean = true
 }

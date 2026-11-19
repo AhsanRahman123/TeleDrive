@@ -39,6 +39,19 @@ interface PlatformCapabilities {
      * so the toggle could never fire there and is hidden instead of dead.
      */
     val supportsMeteredTransfers: Boolean get() = true
+
+    /**
+     * Whether the platform offers two distinct upload pickers — a built-in
+     * one and the operating system's native one — and the create menu should
+     * therefore list each upload action in both variants explicitly.
+     * Desktop has both; Android has only its system picker, so its menu is
+     * unchanged. The explicit variants are provided through
+     * [LocalInAppMultiFilePicker], [LocalInAppFolderPicker],
+     * [LocalNativeMultiFilePicker] and [LocalNativeFolderPicker]; the
+     * classic pickers keep following the platform's default (on desktop,
+     * the "Use Windows native file picker" setting).
+     */
+    val supportsExplicitPickerChoice: Boolean get() = false
 }
 
 val LocalPlatformCapabilities = staticCompositionLocalOf<PlatformCapabilities> {
