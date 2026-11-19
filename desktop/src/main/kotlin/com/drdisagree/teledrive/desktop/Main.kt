@@ -54,6 +54,7 @@ import com.drdisagree.teledrive.desktop.resources.app_icon
 import com.drdisagree.teledrive.desktop.ui.FullscreenController
 import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.desktop.ui.ProvideDesktopPlatformActions
+import com.drdisagree.teledrive.desktop.window.WindowsCaptureBlocker
 import com.drdisagree.teledrive.desktop.window.WindowsTitleBar
 import com.drdisagree.teledrive.desktop.window.WindowsBorderlessFullscreenController
 import com.drdisagree.teledrive.desktop.window.WindowsF11Shortcut

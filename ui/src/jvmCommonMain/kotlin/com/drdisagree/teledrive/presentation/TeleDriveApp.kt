@@ -17,6 +17,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -41,7 +44,6 @@ import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -74,7 +76,6 @@ import androidx.navigation.NavHostController
 import androidx.navigation.toRoute
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.window.core.layout.WindowSizeClass
 import com.drdisagree.teledrive.core.common.NotificationDestinations
 import com.drdisagree.teledrive.core.files.PendingShare
 import com.drdisagree.teledrive.domain.model.AppLanguage
@@ -217,15 +218,13 @@ private fun MainScaffold(
     val isTopLevel = TopLevelDestination.entries.any { destination ->
         destination.matches(backStackEntry)
     }
-    val windowSizeClass = currentWindowAdaptiveInfoV2().windowSizeClass
     // Android intentionally keeps the floating bottom navigation in both orientations.
     // The adaptive width class can transiently report medium/expanded after the video
     // player forces an orientation change; switching to a rail here creates a mixed
-    // portrait layout. Desktop retains its existing adaptive navigation rail.
-    val useRail = !LocalAndroidLayout.current &&
-            windowSizeClass.isWidthAtLeastBreakpoint(
-                WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND
-            )
+    // portrait layout. Desktop always uses the rail: below the medium breakpoint the
+    // floating bar would only offer its four pinned destinations and leave Transfers,
+    // Trash and Collections unreachable, and the desktop window can be 480dp wide.
+    val useRail = !LocalAndroidLayout.current
 
     val startDestination: Route = if (onboardingComplete) Route.Home else Route.Onboarding
 
@@ -283,19 +282,23 @@ private fun MainScaffold(
                 .background(MaterialTheme.colorScheme.background)
         ) {
             NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-                TopLevelDestination.entries.forEach { destination ->
-                    val selected = destination.matches(backStackEntry)
-                    NavigationRailItem(
-                        selected = selected,
-                        onClick = { if (!selected) navigateTopLevel(navController, destination) },
-                        icon = {
-                            Icon(
-                                if (selected) destination.selectedIcon else destination.icon,
-                                contentDescription = stringResource(destination.labelRes)
-                            )
-                        },
-                        label = { Text(stringResource(destination.labelRes)) }
-                    )
+                // All ten destinations must stay reachable in short windows
+                // (the desktop minimum height is 600dp), so the rail scrolls.
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    TopLevelDestination.entries.forEach { destination ->
+                        val selected = destination.matches(backStackEntry)
+                        NavigationRailItem(
+                            selected = selected,
+                            onClick = { if (!selected) navigateTopLevel(navController, destination) },
+                            icon = {
+                                Icon(
+                                    if (selected) destination.selectedIcon else destination.icon,
+                                    contentDescription = stringResource(destination.labelRes)
+                                )
+                            },
+                            label = { Text(stringResource(destination.labelRes)) }
+                        )
+                    }
                 }
             }
             AppNavHost(
