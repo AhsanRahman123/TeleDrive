@@ -542,6 +542,8 @@
     <string name="player_scaling">Scaling</string>
     <string name="player_subtitle_appearance">Subtitle appearance and position</string>
     <string name="player_video_scale">Video scale</string>
+    <string name="player_more_actions">More player actions</string>
+    <string name="player_queue">Queue</string>
     <string name="player_resize_mode">Resize mode</string>
     <string name="player_resize_fit">Fit</string>
     <string name="player_resize_zoom">Zoom</string>

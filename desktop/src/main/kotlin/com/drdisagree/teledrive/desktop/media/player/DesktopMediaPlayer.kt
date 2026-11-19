@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.Forward10
@@ -102,6 +104,8 @@ import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.player_audio_track
+import com.drdisagree.teledrive.resources.player_more_actions
+import com.drdisagree.teledrive.resources.player_queue
 import com.drdisagree.teledrive.resources.player_resize_fill
 import com.drdisagree.teledrive.resources.player_resize_fit
 import com.drdisagree.teledrive.resources.player_resize_mode
@@ -1532,6 +1536,7 @@ private fun PlayerControlsBar(
     var showAudioMenu by remember { mutableStateOf(false) }
     var showSubtitleMenu by remember { mutableStateOf(false) }
     var showScaleMenu by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
     var showQueueMenu by remember { mutableStateOf(false) }
     var showSleepMenu by remember { mutableStateOf(false) }
     var showCustomSleepDialog by remember { mutableStateOf(false) }
@@ -1674,25 +1679,84 @@ private fun PlayerControlsBar(
             volumeSliderActive,
             brightnessSliderActive,
             subtitleSettingsOpen,
-            showScaleMenu
+            showScaleMenu,
+            showMoreMenu
         ) {
             onControlsKeepVisible(
                 showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
                     showQueueMenu || showSleepMenu || showCustomSleepDialog ||
                     volumeSliderActive || brightnessSliderActive || subtitleSettingsOpen ||
-                    showScaleMenu
+                    showScaleMenu || showMoreMenu
             )
         }
         DisposableEffect(Unit) {
             onDispose { onControlsKeepVisible(false) }
         }
 
-        FlowRow(
+        // Menu contents shared between the wide control row's own menus and the
+        // narrow row's "More" overflow menu.
+        val queueMenuItems: @Composable (onChosen: () -> Unit) -> Unit = { onChosen ->
+            queueItems.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text(item.name, maxLines = 1) },
+                    leadingIcon = {
+                        RadioButton(
+                            selected = item.id == currentQueueItemId,
+                            onClick = null
+                        )
+                    },
+                    onClick = {
+                        onChosen()
+                        onSelectQueueItem(item.id)
+                        onInteraction()
+                    }
+                )
+            }
+        }
+        val sleepMenuItems: @Composable (onChosen: () -> Unit) -> Unit = { onChosen ->
+            listOf(15L, 30L, 45L, 60L).forEach { minutes ->
+                DropdownMenuItem(
+                    text = { Text("$minutes minutes") },
+                    onClick = {
+                        onChosen()
+                        onSetSleepTimer(minutes * 60_000L)
+                        onInteraction()
+                    }
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Custom duration\u2026") },
+                onClick = {
+                    onChosen()
+                    showCustomSleepDialog = true
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("End of current track") },
+                onClick = {
+                    onChosen()
+                    onSleepAtTrackEnd()
+                    onInteraction()
+                }
+            )
+            if (sleepTimerLabel != "Sleep timer") {
+                DropdownMenuItem(
+                    text = { Text("Turn off sleep timer") },
+                    onClick = {
+                        onChosen()
+                        onClearSleepTimer()
+                        onInteraction()
+                    }
+                )
+            }
+        }
+
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalAlignment = Alignment.CenterVertically
         ) {
             PlayerAutoHideSlider(
                 icon = if (muted) Icons.AutoMirrored.Filled.VolumeOff
@@ -1951,11 +2015,16 @@ private fun PlayerControlsBar(
                     )
                 }
             }
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
+            // One stable row at desktop widths; below ~720dp the secondary
+            // actions move into a "More" overflow menu instead of wrapping
+            // (the wrapping FlowRow made the bar reflow while in use).
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val wideControls = maxWidth >= 720.dp
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 Box {
                     TextButton(onClick = {
                         onInteraction()
@@ -1991,6 +2060,7 @@ private fun PlayerControlsBar(
                         tint = if (repeatOne) MaterialTheme.colorScheme.primary else Color.White
                     )
                 }
+                if (wideControls) {
                 TooltipIconButton(
                     tooltip = "Repeat all videos",
                     onClick = { onInteraction(); onToggleRepeatAll() },
@@ -2031,22 +2101,7 @@ private fun PlayerControlsBar(
                         onDismissRequest = { showQueueMenu = false },
                         modifier = Modifier.heightIn(max = 420.dp)
                     ) {
-                        queueItems.forEach { item ->
-                            DropdownMenuItem(
-                                text = { Text(item.name, maxLines = 1) },
-                                leadingIcon = {
-                                    RadioButton(
-                                        selected = item.id == currentQueueItemId,
-                                        onClick = null
-                                    )
-                                },
-                                onClick = {
-                                    showQueueMenu = false
-                                    onSelectQueueItem(item.id)
-                                    onInteraction()
-                                }
-                            )
-                        }
+                        queueMenuItems { showQueueMenu = false }
                     }
                 }
                 Box {
@@ -2064,42 +2119,9 @@ private fun PlayerControlsBar(
                         expanded = showSleepMenu,
                         onDismissRequest = { showSleepMenu = false }
                     ) {
-                        listOf(15L, 30L, 45L, 60L).forEach { minutes ->
-                            DropdownMenuItem(
-                                text = { Text("$minutes minutes") },
-                                onClick = {
-                                    showSleepMenu = false
-                                    onSetSleepTimer(minutes * 60_000L)
-                                    onInteraction()
-                                }
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("Custom duration…") },
-                            onClick = {
-                                showSleepMenu = false
-                                showCustomSleepDialog = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("End of current track") },
-                            onClick = {
-                                showSleepMenu = false
-                                onSleepAtTrackEnd()
-                                onInteraction()
-                            }
-                        )
-                        if (sleepTimerLabel != "Sleep timer") {
-                            DropdownMenuItem(
-                                text = { Text("Turn off sleep timer") },
-                                onClick = {
-                                    showSleepMenu = false
-                                    onClearSleepTimer()
-                                    onInteraction()
-                                }
-                            )
-                        }
+                        sleepMenuItems { showSleepMenu = false }
                     }
+                }
                 }
                 if (!isAudio) {
                     Box {
@@ -2261,6 +2283,62 @@ private fun PlayerControlsBar(
                         }
                     }
                 }
+                if (!wideControls) {
+                    Box {
+                        TooltipIconButton(
+                            tooltip = stringResource(Res.string.player_more_actions),
+                            onClick = { onInteraction(); showMoreMenu = true },
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.MoreHoriz,
+                                contentDescription = stringResource(
+                                    Res.string.player_more_actions
+                                ),
+                                tint = Color.White
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Repeat all videos") },
+                                leadingIcon = {
+                                    Checkbox(checked = repeatAll, onCheckedChange = null)
+                                },
+                                onClick = {
+                                    onToggleRepeatAll()
+                                    onInteraction()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Shuffle playback queue") },
+                                leadingIcon = {
+                                    Checkbox(checked = shuffle, onCheckedChange = null)
+                                },
+                                onClick = {
+                                    onToggleShuffle()
+                                    onInteraction()
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.player_queue)) },
+                                enabled = false,
+                                onClick = {}
+                            )
+                            queueMenuItems { showMoreMenu = false }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(sleepTimerLabel) },
+                                enabled = false,
+                                onClick = {}
+                            )
+                            sleepMenuItems { showMoreMenu = false }
+                        }
+                    }
+                }
                 TooltipIconButton(
                     tooltip = "Hide player controls",
                     onClick = { onToggleControlsVisibility() },
@@ -2291,6 +2369,7 @@ private fun PlayerControlsBar(
                             tint = Color.White
                         )
                     }
+                }
                 }
             }
         }
