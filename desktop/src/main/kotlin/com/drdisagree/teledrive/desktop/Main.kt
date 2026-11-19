@@ -42,7 +42,10 @@ import com.drdisagree.teledrive.core.media.ThumbnailModel
 import com.drdisagree.teledrive.core.media.ThumbnailStore
 import com.drdisagree.teledrive.core.media.thumbnailCacheKey
 import com.drdisagree.teledrive.core.publish.PublishScheduler
+import com.drdisagree.teledrive.core.transfer.MaintenanceScheduler
+import com.drdisagree.teledrive.core.transfer.TransferScheduler
 import com.drdisagree.teledrive.desktop.di.desktopModule
+import com.drdisagree.teledrive.desktop.transfer.DesktopBackupResumeScheduler
 import com.drdisagree.teledrive.desktop.resources.Res
 import com.drdisagree.teledrive.desktop.resources.Res as DesktopRes
 import com.drdisagree.teledrive.desktop.resources.app_already_running
@@ -71,6 +74,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -103,6 +107,27 @@ fun main() {
         runCatching { getKoin().get<FolderOwnershipRepair>().refileStrayFiles() }
         getKoin().get<PublishScheduler>().kick()
         runCatching { getKoin().get<TrashRepository>().repairTrashTree() }
+    }
+    // Auto-backup arming, mirroring Android's TeleDriveApplication.onCreate:
+    // without this startup call the desktop schedulers would only arm after
+    // the user opened Settings. The resume scheduler's kick target is wired
+    // here because it cannot be a constructor dependency (Koin cycle through
+    // the transfer drainer).
+    getKoin().get<DesktopBackupResumeScheduler>().kickAction = { allowMetered ->
+        getKoin().get<TransferScheduler>().kick(allowMetered)
+    }
+    backgroundScope.launch {
+        runCatching {
+            val prefs = getKoin().get<SettingsRepository>().preferences.first()
+            getKoin().get<MaintenanceScheduler>().scheduleAll(
+                backupEnabled = prefs.autoBackupEnabled && prefs.backupIntervalHours > 0,
+                backupIntervalHours = prefs.backupIntervalHours,
+                wifiOnly = prefs.backupWifiOnly,
+                chargingOnly = prefs.backupChargingOnly,
+                instantBackup = prefs.instantBackupEnabled,
+                updateChecks = prefs.updateCheckEnabled
+            )
+        }
     }
     application {
         val windowState = rememberWindowState(width = 1200.dp, height = 800.dp)
