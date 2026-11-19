@@ -25,11 +25,21 @@ class FolderMerger(
     private suspend fun mergeAll(chatId: Long): Int {
         var merged = 0
         repeat(MAX_PASSES) {
-            val groups = folderDao.allFolders(chatId)
-                .filter { it.trashedAt == null }
-                .groupBy { it.parentId to it.name.lowercase() }
+            val alive = folderDao.allFolders(chatId).filter { it.trashedAt == null }
+            // Conservative pass: same parent + same normalised name (trim,
+            // collapsed whitespace, casefold). Failing that, a compact pass
+            // (whitespace ignored entirely) converges spaced-out spellings of
+            // the same folder ("r o o t s" vs "roots") onto one survivor.
+            val groups = alive
+                .groupBy { it.parentId to FolderNameKey.of(it.name) }
                 .values
                 .filter { it.size > 1 }
+                .ifEmpty {
+                    alive
+                        .groupBy { it.parentId to FolderNameKey.compact(it.name) }
+                        .values
+                        .filter { it.size > 1 }
+                }
             if (groups.isEmpty()) return merged
             val now = System.currentTimeMillis()
             for (group in groups) {

@@ -111,7 +111,7 @@ class PublishOutboxDrainer(
      * and holds an account-wide flood deadline, and [clearIfUnchanged] seals each file
      * inside its own transaction. Per-file outcomes match the old one-by-one loop exactly:
      * success seals and clears the row, a short rate limit waits and retries the same
-     * file, a permanent rejection is dead-lettered, and a transient failure or an
+     * file, a permanent rejection keeps the row pending and stops the drain, and a transient failure or an
      * over-long rate limit stops the drain with unstarted files still flagged for the
      * next run.
      */
@@ -156,10 +156,31 @@ class PublishOutboxDrainer(
                                         return@withPermit
                                     }
                                     // Waited out: loop retries the same file.
+                                } else if (error is AppError.TelegramError &&
+                                    error.code == FileManifestPublisher.LOCAL_ONLY_CODE
+                                ) {
+                                    // No channel message yet: keep the row
+                                    // pending (it publishes once the upload
+                                    // lands) but do not block this drain.
+                                    SafeLog.d(
+                                        TAG,
+                                        "Deferring publish for local-only file ${entity.id}"
+                                    )
+                                    return@withPermit
                                 } else if (isPermanent(error)) {
-                                    SafeLog.w(TAG, "Dropping unpublishable manifest: $error")
-                                    clearIfUnchanged(entity, accepted = false)
-                                    reportProgress()
+                                    // Never dead-letter into silence: the row
+                                    // stays pending with its baseline intact,
+                                    // the failure is logged, and the drain
+                                    // stops so the scheduler retries with
+                                    // backoff instead of the caption edit
+                                    // being dropped forever.
+                                    SafeLog.w(
+                                        TAG,
+                                        "Caption publish permanently rejected for " +
+                                            "${entity.id} (message ${entity.messageId}); " +
+                                            "keeping it pending for retry: $error"
+                                    )
+                                    aborted.set(true)
                                     return@withPermit
                                 } else {
                                     aborted.set(true)
@@ -221,14 +242,6 @@ class PublishOutboxDrainer(
                 pendingPublish = published.pendingPublish,
                 remoteBase = published.remoteBase
             ) == published
-            if (!accepted && unchanged) {
-                // Permanent rejection (e.g. MESSAGE_ID_INVALID): this message can
-                // never accept the publish, so adopt the local state as the
-                // baseline. Otherwise the sync recovery check re-queues the same
-                // unpublishable file on every pass, forever. The caption itself
-                // stays stale until the file is re-uploaded.
-                fileDao.setRemoteBase(published.id, FileBase.of(current).toText())
-            }
             if (unchanged) {
                 fileDao.clearPendingPublish(published.id)
             }

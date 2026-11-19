@@ -20,8 +20,17 @@ class FileManifestPublisher(
 ) {
 
     suspend fun publish(entity: FileEntity): AppResult<Unit> {
-        val chatId = entity.chatId ?: return AppResult.Success(Unit)
-        val messageId = entity.messageId ?: return AppResult.Success(Unit)
+        // A local-only file has no channel message whose caption could carry
+        // its manifest, so there is nothing to publish *yet*. Reporting success
+        // here used to seal the row (pending cleared, baseline adopted) while
+        // Telegram still held the old caption — a move of such files looked
+        // published and never was. The drainer defers these rows instead.
+        val chatId = entity.chatId ?: return AppResult.Failure(
+            AppError.TelegramError(LOCAL_ONLY_CODE, "File has no channel message yet")
+        )
+        val messageId = entity.messageId ?: return AppResult.Failure(
+            AppError.TelegramError(LOCAL_ONLY_CODE, "File has no channel message yet")
+        )
         val fileManifest = RemoteFileManifest(
             fileId = entity.id,
             name = entity.name,
@@ -64,4 +73,8 @@ class FileManifestPublisher(
         }
     }
 
+    companion object {
+        /** Synthetic code: the file has no channel message to caption-edit yet. */
+        const val LOCAL_ONLY_CODE = -1
+    }
 }
