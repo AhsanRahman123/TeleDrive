@@ -117,7 +117,7 @@ internal fun SubtitleAppearance.toVlcFactoryArguments(videoHeight: Int = 1080): 
             backgroundOpacity = value.windowOpacity
         )
         options += "--freetype-font=${value.fontFamily}"
-        options += "--freetype-rel-fontsize=${(16f * value.textScale).roundToInt().coerceIn(8, 40)}"
+        options += "--freetype-rel-fontsize=${freetypeRelFontSize(value.textScale)}"
         options += "--freetype-color=${value.textColor and 0xFFFFFF}"
         options += "--freetype-opacity=${(value.textOpacity * 255f).roundToInt()}"
         options += "--freetype-background-color=$backgroundRgb"
@@ -139,14 +139,61 @@ internal fun SubtitleAppearance.toVlcFactoryArguments(videoHeight: Int = 1080): 
     ) {
         // sub-margin is a LibVLC instance option. Keep the default height as a
         // reference scale; VLC applies the margin to the active video's subtitle area.
-        val margin = (
-            (value.verticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) * videoHeight
-        ).roundToInt().coerceIn(-videoHeight / 2, videoHeight * 4 / 5)
-        options += "--sub-margin=$margin"
+        options += "--sub-margin=${subtitleSubMargin(value.verticalPosition, videoHeight)}"
     }
 
     return options
 }
+
+/**
+ * The `freetype-rel-fontsize` value for a text scale (1.0 = 100%).
+ *
+ * VLC 3.0's freetype renderer treats this option as a DIVISOR, not a size:
+ * `GetFontSize()` in modules/text_renderer/freetype/freetype.c computes
+ * `i_size = fmt_out.video.i_height / i_ratio` when no absolute
+ * `freetype-fontsize` is set. The mapping must therefore INVERT the scale —
+ * a larger requested scale needs a smaller divisor. The previous direct
+ * mapping (16 × scale) did the opposite: raising Text size in the dialog
+ * made the rendered subtitles smaller (user test #2, PC-9). At scale 1.0
+ * the value stays at VLC's own default of 16, so 100% renders exactly as
+ * VLC renders it.
+ *
+ * The coerce range keeps the effective scale honest across the dialog's
+ * 0.5–2.5 slider range: 16/0.5 = 32 and 16/2.5 ≈ 6 both stay reachable, so
+ * the effective glyph size is strictly increasing over the whole range.
+ * (The option's suggested value list in the module descriptor — 20/18/16/12/6 —
+ * is a UI hint for VLC's own preferences dialog; instance-option values are
+ * not clamped to it, as the previous build's 8–40 range already proved by
+ * rendering at visibly different, if inverted, sizes.)
+ */
+internal fun freetypeRelFontSize(textScale: Float): Int =
+    (16f / textScale.coerceIn(0.5f, 2.5f)).roundToInt().coerceIn(5, 48)
+
+/**
+ * The effective glyph height (px) VLC's freetype renderer produces for a
+ * video of [videoHeight] px with the given relative font size, under the
+ * documented formula `height / relFontSize`. Exposed so tests can pin the
+ * direction of the size mapping against VLC's own arithmetic.
+ */
+internal fun freetypeEffectiveGlyphHeight(videoHeight: Int, relFontSize: Int): Float =
+    videoHeight.toFloat() / relFontSize
+
+/**
+ * The `sub-margin` value (px) for a vertical position fraction.
+ *
+ * VLC's own subtitle-position hotkeys define the sign: SUBPOS_UP ("move
+ * subtitles higher") INCREMENTS sub-margin and SUBPOS_DOWN decrements it
+ * (modules/control/hotkeys.c), so a positive margin moves subtitles UP.
+ * The app's position fraction grows DOWNWARD (0.88 = near the bottom), so
+ * raising the position above the default (a smaller fraction, higher on
+ * screen) must produce a POSITIVE margin: margin = (default − position) ×
+ * height. The previous (position − default) mapping inverted the slider
+ * the same way the font size was inverted (PC-9).
+ */
+internal fun subtitleSubMargin(verticalPosition: Float, videoHeight: Int): Int =
+    ((DEFAULT_SUBTITLE_VERTICAL_POSITION - verticalPosition) * videoHeight)
+        .roundToInt()
+        .coerceIn(-videoHeight / 2, videoHeight * 4 / 5)
 
 internal fun compositeSubtitleBackground(
     foregroundColor: Int,

@@ -28,13 +28,50 @@ class SubtitleAppearanceOptionsTest {
         ).toVlcFactoryArguments(videoHeight = 1_000)
 
         assertTrue(options.contains("--freetype-font=Consolas"))
-        assertTrue(options.contains("--freetype-rel-fontsize=24"))
+        // 150% scale: rel-fontsize is a divisor in VLC (height / value), so a
+        // larger scale maps to a SMALLER value: round(16 / 1.5) = 11.
+        assertTrue(options.contains("--freetype-rel-fontsize=11"))
         assertTrue(options.contains("--freetype-color=16776960"))
         assertTrue(options.contains("--freetype-opacity=128"))
         assertTrue(options.contains("--freetype-background-opacity=128"))
         assertTrue(options.contains("--freetype-outline-thickness=4"))
         assertTrue(options.contains("--freetype-outline-opacity=204"))
-        assertTrue(options.contains("--sub-margin=-130"))
+        // Position 0.75 is ABOVE the 0.88 default; a positive sub-margin
+        // moves subtitles up in VLC, so the margin is +130, not -130.
+        assertTrue(options.contains("--sub-margin=130"))
+    }
+
+    @Test
+    fun `higher text size percent means strictly larger rendered glyphs`() {
+        // Pin the direction against VLC 3.0 freetype's documented formula
+        // (glyph height = video height / freetype-rel-fontsize). The old
+        // direct mapping (16 * scale) inverted the slider: this sweep failed
+        // on every step before the fix.
+        val scales = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.5f)
+        val glyphHeights = scales.map { scale ->
+            freetypeEffectiveGlyphHeight(
+                videoHeight = 1080,
+                relFontSize = freetypeRelFontSize(scale)
+            )
+        }
+        glyphHeights.zipWithNext().forEach { (smaller, larger) ->
+            assertTrue(
+                "glyph height must strictly increase with text size: $glyphHeights",
+                larger > smaller
+            )
+        }
+        // 100% is VLC's own default divisor, so it renders at height / 16.
+        assertEquals(16, freetypeRelFontSize(1.0f))
+        assertEquals(1080f / 16f, freetypeEffectiveGlyphHeight(1080, 16), 0.01f)
+    }
+
+    @Test
+    fun `vertical position margin sign follows VLC subtitle position semantics`() {
+        // Above the default (smaller fraction) -> positive margin (VLC moves
+        // subtitles up when sub-margin increases); below -> negative.
+        assertTrue(subtitleSubMargin(0.5f, 1000) > 0)
+        assertTrue(subtitleSubMargin(0.92f, 1000) < 0)
+        assertEquals(0, subtitleSubMargin(DEFAULT_SUBTITLE_VERTICAL_POSITION, 1000))
     }
 
     @Test
