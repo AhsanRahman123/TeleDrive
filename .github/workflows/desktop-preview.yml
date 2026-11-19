@@ -5,6 +5,11 @@ on:
     branches:
       - desktop/pranto-drive-pc-20261119
   workflow_dispatch:
+    inputs:
+      test_filter:
+        description: "Optional Gradle --tests filter for the UI test step (diagnostics)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -31,8 +36,12 @@ jobs:
         run: ./gradlew :shared:desktopTest
 
       - name: UI desktop tests
-        timeout-minutes: 20
-        run: ./gradlew :ui:desktopTest
+        timeout-minutes: 12
+        shell: pwsh
+        run: |
+          $extra = @()
+          if ("${{ inputs.test_filter }}" -ne "") { $extra = @("--tests", "${{ inputs.test_filter }}") }
+          ./gradlew :ui:desktopTest @extra
 
       - name: Desktop module tests
         run: ./gradlew :desktop:test
