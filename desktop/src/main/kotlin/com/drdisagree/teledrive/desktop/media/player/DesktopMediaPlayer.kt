@@ -103,7 +103,6 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.presentation.common.Formatters
