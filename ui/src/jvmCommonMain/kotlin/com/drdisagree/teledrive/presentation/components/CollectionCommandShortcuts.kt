@@ -48,6 +48,7 @@ fun Modifier.collectionCommandShortcuts(
     onPaste: (() -> Boolean)? = null,
     onNewFolder: (() -> Boolean)? = null,
     onNewTab: (() -> Boolean)? = null,
+    onCloseTab: (() -> Boolean)? = null,
     onDelete: (() -> Boolean)? = null,
     interceptBeforeChildren: Boolean = false
 ): Modifier {
@@ -69,6 +70,7 @@ fun Modifier.collectionCommandShortcuts(
                 Key.V -> onPaste
                 Key.N -> onNewFolder
                 Key.T -> onNewTab
+                Key.Delete -> onCloseTab
                 else -> null
             }
             action?.invoke() == true

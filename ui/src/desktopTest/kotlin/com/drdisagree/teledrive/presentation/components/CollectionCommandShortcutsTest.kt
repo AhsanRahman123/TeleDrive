@@ -96,6 +96,43 @@ class CollectionCommandShortcutsTest {
     }
 
     @Test
+    fun `ctrl delete closes the tab while plain delete still trashes`() {
+        val actions = mutableListOf<String>()
+
+        rule.setContent {
+            val requester = rememberCollectionCommandFocusRequester()
+            Box(
+                modifier = Modifier
+                    .size(300.dp, 200.dp)
+                    .collectionCommandShortcuts(
+                        focusRequester = requester,
+                        onDelete = { actions += "trash"; true },
+                        onCloseTab = { actions += "closeTab"; true },
+                        interceptBeforeChildren = true
+                    )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .testTag("delete-child")
+                        .focusable()
+                )
+            }
+        }
+
+        rule.onNodeWithTag("delete-child").requestFocus()
+        rule.onNodeWithTag("delete-child").performKeyInput {
+            pressKey(Key.Delete)
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.Delete)
+            keyUp(Key.CtrlLeft)
+        }
+        rule.waitForIdle()
+
+        assertEquals(listOf("trash", "closeTab"), actions)
+    }
+
+    @Test
     fun `default bubbling mode preserves nested text field shortcuts`() {
         var selectedAll by mutableStateOf(0)
         var editorValue by mutableStateOf(

@@ -714,6 +714,19 @@ fun FilesScreen(
                     onNewTab = {
                         if (showDuplicateManager || showEmptyItems) false else { createTab(); true }
                     },
+                    onCloseTab = {
+                        if (showDuplicateManager || showEmptyItems) {
+                            false
+                        } else {
+                            val active = tabs.firstOrNull { it.id == selectedTabId }
+                            if (active != null && tabs.size > 1) {
+                                closeTab(active)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    },
                     // Files has no inline text editor in this workspace (edit dialogs
                     // are separate windows), so handle shortcuts before row/button children.
                     interceptBeforeChildren = true
