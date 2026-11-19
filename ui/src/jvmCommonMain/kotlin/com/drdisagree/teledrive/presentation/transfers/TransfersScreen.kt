@@ -97,6 +97,8 @@ import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollecti
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
 import com.drdisagree.teledrive.presentation.platform.LocalFileOpener
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
+import com.drdisagree.teledrive.presentation.platform.LocalTransfersSortPreference
+import com.drdisagree.teledrive.presentation.platform.sanitizeTransfersSortOrder
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
@@ -160,7 +162,14 @@ fun TransfersScreen(
     var showTransferSettings by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var typeFilter by remember { mutableStateOf("ALL") }
-    var sortOrder by remember { mutableStateOf("PRIORITY") }
+    // The sort choice persists across restarts where the platform provides
+    // a store (desktop, PC-6); elsewhere it stays the in-memory default.
+    val transfersSortPreference = LocalTransfersSortPreference.current
+    var sortOrder by remember {
+        mutableStateOf(
+            sanitizeTransfersSortOrder(transfersSortPreference?.loadSortOrder())
+        )
+    }
     var showFilterMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
@@ -599,6 +608,7 @@ fun TransfersScreen(
                                         text = { Text(label) },
                                         onClick = {
                                             sortOrder = value
+                                            transfersSortPreference?.saveSortOrder(value)
                                             showSortMenu = false
                                         }
                                     )
