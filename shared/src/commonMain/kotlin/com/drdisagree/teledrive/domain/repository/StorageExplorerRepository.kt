@@ -47,6 +47,10 @@ data class StorageExplorerDeleteResult(
 
 interface StorageExplorerRepository {
 
+    /** Human-readable progress of the running scan, or null when idle. */
+    val scanProgress: kotlinx.coroutines.flow.StateFlow<String?>
+        get() = kotlinx.coroutines.flow.MutableStateFlow(null)
+
     /** Scans physical app-owned paths once; overlapping roots are excluded from the totals. */
     suspend fun scan(): StorageExplorerSnapshot
 

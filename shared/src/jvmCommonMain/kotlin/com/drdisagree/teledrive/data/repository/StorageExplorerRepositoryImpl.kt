@@ -11,6 +11,8 @@ import com.drdisagree.teledrive.domain.repository.StorageExplorerRoot
 import com.drdisagree.teledrive.domain.repository.StorageExplorerSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -48,6 +50,9 @@ class StorageExplorerRepositoryImpl(
         var fileCount: Int = 0
     )
 
+    private val _scanProgress = MutableStateFlow<String?>(null)
+    override val scanProgress: StateFlow<String?> = _scanProgress
+
     private data class ScanRootResult(
         val root: StorageExplorerRoot,
         val entries: List<StorageExplorerEntry>
@@ -55,8 +60,12 @@ class StorageExplorerRepositoryImpl(
 
     override suspend fun scan(): StorageExplorerSnapshot {
         val preferences = settingsRepository.preferences.first()
-        return withContext(Dispatchers.IO) {
-            scanOnIo(preferences.downloadDirectory)
+        return try {
+            withContext(Dispatchers.IO) {
+                scanOnIo(preferences.downloadDirectory)
+            }
+        } finally {
+            _scanProgress.value = null
         }
     }
 
@@ -70,6 +79,7 @@ class StorageExplorerRepositoryImpl(
         val warnings = mutableListOf<String>()
 
         for (spec in specs) {
+            _scanProgress.value = "Scanning ${spec.name}…"
             val scanned = scanRoot(
                 spec = spec,
                 downloadRoot = downloadRoot,
@@ -257,6 +267,18 @@ class StorageExplorerRepositoryImpl(
         val directoryFiles = mutableListOf<File>()
         val regularFiles = mutableListOf<File>()
         var unreadableCount = 0
+        // Bounded scan: past the entry cap, files still count toward the
+        // totals (overflow) but are not materialised as rows, so a huge tree
+        // cannot exhaust memory or stall the screen.
+        var overflowBytes = 0L
+        var overflowCount = 0
+        val overflowByParent = mutableMapOf<String, DirectorySize>()
+        // The TDLib database subtree is summarised (one size-only pass, one
+        // row) instead of being walked entry by entry: it holds thousands of
+        // session files the user cannot act on individually.
+        var tdlibSummaryBytes = 0L
+        var tdlibSummaryCount = 0
+        var tdlibSummaryDir: File? = null
 
         try {
             Files.walkFileTree(
@@ -266,7 +288,32 @@ class StorageExplorerRepositoryImpl(
                         dir: Path,
                         attrs: BasicFileAttributes
                     ): FileVisitResult {
-                        if (dir != root.toPath()) directoryFiles += dir.toFile()
+                        if (dir != root.toPath()) {
+                            val dirFile = dir.toFile()
+                            if (spec.kind == RootKind.APP_DATA &&
+                                dirFile.name == TDLIB_DIR_NAME &&
+                                dirFile.parentFile?.path == root.path
+                            ) {
+                                var bytes = 0L
+                                var count = 0
+                                runCatching {
+                                    Files.walk(dir).use { stream ->
+                                        stream.forEach { path ->
+                                            val f = path.toFile()
+                                            if (f.isFile) {
+                                                bytes += f.length()
+                                                count++
+                                            }
+                                        }
+                                    }
+                                }
+                                tdlibSummaryBytes = bytes
+                                tdlibSummaryCount = count
+                                tdlibSummaryDir = dirFile
+                                return FileVisitResult.SKIP_SUBTREE
+                            }
+                            directoryFiles += dirFile
+                        }
                         return FileVisitResult.CONTINUE
                     }
 
@@ -276,7 +323,24 @@ class StorageExplorerRepositoryImpl(
                     ): FileVisitResult {
                         // The default file-tree walk does not follow symbolic links.
                         if (attrs.isRegularFile && !attrs.isSymbolicLink) {
-                            regularFiles += file.toFile()
+                            if (regularFiles.size < MAX_ENTRIES_PER_ROOT) {
+                                regularFiles += file.toFile()
+                            } else {
+                                overflowBytes += attrs.size()
+                                overflowCount++
+                                val parentPath = file.parent?.toString()
+                                if (parentPath != null) {
+                                    val aggregate =
+                                        overflowByParent.getOrPut(parentPath) { DirectorySize() }
+                                    aggregate.bytes += attrs.size()
+                                    aggregate.fileCount++
+                                }
+                            }
+                            val seen = regularFiles.size + overflowCount
+                            if (seen % 5_000 == 0) {
+                                _scanProgress.value =
+                                    "Scanning ${spec.name}... $seen files"
+                            }
                         }
                         return FileVisitResult.CONTINUE
                     }
@@ -301,7 +365,10 @@ class StorageExplorerRepositoryImpl(
         }
 
         val fileEntries = regularFiles.map { file ->
-            val normalized = canonical(file)
+            // The walk starts at the canonical root and never follows links,
+            // so the absolute walk path is already normalised; resolving
+            // canonicalFile per file was the scan's main stall.
+            val normalized = file.absoluteFile
             val category = categoryFor(normalized, spec.kind, downloadRoot, cacheRoots)
             val safe = isDeletable(normalized, safeRoots)
             StorageExplorerEntry(
@@ -335,7 +402,7 @@ class StorageExplorerRepositoryImpl(
         }
 
         val directoryEntries = directoryFiles.map { directory ->
-            val normalized = canonical(directory)
+            val normalized = directory.absoluteFile
             val category = categoryFor(normalized, spec.kind, downloadRoot, cacheRoots)
             val stats = directorySizes[normalized.path] ?: DirectorySize()
             val safe = isDeletable(normalized, safeRoots)
@@ -354,7 +421,38 @@ class StorageExplorerRepositoryImpl(
             )
         }
 
-        val rootBytes = fileEntries.sumOf { it.sizeBytes }
+        for ((parentPath, aggregate) in overflowByParent) {
+            var parent: File? = File(parentPath)
+            var guard = 0
+            while (parent != null && isWithin(parent, root) && guard++ < MAX_DIRECTORY_DEPTH) {
+                val key = parent.path
+                val target = directorySizes.getOrPut(key) { DirectorySize() }
+                target.bytes += aggregate.bytes
+                target.fileCount += aggregate.fileCount
+                if (key == root.path) break
+                parent = parent.parentFile
+            }
+        }
+        val summaryEntry = tdlibSummaryDir?.let { dir ->
+            val rootAggregate = directorySizes.getOrPut(root.path) { DirectorySize() }
+            rootAggregate.bytes += tdlibSummaryBytes
+            rootAggregate.fileCount += tdlibSummaryCount
+            StorageExplorerEntry(
+                path = dir.absolutePath,
+                rootId = spec.id,
+                parentPath = root.path,
+                name = dir.name,
+                category = categoryFor(dir.absoluteFile, spec.kind, downloadRoot, cacheRoots),
+                sizeBytes = tdlibSummaryBytes,
+                lastModifiedAt = dir.lastModified(),
+                isDirectory = true,
+                fileCount = tdlibSummaryCount,
+                canDelete = false,
+                protectionReason = "Telegram session data is managed by the app."
+            )
+        }
+
+        val rootBytes = fileEntries.sumOf { it.sizeBytes } + overflowBytes + tdlibSummaryBytes
         return ScanRootResult(
             root = StorageExplorerRoot(
                 id = spec.id,
@@ -364,12 +462,12 @@ class StorageExplorerRepositoryImpl(
                 exists = true,
                 isDirectory = true,
                 sizeBytes = rootBytes,
-                fileCount = fileEntries.size,
+                fileCount = fileEntries.size + overflowCount + tdlibSummaryCount,
                 directoryCount = directoryEntries.size,
                 canDeleteContents = isDeletable(root, safeRoots),
                 protectionReason = protection
             ),
-            entries = directoryEntries + fileEntries
+            entries = directoryEntries + listOfNotNull(summaryEntry) + fileEntries
         )
     }
 
@@ -607,6 +705,8 @@ class StorageExplorerRepositoryImpl(
         const val DOWNLOADS_ROOT_ID = "DOWNLOADS"
         const val MAX_DIRECTORY_DEPTH = 128
         const val MAX_WARNINGS = 8
+        const val MAX_ENTRIES_PER_ROOT = 25_000
+        const val TDLIB_DIR_NAME = "db"
 
         const val CATEGORY_APP_DATA = "APP_DATA"
         const val CATEGORY_CACHE = "CACHE"

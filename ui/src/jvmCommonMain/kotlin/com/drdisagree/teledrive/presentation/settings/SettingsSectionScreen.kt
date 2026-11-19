@@ -271,10 +271,10 @@ fun SettingsSectionScreen(
             )
         }
     ) { padding ->
-        if (state.loading) {
-            LoadingState(modifier = Modifier.padding(padding))
-            return@Scaffold
-        }
+        // The Thumbnail Manager and Storage Explorer do not depend on the
+        // settings state flows, so they render immediately; the loading gate
+        // below must not wedge them behind a spinner when one of those flows
+        // is slow or never emits on this platform.
         if (section == SettingsSectionType.THUMBNAILS) {
             ThumbnailManagerScreen(
                 onBack = onBack,
@@ -288,6 +288,8 @@ fun SettingsSectionScreen(
                     .fillMaxSize()
                     .padding(top = padding.calculateTopPadding())
             )
+        } else if (state.loading) {
+            LoadingState(modifier = Modifier.padding(padding))
         } else {
             Box(modifier = Modifier.fillMaxSize()) {
                 Column(

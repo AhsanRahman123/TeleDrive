@@ -743,11 +743,17 @@ fun TransfersScreen(
                 TransferRow(
                     transfer = transfer,
                     onOpenInApp = transfer.fileId?.let { id -> { onOpenFile(id) } },
-                    onOpenWith = if (transfer.type.isIncoming) {
-                        transfer.localPath?.takeIf { fileOpener != null }?.let { path ->
-                            { fileOpener?.openWith(path, transfer.displayName, null) }
+                    onOpenWith = transfer.localPath?.takeIf { fileOpener != null }?.let { path ->
+                        {
+                            // Use the opener's real result: if the chooser
+                            // could not open the file, reveal it in the file
+                            // manager instead of silently doing nothing.
+                            val opened = fileOpener?.openWith(
+                                path, transfer.displayName, null
+                            ) ?: false
+                            if (!opened) fileRevealer?.reveal(path)
                         }
-                    } else null,
+                    },
                     onShowInFolder = transfer.localPath?.takeIf { fileRevealer != null }?.let { path ->
                         { fileRevealer?.reveal(path) }
                     },

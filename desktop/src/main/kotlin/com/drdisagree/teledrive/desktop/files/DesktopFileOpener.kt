@@ -19,12 +19,18 @@ class DesktopFileOpener : FileOpener {
         if (!file.isFile) return false
         if (Platform.isWindows()) {
             val chooserStarted = runCatching {
-                ProcessBuilder(
+                val process = ProcessBuilder(
                     "rundll32.exe",
                     "shell32.dll,OpenAs_RunDLL",
                     file.absolutePath
                 ).start()
-                true
+                // A chooser that failed to appear exits immediately with an
+                // error; one still running after a short wait is the dialog.
+                if (process.waitFor(750, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    process.exitValue() == 0
+                } else {
+                    true
+                }
             }.getOrDefault(false)
             if (chooserStarted) return true
         }

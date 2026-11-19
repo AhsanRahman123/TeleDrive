@@ -417,6 +417,7 @@ class TransferExecutor(
                                     telegramClient.deleteMessages(chatId, listOf(stale))
                                 }
                             }
+                        transferDao.setLocalPath(transfer.id, localPath)
                         releaseLocalCopy(transfer.type, entity, localPath, contentHash)
                         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
                         outcome = TransferOutcome.Completed
@@ -585,6 +586,7 @@ class TransferExecutor(
                                     telegramClient.deleteMessages(chatId, listOf(stale))
                                 }
                             }
+                            transferDao.setLocalPath(transfer.id, localPath)
                             releaseLocalCopy(transfer.type, entity, localPath, finalHash)
                             transferDao.setCompleted(transfer.id, System.currentTimeMillis())
                             outcome = TransferOutcome.Completed
@@ -849,7 +851,7 @@ class TransferExecutor(
             return TransferOutcome.Failed(messages.verifyFailed)
         }
         val savedPath = target.finish() ?: return TransferOutcome.Failed(messages.saveFailed)
-        transferDao.setLocalPath(transfer.id, null)
+        transferDao.setLocalPath(transfer.id, savedPath)
         fileDao.setLocalPath(entity.id, savedPath)
         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
         refreshDownloadedMediaThumbnail(entity)
@@ -923,6 +925,7 @@ class TransferExecutor(
         )
 
         fileDao.setLocalPath(fileId, savedPath)
+        transferDao.setLocalPath(transfer.id, savedPath)
         transferDao.setCompleted(transfer.id, System.currentTimeMillis())
         refreshDownloadedMediaThumbnail(entity)
         return TransferOutcome.Completed
