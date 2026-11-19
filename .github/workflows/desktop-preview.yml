@@ -27,8 +27,15 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v5
 
-      - name: Desktop tests
-        run: ./gradlew :shared:desktopTest :ui:desktopTest :desktop:test
+      - name: Shared desktop tests
+        run: ./gradlew :shared:desktopTest
+
+      - name: UI desktop tests
+        timeout-minutes: 20
+        run: ./gradlew :ui:desktopTest
+
+      - name: Desktop module tests
+        run: ./gradlew :desktop:test
 
       - name: Cache VLC natives
         uses: actions/cache@v6
