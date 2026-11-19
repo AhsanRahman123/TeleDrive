@@ -50,11 +50,6 @@ import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.resources.files_move_to
 import com.drdisagree.teledrive.resources.files_move_here
 import com.drdisagree.teledrive.presentation.common.AppBackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -112,17 +107,12 @@ import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -984,41 +974,16 @@ fun GalleryScreen(
             }
         }
     ) { padding ->
-        var tabsVisible by remember { mutableStateOf(true) }
-        val mediaScrolls by remember(scrolled) {
-            derivedStateOf { scrolled.canScrollForward || scrolled.canScrollBackward }
-        }
-        LaunchedEffect(state.tab) { tabsVisible = true }
-        LaunchedEffect(mediaScrolls) { if (!mediaScrolls) tabsVisible = true }
-        val tabScrollConnection = remember {
-            object : NestedScrollConnection {
-                @Suppress("SameReturnValue")
-                override fun onPreScroll(
-                    available: Offset,
-                    source: NestedScrollSource
-                ): Offset {
-                    if (!mediaScrolls) return Offset.Zero
-                    when {
-                        available.y < -TAB_SCROLL_THRESHOLD -> tabsVisible = false
-                        available.y > TAB_SCROLL_THRESHOLD -> tabsVisible = true
-                    }
-                    return Offset.Zero
-                }
-            }
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = padding.calculateTopPadding())
-                .nestedScroll(tabScrollConnection)
         ) {
-            AnimatedVisibility(
-                visible = tabsVisible,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
+            // Pinned header: the tab selector, search field and filter chips
+            // stay fixed while only the media grid / albums list below them
+            // scrolls. This block used to hide itself on scroll down and fade
+            // back on scroll up, which made the controls vanish mid-browse.
+            Column(modifier = Modifier.fillMaxWidth()) {
                     if (!state.isAlbumView) {
                         GalleryTabSelector(
                             selected = state.tab,
@@ -1163,8 +1128,6 @@ fun GalleryScreen(
                     )
                 }
             }
-
-                }
             }
 
             if (state.tab == GalleryTab.ALBUMS && !state.isAlbumView) {
@@ -1484,4 +1447,3 @@ fun GalleryScreen(
     }
 }
 
-private const val TAB_SCROLL_THRESHOLD = 6f
