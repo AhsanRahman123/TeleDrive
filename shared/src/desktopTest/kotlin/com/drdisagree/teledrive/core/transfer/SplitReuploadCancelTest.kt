@@ -1,6 +1,9 @@
 package com.drdisagree.teledrive.core.transfer
 
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
+import com.drdisagree.teledrive.domain.repository.FileRepository
+import com.drdisagree.teledrive.core.files.LocalCleanup
+import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.dispatchers.DispatcherProvider
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.media.ThumbnailStore
@@ -151,6 +154,10 @@ class SplitReuploadCancelTest {
             telegramClient = telegram,
             transferDao = database.transferDao(),
             fileDao = database.fileDao(),
+            fileRepository = object : FileRepository by unused() {
+                override suspend fun deleteLocalCopy(ids: List<String>) =
+                    AppResult.Success(LocalCleanup(deletedCount = 0))
+            },
             backupDao = database.backupDao(),
             manifestCodec = codec,
             folderPathResolver = FolderPathResolver(
