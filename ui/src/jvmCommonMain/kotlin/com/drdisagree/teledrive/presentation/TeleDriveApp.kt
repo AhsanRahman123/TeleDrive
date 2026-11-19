@@ -101,7 +101,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 import com.drdisagree.teledrive.presentation.common.platformConfiguration
-import com.drdisagree.teledrive.presentation.navigation.isReadyForNavigation
+import com.drdisagree.teledrive.presentation.navigation.navigateOnce
 
 @Composable
 fun TeleDriveApp(
@@ -519,14 +519,14 @@ private fun navigateTopLevel(
     navController: NavHostController,
     destination: TopLevelDestination
 ) {
-    if (!navController.isReadyForNavigation) return
-    while (navController.previousBackStackEntry?.destination?.hasRoute(Route.Home::class) == false) {
-        if (!navController.popBackStack()) break
-    }
-    navController.navigate(destination.route) {
-        popUpTo(Route.Home) { saveState = true }
+    // The stable build's tab switch, restored verbatim: one navigate with a
+    // declarative popUpTo(Home). Upstream 1.6 replaced this with a manual
+    // popBackStack() loop plus saveState/restoreState; on device that loop
+    // fires a back-stack transaction per popped entry on every tab tap and
+    // the switch felt broken next to the stable build's single transaction.
+    navController.navigateOnce(destination.route) {
+        popUpTo(Route.Home) { inclusive = destination.route == Route.Home }
         launchSingleTop = true
-        restoreState = true
     }
 }
 
