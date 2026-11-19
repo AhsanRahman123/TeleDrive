@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
@@ -149,6 +150,7 @@ import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
 import com.drdisagree.teledrive.resources.common_download
+import com.drdisagree.teledrive.resources.note_edit_action
 import com.drdisagree.teledrive.resources.files_copy_here
 import com.drdisagree.teledrive.resources.files_copy_to
 import com.drdisagree.teledrive.resources.files_move_here
@@ -199,6 +201,7 @@ import com.drdisagree.teledrive.desktop.resources.Res as DesktopRes
 @Composable
 fun DesktopPreviewScreen(
     onBack: () -> Unit,
+    onEditNote: (String, String) -> Unit = { _, _ -> },
     viewModel: PreviewViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -535,6 +538,22 @@ fun DesktopPreviewScreen(
                                     contentDescription = "Mirror vertically",
                                     tint = if (mirrorImageVertically) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        if (MimeTypes.isText(currentFile.mimeType)) {
+                            TooltipIconButton(
+                                tooltip = stringResource(Res.string.note_edit_action),
+                                onClick = {
+                                    onEditNote(
+                                        currentFile.id,
+                                        currentFile.name.substringBeforeLast('.')
+                                    )
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Edit,
+                                    contentDescription = stringResource(Res.string.note_edit_action)
                                 )
                             }
                         }

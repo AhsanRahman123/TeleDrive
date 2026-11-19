@@ -7,6 +7,6 @@ object DesktopPlatformScreens : PlatformScreens {
 
     @Composable
     override fun Preview(onBack: () -> Unit, onEditNote: (String, String) -> Unit) {
-        DesktopPreviewScreen(onBack = onBack)
+        DesktopPreviewScreen(onBack = onBack, onEditNote = onEditNote)
     }
 }
