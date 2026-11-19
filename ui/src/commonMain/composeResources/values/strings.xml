@@ -541,6 +541,11 @@
     <string name="player_replay">Replay</string>
     <string name="player_scaling">Scaling</string>
     <string name="player_subtitle_appearance">Subtitle appearance and position</string>
+    <string name="player_video_scale">Video scale</string>
+    <string name="player_resize_mode">Resize mode</string>
+    <string name="player_resize_fit">Fit</string>
+    <string name="player_resize_zoom">Zoom</string>
+    <string name="player_resize_fill">Fill</string>
     <string name="subtitle_settings_title">Subtitle settings</string>
     <string name="subtitle_settings_note">Changes are applied when you press Apply. The video resumes from the same position.</string>
     <string name="subtitle_style">Style</string>

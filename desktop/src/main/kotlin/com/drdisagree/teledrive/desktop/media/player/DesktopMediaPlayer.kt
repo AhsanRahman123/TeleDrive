@@ -87,7 +87,10 @@ import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -99,7 +102,12 @@ import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.player_audio_track
+import com.drdisagree.teledrive.resources.player_resize_fill
+import com.drdisagree.teledrive.resources.player_resize_fit
+import com.drdisagree.teledrive.resources.player_resize_mode
+import com.drdisagree.teledrive.resources.player_resize_zoom
 import com.drdisagree.teledrive.resources.player_subtitle_appearance
+import com.drdisagree.teledrive.resources.player_video_scale
 import com.drdisagree.teledrive.resources.player_exit_full_screen
 import com.drdisagree.teledrive.resources.player_full_screen
 import com.drdisagree.teledrive.resources.player_hide_subtitles
@@ -234,6 +242,8 @@ internal fun DesktopMediaPlayer(
     // swap recreates the player: the captured position/play state the restarted
     // player must come back to.
     var styleRestart by remember { mutableStateOf<StyleRestart?>(null) }
+    var scalePreset by remember(mrl) { mutableStateOf(VideoScalePreset.BEST_FIT) }
+    var stageSize by remember { mutableStateOf(IntSize.Zero) }
     val startPausedArmed = remember { AtomicBoolean(false) }
     var resumeSavedPosition by remember(mrl) { mutableStateOf<Long?>(null) }
     var resumeTarget by remember(mrl) { mutableStateOf<Long?>(null) }
@@ -932,6 +942,7 @@ internal fun DesktopMediaPlayer(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onSizeChanged { stageSize = it }
             .focusRequester(playerFocusRequester)
             .onPreviewKeyEvent { event ->
                 if (showSubtitleSettings) return@onPreviewKeyEvent false
@@ -1320,6 +1331,21 @@ internal fun DesktopMediaPlayer(
                                 },
                                 onDragCancel = { dragActive = false }
                             )
+                        }
+                        .graphicsLayer {
+                            // Manual scale presets (the VLC-style replacement for
+                            // the removed pinch zoom): a pure centre scale of the
+                            // whole picture, composed with the FIT/ZOOM/FILL mode.
+                            val (factorX, factorY) = videoScaleFactors(
+                                preset = scalePreset,
+                                stageWidth = stageSize.width,
+                                stageHeight = stageSize.height,
+                                videoWidth = current.width,
+                                videoHeight = current.height,
+                                resizeMode = scaling
+                            )
+                            scaleX = factorX
+                            scaleY = factorY
                         },
                     contentScale = scaling.contentScale
                 )
@@ -1431,7 +1457,9 @@ internal fun DesktopMediaPlayer(
                 },
                 subtitleSettingsOpen = showSubtitleSettings,
                 onOpenSubtitleSettings = { showSubtitleSettings = true },
-                onSubtitlesOnChange = { subtitleTrackActive = it }
+                onSubtitlesOnChange = { subtitleTrackActive = it },
+                scalePreset = scalePreset,
+                onScalePresetChange = { scalePreset = it }
             )
         }
 
@@ -1496,11 +1524,14 @@ private fun PlayerControlsBar(
     onControlPreferencesChange: (PlayerControlPreferences) -> Unit,
     subtitleSettingsOpen: Boolean,
     onOpenSubtitleSettings: () -> Unit,
-    onSubtitlesOnChange: (Boolean) -> Unit
+    onSubtitlesOnChange: (Boolean) -> Unit,
+    scalePreset: VideoScalePreset,
+    onScalePresetChange: (VideoScalePreset) -> Unit
 ) {
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
     var showSubtitleMenu by remember { mutableStateOf(false) }
+    var showScaleMenu by remember { mutableStateOf(false) }
     var showQueueMenu by remember { mutableStateOf(false) }
     var showSleepMenu by remember { mutableStateOf(false) }
     var showCustomSleepDialog by remember { mutableStateOf(false) }
@@ -1642,12 +1673,14 @@ private fun PlayerControlsBar(
             showCustomSleepDialog,
             volumeSliderActive,
             brightnessSliderActive,
-            subtitleSettingsOpen
+            subtitleSettingsOpen,
+            showScaleMenu
         ) {
             onControlsKeepVisible(
                 showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
                     showQueueMenu || showSleepMenu || showCustomSleepDialog ||
-                    volumeSliderActive || brightnessSliderActive || subtitleSettingsOpen
+                    volumeSliderActive || brightnessSliderActive || subtitleSettingsOpen ||
+                    showScaleMenu
             )
         }
         DisposableEffect(Unit) {
@@ -2156,20 +2189,76 @@ private fun PlayerControlsBar(
                     }
                 }
                 if (!isAudio) {
-                    TooltipIconButton(
-                        tooltip = stringResource(Res.string.player_scaling),
-                        onClick = { onInteraction(); onScaling(scaling.next()) },
-                        modifier = Modifier.size(38.dp)
-                    ) {
-                        Icon(
-                            imageVector = when (scaling) {
-                                VideoScaling.FIT -> Icons.Filled.FitScreen
-                                VideoScaling.ZOOM -> Icons.Filled.ZoomOutMap
-                                VideoScaling.FILL -> Icons.Filled.Fullscreen
-                            },
-                            contentDescription = stringResource(Res.string.player_scaling),
-                            tint = Color.White
-                        )
+                    Box {
+                        TooltipIconButton(
+                            tooltip = stringResource(Res.string.player_scaling),
+                            onClick = { onInteraction(); showScaleMenu = true },
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(
+                                imageVector = when (scaling) {
+                                    VideoScaling.FIT -> Icons.Filled.FitScreen
+                                    VideoScaling.ZOOM -> Icons.Filled.ZoomOutMap
+                                    VideoScaling.FILL -> Icons.Filled.Fullscreen
+                                },
+                                contentDescription = stringResource(Res.string.player_scaling),
+                                tint = Color.White
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showScaleMenu,
+                            onDismissRequest = { showScaleMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.player_video_scale)) },
+                                enabled = false,
+                                onClick = {}
+                            )
+                            VideoScalePreset.entries.forEach { preset ->
+                                TrackMenuItem(
+                                    label = preset.label,
+                                    selected = scalePreset == preset,
+                                    onClick = {
+                                        showScaleMenu = false
+                                        onScalePresetChange(preset)
+                                        onInteraction()
+                                    }
+                                )
+                            }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.player_resize_mode)) },
+                                enabled = false,
+                                onClick = {}
+                            )
+                            TrackMenuItem(
+                                label = stringResource(Res.string.player_resize_fit),
+                                selected = scaling == VideoScaling.FIT,
+                                onClick = {
+                                    showScaleMenu = false
+                                    onScaling(VideoScaling.FIT)
+                                    onInteraction()
+                                }
+                            )
+                            TrackMenuItem(
+                                label = stringResource(Res.string.player_resize_zoom),
+                                selected = scaling == VideoScaling.ZOOM,
+                                onClick = {
+                                    showScaleMenu = false
+                                    onScaling(VideoScaling.ZOOM)
+                                    onInteraction()
+                                }
+                            )
+                            TrackMenuItem(
+                                label = stringResource(Res.string.player_resize_fill),
+                                selected = scaling == VideoScaling.FILL,
+                                onClick = {
+                                    showScaleMenu = false
+                                    onScaling(VideoScaling.FILL)
+                                    onInteraction()
+                                }
+                            )
+                        }
                     }
                 }
                 TooltipIconButton(
