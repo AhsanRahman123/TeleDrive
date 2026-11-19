@@ -10,9 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.toRoute
@@ -45,30 +43,6 @@ object NavigationTransitions {
 
     fun fadeThroughExit(): ExitTransition = fadeOut(tween(EXIT_MS / 2))
 
-    fun tabEnterVertical(forward: Boolean): EnterTransition =
-        slideInVertically(
-            animationSpec = tween(ENTER_MS, easing = EmphasizedDecelerate)
-        ) { fullHeight -> if (forward) fullHeight else -fullHeight } +
-                fadeIn(tween(ENTER_MS / 2))
-
-    fun tabExitVertical(forward: Boolean): ExitTransition =
-        slideOutVertically(
-            animationSpec = tween(ENTER_MS, easing = EmphasizedDecelerate)
-        ) { fullHeight -> if (forward) -fullHeight else fullHeight } +
-                fadeOut(tween(ENTER_MS / 2))
-
-    fun tabEnter(forward: Boolean): EnterTransition =
-        slideInHorizontally(
-            animationSpec = tween(ENTER_MS, easing = EmphasizedDecelerate)
-        ) { fullWidth -> if (forward) fullWidth else -fullWidth } +
-                fadeIn(tween(ENTER_MS / 2))
-
-    fun tabExit(forward: Boolean): ExitTransition =
-        slideOutHorizontally(
-            animationSpec = tween(ENTER_MS, easing = EmphasizedDecelerate)
-        ) { fullWidth -> if (forward) -fullWidth else fullWidth } +
-                fadeOut(tween(ENTER_MS / 2))
-
     fun previewEnter(): EnterTransition =
         fadeIn(tween(ENTER_MS / 2)) +
                 scaleIn(
@@ -85,16 +59,6 @@ object NavigationTransitions {
 
     fun AnimatedContentTransitionScope<NavBackStackEntry>.isPeerSwitch(): Boolean =
         initialState.isTopLevel() && targetState.isTopLevel()
-
-    fun AnimatedContentTransitionScope<NavBackStackEntry>.movesForward(): Boolean {
-        val from = initialState.topLevelIndex() ?: return true
-        val to = targetState.topLevelIndex() ?: return true
-        return to > from
-    }
-
-    private fun NavBackStackEntry.topLevelIndex(): Int? = TopLevelDestination.entries
-        .indexOfFirst { destination.hasRoute(it.route::class) }
-        .takeIf { it >= 0 }
 
     private fun NavBackStackEntry.isTopLevel(): Boolean {
         val current = destination

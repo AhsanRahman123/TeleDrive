@@ -7,10 +7,8 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -315,8 +313,7 @@ private fun MainScaffold(
                 startDestination = startDestination,
                 modifier = Modifier
                     .fillMaxSize()
-                    .consumeWindowInsets(WindowInsets.systemBars.only(WindowInsetsSides.Start)),
-                verticalTabMotion = true
+                    .consumeWindowInsets(WindowInsets.systemBars.only(WindowInsetsSides.Start))
             )
         }
     } else {
@@ -341,10 +338,16 @@ private fun MainScaffold(
             val topLevelIndex = bottomDestinations.indexOfFirst { destination ->
                 destination.matches(backStackEntry)
             }
-            var selectedNavIndex by remember { mutableIntStateOf(0) }
+            var lastNavIndex by remember { mutableIntStateOf(0) }
             LaunchedEffect(topLevelIndex) {
-                if (topLevelIndex >= 0) selectedNavIndex = topLevelIndex
+                if (topLevelIndex >= 0) lastNavIndex = topLevelIndex
             }
+            // Derive the selection in the same composition pass as the back-stack
+            // change. Syncing it through the effect above left the pill and the
+            // expanded item pointing at the previous tab for a frame or two after
+            // every switch, which read as lag. The remembered value only serves
+            // the bar's exit animation, when no destination is top-level.
+            val selectedNavIndex = if (topLevelIndex >= 0) topLevelIndex else lastNavIndex
             AnimatedVisibility(
                 visible = topLevelIndex >= 0,
                 enter = slideInVertically(barSlideSpec()) { height -> height } +
@@ -463,12 +466,11 @@ private fun NavigationPillItem(
             .padding(horizontal = ITEM_PADDING, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AnimatedVisibility(
-            visible = selected,
-            enter = expandHorizontally(spring(stiffness = Spring.StiffnessMediumLow)) +
-                    fadeIn(spring(stiffness = Spring.StiffnessMediumLow)),
-            exit = shrinkHorizontally(spring(stiffness = Spring.StiffnessMediumLow)) + fadeOut()
-        ) {
+        // The icon appears and disappears with the selection itself, never
+        // animated: the old expand/shrink springs kept both the outgoing and
+        // the incoming item mid-width for hundreds of milliseconds, so the
+        // labels slid over each other and the sliding pill on every switch.
+        if (selected) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = destination.selectedIcon,
