@@ -38,6 +38,16 @@ class SubtitleAppearanceOptionsTest {
     }
 
     @Test
+    fun `custom appearance forces the freetype text rendering path`() {
+        val options = SubtitleAppearance(
+            useSystemDefaults = false
+        ).toVlcFactoryArguments(videoHeight = 1080)
+
+        assertTrue(options.contains("--text-renderer=freetype"))
+        assertTrue(options.contains("--no-libass"))
+    }
+
+    @Test
     fun `appearance values are clamped before building factory arguments`() {
         val normalized = SubtitleAppearance(
             textScale = 4f,

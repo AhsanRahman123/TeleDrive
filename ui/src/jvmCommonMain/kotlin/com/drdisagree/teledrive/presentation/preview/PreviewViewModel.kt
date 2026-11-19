@@ -170,6 +170,12 @@ class PreviewViewModel(
         .map { it.preferredSubtitleLanguage }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
+    fun setBackgroundPlayback(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.update { it.copy(backgroundPlayback = enabled) }
+        }
+    }
+
     fun setPreferredAudioLanguage(language: String) {
         viewModelScope.launch {
             settingsRepository.update { it.copy(preferredAudioLanguage = language) }

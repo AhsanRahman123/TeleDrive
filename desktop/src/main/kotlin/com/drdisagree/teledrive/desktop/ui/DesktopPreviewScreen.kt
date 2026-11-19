@@ -1656,7 +1656,10 @@ private fun PreviewPane(
                 onPlaybackFinished = onPlaybackFinished,
                 onControlsVisibilityChange = onPlayerControlsVisibilityChange,
                 onDelete = onDelete,
-                backgroundPlayback = backgroundPlayback
+                backgroundPlayback = backgroundPlayback,
+                onBackgroundPlaybackChange = { enabled ->
+                    viewModel.setBackgroundPlayback(enabled)
+                }
             )
         }
     }

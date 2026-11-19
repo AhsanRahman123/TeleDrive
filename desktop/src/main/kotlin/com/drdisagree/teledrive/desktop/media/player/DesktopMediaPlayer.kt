@@ -8,6 +8,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
@@ -185,18 +186,33 @@ internal fun DesktopMediaPlayer(
     onPlaybackFinished: () -> Unit = {},
     onControlsVisibilityChange: (Boolean) -> Unit = {},
     onDelete: () -> Unit = {},
-    backgroundPlayback: Boolean = false
+    backgroundPlayback: Boolean = false,
+    onBackgroundPlaybackChange: (Boolean) -> Unit = {}
 ) {
     // Subtitle appearance: freetype options are LibVLC instance options, so a
     // non-default appearance gets its own factory and the player is recreated
     // from it (keyed by the appearance below). The shared singleton keeps
     // serving the default appearance and the thumbnail store.
     var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
+    var appearanceFactoryFailed by remember { mutableStateOf(false) }
     val appearanceFactory = remember(subtitleAppearance) {
+        appearanceFactoryFailed = false
         if (subtitleAppearance.toVlcFactoryArguments().isEmpty()) {
             null
         } else {
-            VlcPlayback.createFactory(subtitleAppearance)
+            VlcPlayback.createFactory(subtitleAppearance).also { created ->
+                if (created == null) {
+                    // Never silently substitute the argument-less singleton:
+                    // the failure is logged in VlcPlayback and surfaced in
+                    // the player UI (see the warning overlay below).
+                    appearanceFactoryFailed = true
+                    com.drdisagree.teledrive.core.common.SafeLog.e(
+                        "DesktopMediaPlayer",
+                        "Subtitle appearance factory failed; falling back to " +
+                            "default rendering and telling the user"
+                    )
+                }
+            }
         }
     }
     val factory = appearanceFactory ?: VlcPlayback.factory ?: return
@@ -925,7 +941,15 @@ internal fun DesktopMediaPlayer(
                     }
                     if (preferredSubtitleLanguage.isNotEmpty()) {
                         text.firstOrNull { it.language == preferredSubtitleLanguage }
-                            ?.let { runCatching { player.subpictures().setTrack(it.id) } }
+                            ?.let { chosen ->
+                                // Clear VLC's auto-selected SPU first, or the
+                                // auto track and the chosen track can render
+                                // together (doubled subtitles).
+                                runCatching {
+                                    player.subpictures().setTrack(VLC_TRACK_DISABLED)
+                                }
+                                runCatching { player.subpictures().setTrack(chosen.id) }
+                            }
                     }
                     applied.complete(true)
                 }
@@ -1294,11 +1318,9 @@ internal fun DesktopMediaPlayer(
                 }
             )
             .pointerInput(player, playing, finished, isAudio) {
-                if (!isAudio) {
-                    detectTapGestures(
-                        onTap = { toggleControlsVisibility() }
-                    )
-                }
+                detectTapGestures(
+                    onTap = { toggleControlsVisibility() }
+                )
             }
             .pointerInput(Unit) {
                 var lastPosition = Offset.Unspecified
@@ -1344,6 +1366,17 @@ internal fun DesktopMediaPlayer(
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxSize()
+                        // Subtitle safe area: VLC paints cues inside the frame,
+                        // so while the control bar is visible the frame is
+                        // inset above it instead of the cue hiding behind the
+                        // bar (and being cropped at the fullscreen bottom edge).
+                        .padding(
+                            bottom = if (controlsVisible) {
+                                SUBTITLE_SAFE_AREA_WITH_CONTROLS
+                            } else {
+                                0.dp
+                            }
+                        )
                         .pointerInput(subtitleTrackActive, subtitleAppearance.verticalPosition) {
                             var dragActive = false
                             var startY = 0f
@@ -1411,6 +1444,20 @@ internal fun DesktopMediaPlayer(
             }
         }
 
+        if (appearanceFactoryFailed) {
+            Text(
+                text = "Subtitle appearance could not be applied — " +
+                    "playing with default subtitle rendering.",
+                color = Color.White,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp)
+                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
+
         if (buffering && !finished) {
             CircularWavyProgressIndicator(modifier = Modifier.size(56.dp))
         }
@@ -1446,6 +1493,8 @@ internal fun DesktopMediaPlayer(
                 sleepTimerLabel = sleepTimerLabel,
                 trackTick = trackTick,
                 scaling = scaling,
+                backgroundPlayback = backgroundPlayback,
+                onBackgroundPlaybackChange = onBackgroundPlaybackChange,
                 onPrevious = onPrevious,
                 onNext = onNext,
                 hasPrevious = hasPrevious,
@@ -1457,7 +1506,14 @@ internal fun DesktopMediaPlayer(
                 },
                 onSelectTextTrack = { track ->
                     val trackId = track?.id ?: VLC_TRACK_DISABLED
-                    player.submit { runCatching { player.subpictures().setTrack(trackId) } }
+                    player.submit {
+                        if (trackId != VLC_TRACK_DISABLED) {
+                            runCatching {
+                                player.subpictures().setTrack(VLC_TRACK_DISABLED)
+                            }
+                        }
+                        runCatching { player.subpictures().setTrack(trackId) }
+                    }
                     onPreferredSubtitleLanguage(track?.language.orEmpty())
                     trackTick++
                 },
@@ -1579,6 +1635,8 @@ private fun PlayerControlsBar(
     onScaling: (VideoScaling) -> Unit,
     controlPreferences: PlayerControlPreferences,
     onControlPreferencesChange: (PlayerControlPreferences) -> Unit,
+    backgroundPlayback: Boolean = false,
+    onBackgroundPlaybackChange: (Boolean) -> Unit = {},
     subtitleSettingsOpen: Boolean,
     onOpenSubtitleSettings: () -> Unit,
     onSubtitlesOnChange: (Boolean) -> Unit,
@@ -1953,6 +2011,19 @@ private fun PlayerControlsBar(
                                     rememberVolume = !controlPreferences.rememberVolume
                                 )
                             )
+                            onInteraction()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Background playback") },
+                        leadingIcon = {
+                            Checkbox(
+                                checked = backgroundPlayback,
+                                onCheckedChange = null
+                            )
+                        },
+                        onClick = {
+                            onBackgroundPlaybackChange(!backgroundPlayback)
                             onInteraction()
                         }
                     )
@@ -2463,6 +2534,7 @@ private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
 }
 
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
+private val SUBTITLE_SAFE_AREA_WITH_CONTROLS = 132.dp
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val SHORT_KEY_SEEK_STEP_MS = 5_000L

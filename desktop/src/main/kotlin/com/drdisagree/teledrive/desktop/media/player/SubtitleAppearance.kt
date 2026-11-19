@@ -93,6 +93,13 @@ internal fun SubtitleAppearance.toVlcFactoryArguments(videoHeight: Int = 1080): 
     val options = mutableListOf<String>()
 
     if (!value.useSystemDefaults) {
+        // Embedded MKV subtitles are usually ASS/SSA, which libass renders
+        // with the script's own styles — freetype options cannot affect them.
+        // Force the freetype text-rendering path for text subtitle tracks so
+        // the style below actually applies. VLC-defaults mode emits neither
+        // argument and keeps native (libass) rendering.
+        options += "--text-renderer=freetype"
+        options += "--no-libass"
         val (backgroundRgb, backgroundAlpha) = compositeSubtitleBackground(
             foregroundColor = value.backgroundColor,
             foregroundOpacity = value.backgroundOpacity,

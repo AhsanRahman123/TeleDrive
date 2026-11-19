@@ -30,7 +30,7 @@ object VlcPlayback {
         runCatching {
             createFactory(LIBVLC_ARGS + appearance.toVlcFactoryArguments())
         }.onFailure {
-            SafeLog.w(TAG, "Could not create VLC with the requested subtitle appearance", it)
+            SafeLog.e(TAG, "Could not create VLC with the requested subtitle appearance", it)
         }.getOrNull()
 
     private fun createFactory(): MediaPlayerFactory = createFactory(LIBVLC_ARGS)

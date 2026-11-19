@@ -33,6 +33,16 @@ internal fun MediaPlayer.audioTracks(fallbackPrefix: String): List<VlcTrack> {
 internal fun MediaPlayer.textTracks(fallbackPrefix: String): List<VlcTrack> {
     val info = runCatching { media().info()?.textTracks().orEmpty() }
         .getOrDefault(emptyList<TextTrackInfo>())
+    // Codec visibility for diagnosing doubled/unstyled subtitles: an ASS or
+    // bitmap (PGS/DVB) track renders very differently from a plain text track.
+    if (info.isNotEmpty()) {
+        com.drdisagree.teledrive.core.common.SafeLog.d(
+            "VlcTracks",
+            "SPU tracks: " + info.joinToString { track ->
+                "id=${track.id()} codec=${track.codecDescription()} lang=${track.language()}"
+            }
+        )
+    }
     val current = runCatching { subpictures().track() }.getOrDefault(VLC_TRACK_DISABLED)
     val descriptions = runCatching { subpictures().trackDescriptions() }.getOrDefault(emptyList())
     return descriptions.filter { it.id() != VLC_TRACK_DISABLED }
