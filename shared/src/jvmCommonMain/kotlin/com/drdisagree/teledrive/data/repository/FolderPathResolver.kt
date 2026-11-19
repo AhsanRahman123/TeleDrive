@@ -37,7 +37,7 @@ class FolderPathResolver(
         var parentId: String? = null
         for (segment in segmentsOf(path)) {
             val match = folderDao.childrenOf(parentId, owner)
-                .firstOrNull { it.name.equals(segment, ignoreCase = true) }
+                .firstOrNull { FolderNameKey.matches(it.name, segment) }
                 ?: return null
             parentId = match.id
         }
@@ -69,7 +69,7 @@ class FolderPathResolver(
             val segments = segmentsOf(path)
             for ((index, segment) in segments.withIndex()) {
                 val existing = folderDao.childrenOf(parentId, owner)
-                    .firstOrNull { it.name.equals(segment, ignoreCase = true) }
+                    .firstOrNull { FolderNameKey.matches(it.name, segment) }
                 parentId = existing?.id ?: run {
                     val now = System.currentTimeMillis()
                     val folder = FolderEntity(

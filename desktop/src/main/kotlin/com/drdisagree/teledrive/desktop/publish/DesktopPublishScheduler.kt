@@ -22,9 +22,14 @@ class DesktopPublishScheduler(
         if (!draining.compareAndSet(false, true)) return
         scope.launch {
             try {
-                var attempts = 0
-                while (!drainer.drain(isStopped = { false }) && attempts++ < MAX_ATTEMPTS) {
-                    delay(RETRY_DELAY_SECONDS.seconds)
+                // No attempt cap: pending publishes (e.g. a folder move whose
+                // caption edits were rejected) must keep retrying while the
+                // app runs instead of being silently dropped after 10 tries.
+                // Backoff grows 30s -> 5min so a persistent failure is cheap.
+                var delaySeconds = RETRY_DELAY_SECONDS
+                while (!drainer.drain(isStopped = { false })) {
+                    delay(delaySeconds.seconds)
+                    delaySeconds = minOf(delaySeconds * 2, MAX_RETRY_DELAY_SECONDS)
                 }
             } finally {
                 draining.set(false)
@@ -34,6 +39,6 @@ class DesktopPublishScheduler(
 
     private companion object {
         const val RETRY_DELAY_SECONDS = 30
-        const val MAX_ATTEMPTS = 10
+        const val MAX_RETRY_DELAY_SECONDS = 300
     }
 }
