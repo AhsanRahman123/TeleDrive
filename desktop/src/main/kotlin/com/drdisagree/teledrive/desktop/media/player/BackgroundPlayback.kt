@@ -1,10 +1,5 @@
 package com.drdisagree.teledrive.desktop.media.player
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 
@@ -50,20 +45,21 @@ internal object BackgroundPlayback {
         val factory = parkedFactory
         parkedPlayer = null
         parkedFactory = null
-        // Same serialized teardown the preview itself uses.
+        // Same serialized teardown the preview itself uses. The parked player's
+        // factory goes through VlcFactoryLifecycle like any other: it is
+        // released once this teardown task has released the player, never on
+        // a timer.
         runCatching {
             player.submit {
                 runCatching { player.controls().stop() }
                 runCatching { player.release() }
+                if (factory != null) {
+                    VlcFactoryLifecycle.onPlayerReleased(factory, player)
+                }
             }
         }
         if (factory != null) {
-            // Mirror the preview's factory retirement: release the LibVLC
-            // instance shortly after its player, off the UI thread.
-            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                delay(1_000)
-                runCatching { factory.release() }
-            }
+            VlcFactoryLifecycle.retire(factory)
         }
     }
 }

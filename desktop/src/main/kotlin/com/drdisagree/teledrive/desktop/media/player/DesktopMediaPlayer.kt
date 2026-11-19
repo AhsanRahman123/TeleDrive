@@ -204,14 +204,12 @@ internal fun DesktopMediaPlayer(
         onDispose {
             val retired = appearanceFactory
             if (retired != null && !BackgroundPlayback.ownsFactory(retired)) {
-                // The player built from this factory is released by its own
-                // DisposableEffect (declared later, so it is disposed first);
-                // release the retired LibVLC instance shortly afterwards, off
-                // the UI thread. The shared singleton is never released here.
-                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-                    delay(1_000)
-                    runCatching { retired.release() }
-                }
+                // Retire the LibVLC instance: it is released once every player
+                // created from it has finished its own release (see
+                // VlcFactoryLifecycle) — never on a timer, which could free the
+                // factory under a player whose asynchronous teardown overran
+                // it. The shared singleton is never retired here.
+                VlcFactoryLifecycle.retire(retired)
             }
         }
     }
@@ -326,6 +324,9 @@ internal fun DesktopMediaPlayer(
         // previous preview (see BackgroundPlayback).
         BackgroundPlayback.stopParked()
         factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
+            // Track the player against its per-appearance factory so the
+            // factory is only released after this player has been released.
+            appearanceFactory?.let { VlcFactoryLifecycle.register(it, this) }
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
                     val generation = currentVideoFrameGeneration.get()
@@ -578,6 +579,10 @@ internal fun DesktopMediaPlayer(
     }
 
     DisposableEffect(player) {
+        // Captured from the composition pass that created this effect, i.e. the
+        // appearance factory this player was built from (null for the shared
+        // singleton, which is never released).
+        val playerFactory = appearanceFactory
         onDispose {
             acceptsCurrentMediaEvents.set(false)
             acceptsCurrentVideoFrames.set(false)
@@ -591,6 +596,11 @@ internal fun DesktopMediaPlayer(
                 player.submit {
                     runCatching { player.controls().stop() }
                     runCatching { player.release() }
+                    // Report from inside the submitted task: the factory's
+                    // release is now structurally ordered after this player's.
+                    if (playerFactory != null) {
+                        VlcFactoryLifecycle.onPlayerReleased(playerFactory, player)
+                    }
                 }
             }
         }
