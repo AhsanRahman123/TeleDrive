@@ -142,6 +142,7 @@ import kotlin.time.Duration.Companion.milliseconds
 internal fun DesktopMediaPlayer(
     mrl: String,
     isAudio: Boolean,
+    mediaId: String = mrl,
     modifier: Modifier = Modifier,
     preferredAudioLanguage: String = "",
     preferredSubtitleLanguage: String = "",
@@ -191,6 +192,15 @@ internal fun DesktopMediaPlayer(
     var rate by remember(mrl) { mutableStateOf(1.0f) }
     var repeatOne by remember { mutableStateOf(false) }
     var trackTick by remember { mutableIntStateOf(0) }
+    // Per-video resume: the saved position is loaded when a media starts, applied
+    // once its duration is known, and only trusted for further saving once playback
+    // is observed near it (a seek that lands elsewhere is a manual seek and ends
+    // the restoration). See VideoResumeStore for the position rules.
+    var resumeSavedPosition by remember(mrl) { mutableStateOf<Long?>(null) }
+    var resumeTarget by remember(mrl) { mutableStateOf<Long?>(null) }
+    var resumeSettled by remember(mrl) { mutableStateOf(false) }
+    var resumeSeekRetried by remember(mrl) { mutableStateOf(false) }
+    var lastObservedTimeMs by remember(mrl) { mutableLongStateOf(0L) }
     var scaling by remember { mutableStateOf(VideoScaling.FIT) }
     var controlsVisible by remember { mutableStateOf(true) }
     var interactionTick by remember { mutableIntStateOf(0) }
@@ -437,6 +447,12 @@ internal fun DesktopMediaPlayer(
         buffering = true
         timeMs = 0L
         durationMs = 0L
+        val savedResume = VideoResumeStore.loadPosition(mediaId)
+        resumeSavedPosition = if (savedResume > 0L) savedResume else null
+        resumeTarget = null
+        resumeSettled = savedResume <= 0L
+        resumeSeekRetried = false
+        lastObservedTimeMs = 0L
         trackTick++
         player.submit {
             // A newer selection can arrive while this command is waiting in VLC's serial
@@ -489,6 +505,68 @@ internal fun DesktopMediaPlayer(
                     runCatching { player.controls().stop() }
                     runCatching { player.release() }
                 }
+            }
+        }
+    }
+
+    LaunchedEffect(player, durationMs) {
+        if (durationMs <= 0L) return@LaunchedEffect
+        val saved = resumeSavedPosition ?: return@LaunchedEffect
+        resumeSavedPosition = null
+        val target = videoResumeTarget(saved, durationMs)
+        if (target == null) {
+            resumeSettled = true
+        } else {
+            resumeTarget = target
+            player.submit { runCatching { player.controls().setTime(target) } }
+        }
+    }
+
+    LaunchedEffect(timeMs) {
+        val target = resumeTarget
+        if (target != null) {
+            when {
+                isVideoResumePositionConfirmed(timeMs, target) -> {
+                    resumeTarget = null
+                    resumeSettled = true
+                }
+
+                timeMs > lastObservedTimeMs + 2_000L -> {
+                    // A jump that did not land on the target is a manual seek:
+                    // restoration is over and normal saving resumes from here.
+                    resumeTarget = null
+                    resumeSettled = true
+                }
+
+                timeMs < target - 1_500L && playing && !resumeSeekRetried -> {
+                    resumeSeekRetried = true
+                    player.submit { runCatching { player.controls().setTime(target) } }
+                }
+            }
+        }
+        lastObservedTimeMs = timeMs
+        if (resumeSettled && timeMs > 0L) {
+            VideoResumeStore.savePosition(mediaId, timeMs, durationMs)
+        }
+    }
+
+    LaunchedEffect(playing) {
+        if (!playing && resumeSettled && timeMs > 0L) {
+            VideoResumeStore.savePosition(mediaId, timeMs, durationMs, force = true)
+        }
+    }
+
+    val latestTimeMs = rememberUpdatedState(timeMs)
+    val latestDurationMs = rememberUpdatedState(durationMs)
+    DisposableEffect(mediaId) {
+        onDispose {
+            if (latestTimeMs.value > 0L) {
+                VideoResumeStore.savePosition(
+                    mediaId,
+                    latestTimeMs.value,
+                    latestDurationMs.value,
+                    force = true
+                )
             }
         }
     }

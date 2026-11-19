@@ -1596,6 +1596,7 @@ private fun PreviewPane(
             DesktopMediaPlayer(
                 mrl = mediaMrl,
                 isAudio = mediaIsAudio,
+                mediaId = displayedFile.id,
                 preferredAudioLanguage = preferredAudioLanguage,
                 preferredSubtitleLanguage = preferredSubtitleLanguage,
                 onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
