@@ -10,6 +10,13 @@ import org.junit.Test
  * fingers. These tests pin that behaviour (Pranto's report on the old build: the %
  * bounced 198 -> 146 -> 96 during a steady pinch, the picture slammed to the 40%
  * floor, and any zoom at or below ~100% snapped back to exactly 100% on release).
+ *
+ * The total-fix round adds the sensitivity damping: each event's span ratio is raised
+ * to ZOOM_SENSITIVITY (0.55) before it is applied, after frame-by-frame measurement of
+ * the 1:1 build showed one quick pinch sweeping 129% -> 41% in 0.45 s. The scale
+ * expectations below are therefore the DAMPED values (e.g. a doubled span yields
+ * 2^0.55 = 1.4641, not 2); every structural assertion — anchoring, zero pan at the
+ * centre, drift-free accumulation, the below-100% pan pin — is unchanged.
  */
 class ZoomStabilityTest {
 
@@ -25,23 +32,25 @@ class ZoomStabilityTest {
             prevCentroid = centre, centroid = centre,
             width = width, height = height
         )
-        assertEquals(1.5f, result.scale, 0.001f)
+        // Damped: 1.5^0.55 = 1.2499.
+        assertEquals(1.2499f, result.scale, 0.001f)
         assertEquals(0f, result.panX, 0.001f)
         assertEquals(0f, result.panY, 0.001f)
     }
 
     @Test
     fun `the content point under the fingers stays under the fingers`() {
-        // Pinch about a point left of centre: doubling the span doubles the scale,
-        // and the pan must shift so the same content point stays at (250, 1000).
+        // Pinch about a point left of centre: doubling the span applies the damped
+        // factor 2^0.55 = 1.4641, and the pan must shift so the same content point
+        // stays at (250, 1000): panX = (250 - 500) * (1 - 1.4641) = 116.03.
         val result = pinchZoomStep(
             ZoomTransform(1f, 0f, 0f),
             prevSpan = 100f, span = 200f,
             prevCentroid = Offset(250f, 1000f), centroid = Offset(250f, 1000f),
             width = width, height = height
         )
-        assertEquals(2f, result.scale, 0.001f)
-        assertEquals(250f, result.panX, 0.001f)
+        assertEquals(1.4641f, result.scale, 0.001f)
+        assertEquals(116.03f, result.panX, 0.01f)
         assertEquals(0f, result.panY, 0.001f)
         // Cross-check with the layer's rendering model: a content point p renders at
         // O + (p - O) * s + t. Before the step, the point under (250, 1000) was
@@ -68,7 +77,9 @@ class ZoomStabilityTest {
 
     @Test
     fun `many small steps accumulate without drifting`() {
-        // Ten +5% steps must land on 1.05^10 = 1.6289, anchored at the centre so the
+        // Ten +5% span steps, each damped by the sensitivity exponent, must land on
+        // 1.05^(10 * 0.55) = 1.3079 — the damped steps still telescope exactly, so
+        // nothing is lost or invented along the way — anchored at the centre so the
         // pan stays exactly zero throughout.
         var state = ZoomTransform(1f, 0f, 0f)
         var span = 100f
@@ -77,7 +88,7 @@ class ZoomStabilityTest {
             state = pinchZoomStep(state, span, nextSpan, centre, centre, width, height)
             span = nextSpan
         }
-        assertEquals(1.6289f, state.scale, 0.01f)
+        assertEquals(1.3079f, state.scale, 0.01f)
         assertEquals(0f, state.panX, 0.001f)
         assertEquals(0f, state.panY, 0.001f)
     }
@@ -93,9 +104,33 @@ class ZoomStabilityTest {
             prevCentroid = Offset(250f, 1000f), centroid = Offset(250f, 1000f),
             width = width, height = height
         )
-        assertEquals(0.5f, result.scale, 0.001f)
+        // Damped: 0.5^0.55 = 0.683 — still below 100%, so the pan pin is what matters.
+        assertEquals(0.683f, result.scale, 0.001f)
         assertEquals(0f, result.panX, 0.001f)
         assertEquals(0f, result.panY, 0.001f)
+    }
+
+    @Test
+    fun `span steps are damped by the sensitivity gain`() {
+        // The total-fix regression: at the old 1:1 gain a single firm pinch swept the
+        // whole zoom range. Even the largest single-event steps the glitch filter lets
+        // through must now be damped: a x2 span step applies 2^0.55 = 1.4641, and a
+        // x0.5 span step 0.5^0.55 = 0.683 — the fingers move the zoom at a reduced
+        // rate in both directions.
+        val out = pinchZoomStep(
+            ZoomTransform(1f, 0f, 0f),
+            prevSpan = 100f, span = 200f,
+            prevCentroid = centre, centroid = centre,
+            width = width, height = height
+        )
+        assertEquals(1.4641f, out.scale, 0.001f)
+        val into = pinchZoomStep(
+            ZoomTransform(1f, 0f, 0f),
+            prevSpan = 200f, span = 100f,
+            prevCentroid = centre, centroid = centre,
+            width = width, height = height
+        )
+        assertEquals(0.683f, into.scale, 0.001f)
     }
 
     @Test

@@ -61,6 +61,7 @@ import com.drdisagree.teledrive.resources.player_brightness
 import com.drdisagree.teledrive.resources.player_toggle_controls
 import com.drdisagree.teledrive.resources.player_volume
 import kotlin.math.absoluteValue
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.delay
@@ -167,6 +168,18 @@ fun PlayerGestureArea(
                 // threshold at once. On release the zoom HOLDS at whatever value it
                 // reached, above or below 100%, exactly like MX Player; only a new file
                 // or an aspect-ratio change resets it.
+                //
+                // Sensitivity: each event's span ratio is damped by a fixed exponent
+                // before it is applied (see ZOOM_SENSITIVITY). Frame-by-frame
+                // measurement of this build's predecessor at the raw 1:1 gain showed a
+                // single quick pinch sweeping the whole zoom range (129% -> 41% in
+                // 0.45 s, the 40% floor hit in six separate episodes, per-0.25 s pill
+                // steps up to x1.56 / x0.54) — several times faster than the same
+                // gestures ever moved MX Player's zoom in the reference video (steps
+                // x0.67..x1.29). Native-frame-rate traces proved the tracking itself
+                // was smooth (per-frame steps x0.93..x1.09, no jumps, no drift): the
+                // gain was simply too high for this phone's wide finger-span range, so
+                // the fix is the reduced rate, not a different tracker.
                 .pointerInput(zoomEnabled) {
                     if (!zoomEnabled) return@pointerInput
                     awaitEachGesture {
@@ -620,6 +633,13 @@ internal data class ZoomTransform(val scale: Float, val panX: Float, val panY: F
  * finger-landing position can move the scale by more than the fingers actually moved
  * since the previous event.
  *
+ * The ratio is damped first (`factor^ZOOM_SENSITIVITY`): the exponent compresses every
+ * step toward 1, so the zoom follows the fingers at a reduced, steadier rate while the
+ * product of the steps still telescopes exactly onto the (damped) total span change —
+ * no drift is introduced. Damping is multiplicative in log space, so it shrinks fast
+ * flicks and slow pinches alike, and a factor of exactly 1 (pure centroid movement)
+ * still pans one-to-one.
+ *
  * Anchoring: the graphicsLayer scales about the stage centre O, so a content point p
  * renders at `O + (p - O) * s + t`. The pan is recomputed so the content point that was
  * under the previous centroid C ends up under the current centroid C':
@@ -647,7 +667,8 @@ internal fun pinchZoomStep(
     if (prevSpan <= 0f || span <= 0f || current.scale <= 0f) return current
     val factor = span / prevSpan
     if (factor < MIN_EVENT_SPAN_FACTOR || factor > MAX_EVENT_SPAN_FACTOR) return current
-    val newScale = (current.scale * factor).coerceIn(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
+    val dampedFactor = factor.pow(ZOOM_SENSITIVITY)
+    val newScale = (current.scale * dampedFactor).coerceIn(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
     val appliedRatio = newScale / current.scale
     val originX = width / 2f
     val originY = height / 2f
@@ -715,6 +736,18 @@ private const val MIN_ZOOM_SCALE = 0.4f
 private const val MAX_ZOOM_SCALE = 2.5f
 private const val MIN_EVENT_SPAN_FACTOR = 0.5f
 private const val MAX_EVENT_SPAN_FACTOR = 2f
+
+/**
+ * Pinch-zoom sensitivity: each event's span ratio is raised to this power before it is
+ * applied. 1.0 would track the fingers' span change one-to-one; frame measurement of
+ * the 1:1 build showed one quick pinch sweeping 129% -> 41% in 0.45 s and per-0.25 s
+ * steps up to x1.56 / x0.54, while the same user's MX Player reference stayed within
+ * x0.67..x1.29 per step. 0.55 maps those worst observed steps to x1.28 / x0.71 — inside
+ * MX's observed envelope — and stretches the full 0.4..2.5 zoom range over a span
+ * change of ~28x, far beyond one pinch, so ordinary pinches stop slamming into the
+ * floor and ceiling.
+ */
+private const val ZOOM_SENSITIVITY = 0.55f
 private const val MIN_SUBTITLE_VERTICAL_POSITION = 0.08f
 private const val MAX_SUBTITLE_VERTICAL_POSITION = 0.92f
 internal const val MIN_SUBTITLE_HIT_WIDTH_FRACTION = 0.22f
