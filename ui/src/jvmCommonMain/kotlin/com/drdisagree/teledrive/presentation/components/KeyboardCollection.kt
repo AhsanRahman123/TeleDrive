@@ -31,7 +31,7 @@ fun Modifier.keyboardCollection(
     itemCount: Int,
     shortcuts: CollectionShortcuts = CollectionShortcuts(),
     label: String? = null
-"): Modifier {
+): Modifier {
     state.containerTabStop = label != null && collectionContainerIsTabStop
     return this
         .semantics {
