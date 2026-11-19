@@ -103,6 +103,16 @@ fun main() {
     }
     val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     getKoin().get<DebugLogController>().start(backgroundScope, alwaysVerbose = true)
+    // Warm the shared libVLC factory on a background thread (PC-7): creating
+    // it loads the native libraries and scans the VLC plugin directory,
+    // which takes seconds on a cold start. It used to happen lazily inside
+    // the preview's composition — on the UI thread — the first time a video
+    // was opened, which froze the app (Gallery -> open a video). The
+    // per-appearance factories are created off the UI thread too (see
+    // DesktopMediaPlayer).
+    backgroundScope.launch {
+        runCatching { com.drdisagree.teledrive.desktop.media.player.VlcPlayback.factory }
+    }
     backgroundScope.launch {
         runCatching { getKoin().get<TransferRepository>().recoverOrphanedTransfers() }
         runCatching { getKoin().get<FileRepository>().sweepImportOrphans() }

@@ -152,6 +152,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
+import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
@@ -199,24 +200,44 @@ internal fun DesktopMediaPlayer(
     // serving the default appearance and the thumbnail store.
     var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
     var appearanceFactoryFailed by remember { mutableStateOf(false) }
-    val appearanceFactory = remember(subtitleAppearance) {
-        appearanceFactoryFailed = false
-        if (subtitleAppearance.toVlcFactoryArguments().isEmpty()) {
-            null
+    // The per-appearance factory is created OFF the composition thread
+    // (PC-7): libvlc_new loads the native libraries and scans the plugin
+    // directory — seconds of work that used to run inside remember(),
+    // freezing the UI on the first custom-appearance preview and on every
+    // Apply. While a new factory is being created the player keeps running
+    // on the previous one; the swap (and the style restart it triggers)
+    // happens when the new factory lands.
+    var appearanceFactory by remember { mutableStateOf<MediaPlayerFactory?>(null) }
+    LaunchedEffect(subtitleAppearance) {
+        val requested = subtitleAppearance
+        if (requested.toVlcFactoryArguments().isEmpty()) {
+            appearanceFactory = null
+            appearanceFactoryFailed = false
+            return@LaunchedEffect
+        }
+        val created = withContext(Dispatchers.IO) {
+            VlcPlayback.createFactory(requested)
+        }
+        if (subtitleAppearance != requested) {
+            // A newer appearance superseded this one while its factory was
+            // being created; retire the orphan instead of leaking it.
+            created?.let { VlcFactoryLifecycle.retire(it) }
+            return@LaunchedEffect
+        }
+        if (created == null) {
+            // Never silently substitute the argument-less singleton:
+            // the failure is logged in VlcPlayback and surfaced in
+            // the player UI (see the warning overlay below).
+            appearanceFactoryFailed = true
+            com.drdisagree.teledrive.core.common.SafeLog.e(
+                "DesktopMediaPlayer",
+                "Subtitle appearance factory failed; falling back to " +
+                    "default rendering and telling the user"
+            )
+            appearanceFactory = null
         } else {
-            VlcPlayback.createFactory(subtitleAppearance).also { created ->
-                if (created == null) {
-                    // Never silently substitute the argument-less singleton:
-                    // the failure is logged in VlcPlayback and surfaced in
-                    // the player UI (see the warning overlay below).
-                    appearanceFactoryFailed = true
-                    com.drdisagree.teledrive.core.common.SafeLog.e(
-                        "DesktopMediaPlayer",
-                        "Subtitle appearance factory failed; falling back to " +
-                            "default rendering and telling the user"
-                    )
-                }
-            }
+            appearanceFactoryFailed = false
+            appearanceFactory = created
         }
     }
     val factory = appearanceFactory ?: VlcPlayback.factory ?: return
