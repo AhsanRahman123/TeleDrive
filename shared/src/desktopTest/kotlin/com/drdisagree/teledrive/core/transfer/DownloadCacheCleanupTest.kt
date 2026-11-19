@@ -109,12 +109,23 @@ class DownloadCacheCleanupTest {
         val settings = FakeSettings(UserPreferences())
         val codec = ManifestCodec(StreamCrypto(), unused())
         val telegram = object : TelegramClient by unused() {
-            override fun downloadDocument(remoteFileId: String): Flow<TelegramDownloadEvent> {
+            override fun downloadDocument(
+                remoteFileId: String,
+                chatId: Long?,
+                messageId: Long?,
+                queuePriority: Int
+            ): Flow<TelegramDownloadEvent> {
                 val file = File(workDir, "tdlib-$remoteFileId").apply { writeBytes(byteArrayOf(1, 2, 3)) }
                 return flowOf(TelegramDownloadEvent.Completed(file.absolutePath, file.length()))
             }
 
             override suspend fun deleteLocalCopy(remoteFileId: String) {
+                freed += remoteFileId
+            }
+
+            // Our line frees managed downloads through the managed path; both
+            // free Telegram's cached copy, which is what this test asserts.
+            override suspend fun removeManagedDownload(remoteFileId: String) {
                 freed += remoteFileId
             }
         }
@@ -153,6 +164,13 @@ class DownloadCacheCleanupTest {
             telegramClient = telegram,
             transferDao = database.transferDao(),
             fileDao = database.fileDao(),
+            fileRepository = object :
+                com.drdisagree.teledrive.domain.repository.FileRepository by unused() {
+                override suspend fun deleteLocalCopy(ids: List<String>) =
+                    com.drdisagree.teledrive.core.common.AppResult.Success(
+                        com.drdisagree.teledrive.core.files.LocalCleanup(deletedCount = 0)
+                    )
+            },
             backupDao = database.backupDao(),
             manifestCodec = codec,
             folderPathResolver = FolderPathResolver(
