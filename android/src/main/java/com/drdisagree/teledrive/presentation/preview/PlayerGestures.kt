@@ -168,12 +168,6 @@ fun PlayerGestureArea(
                         var lastCentroid: Offset? = null
                         var lastPanPosition: Offset? = null
 
-                        fun clampedPan(x: Float, y: Float, atScale: Float): Pair<Float, Float> {
-                            val maxX = size.width * (atScale - 1f) / 2f
-                            val maxY = size.height * (atScale - 1f) / 2f
-                            return x.coerceIn(-maxX, maxX) to y.coerceIn(-maxY, maxY)
-                        }
-
                         var finished = false
                         while (!finished) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -213,7 +207,8 @@ fun PlayerGestureArea(
                                             panX += delta.x
                                             panY += delta.y
                                         }
-                                        val (clampedX, clampedY) = clampedPan(panX, panY, scale)
+                                        val (clampedX, clampedY) =
+                                            clampZoomPan(panX, panY, size.width, size.height, scale)
                                         panX = clampedX
                                         panY = clampedY
                                         applyZoom(scale, panX, panY)
@@ -244,8 +239,13 @@ fun PlayerGestureArea(
                                                 panning = true
                                                 panX += delta.x
                                                 panY += delta.y
-                                                val (clampedX, clampedY) =
-                                                    clampedPan(panX, panY, scale)
+                                                val (clampedX, clampedY) = clampZoomPan(
+                                                    panX,
+                                                    panY,
+                                                    size.width,
+                                                    size.height,
+                                                    scale
+                                                )
                                                 panX = clampedX
                                                 panY = clampedY
                                                 change.consume()
@@ -578,6 +578,27 @@ private fun AdjustmentHud(adjustment: AdjustmentLevel) {
             )
         }
     }
+}
+
+/**
+ * Clamps a pinch-zoom pan offset to the scaled picture's half-extents. The half-extents
+ * are floored at 0: below 100% zoom (scale < 1) the raw `size * (scale - 1) / 2` goes
+ * NEGATIVE, which inverts the `coerceIn(-max, max)` range — and Float.coerceIn throws
+ * IllegalArgumentException on an inverted range. That exception, thrown inside the
+ * pinch watcher the first event a pinch crossed below 100%, is what force-closed the
+ * app (Pranto's crash: ZoomHud 100%/102%, then black, then the launcher). At or below
+ * 100% there is nothing to pan, so the offset is simply pinned to 0.
+ */
+internal fun clampZoomPan(
+    x: Float,
+    y: Float,
+    width: Int,
+    height: Int,
+    scale: Float
+): Pair<Float, Float> {
+    val maxX = (width * (scale - 1f) / 2f).coerceAtLeast(0f)
+    val maxY = (height * (scale - 1f) / 2f).coerceAtLeast(0f)
+    return x.coerceIn(-maxX, maxX) to y.coerceIn(-maxY, maxY)
 }
 
 /** Awaits (without acting on) the rest of the current gesture, until every pointer is up. */
