@@ -50,6 +50,8 @@ data class UserPreferences(
     val gallerySortDirection: SortDirection = SortDirection.DESCENDING,
 
     val backgroundPlayback: Boolean = false,
+    /** Desktop only: true = OS-native picker, false = built-in picker (default). */
+    val useNativeFilePicker: Boolean = false,
     val streamBeforeDownload: Boolean = true,
     val preferredAudioLanguage: String = "",
     val preferredSubtitleLanguage: String = "",

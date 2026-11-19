@@ -854,6 +854,8 @@
 
     <!-- Settings: playback -->
     <string name="settings_background_playback">Background playback</string>
+    <string name="settings_use_native_file_picker">Use Windows native file picker</string>
+    <string name="settings_use_native_file_picker_subtitle">Off: pick files with the built-in picker, like the Android app</string>
     <string name="settings_play_videos_load_instead">Play videos while they load instead of downloading first</string>
     <string name="settings_stream_downloading">Stream before downloading</string>
 

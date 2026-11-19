@@ -158,6 +158,8 @@ class SettingsRepositoryImpl(
             ),
             backgroundPlayback = this[PreferenceKeys.BACKGROUND_PLAYBACK]
                 ?: defaults.backgroundPlayback,
+            useNativeFilePicker = this[PreferenceKeys.USE_NATIVE_FILE_PICKER]
+                ?: defaults.useNativeFilePicker,
             streamBeforeDownload = this[PreferenceKeys.STREAM_BEFORE_DOWNLOAD]
                 ?: defaults.streamBeforeDownload,
             preferredAudioLanguage = this[PreferenceKeys.PREFERRED_AUDIO_LANGUAGE]
@@ -230,6 +232,7 @@ class SettingsRepositoryImpl(
         this[PreferenceKeys.GALLERY_SORT_FIELD] = prefs.gallerySortField.name
         this[PreferenceKeys.GALLERY_SORT_DIRECTION] = prefs.gallerySortDirection.name
         this[PreferenceKeys.BACKGROUND_PLAYBACK] = prefs.backgroundPlayback
+        this[PreferenceKeys.USE_NATIVE_FILE_PICKER] = prefs.useNativeFilePicker
         this[PreferenceKeys.STREAM_BEFORE_DOWNLOAD] = prefs.streamBeforeDownload
         this[PreferenceKeys.PREFERRED_AUDIO_LANGUAGE] = prefs.preferredAudioLanguage
         this[PreferenceKeys.PREFERRED_SUBTITLE_LANGUAGE] = prefs.preferredSubtitleLanguage

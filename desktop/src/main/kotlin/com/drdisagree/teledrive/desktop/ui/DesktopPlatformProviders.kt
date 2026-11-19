@@ -2,6 +2,10 @@ package com.drdisagree.teledrive.desktop.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -39,6 +43,8 @@ import com.drdisagree.teledrive.presentation.platform.UrlOpener
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.ic_launcher
 import org.jetbrains.compose.resources.painterResource
+import com.drdisagree.teledrive.domain.repository.SettingsRepository
+import kotlinx.coroutines.flow.map
 import org.koin.compose.koinInject
 import java.awt.Desktop
 import java.awt.FileDialog
@@ -51,6 +57,17 @@ import kotlin.concurrent.thread
 @Composable
 fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
     val capabilities = koinInject<PlatformCapabilities>()
+    val settingsRepository = koinInject<SettingsRepository>()
+    val useNativePicker by remember {
+        settingsRepository.preferences.map { it.useNativeFilePicker }
+    }.collectAsState(initial = false)
+    // Pending built-in picker requests; non-null shows the in-app dialog.
+    var pendingSinglePick by remember {
+        mutableStateOf<((PickResult) -> Unit)?>(null)
+    }
+    var pendingMultiPick by remember {
+        mutableStateOf<((List<String>) -> Unit)?>(null)
+    }
     val urlOpener = remember {
         UrlOpener { url ->
             runCatching { Desktop.getDesktop().browse(URI(url)) }
@@ -71,28 +88,36 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
             }
         }
     }
-    val filePicker = remember {
+    val filePicker = remember(useNativePicker) {
         FilePicker { onPicked ->
-            thread {
-                val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
-                dialog.isVisible = true
-                val file = dialog.file
-                val result = if (file == null) {
-                    PickResult.Canceled
-                } else {
-                    PickResult.Picked(File(dialog.directory, file).absolutePath)
+            if (!useNativePicker) {
+                pendingSinglePick = onPicked
+            } else {
+                thread {
+                    val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
+                    dialog.isVisible = true
+                    val file = dialog.file
+                    val result = if (file == null) {
+                        PickResult.Canceled
+                    } else {
+                        PickResult.Picked(File(dialog.directory, file).absolutePath)
+                    }
+                    onPicked(result)
                 }
-                onPicked(result)
             }
         }
     }
-    val multiFilePicker = remember {
+    val multiFilePicker = remember(useNativePicker) {
         MultiFilePicker { onPicked ->
-            thread {
-                val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
-                dialog.isMultipleMode = true
-                dialog.isVisible = true
-                onPicked(dialog.files.orEmpty().map { it.absolutePath })
+            if (!useNativePicker) {
+                pendingMultiPick = onPicked
+            } else {
+                thread {
+                    val dialog = FileDialog(null as Frame?, "", FileDialog.LOAD)
+                    dialog.isMultipleMode = true
+                    dialog.isVisible = true
+                    onPicked(dialog.files.orEmpty().map { it.absolutePath })
+                }
             }
         }
     }
@@ -153,4 +178,35 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
         LocalPlatformCapabilities provides capabilities,
         content = content
     )
+
+    pendingSinglePick?.let { onPicked ->
+        DesktopUploadPickerDialog(
+            multiSelect = false,
+            onPicked = { files ->
+                pendingSinglePick = null
+                val file = files.firstOrNull()
+                onPicked(
+                    if (file == null) PickResult.Canceled
+                    else PickResult.Picked(file.absolutePath)
+                )
+            },
+            onCancel = {
+                pendingSinglePick = null
+                onPicked(PickResult.Canceled)
+            }
+        )
+    }
+    pendingMultiPick?.let { onPicked ->
+        DesktopUploadPickerDialog(
+            multiSelect = true,
+            onPicked = { files ->
+                pendingMultiPick = null
+                onPicked(files.map { it.absolutePath })
+            },
+            onCancel = {
+                pendingMultiPick = null
+                onPicked(emptyList())
+            }
+        )
+    }
 }

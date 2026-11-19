@@ -65,6 +65,7 @@ object PreferenceKeys {
     val GALLERY_SORT_DIRECTION = stringPreferencesKey("gallery_sort_direction")
 
     val BACKGROUND_PLAYBACK = booleanPreferencesKey("background_playback")
+    val USE_NATIVE_FILE_PICKER = booleanPreferencesKey("use_native_file_picker")
     val STREAM_BEFORE_DOWNLOAD = booleanPreferencesKey("stream_before_download")
     val PREFERRED_AUDIO_LANGUAGE = stringPreferencesKey("preferred_audio_language")
     val PREFERRED_SUBTITLE_LANGUAGE = stringPreferencesKey("preferred_subtitle_language")

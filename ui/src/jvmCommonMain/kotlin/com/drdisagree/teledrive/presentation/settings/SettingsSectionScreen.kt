@@ -163,6 +163,8 @@ import com.drdisagree.teledrive.resources.settings_state_connecting
 import com.drdisagree.teledrive.resources.settings_state_syncing
 import com.drdisagree.teledrive.resources.settings_state_waiting_network
 import com.drdisagree.teledrive.resources.settings_stream_downloading
+import com.drdisagree.teledrive.resources.settings_use_native_file_picker
+import com.drdisagree.teledrive.resources.settings_use_native_file_picker_subtitle
 import com.drdisagree.teledrive.resources.settings_switch_drives_create_another
 import com.drdisagree.teledrive.resources.settings_telegram_account
 import com.drdisagree.teledrive.resources.settings_theme
@@ -649,6 +651,7 @@ private fun StorageSection(
 
     val downloadLocationConfigurable = LocalDownloadLocationConfigurable.current
     val downloadFolderPicker = LocalFolderPicker.current
+    val isDesktopPlatform = !LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
     val autoRemoveManagedCopies =
         LocalPlatformCapabilities.current.autoRemovesManagedCopiesAfterUpload
     SettingsGroup {
@@ -663,6 +666,16 @@ private fun StorageSection(
                             viewModel.update { it.copy(downloadDirectory = result.path) }
                         }
                     }
+                }
+            )
+        }
+        add(visible = isDesktopPlatform) {
+            SettingsSwitchRow(
+                title = stringResource(Res.string.settings_use_native_file_picker),
+                subtitle = stringResource(Res.string.settings_use_native_file_picker_subtitle),
+                checked = prefs.useNativeFilePicker,
+                onChange = { value ->
+                    viewModel.update { it.copy(useNativeFilePicker = value) }
                 }
             )
         }
