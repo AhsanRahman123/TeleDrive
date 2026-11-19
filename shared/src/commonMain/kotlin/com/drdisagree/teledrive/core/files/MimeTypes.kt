@@ -260,6 +260,18 @@ object MimeTypes {
     }
 
     /**
+     * The preferred extension for a MIME type, from the same deterministic table as
+     * [fromFileName] (the first extension listed for a type wins, e.g. "jpg" over "jpeg").
+     * Used to synthesize a file name when Telegram supplies none, mirroring Android's
+     * MimeTypeMap.getExtensionFromMimeType without a platform MIME database.
+     */
+    fun extensionForMimeType(mimeType: String): String? {
+        val normalized = mimeType.substringBefore(';').trim().lowercase()
+        if (normalized.isEmpty()) return null
+        return knownExtensions.entries.firstOrNull { it.value == normalized }?.key
+    }
+
+    /**
      * Prefer a meaningful MIME type supplied by Telegram or a stored manifest. If it is absent
      * or generic, infer from the filename so a document uploaded as application/octet-stream
      * can still be recognized as audio, video, image, archive or a supported document.

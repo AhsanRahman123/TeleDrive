@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.core.telegram
 
 import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.files.AppStoragePaths
+import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.domain.model.Country
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import it.tdlight.ClientFactory
@@ -1699,107 +1700,6 @@ class DesktopTelegramClient(
         downloadedPrefixSize = local?.downloadedPrefixSize ?: 0
     )
 
-    private fun TdApi.Message.toRemoteDocument(): RemoteDocument? = when (val body = content) {
-        is TdApi.MessageDocument -> remoteDocument(
-            file = body.document.document,
-            fileName = body.document.fileName,
-            mimeType = body.document.mimeType,
-            caption = body.caption?.text.orEmpty(),
-            miniThumbnail = body.document.minithumbnail?.data
-        )
-
-        is TdApi.MessageAudio -> remoteDocument(
-            file = body.audio.audio,
-            fileName = body.audio.fileName,
-            mimeType = body.audio.mimeType,
-            caption = body.caption?.text.orEmpty(),
-            miniThumbnail = body.audio.albumCoverMinithumbnail?.data
-        )
-
-        is TdApi.MessageVideo -> remoteDocument(
-            file = body.video.video,
-            fileName = body.video.fileName,
-            mimeType = body.video.mimeType,
-            caption = body.caption?.text.orEmpty(),
-            miniThumbnail = body.video.minithumbnail?.data
-        )
-
-        is TdApi.MessageVoiceNote -> remoteDocument(
-            file = body.voiceNote.voice,
-            fileName = "voice_note_$id.ogg",
-            mimeType = body.voiceNote.mimeType,
-            caption = "",
-            miniThumbnail = null
-        )
-
-        is TdApi.MessageVideoNote -> remoteDocument(
-            file = body.videoNote.video,
-            fileName = "video_note_$id.mp4",
-            mimeType = "video/mp4",
-            caption = "",
-            miniThumbnail = body.videoNote.minithumbnail?.data
-        )
-
-        is TdApi.MessageAnimation -> remoteDocument(
-            file = body.animation.animation,
-            fileName = body.animation.fileName,
-            mimeType = body.animation.mimeType,
-            caption = body.caption?.text.orEmpty(),
-            miniThumbnail = body.animation.minithumbnail?.data
-        )
-
-        is TdApi.MessageSticker -> {
-            val sticker = body.sticker
-            val (extension, mimeType) = when (sticker.format) {
-                is TdApi.StickerFormatTgs -> "tgs" to "application/x-tgsticker"
-                is TdApi.StickerFormatWebm -> "webm" to "video/webm"
-                else -> "webp" to "image/webp"
-            }
-            remoteDocument(
-                file = sticker.sticker,
-                fileName = "sticker_$id.$extension",
-                mimeType = mimeType,
-                caption = "",
-                miniThumbnail = null
-            )
-        }
-
-        is TdApi.MessagePhoto -> body.photo.sizes.maxByOrNull { it.photo.size }?.let { size ->
-            remoteDocument(
-                file = size.photo,
-                fileName = "photo_$id.jpg",
-                mimeType = "image/jpeg",
-                caption = body.caption?.text.orEmpty(),
-                miniThumbnail = body.photo.minithumbnail?.data
-            )
-        }
-
-        else -> null
-    }
-
-    private fun TdApi.Message.remoteDocument(
-        file: TdApi.File,
-        fileName: String,
-        mimeType: String,
-        caption: String,
-        miniThumbnail: ByteArray?
-    ): RemoteDocument? {
-        val remote = file.remote ?: return null
-        if (remote.id.isNullOrEmpty()) return null
-        return RemoteDocument(
-            chatId = chatId,
-            messageId = id,
-            remoteFileId = remote.id,
-            uniqueFileId = remote.uniqueId,
-            fileName = fileName,
-            mimeType = mimeType,
-            sizeBytes = file.size,
-            caption = caption,
-            dateSeconds = date,
-            miniThumbnail = miniThumbnail
-        )
-    }
-
     private fun TdApi.AuthenticationCodeType.toChannel(): CodeDeliveryChannel = when (this) {
         is TdApi.AuthenticationCodeTypeTelegramMessage -> CodeDeliveryChannel.TELEGRAM_APP
         is TdApi.AuthenticationCodeTypeSms -> CodeDeliveryChannel.SMS
@@ -1867,6 +1767,134 @@ class DesktopTelegramClient(
         private const val PREVIEW_PRIORITY = 1
         const val STORAGE_CHAT_MARKER = "#teledrive-storage"
     }
+}
+
+/** The file object attached to a message's media content, if the content carries one. */
+internal fun TdApi.Message.mediaFile(): TdApi.File? = when (val body = content) {
+    is TdApi.MessageDocument -> body.document.document
+    is TdApi.MessageAudio -> body.audio.audio
+    is TdApi.MessageVoiceNote -> body.voiceNote.voice
+    is TdApi.MessageVideo -> body.video.video
+    is TdApi.MessageVideoNote -> body.videoNote.video
+    is TdApi.MessageAnimation -> body.animation.animation
+    is TdApi.MessageSticker -> body.sticker.sticker
+    is TdApi.MessagePhoto -> body.photo.sizes.maxByOrNull { it.photo.size }?.photo
+    else -> null
+}
+
+internal fun TdApi.Message.toRemoteDocument(): RemoteDocument? = when (val body = content) {
+    is TdApi.MessageDocument -> remoteDocument(
+        file = body.document.document,
+        fileName = body.document.fileName,
+        mimeType = body.document.mimeType,
+        caption = body.caption?.text.orEmpty(),
+        miniThumbnail = body.document.minithumbnail?.data
+    )
+
+    is TdApi.MessageAudio -> remoteDocument(
+        file = body.audio.audio,
+        fileName = body.audio.fileName,
+        mimeType = body.audio.mimeType,
+        caption = body.caption?.text.orEmpty(),
+        miniThumbnail = body.audio.albumCoverMinithumbnail?.data
+    )
+
+    is TdApi.MessageVideo -> remoteDocument(
+        file = body.video.video,
+        fileName = body.video.fileName,
+        mimeType = body.video.mimeType,
+        caption = body.caption?.text.orEmpty(),
+        miniThumbnail = body.video.minithumbnail?.data
+    )
+
+    is TdApi.MessageVoiceNote -> remoteDocument(
+        file = body.voiceNote.voice,
+        fileName = "voice_note_$id.ogg",
+        mimeType = body.voiceNote.mimeType,
+        caption = "",
+        miniThumbnail = null
+    )
+
+    is TdApi.MessageVideoNote -> remoteDocument(
+        file = body.videoNote.video,
+        fileName = "video_note_$id.mp4",
+        mimeType = "video/mp4",
+        caption = "",
+        miniThumbnail = body.videoNote.minithumbnail?.data
+    )
+
+    is TdApi.MessageAnimation -> remoteDocument(
+        file = body.animation.animation,
+        fileName = body.animation.fileName,
+        mimeType = body.animation.mimeType,
+        caption = body.caption?.text.orEmpty(),
+        miniThumbnail = body.animation.minithumbnail?.data
+    )
+
+    is TdApi.MessageSticker -> {
+        val sticker = body.sticker
+        val (extension, mimeType) = when (sticker.format) {
+            is TdApi.StickerFormatTgs -> "tgs" to "application/x-tgsticker"
+            is TdApi.StickerFormatWebm -> "webm" to "video/webm"
+            else -> "webp" to "image/webp"
+        }
+        remoteDocument(
+            file = sticker.sticker,
+            fileName = "sticker_$id.$extension",
+            mimeType = mimeType,
+            caption = "",
+            miniThumbnail = null
+        )
+    }
+
+    is TdApi.MessagePhoto -> body.photo.sizes.maxByOrNull { it.photo.size }?.let { size ->
+        remoteDocument(
+            file = size.photo,
+            fileName = "photo_$id.jpg",
+            mimeType = "image/jpeg",
+            caption = body.caption?.text.orEmpty(),
+            miniThumbnail = body.photo.minithumbnail?.data
+        )
+    }
+
+    else -> null
+}
+
+internal fun TdApi.Message.remoteDocument(
+    file: TdApi.File,
+    fileName: String,
+    mimeType: String,
+    caption: String,
+    miniThumbnail: ByteArray?
+): RemoteDocument? {
+    val remote = file.remote ?: return null
+    if (remote.id.isNullOrEmpty()) return null
+
+    // Some Telegram media variants omit fileName or MIME metadata. Keep a useful original
+    // extension where possible so playback, categorization and external opening can identify it.
+    val normalizedName = fileName
+        .trim()
+        .takeIf { it.isNotEmpty() && it != "." }
+        ?.substringAfterLast('/')
+        ?.substringAfterLast('\\')
+        ?: run {
+            val extension = MimeTypes.extensionForMimeType(mimeType)
+            "telegram_file_$id" + extension?.let { ".$it" }.orEmpty()
+        }
+    val normalizedMimeType = MimeTypes.resolve(normalizedName, mimeType)
+
+    return RemoteDocument(
+        chatId = chatId,
+        messageId = id,
+        remoteFileId = remote.id,
+        uniqueFileId = remote.uniqueId,
+        fileName = normalizedName,
+        mimeType = normalizedMimeType,
+        sizeBytes = file.size.takeIf { it > 0 } ?: file.expectedSize,
+        caption = caption,
+        dateSeconds = date,
+        miniThumbnail = miniThumbnail
+    )
 }
 
 /**
