@@ -645,7 +645,8 @@ private fun StorageSection(
 
     val downloadLocationConfigurable = LocalDownloadLocationConfigurable.current
     val downloadFolderPicker = LocalFolderPicker.current
-    val autoRemoveManagedCopies = LocalPlatformCapabilities.current.supportsAutoBackup
+    val autoRemoveManagedCopies =
+        LocalPlatformCapabilities.current.autoRemovesManagedCopiesAfterUpload
     SettingsGroup {
         add(visible = downloadLocationConfigurable) {
             SettingsClickRow(
@@ -1313,7 +1314,7 @@ private fun AdvancedSection(
                 }
             )
         }
-        add {
+        add(visible = LocalPlatformCapabilities.current.supportsMeteredTransfers) {
             SettingsSwitchRow(
                 title = stringResource(Res.string.settings_transfers_wi_fi_only),
                 subtitle = stringResource(Res.string.settings_transfers_wi_fi_only_summary),

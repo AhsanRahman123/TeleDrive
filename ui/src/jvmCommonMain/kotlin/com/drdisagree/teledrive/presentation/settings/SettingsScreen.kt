@@ -82,7 +82,7 @@ fun SettingsScreen(
             val hiddenSections = buildSet {
                 if (!capabilities.supportsAutoBackup) add(SettingsSectionType.BACKUP)
                 if (!capabilities.requiresPermissions) add(SettingsSectionType.PERMISSIONS)
-                if (!capabilities.supportsTouchSelectionActionBar) add(SettingsSectionType.STORAGE_EXPLORER)
+                if (!capabilities.supportsStorageExplorer) add(SettingsSectionType.STORAGE_EXPLORER)
             }
             SettingsGroup {
                 SettingsSectionType.entries.filterNot { it in hiddenSections }.forEach { section ->

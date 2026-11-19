@@ -4,7 +4,7 @@ import com.drdisagree.teledrive.presentation.platform.PlatformCapabilities
 
 class DesktopPlatformCapabilities : PlatformCapabilities {
 
-    override val supportsAutoBackup: Boolean = false
+    override val supportsAutoBackup: Boolean = true
 
     override val requiresPermissions: Boolean = false
 
@@ -12,7 +12,9 @@ class DesktopPlatformCapabilities : PlatformCapabilities {
 
     override val supportsAppLock: Boolean = false
 
-    override val supportsScreenCaptureBlocking: Boolean = false
+    override val supportsScreenCaptureBlocking: Boolean = true
 
     override val supportsDynamicColor: Boolean = false
+
+    override val supportsMeteredTransfers: Boolean = false
 }

@@ -20,4 +20,6 @@ class AndroidPlatformCapabilities : PlatformCapabilities {
     override val savesCollectionScrollOnPreview: Boolean = true
 
     override val supportsTouchSelectionActionBar: Boolean = true
+
+    override val autoRemovesManagedCopiesAfterUpload: Boolean = true
 }

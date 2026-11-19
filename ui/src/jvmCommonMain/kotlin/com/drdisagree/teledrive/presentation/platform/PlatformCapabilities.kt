@@ -21,6 +21,24 @@ interface PlatformCapabilities {
 
     /** Android file manager exposes a fixed touch-first bulk-selection action bar. */
     val supportsTouchSelectionActionBar: Boolean get() = false
+
+    /**
+     * Whether managed local copies are removed automatically after a confirmed upload.
+     * Android opts in; desktop keeps its user-controlled Delete-after-upload toggle instead.
+     * This is deliberately separate from [supportsAutoBackup]: the two coincided on Android
+     * only, and re-using that flag here hid the desktop toggle once backup was ungated.
+     */
+    val autoRemovesManagedCopiesAfterUpload: Boolean get() = false
+
+    /** Whether the Storage Explorer section is offered in Settings. */
+    val supportsStorageExplorer: Boolean get() = true
+
+    /**
+     * Whether transfers can meaningfully be restricted to unmetered networks
+     * (the "Transfers on Wi-Fi only" toggle). Desktop networking is wired/unmetered,
+     * so the toggle could never fire there and is hidden instead of dead.
+     */
+    val supportsMeteredTransfers: Boolean get() = true
 }
 
 val LocalPlatformCapabilities = staticCompositionLocalOf<PlatformCapabilities> {
