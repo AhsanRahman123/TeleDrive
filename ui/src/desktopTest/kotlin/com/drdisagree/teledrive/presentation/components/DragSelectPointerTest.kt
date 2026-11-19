@@ -446,6 +446,10 @@ class DragSelectPointerTest {
     @OptIn(ExperimentalFoundationApi::class)
     @Test
     fun `touch long press then one fast slide paints the whole crossed range`() {
+        // The desktop test clock must not auto-advance: drag-select paints from a
+        // per-frame loop while a touch gesture is active, and an auto-advancing
+        // clock spins that loop forever. Frames are pumped manually below.
+        rule.mainClock.autoAdvance = false
         var selected by mutableStateOf(emptySet<Int>())
         var rangeBase by mutableStateOf(emptySet<Int>())
 
@@ -519,6 +523,10 @@ class DragSelectPointerTest {
     @OptIn(ExperimentalFoundationApi::class)
     @Test
     fun `touch hold selects only the anchor until the next row center is crossed`() {
+        // The desktop test clock must not auto-advance: drag-select paints from a
+        // per-frame loop while a touch gesture is active, and an auto-advancing
+        // clock spins that loop forever. Frames are pumped manually below.
+        rule.mainClock.autoAdvance = false
         var selected by mutableStateOf(emptySet<Int>())
         var rangeBase by mutableStateOf(emptySet<Int>())
 
@@ -597,6 +605,10 @@ class DragSelectPointerTest {
     @OptIn(ExperimentalFoundationApi::class)
     @Test
     fun `touch hold then lift from a drifted position still selects only the anchor`() {
+        // The desktop test clock must not auto-advance: drag-select paints from a
+        // per-frame loop while a touch gesture is active, and an auto-advancing
+        // clock spins that loop forever. Frames are pumped manually below.
+        rule.mainClock.autoAdvance = false
         var selected by mutableStateOf(emptySet<Int>())
         var rangeBase by mutableStateOf(emptySet<Int>())
 
@@ -665,6 +677,10 @@ class DragSelectPointerTest {
     @OptIn(ExperimentalFoundationApi::class)
     @Test
     fun `touch long press slide from a selected row erases the crossed range`() {
+        // The desktop test clock must not auto-advance: drag-select paints from a
+        // per-frame loop while a touch gesture is active, and an auto-advancing
+        // clock spins that loop forever. Frames are pumped manually below.
+        rule.mainClock.autoAdvance = false
         var selected by mutableStateOf(setOf(0, 1, 2, 3))
         var rangeBase by mutableStateOf(setOf(0, 1, 2, 3))
 
