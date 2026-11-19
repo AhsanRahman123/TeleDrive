@@ -583,6 +583,7 @@
     <string name="subtitle_outline_color">Outline color</string>
     <string name="subtitle_outline_opacity">Outline opacity</string>
     <string name="subtitle_blend_note">VLC has one subtitle background layer, so text background and window settings are blended. Raised and depressed edges are approximated by VLC's outline/shadow renderer.</string>
+    <string name="subtitle_ass_note">This appearance applies to plain-text subtitles (such as SRT). Styled subtitles (ASS/SSA, common inside MKV files) keep the look built into the file — VLC renders those itself and cannot restyle them.</string>
     <string name="subtitle_preview_note">Position is approximate: VLC renders text subtitles with its own layout.</string>
     <string name="subtitle_apply">Apply</string>
     <string name="subtitle_reset">Reset</string>

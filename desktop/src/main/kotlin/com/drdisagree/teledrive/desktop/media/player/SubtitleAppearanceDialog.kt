@@ -61,6 +61,7 @@ import com.drdisagree.teledrive.resources.common_cancel
 import com.drdisagree.teledrive.resources.subtitle_apply
 import com.drdisagree.teledrive.resources.subtitle_background
 import com.drdisagree.teledrive.resources.subtitle_background_opacity
+import com.drdisagree.teledrive.resources.subtitle_ass_note
 import com.drdisagree.teledrive.resources.subtitle_blend_note
 import com.drdisagree.teledrive.resources.subtitle_color_black
 import com.drdisagree.teledrive.resources.subtitle_color_blue
@@ -323,6 +324,11 @@ internal fun SubtitleAppearanceDialog(
                     ) { draft = current.copy(edgeOpacity = it) }
                     Text(
                         stringResource(Res.string.subtitle_blend_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        stringResource(Res.string.subtitle_ass_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

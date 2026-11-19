@@ -233,6 +233,19 @@ internal fun DesktopMediaPlayer(
             }
         }
     }
+    // The appearance-failure warning is transient by policy: at most once
+    // per session, and it dismisses itself after a few seconds. It must
+    // never again sit on screen for the whole playback.
+    var appearanceWarningVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(appearanceFactoryFailed) {
+        if (appearanceFactoryFailed &&
+            SubtitleWarningPolicy.claim(SubtitleWarningPolicy.CAUSE_FACTORY_CREATION_FAILED)
+        ) {
+            appearanceWarningVisible = true
+            delay(SubtitleWarningPolicy.DISPLAY_DURATION_MS)
+            appearanceWarningVisible = false
+        }
+    }
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var hasCurrentMediaFrame by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf(false) }
@@ -1451,7 +1464,7 @@ internal fun DesktopMediaPlayer(
             }
         }
 
-        if (appearanceFactoryFailed) {
+        if (appearanceWarningVisible) {
             Text(
                 text = "Subtitle appearance could not be applied — " +
                     "playing with default subtitle rendering.",
