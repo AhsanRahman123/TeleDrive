@@ -21,16 +21,12 @@ class PlayerSession {
     var repeatAll by mutableStateOf(false)
     var sleepTimerDeadlineMillis by mutableLongStateOf(0L)
 
-    // MX-style pinch zoom: a scale over the whole video surface (subtitles live inside
-    // PlayerView, so they scale with the picture) plus the pan offset while zoomed.
-    // Session-held like the resize mode; reset on track change and on resize-mode cycle.
-    var zoomScale by mutableFloatStateOf(1f)
-    var zoomOffsetX by mutableFloatStateOf(0f)
-    var zoomOffsetY by mutableFloatStateOf(0f)
+    // VLC-style manual scale preset: an exact picture size calculated from the stage,
+    // picked from a list — the replacement for the removed pinch zoom. Session-held
+    // like the resize mode; reset to Best fit on track change.
+    var videoScale by mutableStateOf(VideoScalePreset.BEST_FIT)
 
-    fun resetZoom() {
-        zoomScale = 1f
-        zoomOffsetX = 0f
-        zoomOffsetY = 0f
+    fun resetVideoScale() {
+        videoScale = VideoScalePreset.BEST_FIT
     }
 }

@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Lock
@@ -147,6 +148,7 @@ fun PlayerControls(
     onEnterPip: (() -> Unit)? = null,
     onPreferredAudioLanguage: (String) -> Unit = {},
     onPreferredSubtitleLanguage: (String) -> Unit = {},
+    onSheetOpenChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var playing by remember(player) { mutableStateOf(player.isPlaying) }
@@ -179,7 +181,21 @@ fun PlayerControls(
     var showAudioTracks by remember { mutableStateOf(false) }
     var showTextTracks by remember { mutableStateOf(false) }
     var showSubtitleSettings by remember { mutableStateOf(false) }
+    var showVideoScale by remember { mutableStateOf(false) }
     var subtitleAppearance by session::subtitleAppearance
+    var videoScale by session::videoScale
+
+    // While ANY option sheet is open the controls auto-hide is suspended (reported to
+    // MediaPlayer, which owns the timer): an open menu never closes on its own — it
+    // closes only when the user dismisses it. Previously the More sheet was also
+    // force-closed the moment the chrome auto-hid, which is exactly the "the menu
+    // closes itself while I'm still using it" behaviour this replaces.
+    val anySheetOpen = showMore || showSpeeds || showSeekSteps || showAdjustments ||
+            showSleepTimer || showQueue || showAudioTracks || showTextTracks ||
+            showSubtitleSettings || showVideoScale
+    LaunchedEffect(anySheetOpen) {
+        onSheetOpenChanged(anySheetOpen)
+    }
 
     val activity = LocalActivity.current
     val context = LocalContext.current
@@ -263,9 +279,6 @@ fun PlayerControls(
         }
     }
 
-    LaunchedEffect(visible) {
-        if (!visible) showMore = false
-    }
     LaunchedEffect(sleepTimerDeadlineMillis, player) {
         val deadline = sleepTimerDeadlineMillis
         if (deadline > 0L) {
@@ -569,6 +582,17 @@ fun PlayerControls(
                         showAudioTracks = true
                     }
                 )
+                if (!audioOnly) {
+                    MoreRow(
+                        icon = Icons.Filled.AspectRatio,
+                        label = "Video scale",
+                        value = videoScale.label,
+                        onClick = {
+                            showMore = false
+                            showVideoScale = true
+                        }
+                    )
+                }
                 MoreRow(
                     icon = Icons.Filled.Tune,
                     label = "Volume and brightness",
@@ -809,6 +833,47 @@ fun PlayerControls(
                         RadioButton(selected = speed == option, onClick = null)
                         Text(
                             text = speedLabel(option),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.navigationBarsPadding().height(8.dp))
+            }
+        }
+    }
+
+    if (showVideoScale) {
+        ModalBottomSheet(onDismissRequest = { showVideoScale = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 560.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "Video scale",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp)
+                )
+                VideoScalePreset.entries.forEach { preset ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = videoScale == preset,
+                                role = Role.RadioButton,
+                                onClick = {
+                                    videoScale = preset
+                                    onInteraction()
+                                }
+                            )
+                            .padding(horizontal = 24.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = videoScale == preset, onClick = null)
+                        Text(
+                            text = preset.label,
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.padding(start = 16.dp)
                         )

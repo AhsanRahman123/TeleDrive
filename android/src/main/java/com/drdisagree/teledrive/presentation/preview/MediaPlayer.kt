@@ -49,7 +49,9 @@ import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -87,6 +89,7 @@ import java.io.File
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -254,8 +257,8 @@ fun MediaPlayer(
 
     var interactionTick by remember { mutableIntStateOf(0) }
 
-    // Pinch zoom is per-track: a new file always starts at exactly 100%.
-    LaunchedEffect(fileId) { session.resetZoom() }
+    // The manual scale preset is per-track: a new file always starts at Best fit.
+    LaunchedEffect(fileId) { session.resetVideoScale() }
 
     var locked by remember(content) { mutableStateOf(false) }
     var lockHintVisible by remember(content) { mutableStateOf(false) }
@@ -267,6 +270,15 @@ fun MediaPlayer(
     var videoRatio by remember(player) {
         mutableStateOf(player?.videoSize?.toRational())
     }
+    // Display size of the current video (pixel aspect applied) and of the stage the
+    // PlayerView fills; the manual scale preset's factors are computed from these.
+    var videoDisplaySize by remember(player) {
+        mutableStateOf(player?.videoSize?.displaySize() ?: IntSize.Zero)
+    }
+    var stageSize by remember { mutableStateOf(IntSize.Zero) }
+    // True while any player option sheet is open: the controls auto-hide must never
+    // fire then, so an open menu can only be closed by the user (see PlayerControls).
+    var sheetOpen by remember { mutableStateOf(false) }
     var decoderFailed by remember(player) { mutableStateOf(false) }
     var playbackFailed by remember(player) { mutableStateOf(false) }
     var playbackErrorDetails by remember(player) { mutableStateOf<String?>(null) }
@@ -310,6 +322,7 @@ fun MediaPlayer(
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 sized = videoSize.width > 0 && videoSize.height > 0
                 videoRatio = videoSize.toRational()
+                videoDisplaySize = videoSize.displaySize()
             }
 
             override fun onCues(cueGroup: CueGroup) {
@@ -372,8 +385,13 @@ fun MediaPlayer(
         }
     }
 
-    LaunchedEffect(controlsVisible, playing, interactionTick, activePage, audioOnly) {
+    LaunchedEffect(controlsVisible, playing, interactionTick, activePage, audioOnly, sheetOpen) {
         if (!controlsVisible || !playing || !activePage || audioOnly) return@LaunchedEffect
+        // An open option menu/sheet suspends the auto-hide entirely: the chrome (and
+        // with it the menu's host) must stay until the user closes the menu himself.
+        // When the last sheet closes this effect restarts and the normal countdown
+        // resumes from that moment.
+        if (sheetOpen) return@LaunchedEffect
         delay(CONTROLLER_TIMEOUT_MS.milliseconds)
         notifyControls(false)
     }
@@ -466,13 +484,23 @@ fun MediaPlayer(
                 },
                 modifier = Modifier
                     .fillMaxSize()
-                    // Pinch zoom transforms the whole PlayerView; the subtitle view is a
-                    // child of PlayerView, so subtitles scale with the picture.
+                    .onSizeChanged { stageSize = it }
+                    // The manual scale preset transforms the whole PlayerView; the
+                    // subtitle view is a child of PlayerView, so subtitles scale with
+                    // the picture. The factors are a pure function of the chosen
+                    // preset, the stage size, the video size and the aspect mode —
+                    // a fixed centre scale with no translation and no gesture input.
                     .graphicsLayer {
-                        scaleX = session.zoomScale
-                        scaleY = session.zoomScale
-                        translationX = session.zoomOffsetX
-                        translationY = session.zoomOffsetY
+                        val (factorX, factorY) = videoScaleFactors(
+                            preset = session.videoScale,
+                            stageWidth = stageSize.width,
+                            stageHeight = stageSize.height,
+                            videoWidth = videoDisplaySize.width,
+                            videoHeight = videoDisplaySize.height,
+                            resizeMode = resizeMode
+                        )
+                        scaleX = factorX
+                        scaleY = factorY
                     }
             )
         }
@@ -589,15 +617,6 @@ fun MediaPlayer(
                 },
                 onAdjustStart = { if (visibleControls) notifyControls(false) },
                 dragEnabled = !locked && !audioOnly,
-                zoomEnabled = !locked && !audioOnly,
-                zoomScale = session.zoomScale,
-                zoomOffsetX = session.zoomOffsetX,
-                zoomOffsetY = session.zoomOffsetY,
-                onZoomChanged = { scale, offsetX, offsetY ->
-                    session.zoomScale = scale
-                    session.zoomOffsetX = offsetX
-                    session.zoomOffsetY = offsetY
-                },
                 chromeVisible = controlsVisible,
                 subtitleDragEnabled = hasActiveSubtitles && !locked && !audioOnly && !inPipMode,
                 subtitlePosition = subtitleAppearance.verticalPosition,
@@ -661,10 +680,13 @@ fun MediaPlayer(
                 audioOnly = audioOnly,
                 resizeMode = resizeMode,
                 onCycleResizeMode = {
+                    // The scale preset composes with the aspect mode (its factors are
+                    // re-derived from the new base picture), so cycling the aspect
+                    // does not clear the chosen scale.
                     resizeMode = resizeMode.next()
-                    session.resetZoom()
                 },
                 onInteraction = { interactionTick++ },
+                onSheetOpenChanged = { sheetOpen = it },
                 onEnterPip = activity
                     ?.takeIf { pipAvailable }
                     ?.let { host -> { pipController.enter(host) } },
@@ -795,6 +817,14 @@ private fun AudioStage(player: Player, fallbackTitle: String, modifier: Modifier
 
 private fun VideoSize.toRational(): Rational? =
     if (width > 0 && height > 0) Rational(width, height) else null
+
+/** The size the video is displayed at: coded size with the pixel aspect ratio applied. */
+private fun VideoSize.displaySize(): IntSize =
+    if (width > 0 && height > 0) {
+        IntSize((width * pixelWidthHeightRatio).roundToInt().coerceAtLeast(1), height)
+    } else {
+        IntSize.Zero
+    }
 
 private const val CONTROLLER_TIMEOUT_MS = 3_000L
 private const val LOCK_ALPHA = 0.7f
