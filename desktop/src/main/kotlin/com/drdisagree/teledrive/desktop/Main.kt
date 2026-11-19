@@ -204,6 +204,14 @@ fun main() {
                 AppTheme.SYSTEM -> systemDark
             }
             LaunchedEffect(darkTitleBar) { WindowsTitleBar.setDark(window, darkTitleBar) }
+            // Block screenshots (Settings): WDA_EXCLUDEFROMCAPTURE while on,
+            // WDA_NONE restored when off. Default is off.
+            val blockScreenCapture by remember {
+                settingsRepository.preferences.map { it.blockScreenCapture }.distinctUntilChanged()
+            }.collectAsState(initial = false)
+            LaunchedEffect(blockScreenCapture) {
+                WindowsCaptureBlocker.setBlocked(window, blockScreenCapture)
+            }
             // Windows uses an AWT-level dispatcher, so F11 is independent of whichever
             // Compose child currently owns focus. Other desktop platforms retain the
             // Compose window shortcut path.
