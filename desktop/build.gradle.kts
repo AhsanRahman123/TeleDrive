@@ -15,7 +15,7 @@ kotlin {
 val generateBuildInfo = tasks.register("generateBuildInfo") {
     description = "Generates BuildInfo.kt with the version from the version catalog"
     group = "build"
-    val version = libs.versions.appVersion.get()
+    val version = libs.versions.desktopVersion.get()
     val outDir = layout.buildDirectory.dir("generated/buildinfo")
     inputs.property("version", version)
     outputs.dir(outDir)
@@ -257,7 +257,7 @@ if (System.getProperty("os.name").lowercase().contains("mac")) {
     }.configureEach { dependsOn(prepareVlcNativesMac) }
 }
 
-val debVersion = libs.versions.appVersion.get()
+val debVersion = libs.versions.desktopVersion.get()
     .split(".")
     .let { parts -> (parts + List(3) { "0" }).take(3) }
     .joinToString(".")
@@ -279,7 +279,7 @@ compose.desktop {
             targetFormats(TargetFormat.Msi, TargetFormat.Deb, TargetFormat.Dmg)
             appResourcesRootDir.set(layout.buildDirectory.dir("appResources"))
             packageName = if (ciBuild) "TeleDrive CI" else "Pranto Drive"
-            packageVersion = libs.versions.appVersion.get()
+            packageVersion = libs.versions.desktopVersion.get()
                 .split(".")
                 .let { parts -> (parts + List(3) { "0" }).take(3) }
                 .joinToString(".")

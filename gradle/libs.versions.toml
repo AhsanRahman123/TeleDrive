@@ -1,6 +1,12 @@
 [versions]
 #noinspection UnusedVersionCatalogEntry
 appVersion = "1.6.0"
+# Desktop-only package version. Split from appVersion so every delivered PC
+# build can bump the patch number (1.6.1, 1.6.2, ...) — Windows Installer
+# refuses a same-ProductVersion install-over, so the MSI version must move
+# with every build even when the shared app version does not.
+#noinspection UnusedVersionCatalogEntry
+desktopVersion = "1.6.1"
 #noinspection UnusedVersionCatalogEntry
 appVersionCode = "11"
 agp = "9.4.1"
