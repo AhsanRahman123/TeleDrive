@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - desktop/pranto-drive-pc-20261119
+      - pranto/merged-1.6-20261119
   workflow_dispatch:
     inputs:
       test_filter:

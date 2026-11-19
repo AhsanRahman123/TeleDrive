@@ -14,6 +14,7 @@ on:
       - android/performance-optimization-phase1-20261116
       - android/performance-release-preview-20261116
       - android/performance-scroll-navigation-fix-20261116
+      - pranto/merged-1.6-20261119
     paths:
       - '.github/workflows/android-preview.yml'
       - 'android/src/**'
