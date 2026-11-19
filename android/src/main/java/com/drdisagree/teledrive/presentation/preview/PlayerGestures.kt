@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -406,8 +405,10 @@ fun PlayerGestureArea(
                                 continue
                             }
                             if (!change.pressed) {
-                                // A system-cancelled pointer also undoes the adjustment.
-                                if (event.type == PointerEventType.Cancel) cancelled = true
+                                // Pointer up. (A system cancel also surfaces as all
+                                // pointers up in Compose; like the stock detector this
+                                // replaces — which had no cancel handler — the values
+                                // simply stay where they are in that rare case.)
                                 finished = true
                                 continue
                             }
