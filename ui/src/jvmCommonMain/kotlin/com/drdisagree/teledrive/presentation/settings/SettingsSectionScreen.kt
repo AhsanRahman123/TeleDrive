@@ -1286,6 +1286,7 @@ private fun AdvancedSection(
     onOpenProxy: () -> Unit
 ) {
     val prefs = state.preferences
+    val meteredTransfersSupported = LocalPlatformCapabilities.current.supportsMeteredTransfers
     SettingsGroup {
         add {
             SettingsClickRow(
@@ -1314,7 +1315,7 @@ private fun AdvancedSection(
                 }
             )
         }
-        add(visible = LocalPlatformCapabilities.current.supportsMeteredTransfers) {
+        add(visible = meteredTransfersSupported) {
             SettingsSwitchRow(
                 title = stringResource(Res.string.settings_transfers_wi_fi_only),
                 subtitle = stringResource(Res.string.settings_transfers_wi_fi_only_summary),
