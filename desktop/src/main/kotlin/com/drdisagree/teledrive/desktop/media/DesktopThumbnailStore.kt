@@ -336,7 +336,11 @@ class DesktopThumbnailStore(
     private suspend fun effectivePolicy(fileId: String): ThumbnailPolicy =
         thumbnailPolicyDao.effectivePolicy(fileId)
             ?.let { stored -> runCatching { ThumbnailPolicy.valueOf(stored) }.getOrNull() }
-            ?: ThumbnailPolicy.MANUAL_ONLY
+            // Ported from AndroidThumbnailStore: a file with no explicit policy
+            // row generates on demand. Synced files have no row at all, and the
+            // old MANUAL_ONLY default left them (and album covers) blank
+            // forever; only an explicit MANUAL_ONLY rule suppresses generation.
+            ?: ThumbnailPolicy.AUTOMATIC
 
     /**
      * Schedule up to MAX_PARALLEL_GENERATIONS independent jobs. The database remains the
@@ -800,7 +804,9 @@ class DesktopThumbnailStore(
             !settingsRepository.preferences.first().linkPreviews
         ) return null
         return try {
-            telegramClient.fetchThumbnail(chatId, messageId)
+            withTimeoutOrNull(REMOTE_THUMBNAIL_TIMEOUT_MS) {
+                telegramClient.fetchThumbnail(chatId, messageId)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -813,9 +819,10 @@ class DesktopThumbnailStore(
 
     private companion object {
         const val TARGET_FILE = "FILE"
+        const val REMOTE_THUMBNAIL_TIMEOUT_MS = 30_000L
         const val MAX_BACKGROUND_ATTEMPTS = 5
-        const val MAX_PARALLEL_GENERATIONS = 6
-        const val MIN_HEAP_PER_WORKER_BYTES = 384L * 1024L * 1024L
+        const val MAX_PARALLEL_GENERATIONS = 8
+        const val MIN_HEAP_PER_WORKER_BYTES = 192L * 1024L * 1024L
         const val JOB_INSERT_BATCH_SIZE = 250
         const val BACKGROUND_RETRY_DELAY_MS = 5_000L
         const val LINK_NOTE_LIMIT = 8L * 1024

@@ -17,6 +17,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,12 +65,7 @@ fun AlbumCard(
         ) {
             val coverFileId = album.coverFileId
             if (coverFileId != null) {
-                AsyncImage(
-                    model = ThumbnailModel(coverFileId),
-                    contentDescription = albumName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                AlbumCoverImage(coverFileId = coverFileId, albumName = albumName)
             } else {
                 Icon(
                     imageVector = Icons.Outlined.PhotoLibrary,
@@ -132,12 +132,7 @@ fun AlbumListItem(
         ) {
             val coverFileId = album.coverFileId
             if (coverFileId != null) {
-                AsyncImage(
-                    model = ThumbnailModel(coverFileId),
-                    contentDescription = albumName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                AlbumCoverImage(coverFileId = coverFileId, albumName = albumName)
             } else {
                 Icon(
                     imageVector = Icons.Outlined.PhotoLibrary,
@@ -164,5 +159,41 @@ fun AlbumListItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+/**
+ * Album cover that recovers when its thumbnail arrives later: subscribes to
+ * thumbnail change events and bumps the Coil model revision (the desktop
+ * keyer is revision-aware), mirroring FileThumbnail's behaviour.
+ */
+@Composable
+private fun AlbumCoverImage(coverFileId: String, albumName: String) {
+    var revision by remember(coverFileId) { mutableStateOf(0L) }
+    var failed by remember(coverFileId) { mutableStateOf(false) }
+    LaunchedEffect(coverFileId) {
+        com.drdisagree.teledrive.core.media.ThumbnailChangeNotifier.eventsFor(coverFileId)
+            .collect { change ->
+                if (change.fileId == coverFileId) {
+                    failed = false
+                    revision++
+                }
+            }
+    }
+    if (!failed) {
+        AsyncImage(
+            model = ThumbnailModel(coverFileId, revision),
+            contentDescription = albumName,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+            onError = { failed = true }
+        )
+    } else {
+        Icon(
+            imageVector = Icons.Outlined.PhotoLibrary,
+            contentDescription = null,
+            modifier = Modifier.size(28.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

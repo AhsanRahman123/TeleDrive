@@ -188,7 +188,7 @@ fun main() {
                     .components {
                         add(ThumbnailFetcherFactory(getKoin().get<ThumbnailStore>()))
                         add(Keyer<ThumbnailModel> { data, _: Options ->
-                            thumbnailCacheKey(data.fileId)
+                            thumbnailCacheKey(data.fileId, data.revision)
                         })
                     }
                     .crossfade(true)
