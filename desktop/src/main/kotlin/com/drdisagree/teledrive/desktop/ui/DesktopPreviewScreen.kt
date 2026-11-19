@@ -86,6 +86,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -206,6 +207,15 @@ fun DesktopPreviewScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val fullscreenController = LocalFullscreenController.current
+    val streamServer = koinInject<MediaStreamServer>()
+
+    // Leaving the preview ends any streamed playback: stop the stream server so
+    // the active stream's byte source is closed and its TDLib ranged download
+    // does not run on in the background. Paging between files keeps this
+    // composable alive, so in-preview navigation is unaffected.
+    DisposableEffect(Unit) {
+        onDispose { streamServer.stop() }
+    }
 
     fun leavePreview() {
         // Back navigates to the previous screen; fullscreen is a window-level preference

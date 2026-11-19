@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.withLock
 class MediaStreamServer {
 
     private var server: HttpServer? = null
+    private var executor: java.util.concurrent.ExecutorService? = null
     private var active: ActiveStream? = null
     private var activeStreamId: String? = null
 
@@ -27,9 +28,11 @@ class MediaStreamServer {
     fun serve(fileName: String, fileMimeType: String, factory: () -> MediaByteSource): String {
         val running = server ?: HttpServer.create(InetSocketAddress(LOOPBACK, 0), 0).also {
             it.createContext(CONTEXT) { exchange -> handle(exchange) }
-            it.executor = Executors.newCachedThreadPool { task ->
+            val pool = Executors.newCachedThreadPool { task ->
                 Thread(task, "media-stream").apply { isDaemon = true }
             }
+            it.executor = pool
+            executor = pool
             it.start()
             server = it
         }
@@ -51,6 +54,11 @@ class MediaStreamServer {
         return url
     }
 
+    /**
+     * Ends the active stream (closing its byte source, which cancels the TDLib
+     * ranged download behind it) and stops the HTTP server. Called when the
+     * preview closes; [serve] recreates the server on the next stream.
+     */
     @Synchronized
     fun stop() {
         activeStreamId = null
@@ -58,6 +66,8 @@ class MediaStreamServer {
         active = null
         server?.stop(0)
         server = null
+        executor?.shutdownNow()
+        executor = null
     }
 
     private fun handle(exchange: HttpExchange) {
