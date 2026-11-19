@@ -32,6 +32,37 @@ class CancelledBackupCleanupTest {
     }
 
     @Test
+    fun `a cancelled manual upload's file record is removed`() = runBlocking {
+        files.upsert(file("f1"))
+        transfers.upsert(manualTransfer("t1", "f1", TransferState.CANCELLED))
+
+        files.deleteCancelledBackupEntries()
+
+        assertNull(files.byId("f1"))
+    }
+
+    @Test
+    fun `a manual upload queued again after a cancel keeps its record`() = runBlocking {
+        files.upsert(file("f1"))
+        transfers.upsert(manualTransfer("t1", "f1", TransferState.CANCELLED))
+        transfers.upsert(manualTransfer("t2", "f1", TransferState.QUEUED))
+
+        files.deleteCancelledBackupEntries()
+
+        assertNotNull(files.byId("f1"))
+    }
+
+    @Test
+    fun `a cancelled transfer for a file that reached the channel keeps its record`() = runBlocking {
+        files.upsert(file("f1").copy(messageId = 42L))
+        transfers.upsert(manualTransfer("t1", "f1", TransferState.CANCELLED))
+
+        files.deleteCancelledBackupEntries()
+
+        assertNotNull(files.byId("f1"))
+    }
+
+    @Test
     fun `a file queued again after a cancelled backup keeps its record`() = runBlocking {
         files.upsert(file("f1"))
         transfers.upsert(transfer("t1", "f1", TransferState.CANCELLED))
@@ -40,6 +71,23 @@ class CancelledBackupCleanupTest {
         files.deleteCancelledBackupEntries()
 
         assertNotNull(files.byId("f1"))
+    }
+
+    @Test
+    fun `upload completion stamps modifiedAt so fresh uploads sort on top`() = runBlocking {
+        files.upsert(file("f1"))
+
+        files.setRemoteMapping(
+            id = "f1",
+            chatId = TEST_CHAT,
+            messageId = 7L,
+            remoteFileId = "r7",
+            remoteUniqueId = "u7",
+            state = BackupState.BACKED_UP,
+            modifiedAt = 999L
+        )
+
+        org.junit.Assert.assertEquals(999L, files.byId("f1")?.modifiedAt)
     }
 
     private fun file(id: String) = FileEntity(
@@ -59,6 +107,22 @@ class CancelledBackupCleanupTest {
         createdAt = 1,
         modifiedAt = 1,
         addedAt = 1
+    )
+
+    private fun manualTransfer(id: String, fileId: String, state: TransferState) = TransferEntity(
+        id = id,
+        type = TransferType.UPLOAD,
+        fileId = fileId,
+        displayName = fileId,
+        localPath = null,
+        chatId = TEST_CHAT,
+        messageId = null,
+        remoteFileId = null,
+        sizeBytes = 10,
+        state = state,
+        backupSessionId = null,
+        createdAt = 1,
+        updatedAt = 1
     )
 
     private fun transfer(id: String, fileId: String, state: TransferState) = TransferEntity(

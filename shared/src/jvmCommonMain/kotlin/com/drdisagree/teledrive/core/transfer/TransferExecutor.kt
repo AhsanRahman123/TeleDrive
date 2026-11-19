@@ -392,7 +392,8 @@ class TransferExecutor(
                             remoteFileId = document.remoteFileId,
                             remoteUniqueId = document.uniqueFileId,
                             state = BackupState.BACKED_UP,
-                            iconFileId = iconFileId
+                            iconFileId = iconFileId,
+                            modifiedAt = System.currentTimeMillis()
                         )
                         fileDao.setRemoteBase(entity.id, FileBase.of(manifest).toText())
                         if (transfer.type == TransferType.BACKUP) {
@@ -561,7 +562,8 @@ class TransferExecutor(
                                 remoteFileId = first.remoteFileId,
                                 remoteUniqueId = first.remoteUniqueId,
                                 state = BackupState.BACKED_UP,
-                                iconFileId = manifest.iconFileId
+                                iconFileId = manifest.iconFileId,
+                                modifiedAt = System.currentTimeMillis()
                             )
                             fileDao.setRemoteBase(entity.id, FileBase.of(manifest).toText())
                             if (transfer.type == TransferType.BACKUP) {
