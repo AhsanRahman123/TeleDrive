@@ -28,6 +28,7 @@ import com.drdisagree.teledrive.core.media.ThumbnailStore
 import com.drdisagree.teledrive.core.network.NetworkMonitor
 import com.drdisagree.teledrive.core.permissions.PermissionChecker
 import com.drdisagree.teledrive.core.power.PowerMonitor
+import com.drdisagree.teledrive.core.proxy.ProxyFailover
 import com.drdisagree.teledrive.core.proxy.ProxyProbe
 import com.drdisagree.teledrive.core.publish.PublishOutboxDrainer
 import com.drdisagree.teledrive.core.publish.PublishScheduler

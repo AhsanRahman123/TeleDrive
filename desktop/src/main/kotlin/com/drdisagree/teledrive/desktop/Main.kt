@@ -42,6 +42,7 @@ import com.drdisagree.teledrive.core.media.ThumbnailModel
 import com.drdisagree.teledrive.core.media.ThumbnailStore
 import com.drdisagree.teledrive.core.media.thumbnailCacheKey
 import com.drdisagree.teledrive.core.publish.PublishScheduler
+import com.drdisagree.teledrive.core.proxy.ProxyFailover
 import com.drdisagree.teledrive.core.transfer.MaintenanceScheduler
 import com.drdisagree.teledrive.core.transfer.TransferScheduler
 import com.drdisagree.teledrive.desktop.di.desktopModule
