@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -52,6 +53,7 @@ import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import androidx.compose.material3.RadioButton
@@ -97,6 +99,7 @@ import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.player_audio_track
+import com.drdisagree.teledrive.resources.player_subtitle_appearance
 import com.drdisagree.teledrive.resources.player_exit_full_screen
 import com.drdisagree.teledrive.resources.player_full_screen
 import com.drdisagree.teledrive.resources.player_hide_subtitles
@@ -122,6 +125,8 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -169,7 +174,34 @@ internal fun DesktopMediaPlayer(
     onControlsVisibilityChange: (Boolean) -> Unit = {},
     onDelete: () -> Unit = {}
 ) {
-    val factory = VlcPlayback.factory ?: return
+    // Subtitle appearance: freetype options are LibVLC instance options, so a
+    // non-default appearance gets its own factory and the player is recreated
+    // from it (keyed by the appearance below). The shared singleton keeps
+    // serving the default appearance and the thumbnail store.
+    var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
+    val appearanceFactory = remember(subtitleAppearance) {
+        if (subtitleAppearance.toVlcFactoryArguments().isEmpty()) {
+            null
+        } else {
+            VlcPlayback.createFactory(subtitleAppearance)
+        }
+    }
+    val factory = appearanceFactory ?: VlcPlayback.factory ?: return
+    DisposableEffect(appearanceFactory) {
+        onDispose {
+            val retired = appearanceFactory
+            if (retired != null) {
+                // The player built from this factory is released by its own
+                // DisposableEffect (declared later, so it is disposed first);
+                // release the retired LibVLC instance shortly afterwards, off
+                // the UI thread. The shared singleton is never released here.
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                    delay(1_000)
+                    runCatching { retired.release() }
+                }
+            }
+        }
+    }
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var hasCurrentMediaFrame by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf(false) }
@@ -196,6 +228,13 @@ internal fun DesktopMediaPlayer(
     // once its duration is known, and only trusted for further saving once playback
     // is observed near it (a seek that lands elsewhere is a manual seek and ends
     // the restoration). See VideoResumeStore for the position rules.
+    var showSubtitleSettings by remember { mutableStateOf(false) }
+    var subtitleTrackActive by remember { mutableStateOf(false) }
+    // Set only by applySubtitleAppearance, in the instant before the factory
+    // swap recreates the player: the captured position/play state the restarted
+    // player must come back to.
+    var styleRestart by remember { mutableStateOf<StyleRestart?>(null) }
+    val startPausedArmed = remember { AtomicBoolean(false) }
     var resumeSavedPosition by remember(mrl) { mutableStateOf<Long?>(null) }
     var resumeTarget by remember(mrl) { mutableStateOf<Long?>(null) }
     var resumeSettled by remember(mrl) { mutableStateOf(false) }
@@ -281,7 +320,10 @@ internal fun DesktopMediaPlayer(
                     if (expectedMediaGeneration.get() != currentVideoFrameGeneration.get()) return
                     acceptsCurrentMediaEvents.set(true)
                     playerScope.launch {
-                        playing = true
+                        // A style restart of a paused video starts via
+                        // :start-paused; VLC still emits a playing event for
+                        // it, so consume the one-shot flag and stay paused.
+                        playing = !startPausedArmed.getAndSet(false)
                         finished = false
                         // VLC's playing event can precede its first video frame. Keep the old
                         // frame covered until the new source has actually rendered a frame.
@@ -447,7 +489,14 @@ internal fun DesktopMediaPlayer(
         buffering = true
         timeMs = 0L
         durationMs = 0L
-        val savedResume = VideoResumeStore.loadPosition(mediaId)
+        val savedResume = if (styleRestart == null) {
+            VideoResumeStore.loadPosition(mediaId)
+        } else {
+            // A subtitle style restart resumes at the position captured when
+            // the change was applied (already force-saved to the store), not
+            // at a fresh resume lookup.
+            0L
+        }
         resumeSavedPosition = if (savedResume > 0L) savedResume else null
         resumeTarget = null
         resumeSettled = savedResume <= 0L
@@ -466,7 +515,13 @@ internal fun DesktopMediaPlayer(
                     // stop() has completed the outgoing native transition; only now allow
                     // this source's render callbacks into the generation-tagged frame channel.
                     acceptsCurrentVideoFrames.set(true)
-                    val started = runCatching { player.media().start(mrl) }.getOrDefault(false)
+                    val restart = styleRestart
+                    val started = if (restart != null && !restart.wasPlaying) {
+                        runCatching { player.media().play(mrl, ":start-paused") }
+                            .getOrDefault(false)
+                    } else {
+                        runCatching { player.media().start(mrl) }.getOrDefault(false)
+                    }
                     val stillCurrent = currentVideoFrameGeneration.get() == mediaGeneration
                     if (!started || !stillCurrent) {
                         acceptsCurrentMediaEvents.set(false)
@@ -510,6 +565,24 @@ internal fun DesktopMediaPlayer(
     }
 
     LaunchedEffect(player, durationMs) {
+        val restart = styleRestart ?: return@LaunchedEffect
+        if (durationMs <= 0L) return@LaunchedEffect
+        styleRestart = null
+        val target = restart.positionMs
+        if (target >= 2_000L && durationMs - target > 1_500L && timeMs < target - 1_500L) {
+            player.submit { runCatching { player.controls().setTime(target) } }
+            delay(1_500)
+            if (timeMs < target - 1_500L && playing) {
+                player.submit { runCatching { player.controls().setTime(target) } }
+            }
+        }
+        player.submit {
+            runCatching { player.controls().setRate(rate) }
+            runCatching { player.controls().repeat = repeatOne }
+        }
+    }
+
+    LaunchedEffect(player, durationMs) {
         if (durationMs <= 0L) return@LaunchedEffect
         val saved = resumeSavedPosition ?: return@LaunchedEffect
         resumeSavedPosition = null
@@ -545,13 +618,13 @@ internal fun DesktopMediaPlayer(
             }
         }
         lastObservedTimeMs = timeMs
-        if (resumeSettled && timeMs > 0L) {
+        if (resumeSettled && styleRestart == null && timeMs > 0L) {
             VideoResumeStore.savePosition(mediaId, timeMs, durationMs)
         }
     }
 
     LaunchedEffect(playing) {
-        if (!playing && resumeSettled && timeMs > 0L) {
+        if (!playing && resumeSettled && styleRestart == null && timeMs > 0L) {
             VideoResumeStore.savePosition(mediaId, timeMs, durationMs, force = true)
         }
     }
@@ -675,6 +748,25 @@ internal fun DesktopMediaPlayer(
     fun adjustPlayerVolume(delta: Int) {
         setPlayerVolume(volume + delta, unmute = delta > 0)
     }
+
+    fun applySubtitleAppearance(next: SubtitleAppearance) {
+        val normalized = next.normalized()
+        if (normalized == subtitleAppearance) {
+            showSubtitleSettings = false
+            return
+        }
+        // Capture position and play state BEFORE the factory swap recreates
+        // the player; afterwards they would read the new player's zeroed state.
+        // The retained frame bitmap is deliberately left alone so the restart
+        // does not flash black.
+        styleRestart = StyleRestart(positionMs = timeMs, wasPlaying = playing)
+        if (!playing) startPausedArmed.set(true)
+        VideoResumeStore.savePosition(mediaId, timeMs, durationMs, force = true)
+        SubtitleAppearanceStore.save(normalized)
+        subtitleAppearance = normalized
+        showSubtitleSettings = false
+        interactionTick++
+    }
     fun saveVideoSnapshot() {
         if (isAudio) return
         val snapshotDirectory = File(
@@ -746,7 +838,7 @@ internal fun DesktopMediaPlayer(
         }
     }
 
-    var languagesApplied by remember(mrl) { mutableStateOf(false) }
+    var languagesApplied by remember(mrl, player) { mutableStateOf(false) }
     LaunchedEffect(mrl, trackTick, preferredAudioLanguage, preferredSubtitleLanguage) {
         if (languagesApplied || trackTick == 0) return@LaunchedEffect
         val applied = CompletableDeferred<Boolean>()
@@ -842,6 +934,7 @@ internal fun DesktopMediaPlayer(
             .background(Color.Black)
             .focusRequester(playerFocusRequester)
             .onPreviewKeyEvent { event ->
+                if (showSubtitleSettings) return@onPreviewKeyEvent false
                 if (event.type == KeyEventType.KeyUp) {
                     if (event.key == Key.H) {
                         hKeyPressed = false
@@ -879,6 +972,11 @@ internal fun DesktopMediaPlayer(
                     }
                     key == Key.MediaPause -> {
                         player.submit { runCatching { player.controls().pause() } }
+                        interactionTick++
+                        true
+                    }
+                    key == Key.S && ctrl && shift && !alt -> {
+                        showSubtitleSettings = true
                         interactionTick++
                         true
                     }
@@ -1174,7 +1272,55 @@ internal fun DesktopMediaPlayer(
                 Image(
                     bitmap = current,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(subtitleTrackActive, subtitleAppearance.verticalPosition) {
+                            var dragActive = false
+                            var startY = 0f
+                            var lastY = 0f
+                            var startPosition = 0f
+                            detectVerticalDragGestures(
+                                onDragStart = { offset ->
+                                    dragActive = false
+                                    if (subtitleTrackActive && size.height > 0) {
+                                        val bandHalf = 21.dp.toPx()
+                                        val centreY =
+                                            subtitleAppearance.verticalPosition * size.height
+                                        if (kotlin.math.abs(offset.y - centreY) <= bandHalf) {
+                                            dragActive = true
+                                            startY = offset.y
+                                            lastY = offset.y
+                                            startPosition = subtitleAppearance.verticalPosition
+                                        }
+                                    }
+                                },
+                                onVerticalDrag = { change, _ ->
+                                    if (dragActive) {
+                                        lastY = change.position.y
+                                        change.consume()
+                                    }
+                                },
+                                onDragEnd = {
+                                    if (dragActive && size.height > 0) {
+                                        val moved = (startPosition +
+                                            (lastY - startY) / size.height)
+                                            .coerceIn(0.08f, 0.92f)
+                                        if (kotlin.math.abs(
+                                                moved - subtitleAppearance.verticalPosition
+                                            ) > 0.004f
+                                        ) {
+                                            applySubtitleAppearance(
+                                                subtitleAppearance.copy(
+                                                    verticalPosition = moved
+                                                )
+                                            )
+                                        }
+                                    }
+                                    dragActive = false
+                                },
+                                onDragCancel = { dragActive = false }
+                            )
+                        },
                     contentScale = scaling.contentScale
                 )
             }
@@ -1282,7 +1428,18 @@ internal fun DesktopMediaPlayer(
                         RememberedPlayerVolume.update(volume, persist = true)
                     }
                     interactionTick++
-                }
+                },
+                subtitleSettingsOpen = showSubtitleSettings,
+                onOpenSubtitleSettings = { showSubtitleSettings = true },
+                onSubtitlesOnChange = { subtitleTrackActive = it }
+            )
+        }
+
+        if (showSubtitleSettings) {
+            SubtitleAppearanceDialog(
+                appearance = subtitleAppearance,
+                onDismiss = { showSubtitleSettings = false },
+                onApply = { applySubtitleAppearance(it) }
             )
         }
     }
@@ -1336,7 +1493,10 @@ private fun PlayerControlsBar(
     onSelectTextTrack: (VlcTrack?) -> Unit,
     onScaling: (VideoScaling) -> Unit,
     controlPreferences: PlayerControlPreferences,
-    onControlPreferencesChange: (PlayerControlPreferences) -> Unit
+    onControlPreferencesChange: (PlayerControlPreferences) -> Unit,
+    subtitleSettingsOpen: Boolean,
+    onOpenSubtitleSettings: () -> Unit,
+    onSubtitlesOnChange: (Boolean) -> Unit
 ) {
     var showRateMenu by remember { mutableStateOf(false) }
     var showAudioMenu by remember { mutableStateOf(false) }
@@ -1371,6 +1531,7 @@ private fun PlayerControlsBar(
         }
     }
     val subtitlesOn = textTracks.any { it.selected }
+    LaunchedEffect(subtitlesOn) { onSubtitlesOnChange(subtitlesOn) }
 
     if (showCustomSleepDialog) {
         AlertDialog(
@@ -1480,12 +1641,13 @@ private fun PlayerControlsBar(
             showSleepMenu,
             showCustomSleepDialog,
             volumeSliderActive,
-            brightnessSliderActive
+            brightnessSliderActive,
+            subtitleSettingsOpen
         ) {
             onControlsKeepVisible(
                 showSliderSettings || showRateMenu || showAudioMenu || showSubtitleMenu ||
                     showQueueMenu || showSleepMenu || showCustomSleepDialog ||
-                    volumeSliderActive || brightnessSliderActive
+                    volumeSliderActive || brightnessSliderActive || subtitleSettingsOpen
             )
         }
         DisposableEffect(Unit) {
@@ -1945,6 +2107,22 @@ private fun PlayerControlsBar(
                                     }
                                 )
                             }
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = {
+                                    Text(stringResource(Res.string.player_subtitle_appearance))
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Filled.Settings,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showSubtitleMenu = false
+                                    onOpenSubtitleSettings()
+                                }
+                            )
                         }
                     }
                 }
@@ -2088,3 +2266,6 @@ private const val FINE_RATE_STEP = 0.05f
 private const val SYNC_STEP_US = 50_000L
 private val THUMB_WIDTH = 5.dp
 private val THUMB_HEIGHT = 26.dp
+
+/** A subtitle-appearance change captured just before the player is recreated. */
+private data class StyleRestart(val positionMs: Long, val wasPlaying: Boolean)
