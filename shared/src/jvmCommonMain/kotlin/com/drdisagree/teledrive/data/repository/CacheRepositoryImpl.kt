@@ -30,7 +30,6 @@ import com.drdisagree.teledrive.domain.repository.CacheManagerSummary
 import com.drdisagree.teledrive.domain.repository.CacheRemovalResult
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -794,45 +793,6 @@ class CacheRepositoryImpl(
             newlyQueued = (ids.size - alreadyQueued).coerceAtLeast(0),
             alreadyQueued = alreadyQueued
         )
-    }
-
-    private val warmUpMutex = Mutex()
-
-    /**
-     * Background warm-up: queue non-forced generation for every eligible file
-     * that has no thumbnail row yet, so the Gallery and Files grids do not
-     * start generating cold when first opened. Jobs stay behind anything the
-     * user explicitly requested (the queue serves forced rows first) and each
-     * store re-checks the effective policy before generating, so files under
-     * an explicit Manual-only rule are skipped by the workers. Rows already
-     * queued are left untouched — re-enqueueing would reset their attempt
-     * counters. A second call while one is running (or after everything is
-     * cached) costs one empty page read.
-     */
-    override suspend fun warmUpThumbnails() {
-        if (!warmUpMutex.tryLock()) return
-        try {
-            var afterAddedAt: Long? = null
-            var afterFileId: String? = null
-            while (true) {
-                val page = thumbnailDao.allEligibleFileIdsPage(
-                    onlyMissing = true,
-                    afterAddedAt = afterAddedAt,
-                    afterFileId = afterFileId,
-                    limit = JOB_BATCH_SIZE
-                )
-                if (page.isEmpty()) break
-                val queued = thumbnailJobDao.existingFileIds(page.map { it.fileId }).toSet()
-                val fresh = page.map { it.fileId }.filterNot { it in queued }
-                if (fresh.isNotEmpty()) thumbnailStore.enqueueAutomatic(fresh)
-                val last = page.last()
-                afterAddedAt = last.addedAt
-                afterFileId = last.fileId
-                if (page.size < JOB_BATCH_SIZE) break
-            }
-        } finally {
-            warmUpMutex.unlock()
-        }
     }
 
     override suspend fun thumbnailQueue(

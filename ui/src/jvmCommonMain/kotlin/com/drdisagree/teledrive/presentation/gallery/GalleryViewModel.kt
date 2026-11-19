@@ -183,28 +183,6 @@ class GalleryViewModel(
             ?.also { cacheFolderPath(folderId, it) }
     }
 
-    /**
-     * Albums are one row per folder, shown flat with no parent context, so two
-     * different folders that share a name (an "Instagram" under two different
-     * parents, say) are indistinguishable in the list. When a display name
-     * repeats, attach the parent folder's path so they can be told apart.
-     * Nothing is merged here: same-named folders under different parents are
-     * legitimate, and only the sync-time merger converges same-parent
-     * duplicates, where a merge is provably safe.
-     */
-    private suspend fun labelDuplicateAlbums(albums: List<MediaAlbum>): List<MediaAlbum> {
-        val counts = albums.groupingBy { duplicateAlbumKey(it.name) }.eachCount()
-        if (counts.values.none { it > 1 }) return albums
-        return albums.map { album ->
-            if ((counts[duplicateAlbumKey(album.name)] ?: 0) < 2) return@map album
-            val parentId = album.folderId?.let { fileRepository.getFolder(it)?.parentId }
-            album.copy(locationLabel = folderPathLabel(parentId))
-        }
-    }
-
-    private fun duplicateAlbumKey(name: String?): String =
-        name?.trim()?.lowercase().orEmpty()
-
     private fun report(error: AppError) {
         _messages.tryEmit(error.toUiText())
     }
@@ -329,13 +307,12 @@ class GalleryViewModel(
             flowOf(emptyList())
         } else {
             fileRepository.observeAlbums(showHidden = false, showArchived = false).map { rows ->
-                val filtered = rows.asSequence()
+                rows.asSequence()
                     .filter { album ->
                         query.isBlank() || album.name?.contains(query, ignoreCase = true) == true
                     }
                     .sortedWith(albumComparator(sortValue.first, sortValue.second))
                     .toList()
-                labelDuplicateAlbums(filtered)
             }
         }
     }

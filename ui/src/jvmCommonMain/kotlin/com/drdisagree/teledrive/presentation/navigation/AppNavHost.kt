@@ -25,6 +25,7 @@ import com.drdisagree.teledrive.presentation.gallery.GalleryScreen
 import com.drdisagree.teledrive.presentation.home.HomeScreen
 import com.drdisagree.teledrive.presentation.platform.LocalPlatformScreens
 import com.drdisagree.teledrive.presentation.navigation.NavigationTransitions.isPeerSwitch
+import com.drdisagree.teledrive.presentation.navigation.NavigationTransitions.movesForward
 import com.drdisagree.teledrive.presentation.note.NoteEditorScreen
 import com.drdisagree.teledrive.presentation.onboarding.OnboardingScreen
 import com.drdisagree.teledrive.presentation.search.SearchScreen
@@ -42,7 +43,8 @@ import com.drdisagree.teledrive.presentation.trash.TrashScreen
 fun AppNavHost(
     navController: NavHostController,
     startDestination: Route,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    verticalTabMotion: Boolean = false
 ) {
     val androidLayout = LocalAndroidLayout.current
     CompositionLocalProvider(
@@ -52,24 +54,27 @@ fun AppNavHost(
         navController = navController,
         startDestination = startDestination,
         modifier = modifier,
-        // Peer (top-level) switches are instant on every platform: animating them
-        // kept two full collection screens composited mid-flight, which read as
-        // lag and made the bottom-bar labels ghost over each other. Only
-        // in-section push/pop navigation keeps the shared-axis motion.
+        // Android's file and gallery screens can contain many live thumbnails and controls.
+        // Avoid keeping two full collection screens composited during a navigation animation.
+        // Desktop retains the established shared-axis transitions.
         enterTransition = {
-            if (androidLayout || isPeerSwitch()) EnterTransition.None
+            if (androidLayout) EnterTransition.None
+            else if (isPeerSwitch()) tabEnterFor(verticalTabMotion, movesForward())
             else NavigationTransitions.sharedAxisEnter(forward = true)
         },
         exitTransition = {
-            if (androidLayout || isPeerSwitch()) ExitTransition.None
+            if (androidLayout) ExitTransition.None
+            else if (isPeerSwitch()) tabExitFor(verticalTabMotion, movesForward())
             else NavigationTransitions.sharedAxisExit(forward = true)
         },
         popEnterTransition = {
-            if (androidLayout || isPeerSwitch()) EnterTransition.None
+            if (androidLayout) EnterTransition.None
+            else if (isPeerSwitch()) tabEnterFor(verticalTabMotion, movesForward())
             else NavigationTransitions.sharedAxisEnter(forward = false)
         },
         popExitTransition = {
-            if (androidLayout || isPeerSwitch()) ExitTransition.None
+            if (androidLayout) ExitTransition.None
+            else if (isPeerSwitch()) tabExitFor(verticalTabMotion, movesForward())
             else NavigationTransitions.sharedAxisExit(forward = false)
         }
     ) {
@@ -279,6 +284,14 @@ fun AppNavHost(
         }
     }
 }
+
+private fun tabEnterFor(vertical: Boolean, forward: Boolean) =
+    if (vertical) NavigationTransitions.tabEnterVertical(forward)
+    else NavigationTransitions.tabEnter(forward)
+
+private fun tabExitFor(vertical: Boolean, forward: Boolean) =
+    if (vertical) NavigationTransitions.tabExitVertical(forward)
+    else NavigationTransitions.tabExit(forward)
 
 /** Read per screen, so an outgoing screen's padding stays steady while it animates away. */
 @Composable

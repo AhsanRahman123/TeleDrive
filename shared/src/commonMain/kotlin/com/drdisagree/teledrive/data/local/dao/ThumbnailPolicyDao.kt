@@ -21,9 +21,8 @@ interface ThumbnailPolicyDao {
     suspend fun policy(targetType: String, targetId: String): String?
 
     /**
-     * File overrides win. Otherwise the closest ancestor folder override wins. Returns null
-     * when no rule applies; callers treat that as generate-on-demand (AUTOMATIC) — only an
-     * explicit MANUAL_ONLY rule suppresses generation.
+     * File overrides win. Otherwise the closest ancestor folder override wins. With no explicit
+     * rule the caller treats the file as MANUAL_ONLY.
      */
     @Query(
         """

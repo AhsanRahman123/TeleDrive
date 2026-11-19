@@ -7,7 +7,6 @@ import com.drdisagree.teledrive.core.telegram.TelegramAuthState
 import com.drdisagree.teledrive.domain.model.BackupTrigger
 import com.drdisagree.teledrive.domain.model.LayoutDensity
 import com.drdisagree.teledrive.domain.repository.BackupRepository
-import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ChannelRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.SyncRepository
@@ -41,7 +40,6 @@ class AppViewModel(
     private val syncRepository: SyncRepository,
     private val backupRepository: BackupRepository,
     private val channelRepository: ChannelRepository,
-    private val cacheRepository: CacheRepository,
     private val appLockManager: AppLockManager,
     private val localDataWiper: LocalDataWiper,
     private val updateChecker: UpdateChecker
@@ -107,12 +105,6 @@ class AppViewModel(
                 syncRepository.syncOnStart()
                 catchUpBackup()
                 viewModelScope.launch { syncRepository.catchUpWithRemote() }
-                // Warm the thumbnail queue while the user is anywhere in the
-                // app, so Gallery/Files do not start generating cold on first
-                // open. Best-effort: a failure here must never block startup.
-                viewModelScope.launch {
-                    runCatching { cacheRepository.warmUpThumbnails() }
-                }
                 startFollowing()
             }
             .launchIn(viewModelScope)
@@ -134,9 +126,6 @@ class AppViewModel(
         viewModelScope.launch { appLockManager.onAppStarted() }
         if (driveReady) {
             viewModelScope.launch { syncRepository.catchUpWithRemote() }
-            viewModelScope.launch {
-                runCatching { cacheRepository.warmUpThumbnails() }
-            }
             startFollowing()
         }
     }

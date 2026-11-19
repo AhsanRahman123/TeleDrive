@@ -121,15 +121,6 @@ interface CacheRepository {
     suspend fun generateAllThumbnails(): ThumbnailEnqueueResult =
         ThumbnailEnqueueResult()
 
-    /**
-     * Background warm-up, called when the library loads: queue automatic
-     * (non-forced) generation for every eligible file that has no thumbnail
-     * yet, so collection screens do not start generating cold on first open.
-     * Implementations must stay cheap when nothing is missing and must not
-     * disturb rows already queued.
-     */
-    suspend fun warmUpThumbnails() = Unit
-
     suspend fun thumbnailQueue(
         offset: Int,
         limit: Int,
