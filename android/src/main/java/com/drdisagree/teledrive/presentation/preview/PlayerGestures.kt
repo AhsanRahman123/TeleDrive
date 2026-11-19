@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.onClick
@@ -150,6 +151,22 @@ fun PlayerGestureArea(
                 // only. While zoomed in, a one-finger drag pans instead of adjusting
                 // brightness/volume (those detectors are likewise starved once the pan
                 // passes touch slop and this watcher consumes).
+                //
+                // Stability model — the same one Android's ScaleGestureDetector uses, and
+                // MX Player's zoom is built on that detector: the scale is NEVER recomputed
+                // from a baseline captured when the second finger landed. Each event
+                // contributes only its own small span ratio (span / previous span), applied
+                // through [pinchZoomStep], which also re-anchors the pan so the content
+                // point under the fingers stays under the fingers as the scale changes.
+                // Any event that changes the pointer set (a finger lands or lifts, or the
+                // tracked pair changes) only re-baselines — it applies nothing — so the
+                // span collapse as fingers lift off, and digitiser pair swaps, cannot
+                // teleport the picture. The travel spent crossing the claim threshold is
+                // absorbed into the baseline the same way, so a pinch starts moving
+                // smoothly from the current scale instead of jumping by the whole
+                // threshold at once. On release the zoom HOLDS at whatever value it
+                // reached, above or below 100%, exactly like MX Player; only a new file
+                // or an aspect-ratio change resets it.
                 .pointerInput(zoomEnabled) {
                     if (!zoomEnabled) return@pointerInput
                     awaitEachGesture {
@@ -162,67 +179,82 @@ fun PlayerGestureArea(
                         var panY = currentZoomOffsetY
                         var pinching = false
                         var panning = false
-                        var twoPointers = false
-                        var initialSpan = 0f
-                        var startScale = scale
-                        var lastCentroid: Offset? = null
+                        // The two tracked pointer ids; empty while fewer than two fingers
+                        // are down. Any change to the pair means: re-baseline only.
+                        var trackedPair: Set<PointerId> = emptySet()
+                        // Span at the moment the current pair formed; the claim threshold
+                        // is measured against it. Pre-claim travel is never applied.
+                        var claimSpan = 0f
+                        var prevSpan = 0f
+                        var prevCentroid: Offset? = null
                         var lastPanPosition: Offset? = null
 
                         var finished = false
                         while (!finished) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val pressed = event.changes.filter { it.pressed }
+                            // A finger landing or lifting in this event makes its span and
+                            // centroid meaningless for scaling (a lifting finger is already
+                            // absent from `pressed`; a landing one has no previous
+                            // position): such events only re-baseline, never apply.
+                            val pointerSetChanged = event.changes.any {
+                                it.pressed != it.previousPressed
+                            }
                             when {
                                 pressed.size >= 2 -> {
-                                    val first = pressed[0].position
-                                    val second = pressed[1].position
-                                    val span = (first - second).getDistance()
-                                    val centroid = (first + second) / 2f
-                                    if (!twoPointers) {
-                                        // A (new) second finger landed: re-base the pinch.
-                                        twoPointers = true
-                                        initialSpan = span
-                                        startScale = scale
-                                        lastCentroid = centroid
-                                    }
-                                    if (!pinching && initialSpan > 0f) {
-                                        val factor = span / initialSpan
-                                        if (factor >= PINCH_CLAIM_FACTOR ||
-                                            factor <= 1f / PINCH_CLAIM_FACTOR
-                                        ) {
-                                            pinching = true
+                                    val first = pressed[0]
+                                    val second = pressed[1]
+                                    val span = (first.position - second.position)
+                                        .getDistance()
+                                    val centroid = (first.position + second.position) / 2f
+                                    val pair = setOf(first.id, second.id)
+                                    if (pair != trackedPair || pointerSetChanged) {
+                                        // The pair (re)formed or a third finger touched:
+                                        // baseline only, apply nothing this event.
+                                        trackedPair = pair
+                                        claimSpan = span
+                                        prevSpan = span
+                                        prevCentroid = centroid
+                                    } else {
+                                        if (!pinching && claimSpan > 0f) {
+                                            val factor = span / claimSpan
+                                            if (factor >= PINCH_CLAIM_FACTOR ||
+                                                factor <= 1f / PINCH_CLAIM_FACTOR
+                                            ) {
+                                                pinching = true
+                                            }
                                         }
-                                    }
-                                    if (pinching) {
-                                        event.changes.forEach { it.consume() }
-                                        val factor = if (initialSpan > 0f) {
-                                            span / initialSpan
-                                        } else {
-                                            1f
+                                        if (pinching) {
+                                            event.changes.forEach { it.consume() }
+                                            val previousCentroid = prevCentroid
+                                            if (previousCentroid != null) {
+                                                val stepped = pinchZoomStep(
+                                                    ZoomTransform(scale, panX, panY),
+                                                    prevSpan,
+                                                    span,
+                                                    previousCentroid,
+                                                    centroid,
+                                                    size.width,
+                                                    size.height
+                                                )
+                                                scale = stepped.scale
+                                                panX = stepped.panX
+                                                panY = stepped.panY
+                                                applyZoom(scale, panX, panY)
+                                                zoomPercent = (scale * 100).roundToInt()
+                                            }
                                         }
-                                        scale = (startScale * factor)
-                                            .coerceIn(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
-                                        lastCentroid?.let { previous ->
-                                            val delta = centroid - previous
-                                            panX += delta.x
-                                            panY += delta.y
-                                        }
-                                        val (clampedX, clampedY) =
-                                            clampZoomPan(panX, panY, size.width, size.height, scale)
-                                        panX = clampedX
-                                        panY = clampedY
-                                        applyZoom(scale, panX, panY)
-                                        zoomPercent = (scale * 100).roundToInt()
+                                        prevSpan = span
+                                        prevCentroid = centroid
                                     }
-                                    lastCentroid = centroid
                                 }
 
                                 pressed.size == 1 -> {
                                     val change = pressed[0]
-                                    if (twoPointers) {
+                                    if (trackedPair.isNotEmpty()) {
                                         // Dropped from two fingers to one mid-gesture: the
                                         // remaining finger pans from wherever it is now.
-                                        twoPointers = false
+                                        trackedPair = emptySet()
                                         pinching = false
                                         panning = scale > 1f
                                         lastPanPosition = change.position
@@ -258,13 +290,9 @@ fun PlayerGestureArea(
                             }
                             if (event.changes.all { !it.pressed }) {
                                 finished = true
-                                // Snap back: a zoom that settles at (or below) ~100% is no
-                                // zoom at all — return to exactly 1x with no offset.
-                                if (scale <= ZOOM_SNAP_BACK_SCALE &&
-                                    (scale != 1f || panX != 0f || panY != 0f)
-                                ) {
-                                    applyZoom(1f, 0f, 0f)
-                                }
+                                // No snap-back: the zoom holds at its release value,
+                                // above or below 100%, like MX Player. The session
+                                // state already holds exactly what was last applied.
                             }
                         }
                     }
@@ -582,6 +610,55 @@ private fun AdjustmentHud(adjustment: AdjustmentLevel) {
     }
 }
 
+/** An immutable pinch-zoom state: scale plus the graphicsLayer translation. */
+internal data class ZoomTransform(val scale: Float, val panX: Float, val panY: Float)
+
+/**
+ * One incremental pinch step, ScaleGestureDetector-style: the new scale is the current
+ * scale times THIS event's span ratio (`span / prevSpan`) only — never a ratio against
+ * a baseline captured when the gesture started — so no single event, baseline error or
+ * finger-landing position can move the scale by more than the fingers actually moved
+ * since the previous event.
+ *
+ * Anchoring: the graphicsLayer scales about the stage centre O, so a content point p
+ * renders at `O + (p - O) * s + t`. The pan is recomputed so the content point that was
+ * under the previous centroid C ends up under the current centroid C':
+ * `t' = C' - O - (C - O - t) * (s' / s)`, using the ratio that was ACTUALLY applied
+ * after clamping to the zoom range (using the raw factor would drift the picture every
+ * time a bound is hit). With no scale change the formula reduces to `t + (C' - C)`:
+ * the pan simply follows the fingers. The result is clamped by [clampZoomPan], so the
+ * below-100% crash fix applies to every step.
+ *
+ * A span ratio outside [MIN_EVENT_SPAN_FACTOR, MAX_EVENT_SPAN_FACTOR] cannot be real
+ * finger motion at touch sampling rates — it means the digitiser glitched or the
+ * tracked pair silently changed — so the step is skipped and the state returned
+ * unchanged; the caller re-baselines from this event, so the next step is measured
+ * from sane values again.
+ */
+internal fun pinchZoomStep(
+    current: ZoomTransform,
+    prevSpan: Float,
+    span: Float,
+    prevCentroid: Offset,
+    centroid: Offset,
+    width: Int,
+    height: Int
+): ZoomTransform {
+    if (prevSpan <= 0f || span <= 0f || current.scale <= 0f) return current
+    val factor = span / prevSpan
+    if (factor < MIN_EVENT_SPAN_FACTOR || factor > MAX_EVENT_SPAN_FACTOR) return current
+    val newScale = (current.scale * factor).coerceIn(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
+    val appliedRatio = newScale / current.scale
+    val originX = width / 2f
+    val originY = height / 2f
+    val anchoredX = centroid.x - originX -
+        (prevCentroid.x - originX - current.panX) * appliedRatio
+    val anchoredY = centroid.y - originY -
+        (prevCentroid.y - originY - current.panY) * appliedRatio
+    val (clampedX, clampedY) = clampZoomPan(anchoredX, anchoredY, width, height, newScale)
+    return ZoomTransform(newScale, clampedX, clampedY)
+}
+
 /**
  * Clamps a pinch-zoom pan offset to the scaled picture's half-extents. The half-extents
  * are floored at 0: below 100% zoom (scale < 1) the raw `size * (scale - 1) / 2` goes
@@ -636,7 +713,8 @@ private const val DRAG_RANGE = 0.7f
 private const val PINCH_CLAIM_FACTOR = 1.08f
 private const val MIN_ZOOM_SCALE = 0.4f
 private const val MAX_ZOOM_SCALE = 2.5f
-private const val ZOOM_SNAP_BACK_SCALE = 1.02f
+private const val MIN_EVENT_SPAN_FACTOR = 0.5f
+private const val MAX_EVENT_SPAN_FACTOR = 2f
 private const val MIN_SUBTITLE_VERTICAL_POSITION = 0.08f
 private const val MAX_SUBTITLE_VERTICAL_POSITION = 0.92f
 internal const val MIN_SUBTITLE_HIT_WIDTH_FRACTION = 0.22f
