@@ -74,4 +74,12 @@
     <string name="transfer_error_verify_failed">The downloaded file doesn't match the original. Try downloading it again.</string>
     <string name="transfer_error_destination_full">Not enough free space where downloads are saved. Needs %1$s.</string>
     <string name="transfer_error_cache_full">Not enough free space for Pranto Drive's temporary files. Needs %1$s.</string>
+
+    <!-- Notifications -->
+    <string name="notification_upload_failed">Upload failed</string>
+    <string name="notification_download_failed">Download failed</string>
+    <string name="notification_backup_complete">Backup complete</string>
+    <string name="notification_backup_summary">%1$d of %2$d files backed up</string>
+    <string name="notification_update_available">Update available</string>
+    <string name="notification_update_message">%1$s %2$s is ready to download</string>
 </resources>

@@ -4,6 +4,13 @@ import com.drdisagree.teledrive.core.dispatchers.DispatcherProvider
 import com.drdisagree.teledrive.core.transfer.TransferDrainResult
 import com.drdisagree.teledrive.core.transfer.TransferQueueDrainer
 import com.drdisagree.teledrive.core.transfer.TransferScheduler
+import com.drdisagree.teledrive.data.local.entity.TransferEntity
+import com.drdisagree.teledrive.desktop.notifications.DesktopNotifications
+import com.drdisagree.teledrive.desktop.resources.Res
+import com.drdisagree.teledrive.desktop.resources.notification_download_failed
+import com.drdisagree.teledrive.desktop.resources.notification_upload_failed
+import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
@@ -12,11 +19,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.getString
 
 class DesktopTransferScheduler(
     private val drainer: TransferQueueDrainer,
-    dispatchers: DispatcherProvider
+    dispatchers: DispatcherProvider,
+    private val settingsRepository: SettingsRepository,
+    private val notifications: DesktopNotifications
 ) : TransferScheduler {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatchers.io)
@@ -42,7 +53,7 @@ class DesktopTransferScheduler(
                             !globallyPaused &&
                             drainer.drain(
                                 isStopped = { globallyPaused },
-                                onTerminalFailure = { }
+                                onTerminalFailure = { transfer -> notifyFailure(transfer) }
                             ) == TransferDrainResult.INTERRUPTED
                         ) {
                             if (!globallyPaused) delay(RETRY_DELAY_SECONDS.seconds)
@@ -78,6 +89,23 @@ class DesktopTransferScheduler(
     override fun resume(allowMetered: Boolean) {
         synchronized(stateLock) { globallyPaused = false }
         kick(allowMetered)
+    }
+
+    /** Mirrors Android's TransferQueueWorker: a terminal failure notifies if the user kept failure notifications on. */
+    private suspend fun notifyFailure(transfer: TransferEntity) {
+        if (!settingsRepository.preferences.first().failureNotifications) return
+        notifications.notifyFailure(
+            title = getString(
+                when (transfer.type) {
+                    TransferType.UPLOAD, TransferType.BACKUP ->
+                        Res.string.notification_upload_failed
+
+                    TransferType.DOWNLOAD, TransferType.RESTORE ->
+                        Res.string.notification_download_failed
+                }
+            ),
+            message = transfer.displayName
+        )
     }
 
     private companion object {

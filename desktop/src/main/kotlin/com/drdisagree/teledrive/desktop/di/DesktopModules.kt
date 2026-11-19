@@ -38,7 +38,6 @@ import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramPacer
 import com.drdisagree.teledrive.core.transfer.BackupResumeScheduler
 import com.drdisagree.teledrive.core.transfer.BackupSessionTracker
-import com.drdisagree.teledrive.core.transfer.CountingBackupSessionTracker
 import com.drdisagree.teledrive.core.transfer.MaintenanceScheduler
 import com.drdisagree.teledrive.core.transfer.TransferErrorMessages
 import com.drdisagree.teledrive.core.transfer.TransferScheduler
@@ -86,8 +85,10 @@ import com.drdisagree.teledrive.desktop.network.DesktopNetworkMonitor
 import com.drdisagree.teledrive.desktop.permissions.DesktopPermissionChecker
 import com.drdisagree.teledrive.desktop.power.DesktopPowerMonitor
 import com.drdisagree.teledrive.desktop.publish.DesktopPublishScheduler
+import com.drdisagree.teledrive.desktop.notifications.DesktopNotifications
 import com.drdisagree.teledrive.desktop.transfer.DesktopBackupResumeScheduler
 import com.drdisagree.teledrive.desktop.transfer.DesktopMaintenanceScheduler
+import com.drdisagree.teledrive.desktop.transfer.NotifyingDesktopBackupSessionTracker
 import com.drdisagree.teledrive.desktop.transfer.DesktopTransferErrorMessages
 import com.drdisagree.teledrive.desktop.transfer.DesktopTransferScheduler
 import com.drdisagree.teledrive.domain.usecase.useCaseModule
@@ -144,7 +145,8 @@ val desktopModule = module {
     singleOf(::DesktopMediaMetadataExtractor) bind MediaMetadataExtractor::class
     singleOf(::DesktopThumbnailStore) bind ThumbnailStore::class
     singleOf(::NoopThumbnailMemoryCache) bind ThumbnailMemoryCache::class
-    singleOf(::CountingBackupSessionTracker) bind BackupSessionTracker::class
+    singleOf(::DesktopNotifications)
+    singleOf(::NotifyingDesktopBackupSessionTracker) bind BackupSessionTracker::class
     singleOf(::DesktopTransferScheduler) bind TransferScheduler::class
     singleOf(::DesktopBackupResumeScheduler) bind BackupResumeScheduler::class
     singleOf(::DesktopMaintenanceScheduler) bind MaintenanceScheduler::class
