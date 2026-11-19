@@ -1,6 +1,6 @@
 <resources>
     <!-- App-wide -->
-    <string name="app_name">TeleDrive</string>
+    <string name="app_name">Pranto Drive</string>
 
     <!-- Shared labels and dialogs -->
     <string name="common_actions">Más acciones</string>
@@ -29,7 +29,7 @@
     <string name="transfer_error_save_failed">No se pudo guardar la descarga</string>
     <string name="transfer_error_verify_failed">El archivo descargado no coincide con el original. Intenta descargarlo de nuevo.</string>
     <string name="transfer_error_destination_full">No hay espacio libre suficiente donde se guardan las descargas. Se necesitan %1$s.</string>
-    <string name="transfer_error_cache_full">No hay espacio libre suficiente para los archivos temporales de TeleDrive. Se necesitan %1$s.</string>
+    <string name="transfer_error_cache_full">No hay espacio libre suficiente para los archivos temporales de Pranto Drive. Se necesitan %1$s.</string>
     <string name="transfer_error_upload_ended">La subida terminó de forma inesperada</string>
     <string name="transfer_error_upload_stalled">La subida dejó de responder</string>
 

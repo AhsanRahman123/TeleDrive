@@ -957,10 +957,10 @@ class TransferExecutor(
         contentHash: String?
     ) {
         if (storagePaths.autoRemoveManagedCopiesAfterUpload) {
-            // Android imports user-selected files into TeleDrive-owned storage. After a successful
+            // Android imports user-selected files into Pranto Drive-owned storage. After a successful
             // Telegram upload, use the repository's guarded cleanup instead of deleting the
             // transfer path directly. That routine verifies the remote mapping, respects
-            // Available Offline pins, and only removes paths inside TeleDrive-managed roots.
+            // Available Offline pins, and only removes paths inside Pranto Drive-managed roots.
             val latest = fileDao.byId(entity.id) ?: return
             if (
                 latest.localPath != localPath ||

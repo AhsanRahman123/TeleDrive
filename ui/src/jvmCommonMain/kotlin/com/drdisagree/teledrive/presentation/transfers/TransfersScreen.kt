@@ -522,9 +522,9 @@ fun TransfersScreen(
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 text = if (speedLimitDirection == 0) {
-                                    "Telegram has signalled an account-level download speed limit. TeleDrive cannot remove this server-side restriction. Check Telegram Premium eligibility; TDLib exposes a premium download speed-up option."
+                                    "Telegram has signalled an account-level download speed limit. Pranto Drive cannot remove this server-side restriction. Check Telegram Premium eligibility; TDLib exposes a premium download speed-up option."
                                 } else {
-                                    "Telegram has signalled an account-level upload speed limit. This is applied by Telegram, not by TeleDrive."
+                                    "Telegram has signalled an account-level upload speed limit. This is applied by Telegram, not by Pranto Drive."
                                 },
                                 modifier = Modifier.padding(12.dp),
                                 style = MaterialTheme.typography.bodySmall,
@@ -1015,7 +1015,7 @@ private fun TransferRow(
                         ) {
                             onOpenInApp?.let { open ->
                                 DropdownMenuItem(
-                                    text = { Text("Open in TeleDrive") },
+                                    text = { Text("Open in Pranto Drive") },
                                     leadingIcon = { Icon(Icons.Filled.OpenInNew, contentDescription = null) },
                                     onClick = {
                                         showRowMenu = false
