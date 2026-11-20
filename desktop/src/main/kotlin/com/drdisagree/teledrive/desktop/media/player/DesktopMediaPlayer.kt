@@ -139,7 +139,6 @@ import java.awt.Point
 import java.awt.Toolkit
 import java.awt.image.BufferedImage
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -193,22 +192,25 @@ internal fun DesktopMediaPlayer(
     onBackgroundPlaybackChange: (Boolean) -> Unit = {},
     mediaTitle: String = ""
 ) {
-    // Subtitle appearance (PC-13 rescue, report 18): ONE factory and ONE
-    // player for the viewer's whole life. The appearance is NOT a LibVLC
-    // instance configuration any more — it is passed as per-media options
-    // on every media start (see SubtitleAppearance.toVlcMediaOptions), the
-    // route LibVLCSharp and VLC-Android use, so applying a new appearance
-    // never recreates the factory, the player, its event listener or its
-    // render surface. The previous design (a factory per appearance, the
-    // player keyed on it) destroyed and recreated the native player on
-    // every Apply and wedged the transport controls in the process.
+    // Subtitle appearance (PC-19, report 20): appearance is LibVLC
+    // instance configuration — the only channel that demonstrably reaches
+    // the Windows freetype renderer (1.6.1 proved instance arguments
+    // work; 1.6.3 proved per-media options inert; libVLC has no live
+    // variable API). It is therefore applied by swapping the native
+    // instance behind the stable PlayerSession facade: the session,
+    // its event listener, the render surface and every control binding
+    // never change, a candidate instance is proven live before the
+    // facade flips to it, and a failed candidate is discarded with the
+    // current player untouched. (The 1.6.1/1.6.2 design recreated the
+    // player in the open and wedged the controls; the facade exists so
+    // that can never happen again.)
     var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
-    // Bumped by applySubtitleAppearance: the media start effect below is
-    // keyed on it, so an Apply re-starts the CURRENT media on the SAME
-    // player with the new appearance's media options and a :start-time
-    // resume — the player object the controls are bound to never changes.
+    // Bumped by applySubtitleAppearance: resets the preferred-language
+    // track application below, so after an instance swap the chosen
+    // audio/subtitle tracks are re-applied on the new player as a
+    // backstop to the session's own track restoration.
     var appearanceReloadTick by remember { mutableIntStateOf(0) }
-    val factory = VlcPlayback.factory ?: return
+    if (!VlcPlayback.available) return
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var hasCurrentMediaFrame by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf(false) }
@@ -237,13 +239,8 @@ internal fun DesktopMediaPlayer(
     // the restoration). See VideoResumeStore for the position rules.
     var showSubtitleSettings by remember { mutableStateOf(false) }
     var subtitleTrackActive by remember { mutableStateOf(false) }
-    // Set only by applySubtitleAppearance, in the instant before the factory
-    // swap recreates the player: the captured position/play state the restarted
-    // player must come back to.
-    var styleRestart by remember { mutableStateOf<StyleRestart?>(null) }
     var scalePreset by remember(mrl) { mutableStateOf(VideoScalePreset.BEST_FIT) }
     var stageSize by remember { mutableStateOf(IntSize.Zero) }
-    val startPausedArmed = remember { AtomicBoolean(false) }
     var resumeSavedPosition by remember(mrl) { mutableStateOf<Long?>(null) }
     var resumeTarget by remember(mrl) { mutableStateOf<Long?>(null) }
     var resumeSettled by remember(mrl) { mutableStateOf(false) }
@@ -312,26 +309,15 @@ internal fun DesktopMediaPlayer(
         onDispose { timeUpdates.close() }
     }
 
-    // One native VLC instance is retained for the lifetime of this media viewer. The
-    // active MRL is replaced in-place below, avoiding a destroy/recreate flash on W/E.
-    val player = remember(factory, isAudio) {
-        // A new preview replaces any background-playback session parked by a
-        // previous preview (see BackgroundPlayback).
-        BackgroundPlayback.stopParked()
-        factory.mediaPlayers().newEmbeddedMediaPlayer().apply {
-            // From this moment only this player's events and frames are live;
-            // a retired player's listener can still fire during its async
-            // teardown and must be rejected by identity (see PlayerEventGate).
-            eventGate.attach(this)
-            if (!isAudio) {
-                videoSurface().set(composeVideoSurface { image ->
-                    val generation = eventGate.generation()
-                    if (eventGate.acceptsFrames()) {
-                        frameUpdates.trySend(generation to image)
-                    }
-                })
-            }
-            events().addMediaPlayerEventListener(object : MediaPlayerEventAdapter() {
+    // The viewer's ONE event listener, attached by the session to every
+    // native player it creates — the initial player and every appearance
+    // swap candidate. Every callback is identity-gated through the
+    // viewer-scoped PlayerEventGate: a retired player's listener can still
+    // fire during its async teardown, and a swap candidate reports its
+    // start before it owns the session; both must be rejected by identity,
+    // never by guard flags the emitter itself maintains.
+    val playerEventListener = remember(isAudio) {
+        object : MediaPlayerEventAdapter() {
                 // vlcj event callbacks run on native/event threads. Compose state is only
                 // mutated from the player scope, never directly from those callback threads.
                 override fun playing(mediaPlayer: MediaPlayer) {
@@ -339,10 +325,7 @@ internal fun DesktopMediaPlayer(
                     if (!eventGate.isExpectedGeneration()) return
                     eventGate.openEvents()
                     playerScope.launch {
-                        // A style restart of a paused video starts via
-                        // :start-paused; VLC still emits a playing event for
-                        // it, so consume the one-shot flag and stay paused.
-                        playing = !startPausedArmed.getAndSet(false)
+                        playing = true
                         finished = false
                         // VLC's playing event can precede its first video frame. Keep the old
                         // frame covered until the new source has actually rendered a frame.
@@ -395,7 +378,7 @@ internal fun DesktopMediaPlayer(
                         playing = false
                         // Mirror the playing() fallbacks so a start-paused
                         // load still gets its duration (the seek bar and the
-                        // style-restart seek both key off it) and position.
+                        // resume seek both key off it) and position.
                         val reportedLength = runCatching { mediaPlayer.status().length() }
                             .getOrNull()
                         if (reportedLength != null && reportedLength > 0L) {
@@ -469,7 +452,59 @@ internal fun DesktopMediaPlayer(
                         buffering = false
                     }
                 }
-            })
+        }
+    }
+
+    // The stable player facade (PC-19): created once for this viewer and
+    // never replaced. It builds the first native player on the saved
+    // appearance's instance and swaps instances behind itself when an
+    // appearance is applied, so everything below — controls, effects,
+    // the render surface — binds to the session, never to a native
+    // player that an Apply could retire.
+    val sessionRef = remember {
+        java.util.concurrent.atomic.AtomicReference<PlayerSession?>(null)
+    }
+    val player = remember(isAudio) {
+        PlayerSession(
+            eventGate = eventGate,
+            configurePlayer = { nativePlayer ->
+                if (!isAudio) {
+                    nativePlayer.videoSurface().set(
+                        composeVideoSurface { emitter, image ->
+                            val generation = eventGate.generation()
+                            // Frames count only from the player the gate
+                            // calls current: a swap candidate renders
+                            // into the void until the facade flips to it.
+                            if (eventGate.isCurrent(emitter) &&
+                                eventGate.acceptsFrames()
+                            ) {
+                                frameUpdates.trySend(generation to image)
+                            }
+                        }
+                    )
+                }
+                nativePlayer.events().addMediaPlayerEventListener(playerEventListener)
+            },
+            onSwapSettled = {
+                // A swap (or its rollback) completed. Refresh the
+                // track-derived state against the now-current player; if
+                // the user paused while the swap was in flight, the
+                // candidate came up playing — put it back to paused.
+                playerScope.launch {
+                    trackTick++
+                    val session = sessionRef.get()
+                    if (session != null &&
+                        !latestPlaying.value && !latestFinished.value
+                    ) {
+                        session.submit {
+                            runCatching { session.controls().pause() }
+                        }
+                    }
+                }
+            }
+        ).also { session ->
+            sessionRef.set(session)
+            session.start(subtitleAppearance)
         }
     }
 
@@ -526,11 +561,15 @@ internal fun DesktopMediaPlayer(
     }
 
     val fullscreenController = LocalFullscreenController.current
-    LaunchedEffect(player, mrl, appearanceReloadTick) {
-        // Reuse one VLC player for the lifetime of this viewer. Recreating native VLC and
-        // its render/event channels for every MRL caused the previously-fixed flash/black frame
-        // when moving to the next video. Close the event gate while swapping sources so late
-        // callbacks from the outgoing item cannot update the incoming item's state.
+    LaunchedEffect(player, mrl) {
+        // Reuse the session's current player for every MRL of this viewer.
+        // Recreating native VLC and its render/event channels for every MRL
+        // caused the previously-fixed flash/black frame when moving to the
+        // next video. Close the event gate while swapping sources so late
+        // callbacks from the outgoing item cannot update the incoming item's
+        // state. The subtitle appearance does NOT ride on this start: it is
+        // instance configuration, already built into the current player's
+        // instance (see PlayerSession).
         val mediaGeneration = eventGate.beginMedia()
         hasCurrentMediaFrame = false
         while (frameUpdates.tryReceive().isSuccess) Unit
@@ -542,22 +581,7 @@ internal fun DesktopMediaPlayer(
         buffering = true
         timeMs = 0L
         durationMs = 0L
-        // A pending subtitle style restart belongs to the file it was captured on. If the
-        // user moved to another file before the restarted player came up, drop it here:
-        // the new file starts from its own resume position, never the old file's.
-        val pendingRestart = styleRestart
-        if (pendingRestart != null && pendingRestart.mediaId != mediaId) {
-            styleRestart = null
-        }
-        val activeRestart = styleRestart
-        val savedResume = if (activeRestart == null) {
-            VideoResumeStore.loadPosition(mediaId)
-        } else {
-            // A subtitle style restart resumes at the position captured when
-            // the change was applied (already force-saved to the store), not
-            // at a fresh resume lookup.
-            0L
-        }
+        val savedResume = VideoResumeStore.loadPosition(mediaId)
         resumeSavedPosition = if (savedResume > 0L) savedResume else null
         resumeTarget = null
         resumeSettled = savedResume <= 0L
@@ -565,42 +589,45 @@ internal fun DesktopMediaPlayer(
         lastObservedTimeMs = 0L
         trackTick++
         player.submit {
-            // A newer selection can arrive while this command is waiting in VLC's serial
-            // executor. Never start an obsolete MRL after a newer generation was requested.
+            // A newer selection can arrive while this command is waiting in the session's
+            // serial executor. Never start an obsolete MRL after a newer generation was
+            // requested. The native player is snapshotted at execution time: an appearance
+            // swap that flipped the facade while this command waited must not be stopped
+            // or started over — the generation checks below abandon this command instead.
             if (eventGate.generation() == mediaGeneration) {
-                // Stop the outgoing source before attaching another item. MediaApi.start()
-                // waits until the incoming source reports playing or an error.
-                runCatching { player.controls().stop() }
-                if (eventGate.generation() == mediaGeneration) {
+                val nativePlayer = player.currentPlayerOrNull()
+                if (nativePlayer != null) {
+                    // Stop the outgoing source before attaching another item. MediaApi.start()
+                    // waits until the incoming source reports playing or an error.
+                    runCatching { nativePlayer.controls().stop() }
+                }
+                if (eventGate.generation() == mediaGeneration && nativePlayer != null) {
                     eventGate.expectGeneration(mediaGeneration)
                     // stop() has completed the outgoing native transition; only now allow
                     // this source's render callbacks into the generation-tagged frame channel.
                     eventGate.setAcceptsFrames(true)
-                    val restart = activeRestart
-                    // Appearance rides on EVERY start as per-media options
-                    // (report 18): the first playback already honours the
-                    // saved appearance, and an Apply reload picks up the new
-                    // one — on this same player, with the position carried
-                    // by :start-time as part of the start itself instead of
-                    // a post-start seek racing the event stream.
-                    val startOptions = mediaStartOptions(
-                        appearance = subtitleAppearance,
-                        restartPositionMs = restart?.positionMs,
-                        restartWasPlaying = restart?.wasPlaying ?: true
-                    )
                     val started = runCatching {
-                        player.media().start(mrl, *startOptions.toTypedArray())
+                        nativePlayer.media().start(mrl)
                     }.getOrDefault(false)
                     val stillCurrent = eventGate.generation() == mediaGeneration
                     if (!started || !stillCurrent) {
-                        eventGate.closeEvents()
                         if (!stillCurrent) {
-                            eventGate.setAcceptsFrames(false)
-                            eventGate.clearExpected(mediaGeneration)
-                            // A newer MRL was requested while start() was waiting. Stop this
-                            // stale source before the next queued command attaches its media.
-                            runCatching { player.controls().stop() }
+                            // The generation moved on while start() was waiting. Clean up
+                            // ONLY when this task's player still owns the gate: if an
+                            // appearance swap flipped the facade to a candidate meanwhile,
+                            // the gate (and its open state) belongs to the candidate now and
+                            // a stale task must never close it — that was the PC-11 trap.
+                            // A newer MRL start on this same player manages the gate itself.
+                            if (eventGate.isCurrent(nativePlayer)) {
+                                eventGate.closeEvents()
+                                eventGate.setAcceptsFrames(false)
+                                eventGate.clearExpected(mediaGeneration)
+                                // Stop this stale source before the next queued command
+                                // attaches its media.
+                                runCatching { nativePlayer.controls().stop() }
+                            }
                         } else {
+                            eventGate.closeEvents()
                             // Keep this generation associated with the selected MRL so the
                             // user can retry playback with the normal Play control. Its render
                             // callbacks must remain accepted during that retry.
@@ -619,58 +646,25 @@ internal fun DesktopMediaPlayer(
 
     DisposableEffect(player) {
         onDispose {
-            eventGate.detach(player)
-            // The viewer-level effect below may have parked this player for
-            // background playback; a parked player must not be released here.
-            if (BackgroundPlayback.isParked(player)) return@onDispose
-            // Keep teardown serialized with pending play/seek/track commands. Disposing the
-            // composable must not race a queued media replacement against native player release.
-            // The player was created from the shared singleton factory, which is never
-            // released — there is no per-player factory bookkeeping (report 18).
-            runCatching {
-                player.submit {
-                    runCatching { player.controls().stop() }
-                    runCatching { player.release() }
-                }
-            }
+            // The session releases its current native player (and any
+            // in-flight swap candidate) with serialized native teardown,
+            // and retires dedicated appearance instances through
+            // VlcFactoryLifecycle — never under a live player. A player
+            // parked for background playback by the effect below is
+            // excluded: BackgroundPlayback owns its release.
+            player.disposeViewer()
         }
     }
 
-    // Background playback: declared after the per-player effect so it is
-    // disposed first when the whole viewer leaves (navigation). It parks the
-    // current player instead of letting the teardown above release it. The
-    // parked player's factory is the shared singleton (null here): it is
-    // never retired, so parking needs no lifecycle bookkeeping.
-    val latestPlayer = rememberUpdatedState(player)
+    // Background playback: declared after the session effect so it is
+    // disposed first when the whole viewer leaves (navigation). It hands
+    // the session's current player to BackgroundPlayback instead of
+    // letting the teardown above release it.
     DisposableEffect(Unit) {
         onDispose {
             if (latestBackgroundPlayback.value && latestPlaying.value && !latestFinished.value) {
-                BackgroundPlayback.park(latestPlayer.value, null)
+                player.parkCurrent()
             }
-        }
-    }
-
-    LaunchedEffect(player, durationMs) {
-        val restart = styleRestart ?: return@LaunchedEffect
-        if (restart.mediaId != mediaId) {
-            // The pending restart was captured for a file that is no longer current;
-            // never seek this file to another file's position.
-            styleRestart = null
-            return@LaunchedEffect
-        }
-        if (durationMs <= 0L) return@LaunchedEffect
-        styleRestart = null
-        val target = restart.positionMs
-        if (target >= 2_000L && durationMs - target > 1_500L && timeMs < target - 1_500L) {
-            player.submit { runCatching { player.controls().setTime(target) } }
-            delay(1_500)
-            if (timeMs < target - 1_500L && playing) {
-                player.submit { runCatching { player.controls().setTime(target) } }
-            }
-        }
-        player.submit {
-            runCatching { player.controls().setRate(rate) }
-            runCatching { player.controls().repeat = repeatOne }
         }
     }
 
@@ -710,13 +704,13 @@ internal fun DesktopMediaPlayer(
             }
         }
         lastObservedTimeMs = timeMs
-        if (resumeSettled && styleRestart == null && timeMs > 0L) {
+        if (resumeSettled && timeMs > 0L) {
             VideoResumeStore.savePosition(mediaId, timeMs, durationMs)
         }
     }
 
     LaunchedEffect(playing) {
-        if (!playing && resumeSettled && styleRestart == null && timeMs > 0L) {
+        if (!playing && resumeSettled && timeMs > 0L) {
             VideoResumeStore.savePosition(mediaId, timeMs, durationMs, force = true)
         }
     }
@@ -854,19 +848,33 @@ internal fun DesktopMediaPlayer(
             showSubtitleSettings = false
             return
         }
-        // Capture position and play state BEFORE the factory swap recreates
-        // the player; afterwards they would read the new player's zeroed state.
-        // The retained frame bitmap is deliberately left alone so the restart
-        // does not flash black.
-        styleRestart = StyleRestart(mediaId = mediaId, positionMs = timeMs, wasPlaying = playing)
-        if (!playing) startPausedArmed.set(true)
         VideoResumeStore.savePosition(mediaId, timeMs, durationMs, force = true)
         SubtitleAppearanceStore.save(normalized)
         subtitleAppearance = normalized
-        // Same player, same factory: the start effect re-runs and re-starts
-        // the current media with the new appearance's media options and a
-        // :start-time resume. Nothing the controls reference is recreated,
-        // so seek/play/pause cannot desync (PC-13).
+        // Appearance is instance configuration: the session builds a
+        // candidate instance with the new appearance, proves it live on
+        // this same media at this same position, and only then flips the
+        // facade to it. The controls, the listener and the surface stay
+        // bound to the session throughout, and on any failure the current
+        // player simply keeps playing with the old appearance (PC-19).
+        // The retained frame bitmap is deliberately left alone so the
+        // flip does not flash black.
+        player.requestAppearance(
+            normalized,
+            PlayerSession.Capture(
+                mrl = mrl,
+                positionMs = timeMs,
+                wasPlaying = playing,
+                wasFinished = finished,
+                rate = rate,
+                volume = volume,
+                muted = muted,
+                repeatOne = repeatOne
+            )
+        )
+        // Reset the preferred-language application so the chosen tracks
+        // are re-applied on the new player as a backstop to the session's
+        // own track restoration.
         appearanceReloadTick++
         showSubtitleSettings = false
         interactionTick++
@@ -1614,7 +1622,7 @@ internal fun DesktopMediaPlayer(
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun PlayerControlsBar(
-    player: MediaPlayer,
+    player: PlayerSession,
     isAudio: Boolean,
     playing: Boolean,
     finished: Boolean,
@@ -2545,7 +2553,7 @@ private val PLAYBACK_RATE_PRESETS = listOf(
     2.0f, 2.5f, 3.0f, 4.0f
 )
 
-private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
+private fun PlayerSession.submitAudioState(volume: Int, muted: Boolean) {
     val requestedVolume = volume.coerceIn(0, MAX_VOLUME)
     val requestedMute = muted || requestedVolume <= 0
     runCatching {
@@ -2584,15 +2592,6 @@ private const val SYNC_STEP_US = 50_000L
 private val THUMB_WIDTH = 5.dp
 private val THUMB_HEIGHT = 26.dp
 
-/** A subtitle-appearance change captured just before the player is recreated. */
-private data class StyleRestart(
-    /** The media the position was captured on; a restart must never seek a different file. */
-    val mediaId: String,
-    val positionMs: Long,
-    val wasPlaying: Boolean
-)
-
-
 /**
  * Desktop port of Android's AudioStage: album artwork (the file's thumbnail,
  * which for audio is the embedded cover) above title / artist / album lines
@@ -2602,7 +2601,7 @@ private data class StyleRestart(
  */
 @Composable
 private fun AudioStage(
-    player: MediaPlayer,
+    player: PlayerSession,
     mediaId: String,
     fallbackTitle: String
 ) {

@@ -165,49 +165,26 @@ internal fun SubtitleAppearance.toVlcFactoryArguments(videoHeight: Int = 1080): 
 }
 
 /**
- * The same appearance as **per-media options** (`:name=value`), for passing
- * to a media start on an already-running player (PC-13 rescue, report 18).
- *
- * This is the route the VLC ecosystem itself uses (LibVLCSharp's official
- * Q&A and VLC-Android's VLCOptions both set `freetype-*` through media
- * options): options attached to an input item are inherited by the module
- * tree the input spawns (vout -> spu -> text renderer), so the renderer
- * created for that media picks them up — with the player instance, its
- * event listener and its render surface left completely untouched.
- *
- * It is also strictly safer than instance arguments: an unrecognised
- * *instance* argument makes libvlc_new return NULL (the report-16
- * `--no-libass` failure), while an unrecognised *media* option is simply
- * ignored. The option names and values are exactly the verified factory
- * set, re-prefixed.
+ * The media options for starting the SAME media on a swap candidate
+ * player (PC-19): only the start directives — the position carried by
+ * `:start-time` (part of the start itself, not a post-start seek) and
+ * `:start-paused` when the video was paused. The appearance itself is
+ * NOT carried here: appearance is instance configuration (see
+ * [toVlcFactoryArguments]) and the candidate instance is built with it.
+ * Start directives are core input options and are honoured by the input
+ * on any instance — unlike the freetype media options the 1.6.3 build
+ * tried, which the user's PC proved inert (report 20). Pure and pinned
+ * by tests so the Apply sequence (switch track -> Apply -> same
+ * position, same play state) cannot silently regress.
  */
-internal fun SubtitleAppearance.toVlcMediaOptions(videoHeight: Int = 1080): List<String> =
-    toVlcFactoryArguments(videoHeight).map { factoryArgument ->
-        ":" + factoryArgument.removePrefix("--")
-    }
-
-/**
- * The full media-option list for one media start on the lifelong player
- * (PC-13): the appearance's media options, plus — for an appearance-Apply
- * reload — the resume position carried by `:start-time` (part of the
- * start itself, not a post-start seek) and `:start-paused` when the video
- * was paused. For an ordinary first start [restartPositionMs] is null and
- * only the appearance options are emitted. Pure and pinned by tests so the
- * Apply sequence (switch track -> Apply -> same position, same play state,
- * controls untouched) cannot silently regress.
- */
-internal fun mediaStartOptions(
-    appearance: SubtitleAppearance,
-    restartPositionMs: Long?,
+internal fun swapStartOptions(
+    restartPositionMs: Long,
     restartWasPlaying: Boolean
 ): List<String> = buildList {
-    addAll(appearance.toVlcMediaOptions())
-    if (restartPositionMs != null) {
-        if (restartPositionMs >= 1_000L) {
-            add(":start-time=${restartPositionMs / 1000.0}")
-        }
-        if (!restartWasPlaying) add(":start-paused")
+    if (restartPositionMs >= 1_000L) {
+        add(":start-time=${restartPositionMs / 1000.0}")
     }
+    if (!restartWasPlaying) add(":start-paused")
 }
 
 /**

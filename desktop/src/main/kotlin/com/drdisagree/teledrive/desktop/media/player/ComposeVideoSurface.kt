@@ -36,7 +36,9 @@ internal data class VideoFramePixels(
     }
 }
 
-internal fun composeVideoSurface(onFrame: (VideoFramePixels) -> Unit): CallbackVideoSurface {
+internal fun composeVideoSurface(
+    onFrame: (MediaPlayer, VideoFramePixels) -> Unit
+): CallbackVideoSurface {
     val bufferFormat = object : BufferFormatCallbackAdapter() {
         override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat =
             RV32BufferFormat(sourceWidth, sourceHeight)
@@ -70,7 +72,11 @@ internal fun composeVideoSurface(onFrame: (VideoFramePixels) -> Unit): CallbackV
 
             // Keep native callback work bounded. Skia bitmap construction happens after the
             // conflated handoff on the Compose dispatcher, so superseded frames are never decoded.
-            onFrame(VideoFramePixels(width, height, rowBytes, framePixels))
+            // The emitting player travels with the frame: during an appearance
+            // instance swap two players share this surface shape, and the
+            // viewer accepts frames only from the player that is currently
+            // live (see PlayerEventGate), never from a swap candidate.
+            onFrame(mediaPlayer, VideoFramePixels(width, height, rowBytes, framePixels))
         }
     }
 

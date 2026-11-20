@@ -20,6 +20,25 @@ object VlcPlayback {
 
     val available: Boolean get() = factory != null
 
+    /**
+     * A dedicated LibVLC instance carrying a subtitle appearance's factory
+     * arguments (PC-19). Appearance is instance configuration — it can
+     * only be delivered by an instance built with it — so an appearance
+     * swap builds one of these, proves a player from it live, and only
+     * then retires the previous instance (see [PlayerSession]). Returns
+     * null when instance creation fails; the caller then keeps the
+     * current player untouched. The arguments must come from
+     * [SubtitleAppearance.toVlcFactoryArguments]: an unverified instance
+     * option makes libvlc_new fail outright (the report-16 `--no-libass`
+     * lesson), which is exactly the failure this null surfaces safely.
+     */
+    fun createAppearanceFactory(appearanceArguments: List<String>): MediaPlayerFactory? =
+        runCatching { createFactory(LIBVLC_ARGS + appearanceArguments) }
+            .onFailure {
+                SafeLog.w(TAG, "Appearance instance unavailable: ${it.message}")
+            }
+            .getOrNull()
+
     private fun createFactory(): MediaPlayerFactory = createFactory(LIBVLC_ARGS)
 
     private fun createFactory(arguments: List<String>): MediaPlayerFactory {
