@@ -67,21 +67,7 @@ fun summarizeTransfers(state: TransfersUiState, nowMillis: Long): TransferBubble
     fun List<TransferTask>.running(): List<TransferTask> =
         filter { it.state == TransferState.RUNNING }
 
-    fun List<TransferTask>.speed(): Long =
-        sumOf { task ->
-            if (task.state != TransferState.RUNNING) {
-                0L
-            } else if (
-                task.speedBytesPerSecond > 0L &&
-                nowMillis - task.updatedAt > SPEED_STALE_AFTER_MS
-            ) {
-                // Same stale rule as the Transfers screen: never keep
-                // displaying the last non-zero rate once progress stops.
-                0L
-            } else {
-                task.speedBytesPerSecond
-            }
-        }
+    fun List<TransferTask>.speed(): Long = sumOf { effectiveSpeedBytesPerSecond(it, nowMillis) }
 
     val totalBytes = unfinished.sumOf { it.sizeBytes }
     val transferredBytes = unfinished.sumOf { it.transferredBytes }
@@ -116,3 +102,17 @@ fun summarizeTransfers(state: TransfersUiState, nowMillis: Long): TransferBubble
 
 /** Mirrors TransfersScreen's SPEED_STALE_AFTER_MS (same rule, same value). */
 internal const val SPEED_STALE_AFTER_MS = 5_000L
+
+/**
+ * The speed the UI may show for [task] at [nowMillis]: the engine's rate
+ * for a RUNNING task, zeroed when the task's last progress update is older
+ * than [SPEED_STALE_AFTER_MS] (the Transfers screen's stale rule) and for
+ * every non-running state.
+ */
+internal fun effectiveSpeedBytesPerSecond(task: TransferTask, nowMillis: Long): Long =
+    when {
+        task.state != TransferState.RUNNING -> 0L
+        task.speedBytesPerSecond > 0L &&
+            nowMillis - task.updatedAt > SPEED_STALE_AFTER_MS -> 0L
+        else -> task.speedBytesPerSecond
+    }

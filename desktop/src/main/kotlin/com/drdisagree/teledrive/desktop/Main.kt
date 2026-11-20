@@ -54,6 +54,7 @@ import com.drdisagree.teledrive.desktop.resources.app_icon
 import com.drdisagree.teledrive.desktop.ui.FullscreenController
 import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.desktop.ui.ProvideDesktopPlatformActions
+import com.drdisagree.teledrive.desktop.ui.TransferBubbleOverlay
 import com.drdisagree.teledrive.desktop.window.WindowsCaptureBlocker
 import com.drdisagree.teledrive.desktop.window.WindowsTitleBar
 import com.drdisagree.teledrive.desktop.window.WindowsBorderlessFullscreenController
@@ -289,6 +290,10 @@ fun main() {
                         )
                     }
                 }
+                // Floating transfer bubble: an in-app overlay above the app
+                // content. It renders nothing while its Settings switch is
+                // off or the window is in fullscreen.
+                TransferBubbleOverlay(fullscreenController = fullscreenController)
             }
         }
     }

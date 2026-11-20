@@ -75,6 +75,19 @@
     <string name="transfer_error_destination_full">Not enough free space where downloads are saved. Needs %1$s.</string>
     <string name="transfer_error_cache_full">Not enough free space for Pranto Drive's temporary files. Needs %1$s.</string>
 
+    <!-- Transfer bubble -->
+    <string name="bubble_uploading">Uploading</string>
+    <string name="bubble_downloading">Downloading</string>
+    <string name="bubble_overall">overall</string>
+    <string name="bubble_transferred_of">%1$s of %2$s · %3$d%%</string>
+    <string name="bubble_file_active">%1$d file active</string>
+    <string name="bubble_files_active">%1$d files active</string>
+    <string name="bubble_queue_waiting">Queue · %1$d waiting</string>
+    <string name="bubble_no_active">No active transfers</string>
+    <string name="bubble_more">+ %1$d more</string>
+    <string name="bubble_hide">Hide bubble</string>
+    <string name="bubble_show_transfers">Show transfers</string>
+
     <!-- Notifications -->
     <string name="notification_upload_failed">Upload failed</string>
     <string name="notification_download_failed">Download failed</string>

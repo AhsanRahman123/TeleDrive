@@ -1,0 +1,762 @@
+package com.drdisagree.teledrive.desktop.ui
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
+import com.drdisagree.teledrive.desktop.resources.Res as DesktopRes
+import com.drdisagree.teledrive.desktop.resources.bubble_downloading
+import com.drdisagree.teledrive.desktop.resources.bubble_file_active
+import com.drdisagree.teledrive.desktop.resources.bubble_files_active
+import com.drdisagree.teledrive.desktop.resources.bubble_hide
+import com.drdisagree.teledrive.desktop.resources.bubble_more
+import com.drdisagree.teledrive.desktop.resources.bubble_no_active
+import com.drdisagree.teledrive.desktop.resources.bubble_overall
+import com.drdisagree.teledrive.desktop.resources.bubble_queue_waiting
+import com.drdisagree.teledrive.desktop.resources.bubble_show_transfers
+import com.drdisagree.teledrive.desktop.resources.bubble_transferred_of
+import com.drdisagree.teledrive.desktop.resources.bubble_uploading
+import com.drdisagree.teledrive.domain.model.TransferState
+import com.drdisagree.teledrive.domain.model.TransferTask
+import com.drdisagree.teledrive.domain.repository.SettingsRepository
+import com.drdisagree.teledrive.domain.repository.TransferRepository
+import com.drdisagree.teledrive.presentation.common.Formatters
+import com.drdisagree.teledrive.presentation.transfers.TransfersUiState
+import com.drdisagree.teledrive.presentation.transfers.TransfersViewModel
+import com.drdisagree.teledrive.resources.Res
+import com.drdisagree.teledrive.resources.common_backup_queued
+import com.drdisagree.teledrive.resources.common_cancel
+import com.drdisagree.teledrive.resources.common_pause
+import com.drdisagree.teledrive.resources.common_resume
+import com.drdisagree.teledrive.resources.transfers
+import com.drdisagree.teledrive.resources.transfers_pause
+import com.drdisagree.teledrive.resources.transfers_resume
+import com.drdisagree.teledrive.resources.transfers_section_paused
+import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
+import org.koin.java.KoinJavaComponent.getKoin
+
+/**
+ * The floating transfer bubble (design Variant A, approved from the video
+ * mockups): a chat-head that floats over the app content — an in-app
+ * overlay, not a separate window — with a progress ring, direction arrows
+ * and a queue badge; tapping it opens a stat card whose pause / resume /
+ * cancel controls call the very same [TransfersViewModel] functions the
+ * Transfers screen calls.
+ *
+ * Data integrity: the overlay holds its own [TransfersViewModel] instance
+ * built from the same Koin repositories. The ViewModel's uiState combine
+ * is deterministic over the repository flows, so the state rendered here
+ * is the same state the Transfers screen renders; every number is then
+ * derived by [summarizeTransfers]. Nothing here touches the transfer
+ * engine — this is a display + control surface only.
+ *
+ * The root is a plain full-size Box: only the bubble, panel and pull-tab
+ * themselves consume pointer input, everything else falls through to the
+ * app. Nothing requests focus.
+ */
+@Composable
+fun TransferBubbleOverlay(fullscreenController: FullscreenController?) {
+    val enabled by DesktopTransferBubbleStore.enabled.collectAsState()
+    if (enabled) {
+        TransferBubbleContent(fullscreenController)
+    }
+}
+
+@Composable
+private fun TransferBubbleContent(fullscreenController: FullscreenController?) {
+    val viewModel = remember {
+        TransfersViewModel(
+            transferRepository = getKoin().get<TransferRepository>(),
+            settingsRepository = getKoin().get<SettingsRepository>()
+        )
+    }
+    val state by viewModel.uiState.collectAsState()
+    // One-second clock — the cadence the Transfers screen uses for its
+    // stale-speed display, and the tick that re-reads the (non-observable)
+    // fullscreen flag so the widget never lingers over a fullscreen player.
+    var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            nowMillis = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+    val summary = summarizeTransfers(state, nowMillis)
+
+    var userHidden by remember { mutableStateOf(false) }
+    var panelOpen by remember { mutableStateOf(false) }
+
+    // Re-read on every recomposition (the one-second clock guarantees one
+    // at least every second): entering fullscreen closes the panel so it
+    // can never be stranded over the player.
+    val fullscreen = fullscreenController?.isFullscreen?.invoke() ?: false
+    LaunchedEffect(fullscreen) {
+        if (fullscreen) panelOpen = false
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val windowWidth = maxWidth.value
+        val windowHeight = maxHeight.value
+        val density = LocalDensity.current
+
+        var bubbleOffset by remember {
+            mutableStateOf(
+                DesktopTransferBubbleStore.loadPosition()
+                    ?.let { (x, y) -> BubbleOffset(x, y) }
+                    ?: TransferBubbleLayout.defaultOffset(windowWidth, windowHeight)
+            )
+        }
+        val effectiveOffset = TransferBubbleLayout.clampOffset(
+            bubbleOffset.x, bubbleOffset.y, windowWidth, windowHeight
+        )
+
+        when (bubbleVisibility(enabled = true, fullscreen = fullscreen, userHidden = userHidden)) {
+            BubbleVisibility.GONE -> Unit
+            BubbleVisibility.TAB -> {
+                val onLeft = TransferBubbleLayout.tabOnLeftEdge(effectiveOffset, windowWidth)
+                TransferBubbleTab(
+                    offset = TransferBubbleLayout.tabOffset(effectiveOffset, windowWidth, windowHeight),
+                    onLeftEdge = onLeft,
+                    onClick = { userHidden = false }
+                )
+            }
+            BubbleVisibility.BUBBLE -> {
+                if (panelOpen) {
+                    var panelSize by remember { mutableStateOf(IntSize.Zero) }
+                    val listedCount = (state.active + state.paused)
+                        .take(MAX_LISTED_TRANSFERS).size
+                    val panelHeightDp = if (panelSize == IntSize.Zero) {
+                        estimatePanelHeightDp(listedCount)
+                    } else {
+                        panelSize.height / density.density
+                    }
+                    val panelWidthDp = if (panelSize == IntSize.Zero) {
+                        PANEL_WIDTH_DP
+                    } else {
+                        panelSize.width / density.density
+                    }
+                    TransferBubblePanel(
+                        state = state,
+                        summary = summary,
+                        nowMillis = nowMillis,
+                        offset = TransferBubbleLayout.panelOffset(
+                            bubble = effectiveOffset,
+                            panelWidth = panelWidthDp,
+                            panelHeight = panelHeightDp,
+                            windowWidth = windowWidth,
+                            windowHeight = windowHeight
+                        ),
+                        onSizeChanged = { panelSize = it },
+                        onPause = viewModel::pause,
+                        onResume = viewModel::resume,
+                        onCancel = viewModel::cancel,
+                        onPauseAll = viewModel::pauseAll,
+                        onResumeAll = viewModel::resumeAll,
+                        onHide = {
+                            panelOpen = false
+                            userHidden = true
+                        }
+                    )
+                }
+                TransferBubble(
+                    summary = summary,
+                    offset = effectiveOffset,
+                    onDragDelta = { dxDp, dyDp ->
+                        bubbleOffset = TransferBubbleLayout.clampOffset(
+                            bubbleOffset.x + dxDp, bubbleOffset.y + dyDp,
+                            windowWidth, windowHeight
+                        )
+                    },
+                    onDragFinished = {
+                        DesktopTransferBubbleStore.savePosition(bubbleOffset.x, bubbleOffset.y)
+                    },
+                    onClick = { panelOpen = !panelOpen }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Drag-vs-click for the bubble: movement past the touch slop is a drag
+ * (the release then does NOT toggle the panel); anything less is a click.
+ * Dragging persists the position only when the gesture ends.
+ */
+private fun Modifier.bubbleGestures(
+    onDragDelta: (Float, Float) -> Unit,
+    onDragFinished: () -> Unit,
+    onClick: () -> Unit
+): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        var dragged = false
+        var upChange: PointerInputChange? = null
+        while (true) {
+            val event = awaitPointerEvent()
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if (!change.pressed) {
+                upChange = change
+                break
+            }
+            val delta = change.position - change.previousPosition
+            if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                dragged = true
+            }
+            if (dragged && delta != Offset.Zero) {
+                onDragDelta(delta.x / density, delta.y / density)
+                change.consume()
+            }
+        }
+        if (upChange != null) {
+            if (dragged) onDragFinished() else onClick()
+        }
+    }
+}
+
+@Composable
+private fun TransferBubble(
+    summary: TransferBubbleSummary,
+    offset: BubbleOffset,
+    onDragDelta: (Float, Float) -> Unit,
+    onDragFinished: () -> Unit,
+    onClick: () -> Unit
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    Surface(
+        modifier = Modifier
+            .offset {
+                IntOffset(
+                    (offset.x * density).roundToInt(),
+                    (offset.y * density).roundToInt()
+                )
+            }
+            .size(TransferBubbleLayout.BUBBLE_SIZE_DP.dp)
+            .bubbleGestures(onDragDelta, onDragFinished, onClick),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 6.dp
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            Canvas(Modifier.fillMaxSize().padding(5.dp)) {
+                val stroke = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round)
+                drawArc(
+                    color = track,
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = stroke
+                )
+                drawArc(
+                    color = primary,
+                    startAngle = -90f,
+                    sweepAngle = 360f * summary.overallProgress.coerceIn(0f, 1f),
+                    useCenter = false,
+                    style = stroke
+                )
+            }
+            if (summary.hasUnfinishedWork) {
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row {
+                        Icon(
+                            Icons.Filled.ArrowUpward,
+                            contentDescription = null,
+                            modifier = Modifier.size(11.dp),
+                            tint = primary
+                        )
+                        Icon(
+                            Icons.Filled.ArrowDownward,
+                            contentDescription = null,
+                            modifier = Modifier.size(11.dp),
+                            tint = secondary
+                        )
+                    }
+                    Text(
+                        text = Formatters.percent(summary.overallProgress),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = stringResource(DesktopRes.string.bubble_overall),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    modifier = Modifier.align(Alignment.Center).size(26.dp),
+                    tint = primary
+                )
+            }
+            if (summary.queuedCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(20.dp)
+                        .background(primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = Formatters.badgeCount(summary.queuedCount),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransferBubbleTab(
+    offset: BubbleOffset,
+    onLeftEdge: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .offset {
+                IntOffset(
+                    (offset.x * density).roundToInt(),
+                    (offset.y * density).roundToInt()
+                )
+            }
+            .size(
+                TransferBubbleLayout.TAB_WIDTH_DP.dp,
+                TransferBubbleLayout.TAB_HEIGHT_DP.dp
+            )
+            .clickable(onClick = onClick),
+        shape = if (onLeftEdge) {
+            RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
+        } else {
+            RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)
+        },
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 6.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+        ) {
+            Icon(
+                if (onLeftEdge) Icons.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowLeft,
+                contentDescription = stringResource(DesktopRes.string.bubble_show_transfers),
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                Icons.Filled.SwapVert,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@Composable
+private fun TransferBubblePanel(
+    state: TransfersUiState,
+    summary: TransferBubbleSummary,
+    nowMillis: Long,
+    offset: BubbleOffset,
+    onSizeChanged: (IntSize) -> Unit,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onPauseAll: () -> Unit,
+    onResumeAll: () -> Unit,
+    onHide: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .offset {
+                IntOffset(
+                    (offset.x * density).roundToInt(),
+                    (offset.y * density).roundToInt()
+                )
+            }
+            .width(PANEL_WIDTH_DP.dp)
+            .onSizeChanged(onSizeChanged),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 8.dp
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.SwapVert,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = stringResource(Res.string.transfers),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = Formatters.percent(summary.overallProgress),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                // The same bulk actions, under the same conditions, as the
+                // Transfers screen's top bar.
+                if (summary.anyRunning) {
+                    IconButton(onClick = onPauseAll) {
+                        Icon(
+                            Icons.Filled.Pause,
+                            contentDescription = stringResource(Res.string.transfers_pause)
+                        )
+                    }
+                } else if (summary.anyQueued || state.paused.isNotEmpty()) {
+                    IconButton(onClick = onResumeAll) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = stringResource(Res.string.transfers_resume)
+                        )
+                    }
+                }
+                IconButton(onClick = onHide) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = stringResource(DesktopRes.string.bubble_hide)
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                progress = summary.overallProgress,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(14.dp))
+            BubbleDirectionRow(
+                uploading = true,
+                activeCount = summary.uploadingActive,
+                speedBytesPerSecond = summary.uploadingSpeedBytesPerSecond,
+                transferredBytes = summary.uploadingTransferredBytes,
+                totalBytes = summary.uploadingTotalBytes,
+                progress = summary.uploadingProgress
+            )
+            Spacer(Modifier.height(12.dp))
+            BubbleDirectionRow(
+                uploading = false,
+                activeCount = summary.downloadingActive,
+                speedBytesPerSecond = summary.downloadingSpeedBytesPerSecond,
+                transferredBytes = summary.downloadingTransferredBytes,
+                totalBytes = summary.downloadingTotalBytes,
+                progress = summary.downloadingProgress
+            )
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(
+                        DesktopRes.string.bubble_queue_waiting,
+                        summary.queuedCount
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "↑ ${Formatters.bytes(summary.uploadedTotalBytes)}" +
+                        "   ↓ ${Formatters.bytes(summary.downloadedTotalBytes)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            val listed = (state.active + state.paused).take(MAX_LISTED_TRANSFERS)
+            if (listed.isEmpty()) {
+                Text(
+                    text = stringResource(DesktopRes.string.bubble_no_active),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 10.dp)
+                )
+            } else {
+                Spacer(Modifier.height(8.dp))
+                listed.forEach { task ->
+                    BubbleTransferRow(
+                        task = task,
+                        nowMillis = nowMillis,
+                        onPause = onPause,
+                        onResume = onResume,
+                        onCancel = onCancel
+                    )
+                }
+                val extra = state.active.size + state.paused.size - listed.size
+                if (extra > 0) {
+                    Text(
+                        text = stringResource(DesktopRes.string.bubble_more, extra),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BubbleDirectionRow(
+    uploading: Boolean,
+    activeCount: Int,
+    speedBytesPerSecond: Long,
+    transferredBytes: Long,
+    totalBytes: Long,
+    progress: Float
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(
+                    if (uploading) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    },
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                if (uploading) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = if (uploading) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                }
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(
+                        if (uploading) {
+                            DesktopRes.string.bubble_uploading
+                        } else {
+                            DesktopRes.string.bubble_downloading
+                        }
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = Formatters.speed(speedBytesPerSecond),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = stringResource(
+                        DesktopRes.string.bubble_transferred_of,
+                        Formatters.bytes(transferredBytes),
+                        Formatters.bytes(totalBytes),
+                        (progress * 100).roundToInt()
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = stringResource(
+                        if (activeCount == 1) {
+                            DesktopRes.string.bubble_file_active
+                        } else {
+                            DesktopRes.string.bubble_files_active
+                        },
+                        activeCount
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            LinearProgressIndicator(
+                progress = progress,
+                modifier = Modifier.fillMaxWidth().height(6.dp),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun BubbleTransferRow(
+    task: TransferTask,
+    nowMillis: Long,
+    onPause: (String) -> Unit,
+    onResume: (String) -> Unit,
+    onCancel: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            if (task.type.isIncoming) Icons.Filled.ArrowDownward else Icons.Filled.ArrowUpward,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = task.displayName,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = bubbleTransferSublabel(task, nowMillis),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        when (task.state) {
+            TransferState.RUNNING -> IconButton(
+                onClick = { onPause(task.id) },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Pause,
+                    contentDescription = stringResource(Res.string.common_pause),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            TransferState.PAUSED -> IconButton(
+                onClick = { onResume(task.id) },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = stringResource(Res.string.common_resume),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            else -> Unit
+        }
+        if (
+            task.state == TransferState.RUNNING ||
+            task.state == TransferState.QUEUED ||
+            task.state == TransferState.PAUSED
+        ) {
+            IconButton(
+                onClick = { onCancel(task.id) },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = stringResource(Res.string.common_cancel),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun bubbleTransferSublabel(task: TransferTask, nowMillis: Long): String =
+    when (task.state) {
+        TransferState.RUNNING -> {
+            val speed = effectiveSpeedBytesPerSecond(task, nowMillis)
+            if (speed > 0) {
+                "${Formatters.percent(task.progress)} · ${Formatters.speed(speed)}"
+            } else {
+                Formatters.percent(task.progress)
+            }
+        }
+        TransferState.QUEUED ->
+            "${stringResource(Res.string.common_backup_queued)} · ${Formatters.percent(task.progress)}"
+        TransferState.PAUSED ->
+            "${stringResource(Res.string.transfers_section_paused)} · ${Formatters.percent(task.progress)}"
+        else -> Formatters.percent(task.progress)
+    }
+
+/** First-frame estimate; the measured size replaces it after one layout. */
+private fun estimatePanelHeightDp(listedCount: Int): Float =
+    330f + listedCount * 40f
+
+private const val PANEL_WIDTH_DP = 352f
+private const val MAX_LISTED_TRANSFERS = 5
