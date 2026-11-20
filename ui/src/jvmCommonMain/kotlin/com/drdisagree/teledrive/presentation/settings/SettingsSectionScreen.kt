@@ -156,6 +156,16 @@ import com.drdisagree.teledrive.resources.settings_share_debug_log
 import com.drdisagree.teledrive.resources.settings_share_debug_log_subtitle
 import com.drdisagree.teledrive.resources.settings_show_transfer_bubble
 import com.drdisagree.teledrive.resources.settings_show_transfer_bubble_subtitle
+import com.drdisagree.teledrive.resources.settings_transfer_widget_color
+import com.drdisagree.teledrive.resources.settings_transfer_widget_style
+import com.drdisagree.teledrive.resources.settings_transfer_widget_style_bubble
+import com.drdisagree.teledrive.resources.settings_transfer_widget_style_strip
+import com.drdisagree.teledrive.resources.settings_widget_color_app_accent
+import com.drdisagree.teledrive.resources.settings_widget_color_blue
+import com.drdisagree.teledrive.resources.settings_widget_color_graphite
+import com.drdisagree.teledrive.resources.settings_widget_color_green
+import com.drdisagree.teledrive.resources.settings_widget_color_orange
+import com.drdisagree.teledrive.resources.settings_widget_color_purple
 import com.drdisagree.teledrive.resources.settings_shown_channels_private_owned
 import com.drdisagree.teledrive.resources.settings_shows_archived_collection_home
 import com.drdisagree.teledrive.resources.settings_shows_hidden_collection_home
@@ -204,6 +214,8 @@ import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalFolderPicker
 import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.presentation.platform.LocalTransferBubblePreference
+import com.drdisagree.teledrive.presentation.platform.TransferWidgetColor
+import com.drdisagree.teledrive.presentation.platform.TransferWidgetStyle
 import com.drdisagree.teledrive.presentation.platform.PickResult
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
@@ -981,6 +993,18 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
     val supportedRefreshRatesLabel = displayRefreshRateController?.supportedRates()
         ?.sorted()?.joinToString(" / ") { "$it Hz" }?.ifBlank { "none detected" } ?: "none detected"
     var showLanguageDialog by remember { mutableStateOf(false) }
+    var showWidgetStyleDialog by remember { mutableStateOf(false) }
+    var showWidgetColorDialog by remember { mutableStateOf(false) }
+    var widgetStyle by remember {
+        mutableStateOf(
+            transferBubblePreference?.widgetStyle() ?: TransferWidgetStyle.BUBBLE
+        )
+    }
+    var widgetColor by remember {
+        mutableStateOf(
+            transferBubblePreference?.widgetColor() ?: TransferWidgetColor.APP_ACCENT
+        )
+    }
 
     if (showThemeDialog) {
         ChoiceDialog(
@@ -1072,6 +1096,56 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
         )
     }
 
+    // Desktop-only transfer widget appearance (the platform hook is null
+    // elsewhere; the dialogs can only be opened from rows that render
+    // when it exists). Choices apply live — the overlay collects the
+    // desktop store's flows, so no restart is needed.
+    if (showWidgetStyleDialog && transferBubblePreference != null) {
+        ChoiceDialog(
+            title = stringResource(Res.string.settings_transfer_widget_style),
+            options = listOf(
+                TransferWidgetStyle.BUBBLE to
+                    stringResource(Res.string.settings_transfer_widget_style_bubble),
+                TransferWidgetStyle.BOTTOM_STRIP to
+                    stringResource(Res.string.settings_transfer_widget_style_strip)
+            ),
+            selected = widgetStyle,
+            onSelect = { choice ->
+                showWidgetStyleDialog = false
+                widgetStyle = choice
+                transferBubblePreference.setWidgetStyle(choice)
+            },
+            onDismiss = { showWidgetStyleDialog = false }
+        )
+    }
+
+    if (showWidgetColorDialog && transferBubblePreference != null) {
+        ChoiceDialog(
+            title = stringResource(Res.string.settings_transfer_widget_color),
+            options = listOf(
+                TransferWidgetColor.APP_ACCENT to
+                    stringResource(Res.string.settings_widget_color_app_accent),
+                TransferWidgetColor.ORANGE to
+                    stringResource(Res.string.settings_widget_color_orange),
+                TransferWidgetColor.BLUE to
+                    stringResource(Res.string.settings_widget_color_blue),
+                TransferWidgetColor.GREEN to
+                    stringResource(Res.string.settings_widget_color_green),
+                TransferWidgetColor.PURPLE to
+                    stringResource(Res.string.settings_widget_color_purple),
+                TransferWidgetColor.GRAPHITE to
+                    stringResource(Res.string.settings_widget_color_graphite)
+            ),
+            selected = widgetColor,
+            onSelect = { choice ->
+                showWidgetColorDialog = false
+                widgetColor = choice
+                transferBubblePreference.setWidgetColor(choice)
+            },
+            onDismiss = { showWidgetColorDialog = false }
+        )
+    }
+
     SettingsGroup {
         add {
             SettingsClickRow(
@@ -1109,7 +1183,7 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                 onClick = { showDisplayRefreshRateDialog = true }
             )
         }
-        // Desktop-only: the floating transfer bubble's master switch. The
+        // Desktop-only: the floating transfer widget's master switch. The
         // platform hook is null elsewhere, so the row never renders there.
         add(visible = transferBubblePreference != null) {
             var bubbleEnabled by remember {
@@ -1123,6 +1197,42 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                     bubbleEnabled = value
                     transferBubblePreference!!.setEnabled(value)
                 }
+            )
+        }
+        // Desktop-only: which shell the transfer widget uses (round 6) —
+        // the floating bubble or the bottom strip. Applies live.
+        add(visible = transferBubblePreference != null) {
+            SettingsClickRow(
+                title = stringResource(Res.string.settings_transfer_widget_style),
+                subtitle = when (widgetStyle) {
+                    TransferWidgetStyle.BUBBLE ->
+                        stringResource(Res.string.settings_transfer_widget_style_bubble)
+                    TransferWidgetStyle.BOTTOM_STRIP ->
+                        stringResource(Res.string.settings_transfer_widget_style_strip)
+                },
+                onClick = { showWidgetStyleDialog = true }
+            )
+        }
+        // Desktop-only: the transfer widget's colour preset (round 6),
+        // applied to both shells' rings, bars and accents. Applies live.
+        add(visible = transferBubblePreference != null) {
+            SettingsClickRow(
+                title = stringResource(Res.string.settings_transfer_widget_color),
+                subtitle = when (widgetColor) {
+                    TransferWidgetColor.APP_ACCENT ->
+                        stringResource(Res.string.settings_widget_color_app_accent)
+                    TransferWidgetColor.ORANGE ->
+                        stringResource(Res.string.settings_widget_color_orange)
+                    TransferWidgetColor.BLUE ->
+                        stringResource(Res.string.settings_widget_color_blue)
+                    TransferWidgetColor.GREEN ->
+                        stringResource(Res.string.settings_widget_color_green)
+                    TransferWidgetColor.PURPLE ->
+                        stringResource(Res.string.settings_widget_color_purple)
+                    TransferWidgetColor.GRAPHITE ->
+                        stringResource(Res.string.settings_widget_color_graphite)
+                },
+                onClick = { showWidgetColorDialog = true }
             )
         }
         add {

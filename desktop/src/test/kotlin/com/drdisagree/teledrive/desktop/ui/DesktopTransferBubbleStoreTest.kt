@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.desktop.ui
 
+import com.drdisagree.teledrive.presentation.platform.TransferWidgetColor
+import com.drdisagree.teledrive.presentation.platform.TransferWidgetStyle
 import java.util.UUID
 import java.util.prefs.Preferences
 import org.junit.Assert.assertEquals
@@ -8,8 +10,71 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The transfer bubble's desktop store (switch + dragged position). */
+/** The transfer widget's desktop store (switch, style, colour, position). */
 class DesktopTransferBubbleStoreTest {
+
+    @Test
+    fun `widget style defaults to bubble and round trips`() = withTemporaryPreferences { node ->
+        assertEquals(
+            TransferWidgetStyle.BUBBLE,
+            DesktopTransferBubbleStore.loadStyle(node)
+        )
+        DesktopTransferBubbleStore.saveStyle(node, TransferWidgetStyle.BOTTOM_STRIP)
+        assertEquals(
+            TransferWidgetStyle.BOTTOM_STRIP,
+            DesktopTransferBubbleStore.loadStyle(node)
+        )
+        DesktopTransferBubbleStore.saveStyle(node, TransferWidgetStyle.BUBBLE)
+        assertEquals(
+            TransferWidgetStyle.BUBBLE,
+            DesktopTransferBubbleStore.loadStyle(node)
+        )
+    }
+
+    @Test
+    fun `widget color defaults to app accent and round trips every preset`() =
+        withTemporaryPreferences { node ->
+            assertEquals(
+                TransferWidgetColor.APP_ACCENT,
+                DesktopTransferBubbleStore.loadColor(node)
+            )
+            for (preset in TransferWidgetColor.entries) {
+                DesktopTransferBubbleStore.saveColor(node, preset)
+                assertEquals(preset, DesktopTransferBubbleStore.loadColor(node))
+            }
+        }
+
+    @Test
+    fun `an unknown stored style or color falls back to the defaults`() =
+        withTemporaryPreferences { node ->
+            node.put("widget_style", "NOT_A_STYLE")
+            node.put("widget_color", "NOT_A_COLOR")
+            assertEquals(
+                TransferWidgetStyle.BUBBLE,
+                DesktopTransferBubbleStore.loadStyle(node)
+            )
+            assertEquals(
+                TransferWidgetColor.APP_ACCENT,
+                DesktopTransferBubbleStore.loadColor(node)
+            )
+        }
+
+    @Test
+    fun `style and color live beside the switch without disturbing it`() =
+        withTemporaryPreferences { node ->
+            DesktopTransferBubbleStore.saveEnabled(node, false)
+            DesktopTransferBubbleStore.saveStyle(node, TransferWidgetStyle.BOTTOM_STRIP)
+            DesktopTransferBubbleStore.saveColor(node, TransferWidgetColor.ORANGE)
+            assertFalse(DesktopTransferBubbleStore.loadEnabled(node))
+            assertEquals(
+                TransferWidgetStyle.BOTTOM_STRIP,
+                DesktopTransferBubbleStore.loadStyle(node)
+            )
+            assertEquals(
+                TransferWidgetColor.ORANGE,
+                DesktopTransferBubbleStore.loadColor(node)
+            )
+        }
 
     @Test
     fun `the switch defaults to on and round trips`() = withTemporaryPreferences { node ->

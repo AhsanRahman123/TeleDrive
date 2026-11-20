@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -13,10 +14,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,8 +28,10 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SwapVert
@@ -72,11 +78,10 @@ import com.drdisagree.teledrive.desktop.resources.bubble_transferred_of
 import com.drdisagree.teledrive.desktop.resources.bubble_uploading
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferTask
-import com.drdisagree.teledrive.domain.repository.SettingsRepository
-import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.presentation.common.Formatters
+import com.drdisagree.teledrive.presentation.platform.TransferWidgetStyle
+import com.drdisagree.teledrive.presentation.transfers.TransfersStore
 import com.drdisagree.teledrive.presentation.transfers.TransfersUiState
-import com.drdisagree.teledrive.presentation.transfers.TransfersViewModel
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_backup_queued
 import com.drdisagree.teledrive.resources.common_cancel
@@ -92,41 +97,41 @@ import org.jetbrains.compose.resources.stringResource
 import org.koin.java.KoinJavaComponent.getKoin
 
 /**
- * The floating transfer bubble (design Variant A, approved from the video
- * mockups): a chat-head that floats over the app content — an in-app
- * overlay, not a separate window — with a progress ring, direction arrows
- * and a queue badge; tapping it opens a stat card whose pause / resume /
- * cancel controls call the very same [TransfersViewModel] functions the
- * Transfers screen calls.
+ * The floating transfer widget (design Variants A + C, approved from the
+ * video mockups): an in-app overlay — not a separate window — in one of
+ * two shells chosen in Settings: the draggable chat-head **bubble**
+ * (Variant A, progress ring + direction arrows + queue badge) or the
+ * **bottom strip** (Variant C, a slim centred bar with live speeds, the
+ * overall bar and totals). Both shells open the same stat panel, whose
+ * pause / resume / cancel controls call the very same functions the
+ * Transfers screen calls, and both take the persisted colour preset.
  *
- * Data integrity: the overlay holds its own [TransfersViewModel] instance
- * built from the same Koin repositories. The ViewModel's uiState combine
- * is deterministic over the repository flows, so the state rendered here
- * is the same state the Transfers screen renders; every number is then
- * derived by [summarizeTransfers]. Nothing here touches the transfer
- * engine — this is a display + control surface only.
+ * Data integrity (round 6 structural fix): the widget binds to the ONE
+ * app-level [TransfersStore] — the same Koin single the Transfers
+ * screen's ViewModel delegates to. There is no second transfers state
+ * holder anywhere, so the widget and the screen can never disagree or
+ * double-process; every number is derived by [summarizeTransfers] from
+ * that shared state.
  *
- * The root is a plain full-size Box: only the bubble, panel and pull-tab
- * themselves consume pointer input, everything else falls through to the
- * app. Nothing requests focus.
+ * The root is a plain full-size Box: only the bubble, strip, panel and
+ * tabs themselves consume pointer input, everything else falls through
+ * to the app. Nothing requests focus.
  */
 @Composable
 fun TransferBubbleOverlay(fullscreenController: FullscreenController?) {
     val enabled by DesktopTransferBubbleStore.enabled.collectAsState()
     if (enabled) {
-        TransferBubbleContent(fullscreenController)
+        TransferWidgetContent(fullscreenController)
     }
 }
 
 @Composable
-private fun TransferBubbleContent(fullscreenController: FullscreenController?) {
-    val viewModel = remember {
-        TransfersViewModel(
-            transferRepository = getKoin().get<TransferRepository>(),
-            settingsRepository = getKoin().get<SettingsRepository>()
-        )
-    }
-    val state by viewModel.uiState.collectAsState()
+private fun TransferWidgetContent(fullscreenController: FullscreenController?) {
+    val store = remember { getKoin().get<TransfersStore>() }
+    val state by store.uiState.collectAsState()
+    val style by DesktopTransferBubbleStore.style.collectAsState()
+    val colorPreset by DesktopTransferBubbleStore.color.collectAsState()
+    val accent = widgetAccent(colorPreset)
     // One-second clock — the cadence the Transfers screen uses for its
     // stale-speed display, and the tick that re-reads the (non-observable)
     // fullscreen flag so the widget never lingers over a fullscreen player.
@@ -139,13 +144,44 @@ private fun TransferBubbleContent(fullscreenController: FullscreenController?) {
     }
     val summary = summarizeTransfers(state, nowMillis)
 
+    // Re-read on every recomposition (the one-second clock guarantees one
+    // at least every second).
+    val fullscreen = fullscreenController?.isFullscreen?.invoke() ?: false
+
+    when (style) {
+        TransferWidgetStyle.BUBBLE -> BubbleShell(
+            state = state,
+            summary = summary,
+            nowMillis = nowMillis,
+            store = store,
+            accent = accent,
+            fullscreen = fullscreen
+        )
+        TransferWidgetStyle.BOTTOM_STRIP -> StripShell(
+            state = state,
+            summary = summary,
+            nowMillis = nowMillis,
+            store = store,
+            accent = accent,
+            fullscreen = fullscreen
+        )
+    }
+}
+
+@Composable
+private fun BubbleShell(
+    state: TransfersUiState,
+    summary: TransferBubbleSummary,
+    nowMillis: Long,
+    store: TransfersStore,
+    accent: WidgetAccent?,
+    fullscreen: Boolean
+) {
     var userHidden by remember { mutableStateOf(false) }
     var panelOpen by remember { mutableStateOf(false) }
 
-    // Re-read on every recomposition (the one-second clock guarantees one
-    // at least every second): entering fullscreen closes the panel so it
-    // can never be stranded over the player.
-    val fullscreen = fullscreenController?.isFullscreen?.invoke() ?: false
+    // Entering fullscreen closes the panel so it can never be stranded
+    // over the player.
     LaunchedEffect(fullscreen) {
         if (fullscreen) panelOpen = false
     }
@@ -173,14 +209,14 @@ private fun TransferBubbleContent(fullscreenController: FullscreenController?) {
                 TransferBubbleTab(
                     offset = TransferBubbleLayout.tabOffset(effectiveOffset, windowWidth, windowHeight),
                     onLeftEdge = onLeft,
+                    accent = accent,
                     onClick = { userHidden = false }
                 )
             }
             BubbleVisibility.BUBBLE -> {
                 if (panelOpen) {
                     var panelSize by remember { mutableStateOf(IntSize.Zero) }
-                    val listedCount = (state.active + state.paused)
-                        .take(MAX_LISTED_TRANSFERS).size
+                    val listedCount = (state.active + state.paused).size
                     val panelHeightDp = if (panelSize == IntSize.Zero) {
                         estimatePanelHeightDp(listedCount)
                     } else {
@@ -203,11 +239,12 @@ private fun TransferBubbleContent(fullscreenController: FullscreenController?) {
                             windowHeight = windowHeight
                         ),
                         onSizeChanged = { panelSize = it },
-                        onPause = viewModel::pause,
-                        onResume = viewModel::resume,
-                        onCancel = viewModel::cancel,
-                        onPauseAll = viewModel::pauseAll,
-                        onResumeAll = viewModel::resumeAll,
+                        onPause = store::pause,
+                        onResume = store::resume,
+                        onCancel = store::cancel,
+                        onPauseAll = store::pauseAll,
+                        onResumeAll = store::resumeAll,
+                        accent = accent,
                         onHide = {
                             panelOpen = false
                             userHidden = true
@@ -217,6 +254,7 @@ private fun TransferBubbleContent(fullscreenController: FullscreenController?) {
                 TransferBubble(
                     summary = summary,
                     offset = effectiveOffset,
+                    accent = accent,
                     onDragDelta = { dxDp, dyDp ->
                         bubbleOffset = TransferBubbleLayout.clampOffset(
                             bubbleOffset.x + dxDp, bubbleOffset.y + dyDp,
@@ -269,15 +307,25 @@ private fun Modifier.bubbleGestures(
     }
 }
 
+/** The accent colour in force: the preset's, or the app accent for APP_ACCENT. */
+@Composable
+private fun accentColor(accent: WidgetAccent?): androidx.compose.ui.graphics.Color =
+    accent?.accent ?: MaterialTheme.colorScheme.primary
+
+@Composable
+private fun onAccentColor(accent: WidgetAccent?): androidx.compose.ui.graphics.Color =
+    accent?.onAccent ?: MaterialTheme.colorScheme.onPrimary
+
 @Composable
 private fun TransferBubble(
     summary: TransferBubbleSummary,
     offset: BubbleOffset,
+    accent: WidgetAccent?,
     onDragDelta: (Float, Float) -> Unit,
     onDragFinished: () -> Unit,
     onClick: () -> Unit
 ) {
-    val primary = MaterialTheme.colorScheme.primary
+    val primary = accentColor(accent)
     val secondary = MaterialTheme.colorScheme.secondary
     val track = MaterialTheme.colorScheme.surfaceVariant
     Surface(
@@ -362,7 +410,7 @@ private fun TransferBubble(
                         text = Formatters.badgeCount(summary.queuedCount),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary
+                        color = onAccentColor(accent)
                     )
                 }
             }
@@ -374,6 +422,7 @@ private fun TransferBubble(
 private fun TransferBubbleTab(
     offset: BubbleOffset,
     onLeftEdge: Boolean,
+    accent: WidgetAccent?,
     onClick: () -> Unit
 ) {
     Surface(
@@ -412,7 +461,7 @@ private fun TransferBubbleTab(
                 Icons.Filled.SwapVert,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary
+                tint = accentColor(accent)
             )
         }
     }
@@ -430,7 +479,9 @@ private fun TransferBubblePanel(
     onCancel: (String) -> Unit,
     onPauseAll: () -> Unit,
     onResumeAll: () -> Unit,
-    onHide: () -> Unit
+    accent: WidgetAccent?,
+    onHide: () -> Unit,
+    widthDp: Float = PANEL_WIDTH_DP
 ) {
     Surface(
         modifier = Modifier
@@ -440,7 +491,7 @@ private fun TransferBubblePanel(
                     (offset.y * density).roundToInt()
                 )
             }
-            .width(PANEL_WIDTH_DP.dp)
+            .width(widthDp.dp)
             .onSizeChanged(onSizeChanged),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -451,14 +502,14 @@ private fun TransferBubblePanel(
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .background(MaterialTheme.colorScheme.primary, CircleShape),
+                        .background(accentColor(accent), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         Icons.Filled.SwapVert,
                         contentDescription = null,
                         modifier = Modifier.size(22.dp),
-                        tint = MaterialTheme.colorScheme.onPrimary
+                        tint = onAccentColor(accent)
                     )
                 }
                 Spacer(Modifier.width(12.dp))
@@ -472,7 +523,7 @@ private fun TransferBubblePanel(
                     text = Formatters.percent(summary.overallProgress),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    color = accentColor(accent)
                 )
                 // The same bulk actions, under the same conditions, as the
                 // Transfers screen's top bar.
@@ -501,7 +552,8 @@ private fun TransferBubblePanel(
             Spacer(Modifier.height(10.dp))
             LinearProgressIndicator(
                 progress = summary.overallProgress,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                color = accentColor(accent)
             )
             Spacer(Modifier.height(14.dp))
             BubbleDirectionRow(
@@ -539,7 +591,12 @@ private fun TransferBubblePanel(
                     fontWeight = FontWeight.SemiBold
                 )
             }
-            val listed = (state.active + state.paused).take(MAX_LISTED_TRANSFERS)
+            // Every active and paused transfer the shared state holds —
+            // queued rows included, each with its own Cancel (PC-25).
+            // The list scrolls under a height cap instead of truncating
+            // at a fixed count, so no queued item is ever hidden behind
+            // a "+n more" line the way the old five-row cap hid them.
+            val listed = state.active + state.paused
             if (listed.isEmpty()) {
                 Text(
                     text = stringResource(DesktopRes.string.bubble_no_active),
@@ -549,16 +606,26 @@ private fun TransferBubblePanel(
                 )
             } else {
                 Spacer(Modifier.height(8.dp))
-                listed.forEach { task ->
-                    BubbleTransferRow(
-                        task = task,
-                        nowMillis = nowMillis,
-                        onPause = onPause,
-                        onResume = onResume,
-                        onCancel = onCancel
-                    )
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = PANEL_LIST_MAX_HEIGHT_DP.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    items(listed, key = { it.id }) { task ->
+                        BubbleTransferRow(
+                            task = task,
+                            nowMillis = nowMillis,
+                            onPause = onPause,
+                            onResume = onResume,
+                            onCancel = onCancel
+                        )
+                    }
                 }
-                val extra = state.active.size + state.paused.size - listed.size
+                // Honest remainder: rows beyond the shared state's own
+                // section cap (the same 200-row cap the Transfers screen
+                // lives with) are counted from the state totals — shown,
+                // never silently dropped.
+                val extra = (state.activeTotal - state.active.size) +
+                    (state.pausedTotal - state.paused.size)
                 if (extra > 0) {
                     Text(
                         text = stringResource(DesktopRes.string.bubble_more, extra),
@@ -754,9 +821,200 @@ private fun bubbleTransferSublabel(task: TransferTask, nowMillis: Long): String 
         else -> Formatters.percent(task.progress)
     }
 
+// ---------------------------------------------------------------------------
+// Bottom-strip shell (Variant C)
+// ---------------------------------------------------------------------------
+
+/**
+ * The bottom strip: a slim bar centred at the window's bottom — live
+ * ↑/↓ speeds, the active count, the overall progress bar and the
+ * session totals — that expands upward into the SAME panel the bubble
+ * opens (same shared state, same per-item controls) and hides to a
+ * small centred handle tab. A second shell over the shared panel, not
+ * a second implementation.
+ */
+@Composable
+private fun StripShell(
+    state: TransfersUiState,
+    summary: TransferBubbleSummary,
+    nowMillis: Long,
+    store: TransfersStore,
+    accent: WidgetAccent?,
+    fullscreen: Boolean
+) {
+    var userHidden by remember { mutableStateOf(false) }
+    var panelOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(fullscreen) {
+        if (fullscreen) panelOpen = false
+    }
+    if (fullscreen) return
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val windowWidth = maxWidth.value
+        val windowHeight = maxHeight.value
+        val density = LocalDensity.current
+        val accentCol = accentColor(accent)
+
+        if (userHidden) {
+            val tab = TransferStripLayout.tabOffset(windowWidth, windowHeight)
+            Surface(
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            (tab.x * density).roundToInt(),
+                            (tab.y * density).roundToInt()
+                        )
+                    }
+                    .size(
+                        TransferStripLayout.TAB_WIDTH_DP.dp,
+                        TransferStripLayout.TAB_HEIGHT_DP.dp
+                    )
+                    .clickable { userHidden = false },
+                shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+                color = accentCol,
+                shadowElevation = 6.dp
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowUp,
+                        contentDescription = stringResource(DesktopRes.string.bubble_show_transfers),
+                        modifier = Modifier.size(16.dp),
+                        tint = onAccentColor(accent)
+                    )
+                }
+            }
+            return@BoxWithConstraints
+        }
+
+        val stripWidth = TransferStripLayout.stripWidth(windowWidth)
+        if (panelOpen) {
+            var panelSize by remember { mutableStateOf(IntSize.Zero) }
+            val panelHeightDp = if (panelSize == IntSize.Zero) {
+                estimatePanelHeightDp((state.active + state.paused).size)
+            } else {
+                panelSize.height / density.density
+            }
+            val panelWidthDp = if (panelSize == IntSize.Zero) {
+                stripWidth
+            } else {
+                panelSize.width / density.density
+            }
+            TransferBubblePanel(
+                state = state,
+                summary = summary,
+                nowMillis = nowMillis,
+                offset = TransferStripLayout.panelOffset(
+                    panelWidth = panelWidthDp,
+                    panelHeight = panelHeightDp,
+                    windowWidth = windowWidth,
+                    windowHeight = windowHeight
+                ),
+                onSizeChanged = { panelSize = it },
+                onPause = store::pause,
+                onResume = store::resume,
+                onCancel = store::cancel,
+                onPauseAll = store::pauseAll,
+                onResumeAll = store::resumeAll,
+                accent = accent,
+                onHide = {
+                    panelOpen = false
+                    userHidden = true
+                },
+                widthDp = stripWidth
+            )
+        }
+
+        val strip = TransferStripLayout.stripOffset(windowWidth, windowHeight)
+        Surface(
+            modifier = Modifier
+                .offset {
+                    IntOffset(
+                        (strip.x * density).roundToInt(),
+                        (strip.y * density).roundToInt()
+                    )
+                }
+                .width(stripWidth.dp)
+                .height(TransferStripLayout.BAR_HEIGHT_DP.dp)
+                .clickable { panelOpen = !panelOpen },
+            shape = RoundedCornerShape(22.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 8.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    Icons.Filled.ArrowUpward,
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp),
+                    tint = accentCol
+                )
+                Text(
+                    text = Formatters.speed(summary.uploadingSpeedBytesPerSecond),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                Icon(
+                    Icons.Filled.ArrowDownward,
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp),
+                    tint = MaterialTheme.colorScheme.secondary
+                )
+                Text(
+                    text = Formatters.speed(summary.downloadingSpeedBytesPerSecond),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                Text(
+                    text = stringResource(
+                        DesktopRes.string.bubble_active_count,
+                        state.activeTotal + state.pausedTotal
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+                LinearProgressIndicator(
+                    progress = summary.overallProgress,
+                    modifier = Modifier.weight(1f).height(6.dp),
+                    color = accentCol,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+                Text(
+                    text = "${Formatters.bytes(summary.uploadingTransferredBytes + summary.downloadingTransferredBytes)}" +
+                        " / ${Formatters.bytes(summary.uploadingTotalBytes + summary.downloadingTotalBytes)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+                Icon(
+                    if (panelOpen) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+                    contentDescription = stringResource(DesktopRes.string.bubble_show_transfers),
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
 /** First-frame estimate; the measured size replaces it after one layout. */
 private fun estimatePanelHeightDp(listedCount: Int): Float =
-    330f + listedCount * 40f
+    330f + minOf(listedCount, PANEL_LIST_VISIBLE_ROWS) * 40f
 
 private const val PANEL_WIDTH_DP = 352f
-private const val MAX_LISTED_TRANSFERS = 5
+
+/** The panel list's height cap: rows scroll beneath it, none are dropped. */
+private const val PANEL_LIST_MAX_HEIGHT_DP = 240f
+
+/** Rows visible under the height cap — only for the first-frame estimate. */
+private const val PANEL_LIST_VISIBLE_ROWS = 6
