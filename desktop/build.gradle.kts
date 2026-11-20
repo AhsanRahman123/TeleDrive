@@ -59,6 +59,8 @@ dependencies {
     implementation(libs.twelvemonkeys.webp)
     testImplementation(libs.junit)
     testImplementation(libs.koin.test)
+    testImplementation(compose.desktop.currentOs)
+    testImplementation(libs.cmp.ui.test.junit4)
 }
 
 // The bundled VLC is a Windows-only payload (win64 archive, libvlc.dll). On any

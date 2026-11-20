@@ -39,6 +39,38 @@ class TransferBubbleSummaryTest {
     )
 
     @Test
+    fun `cancel-all availability follows running queued and paused work`() {
+        // PC-31: the panel's labelled Cancel all shows exactly when the
+        // shared store's cancel-all has something to act on.
+        val running = summarizeTransfers(
+            TransfersUiState(
+                active = listOf(task("r", TransferType.UPLOAD, TransferState.RUNNING))
+            ),
+            now
+        )
+        assertTrue(running.anyCancellable)
+
+        val queued = summarizeTransfers(
+            TransfersUiState(
+                active = listOf(task("q", TransferType.UPLOAD, TransferState.QUEUED))
+            ),
+            now
+        )
+        assertTrue(queued.anyCancellable)
+
+        val paused = summarizeTransfers(
+            TransfersUiState(
+                paused = listOf(task("p", TransferType.DOWNLOAD, TransferState.PAUSED))
+            ),
+            now
+        )
+        assertTrue(paused.anyCancellable)
+
+        val idle = summarizeTransfers(TransfersUiState(loading = false), now)
+        assertFalse(idle.anyCancellable)
+    }
+
+    @Test
     fun `empty state is the idle summary`() {
         val summary = summarizeTransfers(TransfersUiState(loading = false), now)
         assertFalse(summary.hasUnfinishedWork)

@@ -145,8 +145,14 @@ class TransferBubbleControlWiringTest {
         viewModel.resumeAll()
         awaitRecorded(repository.calls, "resumeAll")
 
+        viewModel.cancelAll()
+        awaitRecorded(repository.calls, "cancelAll")
+
         assertEquals(
-            listOf("pause:task-1", "resume:task-2", "cancel:task-3", "pauseAll", "resumeAll"),
+            listOf(
+                "pause:task-1", "resume:task-2", "cancel:task-3",
+                "pauseAll", "resumeAll", "cancelAll"
+            ),
             repository.calls.toList()
         )
     }

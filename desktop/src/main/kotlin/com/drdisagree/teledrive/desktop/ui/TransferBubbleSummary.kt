@@ -49,6 +49,16 @@ data class TransferBubbleSummary(
     val anyRunning: Boolean,
     val anyQueued: Boolean
 ) {
+    /**
+     * Anything the shared store's cancel-all would act on (PC-31):
+     * running or queued tasks in the active section, or any paused task.
+     * The panel's labelled "Cancel all" button shows exactly when this
+     * is true — the same condition family as the pause-all / resume-all
+     * icons beside it.
+     */
+    val anyCancellable: Boolean
+        get() = anyRunning || anyQueued || pausedCount > 0
+
     val uploadingProgress: Float
         get() = directionProgress(uploadingTransferredBytes, uploadingTotalBytes)
 

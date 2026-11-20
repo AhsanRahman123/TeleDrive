@@ -23,8 +23,10 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -51,9 +53,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
@@ -101,11 +105,15 @@ internal enum class DesktopPickerSort { NAME, SIZE, MODIFIED, TYPE }
  *   step up one folder, and only at a filesystem root close the picker.
  *   Both inputs run the same [pickerBackAction] implementation, and the
  *   key handler is attached at the dialog level as well as on the
- *   content column, so Escape reaches the ladder whichever part of the
- *   dialog holds focus — it can never fall through to the dialog's own
- *   dismiss (which closed the whole folder picker in one press) or to
- *   the screen behind the dialog. Backspace steps up one folder, as in
- *   Files.
+ *   content column. PC-30: the dialog is created with
+ *   `dismissOnBackPress = false` — in Compose Multiplatform 1.12 the
+ *   desktop Dialog otherwise routes Escape through its NavigationEvent
+ *   back handler straight to `onDismissRequest`, bypassing every key
+ *   handler in the content, which is why one press used to close the
+ *   whole picker despite the ladder.
+ * - **Ctrl+A and a select-all button** (PC-29) in multi-select file
+ *   mode: select every visible file (the search field keeps Ctrl+A for
+ *   its own text while it holds focus).
  *
  * Every filesystem root on the machine (on Windows: every drive letter) is
  * offered in the drive row — the tree is never trapped on the drive it
@@ -174,15 +182,31 @@ internal fun DesktopUploadPickerDialog(
         }
     }
 
-    // Key routing for the ladder. A preview key handler only sees the
-    // keys whose focus path passes through its node — and inside a
-    // dialog, focus can sit on the dialog buttons, which are OUTSIDE
-    // the content column that carried this handler alone. There, Escape fell through to the dialog's own
-    // dismiss and closed the whole folder picker at once (PC-22). The
-    // handler is therefore attached at the dialog level as well (the
-    // AlertDialog modifier, an ancestor of title + content + buttons);
-    // both attachments call this one function, and whichever is on the
-    // path consumes the key first.
+    // Key routing for the ladder and for select-all. A preview key handler
+    // only sees the keys whose focus path passes through its node — and
+    // inside a dialog, focus can sit on the dialog buttons, which are
+    // OUTSIDE the content column that carried this handler alone. There,
+    // Escape fell through to the dialog's own dismiss and closed the
+    // whole folder picker at once (PC-22). The handler is therefore
+    // attached at the dialog level as well (the AlertDialog modifier, an
+    // ancestor of title + content + buttons); both attachments call this
+    // one function, and whichever is on the path consumes the key first.
+    //
+    // PC-30: attaching the handler was never sufficient on its own. In
+    // Compose Multiplatform 1.12 the desktop Dialog routes Escape
+    // through the NavigationEvent dispatcher (an OnBackClickEventHandler
+    // gated by DialogProperties.dismissOnBackPress, default true) and
+    // calls onDismissRequest directly — the key never enters the focused
+    // element's key chain at all, so no preview handler in the content
+    // could ever intercept it and EVERY Escape closed the picker in one
+    // press regardless of the ladder. The dialog below therefore passes
+    // dismissOnBackPress = false; Escape then dispatches as a normal
+    // key, this handler runs the ladder, and the ladder's own CLOSE
+    // step is the only path to onCancel.
+    //
+    // Ctrl+A (PC-29): in multi-select file mode it selects every visible
+    // (search-filtered) file. While the search field holds focus the key
+    // is NOT consumed here, so the field keeps its select-text meaning.
     fun handlePickerKeyEvent(event: KeyEvent): Boolean {
         if (event.type != KeyEventType.KeyDown) return false
         return when (event.key) {
@@ -195,6 +219,16 @@ internal fun DesktopUploadPickerDialog(
                 // field it must delete text.
                 if (!searchFocused && currentDir.parentFile != null) {
                     stepUp()
+                    true
+                } else {
+                    false
+                }
+            }
+            Key.A -> {
+                if (event.isCtrlPressed && !searchFocused &&
+                    mode == DesktopPickerMode.FILES && multiSelect
+                ) {
+                    selected = pickerSelectAllPaths(visibleEntries)
                     true
                 } else {
                     false
@@ -259,6 +293,10 @@ internal fun DesktopUploadPickerDialog(
 
     AlertDialog(
         onDismissRequest = onCancel,
+        // PC-30: keep the framework's NavigationEvent back handler OUT of
+        // Escape (see handlePickerKeyEvent). Clicking outside still
+        // dismisses — that is an explicit user action, not a ladder step.
+        properties = DialogProperties(dismissOnBackPress = false),
         // Dialog-level key routing for the back ladder (PC-22): this
         // modifier sits on the dialog's content surface, an ancestor of
         // the title, the content and the buttons, so Escape reaches the
@@ -345,6 +383,38 @@ internal fun DesktopUploadPickerDialog(
                         )
                     }
                     Box(modifier = Modifier.weight(1f))
+                    if (mode == DesktopPickerMode.FILES && multiSelect) {
+                        // Visible select-all (PC-29): the mouse twin of
+                        // Ctrl+A, over the same visible (search-filtered)
+                        // file set; a second press with everything visible
+                        // selected clears the selection instead.
+                        val visibleFilePaths = pickerSelectAllPaths(visibleEntries)
+                        val allVisibleSelected = visibleFilePaths.isNotEmpty() &&
+                            selected.containsAll(visibleFilePaths)
+                        IconButton(
+                            onClick = {
+                                selected = if (allVisibleSelected) {
+                                    emptySet()
+                                } else {
+                                    visibleFilePaths
+                                }
+                            },
+                            enabled = visibleFilePaths.isNotEmpty()
+                        ) {
+                            Icon(
+                                imageVector = if (allVisibleSelected) {
+                                    Icons.Filled.Deselect
+                                } else {
+                                    Icons.Filled.SelectAll
+                                },
+                                contentDescription = if (allVisibleSelected) {
+                                    "Deselect all"
+                                } else {
+                                    "Select all"
+                                }
+                            )
+                        }
+                    }
                     // Beside the view toggle (PC-24, moved from the
                     // title): one step of the shared back ladder — at a
                     // root, where there is nothing left to clear or step
@@ -613,6 +683,16 @@ internal fun filterPickerEntries(entries: List<File>, search: String): List<File
     if (query.isEmpty()) return entries
     return entries.filter { it.name.contains(query, ignoreCase = true) }
 }
+
+/**
+ * The picker's select-all set (PC-29): the absolute paths of every FILE
+ * in the visible (already search-filtered and sorted) listing. Folders
+ * are never selectable in the picker — a folder row navigates — so they
+ * are excluded, exactly as in [pickerRangeSelection]. Ctrl+A and the
+ * select-all button both use this one computation.
+ */
+internal fun pickerSelectAllPaths(visibleEntries: List<File>): Set<String> =
+    visibleEntries.filter { it.isFile }.map { it.absolutePath }.toSet()
 
 /**
  * Picker ordering: folders always first (navigation structure), then the

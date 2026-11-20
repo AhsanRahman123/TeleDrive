@@ -42,6 +42,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -245,6 +246,7 @@ private fun BubbleShell(
                         onCancel = store::cancel,
                         onPauseAll = store::pauseAll,
                         onResumeAll = store::resumeAll,
+                        onCancelAll = store::cancelAll,
                         accent = accent,
                         onHide = {
                             panelOpen = false
@@ -480,6 +482,7 @@ private fun TransferBubblePanel(
     onCancel: (String) -> Unit,
     onPauseAll: () -> Unit,
     onResumeAll: () -> Unit,
+    onCancelAll: () -> Unit,
     accent: WidgetAccent?,
     onHide: () -> Unit,
     widthDp: Float = PANEL_WIDTH_DP
@@ -591,6 +594,30 @@ private fun TransferBubblePanel(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+            if (summary.anyCancellable) {
+                // PC-31: a clearly LABELLED cancel-all (the header's bulk
+                // actions are icon-only pause/resume). It calls the same
+                // shared store operation the Transfers screen's own
+                // cancel-all uses — the round-6 import-aware one — in
+                // both shells, since both render this one panel.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onCancelAll) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(DesktopRes.string.bubble_cancel_all),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
             }
             // Every active and paused transfer the shared state holds —
             // queued rows included, each with its own Cancel (PC-25).
@@ -919,6 +946,7 @@ private fun StripShell(
                 onCancel = store::cancel,
                 onPauseAll = store::pauseAll,
                 onResumeAll = store::resumeAll,
+                onCancelAll = store::cancelAll,
                 accent = accent,
                 onHide = {
                     panelOpen = false
