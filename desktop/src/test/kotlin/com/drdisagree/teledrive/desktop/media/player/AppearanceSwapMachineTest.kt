@@ -21,6 +21,48 @@ class AppearanceSwapMachineTest {
     private val otherKey = listOf("--text-renderer=freetype", "--freetype-font=Georgia")
 
     @Test
+    fun `reverting a settled flip restores the previous key (PC-27 flip-back)`() {
+        // PC-27: the candidate proved itself on the proof media and the
+        // session flipped to it, but its start of the real media then
+        // failed, so the old player owns the session again. The settled
+        // key must follow the player that actually renders.
+        val machine = AppearanceSwapMachine()
+        machine.seed(defaultKey)
+
+        val generation = machine.begin(customKey)
+        assertEquals(
+            AppearanceSwapMachine.Decision.FLIP,
+            machine.settle(generation, candidateReady = true)
+        )
+        assertEquals(customKey, machine.settledKey())
+
+        machine.revertSettled(defaultKey)
+        assertEquals(defaultKey, machine.settledKey())
+        assertNull(machine.pendingKey())
+    }
+
+    @Test
+    fun `after a flip-back, re-applying the same appearance starts a real swap`() {
+        // If the settled key were left at the reverted-from key, the
+        // session's no-op check (target == settled) would swallow the
+        // user's next Apply of the same appearance forever.
+        val machine = AppearanceSwapMachine()
+        machine.seed(defaultKey)
+
+        val first = machine.begin(customKey)
+        machine.settle(first, candidateReady = true)
+        machine.revertSettled(defaultKey)
+
+        val second = machine.begin(customKey)
+        assertEquals(customKey, machine.pendingKey())
+        assertEquals(
+            AppearanceSwapMachine.Decision.FLIP,
+            machine.settle(second, candidateReady = true)
+        )
+        assertEquals(customKey, machine.settledKey())
+    }
+
+    @Test
     fun `a proven candidate flips and settles its key`() {
         val machine = AppearanceSwapMachine()
         machine.seed(defaultKey)

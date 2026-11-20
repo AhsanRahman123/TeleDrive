@@ -31,16 +31,20 @@ import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer
  *   Commands submitted to the session are resolved against the CURRENT
  *   native player at execution time.
  * - **Appearance swaps are atomic and rollback-safe.** An Apply builds a
- *   candidate instance + player on the swap executor, starts the SAME
- *   media on it (position inside the start, muted until proven), and
- *   flips the facade only after the candidate reports Playing/Paused —
- *   the [AppearanceSwapMachine] decides. On any failure (factory
- *   creation, start error, hard timeout) the candidate is discarded and
- *   the live player keeps the session: it was never stopped, paused or
- *   reconfigured. All events and frames are generation/identity-gated
- *   through the viewer's [PlayerEventGate], which is attached to the
- *   candidate only at the flip — so a retired or not-yet-live player's
- *   events can never touch the viewer's state.
+ *   candidate instance + player on the swap executor and proves it on a
+ *   tiny local proof media ([SwapProofMedia]) — the [AppearanceSwapMachine]
+ *   decides. Only then does the facade flip: the old player is paused
+ *   and silenced, and the candidate starts the real media at the
+ *   captured position as the stream's only reader. (PC-27: proving on
+ *   the real media while the live player played it made streamed swaps
+ *   impossible — both players share one TDLib download window through
+ *   the stream's byte source, so the candidate could never reach
+ *   Playing and every Apply rolled back silently.) If the candidate's
+ *   real start fails, the flip is undone and the old player resumes —
+ *   it was paused, never stopped. All events and frames are
+ *   generation/identity-gated through the viewer's [PlayerEventGate],
+ *   which is attached to the candidate only at the flip — so a retired
+ *   or not-yet-live player's events can never touch the viewer's state.
  *
  * The initial player is built directly on the saved appearance's
  * instance when one is saved, so the first playback is already styled;
@@ -230,26 +234,88 @@ internal class PlayerSession(
         runCatching { candidatePlayer.audio().setVolume(0) }
         runCatching { candidatePlayer.audio().isMute = true }
 
-        val ready = if (capture.wasFinished) {
+        if (capture.wasFinished) {
             // Nothing to restart: the new instance simply owns the next
             // play. (Starting a finished media at its end position would
             // just finish again.)
-            true
-        } else {
+            when (machine.settle(generation, candidateReady = true)) {
+                AppearanceSwapMachine.Decision.FLIP ->
+                    flip(candidatePlayer, dedicated, capture, spuTrack, audioTrack)
+
+                AppearanceSwapMachine.Decision.ROLLBACK -> {
+                    releaseCandidate()
+                    onSwapSettled()
+                }
+
+                // A newer Apply superseded this one; the newer swap owns
+                // the session and will settle it.
+                AppearanceSwapMachine.Decision.DISCARD -> releaseCandidate()
+            }
+            return
+        }
+
+        // PC-27: the candidate proves itself on a tiny LOCAL proof media
+        // (see SwapProofMedia), never on the session's own MRL. The old
+        // proof — start the real media on the candidate while the live
+        // player plays it — is impossible for streamed media: both
+        // players share one byte source over TDLib's single
+        // ranged-download window, every uncovered candidate read
+        // re-seeks that window and blocks behind the live player's
+        // reads, so the candidate could not reach Playing inside the
+        // timeout and every Apply silently rolled back (customization
+        // inert for Gallery/streamed playback; local files, read
+        // directly by both players, flipped fine).
+        val proofLatch = StartLatch()
+        candidatePlayer.events().addMediaPlayerEventListener(proofLatch)
+        val proofPlayCalled = runCatching {
+            candidatePlayer.media().play(SwapProofMedia.mrl())
+        }.getOrDefault(false)
+        val proven = proofPlayCalled && proofLatch.await(PROOF_TIMEOUT_MS)
+        candidatePlayer.events().removeMediaPlayerEventListener(proofLatch)
+
+        if (!proven) {
+            // The proof file itself could not be played (an environment
+            // problem, not an appearance problem): fall back to the
+            // pre-PC-27 proof on the real media, which remains correct
+            // for local files, rather than failing every Apply.
             val latch = StartLatch()
             candidatePlayer.events().addMediaPlayerEventListener(latch)
             val options = swapStartOptions(positionMs, capture.wasPlaying)
             val playCalled = runCatching {
                 candidatePlayer.media().play(capture.mrl, *options.toTypedArray())
             }.getOrDefault(false)
-            val proven = playCalled && latch.await(CANDIDATE_START_TIMEOUT_MS)
+            val legacyProven = playCalled && latch.await(CANDIDATE_START_TIMEOUT_MS)
             candidatePlayer.events().removeMediaPlayerEventListener(latch)
-            proven
+            when (machine.settle(generation, candidateReady = legacyProven)) {
+                AppearanceSwapMachine.Decision.FLIP ->
+                    flip(candidatePlayer, dedicated, capture, spuTrack, audioTrack)
+
+                AppearanceSwapMachine.Decision.ROLLBACK -> {
+                    releaseCandidate()
+                    onSwapSettled()
+                }
+
+                AppearanceSwapMachine.Decision.DISCARD -> releaseCandidate()
+            }
+            return
         }
 
-        when (machine.settle(generation, candidateReady = ready)) {
-            AppearanceSwapMachine.Decision.FLIP ->
-                flip(candidatePlayer, dedicated, capture, spuTrack, audioTrack)
+        // Stop the proof media so none of its late events (its Finished,
+        // above all) can be mistaken for the real media's after the flip.
+        runCatching { candidatePlayer.controls().stop() }
+
+        val previousKey = machine.settledKey()
+        when (machine.settle(generation, candidateReady = true)) {
+            AppearanceSwapMachine.Decision.FLIP -> flipThenStart(
+                candidatePlayer = candidatePlayer,
+                dedicated = dedicated,
+                oldPlayer = old,
+                capture = capture,
+                positionMs = positionMs,
+                spuTrack = spuTrack,
+                audioTrack = audioTrack,
+                previousKey = previousKey
+            )
 
             AppearanceSwapMachine.Decision.ROLLBACK -> {
                 releaseCandidate()
@@ -260,6 +326,116 @@ internal class PlayerSession(
             // session and will settle it.
             AppearanceSwapMachine.Decision.DISCARD -> releaseCandidate()
         }
+    }
+
+    /**
+     * PC-27 flip: the candidate is proven (on the proof media) but has
+     * not started the real media yet. The facade and the event gate move
+     * to it FIRST, the old player is paused and silenced (its events are
+     * identity-gated off from this moment, and pausing it makes the
+     * candidate the stream's only reader — the contention that killed
+     * the old proof cannot recur), and only then does the candidate
+     * start the real media at the captured position. If that start
+     * fails, the flip is undone: the old player — which never stopped
+     * its media, only paused — resumes and owns the session again, and
+     * the machine's settled key reverts with it.
+     */
+    private fun flipThenStart(
+        candidatePlayer: MediaPlayer,
+        dedicated: MediaPlayerFactory?,
+        oldPlayer: MediaPlayer,
+        capture: Capture,
+        positionMs: Long,
+        spuTrack: Int?,
+        audioTrack: Int?,
+        previousKey: List<String>
+    ) {
+        val oldDedicatedFactory = currentDedicatedFactory
+
+        current = candidatePlayer
+        currentDedicatedFactory = dedicated
+        candidate = null
+        candidateDedicatedFactory = null
+        eventGate.attach(candidatePlayer)
+        val mediaGeneration = eventGate.beginMedia()
+        eventGate.expectGeneration(mediaGeneration)
+        eventGate.setAcceptsFrames(true)
+        eventGate.openEvents()
+
+        // The freshest position is the old player's own clock, read
+        // before pausing it: the proof took a moment, and the snapshot
+        // from the swap's start would rewind the video by that much.
+        val startPositionMs = runCatching { oldPlayer.status().time() }.getOrNull()
+            ?.takeIf { it >= 0L } ?: positionMs
+        runCatching { oldPlayer.audio().setVolume(0) }
+        runCatching { oldPlayer.audio().isMute = true }
+        if (capture.wasPlaying) {
+            runCatching { oldPlayer.controls().pause() }
+        }
+
+        val latch = StartLatch()
+        candidatePlayer.events().addMediaPlayerEventListener(latch)
+        val options = swapStartOptions(startPositionMs, capture.wasPlaying)
+        val playCalled = runCatching {
+            candidatePlayer.media().play(capture.mrl, *options.toTypedArray())
+        }.getOrDefault(false)
+        val started = playCalled && latch.await(REAL_START_TIMEOUT_MS)
+        candidatePlayer.events().removeMediaPlayerEventListener(latch)
+
+        if (!started) {
+            flipBack(
+                failedCandidate = candidatePlayer,
+                failedDedicated = dedicated,
+                oldPlayer = oldPlayer,
+                oldDedicatedFactory = oldDedicatedFactory,
+                capture = capture,
+                previousKey = previousKey
+            )
+            return
+        }
+
+        // The same session-state restoration the classic flip performs.
+        runCatching { candidatePlayer.controls().setRate(capture.rate) }
+        runCatching { candidatePlayer.controls().repeat = capture.repeatOne }
+        if (spuTrack != null) {
+            runCatching { candidatePlayer.subpictures().setTrack(spuTrack) }
+        }
+        if (audioTrack != null) {
+            runCatching { candidatePlayer.audio().setTrack(audioTrack) }
+        }
+        runCatching { candidatePlayer.audio().setVolume(capture.volume) }
+        runCatching { candidatePlayer.audio().isMute = capture.muted }
+
+        eventGate.detach(oldPlayer)
+        retirePlayer(oldPlayer, oldDedicatedFactory)
+        onSwapSettled()
+    }
+
+    /** Undoes [flipThenStart]: the old player owns the session again. */
+    private fun flipBack(
+        failedCandidate: MediaPlayer,
+        failedDedicated: MediaPlayerFactory?,
+        oldPlayer: MediaPlayer,
+        oldDedicatedFactory: MediaPlayerFactory?,
+        capture: Capture,
+        previousKey: List<String>
+    ) {
+        machine.revertSettled(previousKey)
+        current = oldPlayer
+        currentDedicatedFactory = oldDedicatedFactory
+        eventGate.attach(oldPlayer)
+        val mediaGeneration = eventGate.beginMedia()
+        eventGate.expectGeneration(mediaGeneration)
+        eventGate.setAcceptsFrames(true)
+        eventGate.openEvents()
+
+        runCatching { oldPlayer.audio().setVolume(capture.volume) }
+        runCatching { oldPlayer.audio().isMute = capture.muted }
+        if (capture.wasPlaying) {
+            runCatching { oldPlayer.controls().play() }
+        }
+        retirePlayer(failedCandidate, failedDedicated)
+        onSwapSettled()
     }
 
     /**
@@ -440,12 +616,31 @@ internal class PlayerSession(
 
     private companion object {
         /**
-         * Hard bound on proving a swap candidate live. A local or streamed
-         * start that has not reported Playing/Paused by then is treated
-         * as failed and rolled back — the live player was never touched,
-         * so the user simply keeps watching with the old appearance.
+         * Hard bound on the fallback proof (candidate starts the real
+         * media, pre-PC-27 style). A start that has not reported
+         * Playing/Paused by then is treated as failed and rolled back —
+         * the live player was never touched, so the user simply keeps
+         * watching with the old appearance.
          */
         const val CANDIDATE_START_TIMEOUT_MS = 6_000L
+
+        /**
+         * Hard bound on the PC-27 proof: the candidate starts a tiny
+         * local file, which reaches Playing in well under a second on
+         * any working instance; the bound only fires when the instance
+         * itself is broken.
+         */
+        const val PROOF_TIMEOUT_MS = 6_000L
+
+        /**
+         * Hard bound on the candidate's post-flip start of the real
+         * media (PC-27). The candidate is the stream's only reader by
+         * then, but a streamed start still needs its range fetches
+         * (header, then the captured position), so the bound is
+         * generous; on failure the flip is undone and the old player
+         * resumes.
+         */
+        const val REAL_START_TIMEOUT_MS = 20_000L
         const val TAG = "PlayerSession"
     }
 }
