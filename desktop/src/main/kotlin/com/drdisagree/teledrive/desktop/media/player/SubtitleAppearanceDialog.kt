@@ -221,11 +221,10 @@ internal fun SubtitleAppearanceDialog(
                 )
 
                 SectionTitle(stringResource(Res.string.subtitle_size_position))
-                // Text size is a freetype option: it exists only in Custom
-                // mode. VLC-defaults mode emits no size argument at all, so
-                // the control is disabled there instead of pretending to
-                // apply (PC-11). Vertical position stays live in both modes
-                // because --sub-margin is emitted for either style.
+                // Text size and vertical position apply in BOTH modes
+                // (PC-19): Default mode keeps VLC's stock font and colours
+                // but still carries size (as a freetype relative-size
+                // instance argument) and position (--sub-margin).
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         stringResource(Res.string.subtitle_text_size),
@@ -237,37 +236,26 @@ internal fun SubtitleAppearanceDialog(
                             draft = current.copy(
                                 textScale = (current.textScale - 0.1f).coerceAtLeast(0.5f)
                             )
-                        },
-                        enabled = !current.useSystemDefaults
+                        }
                     ) { Icon(Icons.Filled.Remove, contentDescription = null) }
                     Slider(
                         value = current.textScale,
                         onValueChange = { draft = current.copy(textScale = it) },
                         valueRange = 0.5f..2.5f,
-                        modifier = Modifier.weight(1f),
-                        enabled = !current.useSystemDefaults
+                        modifier = Modifier.weight(1f)
                     )
                     IconButton(
                         onClick = {
                             draft = current.copy(
                                 textScale = (current.textScale + 0.1f).coerceAtMost(2.5f)
                             )
-                        },
-                        enabled = !current.useSystemDefaults
+                        }
                     ) { Icon(Icons.Filled.Add, contentDescription = null) }
                     PercentField(
-                        fraction = current.textScale,
-                        enabled = !current.useSystemDefaults
+                        fraction = current.textScale
                     ) {
                         draft = current.copy(textScale = it)
                     }
-                }
-                if (current.useSystemDefaults) {
-                    Text(
-                        stringResource(Res.string.subtitle_size_custom_only),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
                 PercentSliderRow(
                     label = stringResource(Res.string.subtitle_vertical_position),
@@ -378,7 +366,11 @@ internal fun SubtitleAppearanceDialog(
 @Composable
 private fun SubtitlePreview(draft: SubtitleAppearance) {
     val effective = if (draft.useSystemDefaults) {
+        // Default mode renders VLC's stock font and colours, but the
+        // draft's size and position DO apply (PC-19) — preview exactly
+        // what Apply will render.
         SubtitleAppearance(
+            textScale = draft.textScale,
             backgroundOpacity = 0f,
             verticalPosition = draft.verticalPosition
         )
