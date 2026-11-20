@@ -40,9 +40,10 @@ internal class WindowsBorderlessFullscreenController(
         val style = User32.INSTANCE.GetWindowLong(hwnd, WinUser.GWL_STYLE)
         check(style != 0) { "Could not read window style (Win32 " + Native.getLastError() + ")." }
         val placement = readPlacement(hwnd)
-        val monitor = readMonitor(hwnd)
+        val geometry = readMonitorGeometry(hwnd)
+        val monitor = geometry.monitor
         val snapshot = Snapshot(
-            style, placement, monitor,
+            style, placement, monitor, geometry.work,
             windowState.position, windowState.size
         )
         lastExit = null
@@ -117,12 +118,20 @@ internal class WindowsBorderlessFullscreenController(
             // RESTORE_PLACEMENT has run synchronously above. Run the
             // remaining exit steps (see fullscreenExitSteps) deferred:
             // Compose applies WindowState changes asynchronously, and —
-            // the PC-20 defect — restoring the SAME bounds never produces
-            // a real size change, so the Compose scene keeps its stale
-            // fullscreen surface (UI cut / scaled wrong) until one
-            // arrives. The user's own workaround was a native snap to
-            // half screen and back; a floating exit now performs that
-            // resize cycle itself. Every step is guarded by the exit
+            // the PC-20/PC-21 defect — restoring the SAME bounds never
+            // produces a real size change, so the Compose scene keeps
+            // its stale fullscreen surface (UI cut / scaled wrong) until
+            // one arrives. The user's own workaround is a WINDOWS snap
+            // to half screen and back — a window-manager operation. The
+            // 1.6.4 attempt imitated it with AWT setSize nudges, which
+            // the window layer can coalesce into nothing (a 1 px change
+            // that AWT/Compose may absorb without any frame
+            // recalculation ever reaching the native window). A floating
+            // exit therefore now performs the snap itself through the
+            // native channel: SetWindowPos to a genuinely different
+            // rect (half the work area) and back to the exact restored
+            // rect, both with SWP_FRAMECHANGED (see
+            // forceNativeSnapCycle). Every step is guarded by the exit
             // token — a fast re-enter (or a newer exit) supersedes it.
             runExitSteps(
                 fullscreenExitSteps(
@@ -164,7 +173,7 @@ internal class WindowsBorderlessFullscreenController(
             if (lastExit === snapshot && !isFullscreen) {
                 when (steps.first()) {
                     FullscreenExitStep.FORCE_RESIZE_CYCLE ->
-                        forceResizeCycle(snapshot, steps.drop(1))
+                        forceNativeSnapCycle(snapshot, steps.drop(1))
 
                     FullscreenExitStep.REASSERT_PLACEMENT -> {
                         runCatching {
@@ -189,26 +198,46 @@ internal class WindowsBorderlessFullscreenController(
     }
 
     /**
-     * The resize cycle his snap workaround performs by hand (PC-20):
-     * shrink the window by one pixel, then restore its exact size on the
-     * NEXT EDT turn, so both sizes register as genuine native resizes and
-     * the Compose scene re-lays out against the restored bounds.
+     * His snap workaround, performed by the app through the native
+     * channel (PC-21): SetWindowPos the window to half the work area —
+     * the rect a Windows snap-left would give it — then SetWindowPos it
+     * back to the exact restored rect, both with SWP_FRAMECHANGED.
+     *
+     * Why this and not the 1.6.4 AWT cycle: `Window.setSize` travels
+     * through AWT/Compose's own size bookkeeping, which can coalesce or
+     * swallow a small change entirely (the 1 px shrink could be absorbed
+     * against the size Compose already believed the window had), so no
+     * frame recalculation ever reached the native window and the scene
+     * stayed stale. SetWindowPos bypasses that bookkeeping: it is the
+     * same call the window manager path uses, it is synchronous (the
+     * window receives WM_WINDOWPOSCHANGED/WM_SIZE before the call
+     * returns), and SWP_FRAMECHANGED forces the frame to be recalculated
+     * for each rect. The two calls run back-to-back on this EDT turn —
+     * deliberately NOT split across turns waiting for paints, which is
+     * what made the AWT version's second half skippable. After the
+     * cycle, the AWT hierarchy is revalidated/repainted (the same
+     * refresh every other native transition in this class performs), so
+     * the Compose scene re-lays out against the final native bounds.
      */
-    private fun forceResizeCycle(snapshot: Snapshot, remaining: List<FullscreenExitStep>) {
-        val width = window.width
-        val height = window.height
-        if (width <= 2 || height <= 2) {
-            runExitSteps(remaining, snapshot, first = false)
-            return
+    private fun forceNativeSnapCycle(snapshot: Snapshot, remaining: List<FullscreenExitStep>) {
+        val hwnd = hwnd()
+        val normal = WindowRect(
+            snapshot.placement.normalLeft, snapshot.placement.normalTop,
+            snapshot.placement.normalRight, snapshot.placement.normalBottom
+        )
+        val work = WindowRect(
+            snapshot.work.left, snapshot.work.top,
+            snapshot.work.right, snapshot.work.bottom
+        )
+        fullscreenExitSnapCycle(normal, work).forEach { call ->
+            setBounds(
+                hwnd,
+                Rect(call.rect.left, call.rect.top, call.rect.right, call.rect.bottom),
+                call.flags
+            )
         }
-        window.setSize(width - 1, height)
-        EventQueue.invokeLater {
-            if (lastExit === snapshot && !isFullscreen) {
-                window.setSize(width, height)
-                refreshAwtLayout()
-                runExitSteps(remaining, snapshot, first = false)
-            }
-        }
+        refreshAwtLayout()
+        runExitSteps(remaining, snapshot, first = false)
     }
 
     private fun refreshAwtLayout() {
@@ -238,13 +267,25 @@ internal class WindowsBorderlessFullscreenController(
         )
     }
 
-    private fun readMonitor(hwnd: WinDef.HWND): Rect {
+    /** The monitor's full rect and its work area (monitor minus taskbar). */
+    private data class MonitorGeometry(val monitor: Rect, val work: Rect)
+
+    private fun readMonitorGeometry(hwnd: WinDef.HWND): MonitorGeometry {
         val monitor = User32.INSTANCE.MonitorFromWindow(hwnd, WinUser.MONITOR_DEFAULTTONEAREST)
             ?: error("Could not locate the monitor containing TeleDrive.")
         val info = WinUser.MONITORINFO()
         checkWin32(User32.INSTANCE.GetMonitorInfo(monitor, info).booleanValue(), "GetMonitorInfo")
         info.read()
-        return Rect(info.rcMonitor.left, info.rcMonitor.top, info.rcMonitor.right, info.rcMonitor.bottom)
+        return MonitorGeometry(
+            monitor = Rect(
+                info.rcMonitor.left, info.rcMonitor.top,
+                info.rcMonitor.right, info.rcMonitor.bottom
+            ),
+            work = Rect(
+                info.rcWork.left, info.rcWork.top,
+                info.rcWork.right, info.rcWork.bottom
+            )
+        )
     }
 
     private fun setStyle(hwnd: WinDef.HWND, style: Int) {
@@ -302,6 +343,8 @@ internal class WindowsBorderlessFullscreenController(
         val style: Int,
         val placement: SavedPlacement,
         val monitor: Rect,
+        /** Work area of [monitor] at enter time — the snap cycle's target geometry. */
+        val work: Rect,
         val composePosition: WindowPosition,
         val composeSize: DpSize
     )
@@ -329,7 +372,7 @@ internal enum class FullscreenExitStep {
     /** Restore the snapshot style + native placement + Compose geometry. */
     RESTORE_PLACEMENT,
 
-    /** Force a real native resize (size change and change-back). */
+    /** Force a real native resize: the snap cycle (see [fullscreenExitSnapCycle]). */
     FORCE_RESIZE_CYCLE,
 
     /** Re-assert the restored placement after the deferred steps. */
@@ -356,3 +399,53 @@ internal fun fullscreenExitSteps(wasMaximized: Boolean): List<FullscreenExitStep
             FullscreenExitStep.REASSERT_PLACEMENT
         )
     }
+
+/** A window rectangle in virtual-screen pixels, Win32 RECT semantics. */
+internal data class WindowRect(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+    val width: Int get() = right - left
+    val height: Int get() = bottom - top
+}
+
+/** One native SetWindowPos call of the fullscreen-exit snap cycle. */
+internal data class NativeSetWindowPosCall(val rect: WindowRect, val flags: Int)
+
+/**
+ * Flags for both snap-cycle calls. SWP_FRAMECHANGED is the point of the
+ * exercise: it makes the window manager recalculate the non-client frame
+ * for the new rect, which is what a real snap does and what an AWT
+ * setSize nudge never guarantees. Z-order and activation stay untouched.
+ */
+internal val fullscreenSnapCycleFlags: Int =
+    WinUser.SWP_FRAMECHANGED or WinUser.SWP_NOZORDER or WinUser.SWP_NOACTIVATE
+
+/**
+ * The rect a Windows snap-to-left would give a window on [work]: the
+ * left half of the work area, full work-area height. If the restored
+ * window already occupies exactly that rect, the right half is used
+ * instead — the cycle only repairs the scene if its first rect is
+ * genuinely different from the restored one.
+ */
+internal fun snapHalfRect(work: WindowRect, normal: WindowRect): WindowRect {
+    val midX = work.left + work.width / 2
+    val leftHalf = WindowRect(work.left, work.top, midX, work.bottom)
+    return if (leftHalf != normal) {
+        leftHalf
+    } else {
+        WindowRect(midX, work.top, work.right, work.bottom)
+    }
+}
+
+/**
+ * The FORCE_RESIZE_CYCLE step as native calls (PC-21), in execution
+ * order: snap to half the work area, then back to the exact restored
+ * rect — the two genuine resizes of the user's manual snap + restore,
+ * issued back-to-back through SetWindowPos.
+ */
+internal fun fullscreenExitSnapCycle(
+    normal: WindowRect,
+    work: WindowRect
+): List<NativeSetWindowPosCall> =
+    listOf(
+        NativeSetWindowPosCall(snapHalfRect(work, normal), fullscreenSnapCycleFlags),
+        NativeSetWindowPosCall(normal, fullscreenSnapCycleFlags)
+    )
