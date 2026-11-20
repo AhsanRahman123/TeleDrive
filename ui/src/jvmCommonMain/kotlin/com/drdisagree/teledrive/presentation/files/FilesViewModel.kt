@@ -1176,9 +1176,25 @@ class FilesViewModel(
     private val _folderConflict = MutableStateFlow<FolderConflict?>(null)
     val folderConflict: StateFlow<FolderConflict?> = _folderConflict.asStateFlow()
 
+    /**
+     * Import sessions currently running, keyed by pick + destination
+     * (round 6, PC-26). A repeated trigger of the same pick — a double
+     * click on a laggy window, a picker callback delivered twice — must
+     * never start a second import of the same tree: two concurrent
+     * imports each copied, registered and enqueued every file, which is
+     * how a large folder's queue filled with the same files again and
+     * again. The folder-conflict continuations ([mergeIntoExistingFolders],
+     * [keepBothFolders]) are single-shot by construction (they consume
+     * the conflict state) and do not need the guard.
+     */
+    private val activeImportKeys = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     fun importAndUpload(uris: List<String>, target: String? = folderId) {
         if (uris.isEmpty()) return
+        val importKey = uris.sorted().joinToString("\n") + "\n->\n" + (target ?: "")
+        if (!activeImportKeys.add(importKey)) return
         importScope.launch {
+          try {
             // Capture before expanding or showing the folder-conflict dialog. Cancel all
             // invalidates this token even if the import has not reached its first upload yet.
             val uploadGeneration = transferRepository.uploadQueueGeneration()
@@ -1205,6 +1221,9 @@ class FilesViewModel(
             }
             _folderConflict.value =
                 FolderConflict(clashes, renamed, sources, folders, target, uploadGeneration)
+          } finally {
+            activeImportKeys.remove(importKey)
+          }
         }
     }
 
@@ -1261,10 +1280,50 @@ class FilesViewModel(
         var copied = 0
         var failed = 0
         for (source in sources) {
+            // Cancel-all stops the import itself, not just the
+            // enqueueing (PC-26): without this break the loop kept
+            // copying the whole tree into managed storage after the
+            // user cancelled — thousands of staged copies nobody was
+            // ever going to upload, filling the PC's disk.
+            if (uploadsCancelled) break
             val destination = fileRepository.resolveImportFolder(
                 source.relativeFolder,
                 target
             )
+            // Idempotency (PC-26): if an earlier import of this tree
+            // already created a still-local row for this file in this
+            // folder, reuse that row and its one staged copy — never
+            // copy or register the same file twice. (The post-copy
+            // findDuplicate below cannot see such rows: it only matches
+            // content that already reached Telegram, and the staged
+            // copy's fresh unique path never matches by path either.)
+            val sourceFile = File(source.reference)
+            val alreadyImported = if (sourceFile.isFile) {
+                fileRepository.findLocalOnlyImport(
+                    folderId = destination,
+                    name = com.drdisagree.teledrive.core.files.FileNameUtils.sanitize(
+                        sourceFile.name
+                    ),
+                    sizeBytes = sourceFile.length()
+                )
+            } else {
+                null
+            }
+            if (alreadyImported != null) {
+                localImports++
+                when (
+                    val enqueue = transferRepository.enqueueUploadForGeneration(
+                        alreadyImported.id,
+                        uploadGeneration
+                    )
+                ) {
+                    is AppResult.Success -> {
+                        if (enqueue.value) imported++ else uploadsCancelled = true
+                    }
+                    is AppResult.Failure -> failed++
+                }
+                continue
+            }
             val file = fileImporter.import(source.reference)
             if (file == null) {
                 failed++
@@ -1301,7 +1360,19 @@ class FilesViewModel(
                                 )
                             ) {
                                 is AppResult.Success -> {
-                                    if (result.value) imported++ else uploadsCancelled = true
+                                    if (result.value) {
+                                        imported++
+                                    } else {
+                                        uploadsCancelled = true
+                                        // This file was imported for an
+                                        // upload batch that no longer
+                                        // exists: unwind it — staged copy
+                                        // discarded, row deleted — so a
+                                        // cancelled import leaves nothing
+                                        // behind (PC-26).
+                                        fileImporter.discard(file)
+                                        fileRepository.deleteLocalOnlyRow(drive.id)
+                                    }
                                 }
                                 is AppResult.Failure -> failed++
                             }

@@ -67,8 +67,21 @@ class DesktopFileImporter(
         File(path).parentFile == File(storagePaths.filesDir, LEGACY_IMPORT_DIR)
 
     override fun sweepOrphans(referencedPaths: Set<String>) {
-        val legacyImports = File(storagePaths.filesDir, LEGACY_IMPORT_DIR).listFiles() ?: return
+        val legacyImports = File(storagePaths.filesDir, LEGACY_IMPORT_DIR).listFiles()
+            .orEmpty()
         legacyImports.filter { it.isFile && it.absolutePath !in referencedPaths }
+            .forEach { it.delete() }
+        // Round 6 (PC-26): the current managed copies directory is swept
+        // too. A copy whose file row is gone — deleted when its upload
+        // was cancelled, the leak that filled the disk during the
+        // large-folder meltdown — is reclaimed here at startup.
+        // [referencedPaths] holds every row's local path (trashed rows
+        // included), so a copy any surviving row still points at is
+        // never touched; user originals are never in this directory at
+        // all (imports copy INTO it), so nothing here is user data.
+        val localCopies = File(storagePaths.filesDir, LOCAL_COPY_DIR).listFiles()
+            .orEmpty()
+        localCopies.filter { it.isFile && it.absolutePath !in referencedPaths }
             .forEach { it.delete() }
     }
 

@@ -87,7 +87,8 @@ class BackupScanTest {
         backupSessionTracker = CountingBackupSessionTracker(
             database.transferDao(),
             database.backupDao()
-        )
+        ),
+        storagePaths = paths
     )
 
     private val paths = object : AppStoragePaths by unused() {

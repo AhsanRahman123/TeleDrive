@@ -135,6 +135,27 @@ interface FileRepository {
 
     suspend fun findDuplicate(localPath: String): DriveFile?
 
+    /**
+     * The still-local row a previous import of the same file into the
+     * same folder already created (round 6, PC-26): matched by folder,
+     * display name and size, with a local path and no remote copy. Lets
+     * a repeated or resumed folder import reuse the row (and its one
+     * staged copy) instead of importing the file again.
+     */
+    suspend fun findLocalOnlyImport(
+        folderId: String?,
+        name: String,
+        sizeBytes: Long
+    ): DriveFile?
+
+    /**
+     * Deletes a file row that has no remote copy. Used to unwind an
+     * import entry whose upload was cancelled before it was ever
+     * enqueued, so a cancelled import leaves neither a row nor (via the
+     * importer's discard) a staged copy behind.
+     */
+    suspend fun deleteLocalOnlyRow(id: String)
+
     suspend fun sweepImportOrphans()
 
     suspend fun resolveImportFolder(relativePath: String, parentId: String?): String?

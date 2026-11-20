@@ -535,6 +535,27 @@ interface FileDao {
     @Query("SELECT localPath FROM files WHERE localPath IS NOT NULL")
     suspend fun allLocalPaths(): List<String>
 
+    /**
+     * A still-local row for the same content in the same folder: same
+     * name and size, no remote copy yet, holding a local path. The
+     * folder-import idempotency check (round 6, PC-26) — an interrupted
+     * or repeated import finds the row its first pass created instead
+     * of importing the file a second time.
+     */
+    @Query(
+        """SELECT * FROM files
+           WHERE folderId IS :folderId AND name = :name AND sizeBytes = :sizeBytes
+             AND chatId IS :chatId AND trashedAt IS NULL
+             AND messageId IS NULL AND localPath IS NOT NULL
+           LIMIT 1"""
+    )
+    suspend fun localOnlyMatch(
+        folderId: String?,
+        name: String,
+        sizeBytes: Long,
+        chatId: Long?
+    ): FileEntity?
+
     @Query(
         """WITH RECURSIVE offline_folders(id) AS (
                SELECT id FROM folders WHERE isAvailableOffline = 1

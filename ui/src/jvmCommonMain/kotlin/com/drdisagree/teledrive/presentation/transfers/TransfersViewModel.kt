@@ -1,133 +1,62 @@
 package com.drdisagree.teledrive.presentation.transfers
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.drdisagree.teledrive.domain.model.TransferSection
-import com.drdisagree.teledrive.domain.model.TransferTask
-import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
-import kotlinx.coroutines.flow.SharingStarted
+import com.drdisagree.teledrive.domain.repository.TransferRepository
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 
+/**
+ * The Transfers screen's ViewModel — a thin lifecycle wrapper over the
+ * app-level [TransfersStore] (round 6, PC-26). All state and every
+ * control live in the store, which is a Koin single: the screen and the
+ * desktop transfer widgets observe and control the SAME instance, so
+ * the two surfaces can never hold divergent transfer state or race
+ * each other's commands. The two-repository constructor remains for
+ * tests and direct constructions; it builds a private store, exactly
+ * like the pre-round-6 ViewModel behaved.
+ */
 class TransfersViewModel(
-    private val transferRepository: TransferRepository,
-    private val settingsRepository: SettingsRepository
+    private val store: TransfersStore
 ) : ViewModel() {
 
-    val transferConcurrency: StateFlow<Int> = settingsRepository.preferences
-        .map { it.transferConcurrency.coerceIn(1, 6) }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 2)
+    constructor(
+        transferRepository: TransferRepository,
+        settingsRepository: SettingsRepository
+    ) : this(TransfersStore(transferRepository, settingsRepository))
 
-    fun setTransferConcurrency(value: Int) = launch {
-        settingsRepository.update { it.copy(transferConcurrency = value.coerceIn(1, 6)) }
-        transferRepository.wakeWorker()
-    }
+    val transferConcurrency: StateFlow<Int> = store.transferConcurrency
 
-    private val rows = combine(
-        transferRepository.observeSection(TransferSection.ACTIVE, SECTION_LIMIT),
-        transferRepository.observeSection(TransferSection.PAUSED, SECTION_LIMIT),
-        transferRepository.observeSection(TransferSection.FAILED, SECTION_LIMIT),
-        transferRepository.observeSection(TransferSection.COMPLETED, SECTION_LIMIT)
-    ) { active, paused, failed, completed ->
-        val seen = mutableSetOf<String>()
-        listOf(
-            active.sortedWith(TRANSFER_ORDER).filterUnseen(seen),
-            paused.sortedWith(TRANSFER_ORDER).filterUnseen(seen),
-            failed.sortedWith(TRANSFER_ORDER).filterUnseen(seen),
-            completed.sortedWith(FINISHED_ORDER).filterUnseen(seen)
-        )
-    }
+    fun setTransferConcurrency(value: Int) = store.setTransferConcurrency(value)
 
-    private fun List<TransferTask>.filterUnseen(seen: MutableSet<String>): List<TransferTask> =
-        filter { seen.add(it.id) }
+    val uiState: StateFlow<TransfersUiState> = store.uiState
 
-    private val totals = combine(
-        transferRepository.observeSectionCount(TransferSection.ACTIVE),
-        transferRepository.observeSectionCount(TransferSection.PAUSED),
-        transferRepository.observeSectionCount(TransferSection.FAILED),
-        transferRepository.observeSectionCount(TransferSection.COMPLETED)
-    ) { counts -> counts.toList() }
+    fun pause(id: String) = store.pause(id)
 
-    val uiState: StateFlow<TransfersUiState> = combine(rows, totals) { sections, counts ->
-        TransfersUiState(
-            active = sections[0],
-            paused = sections[1],
-            failed = sections[2],
-            completed = sections[3],
-            activeTotal = counts[0],
-            pausedTotal = counts[1],
-            failedTotal = counts[2],
-            completedTotal = counts[3],
-            loading = false
-        )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TransfersUiState())
+    fun resume(id: String) = store.resume(id)
 
-    fun pause(id: String) = launch { transferRepository.pause(id) }
+    fun cancel(id: String) = store.cancel(id)
 
-    fun resume(id: String) = launch { transferRepository.resume(id) }
+    fun retry(id: String) = store.retry(id)
 
-    fun cancel(id: String) = launch { transferRepository.cancel(id) }
+    fun setPriority(id: String, priority: Int) = store.setPriority(id, priority)
 
-    fun retry(id: String) = launch { transferRepository.retry(id) }
+    fun reorderDownloads(orderedIds: List<String>) = store.reorderDownloads(orderedIds)
 
-    fun setPriority(id: String, priority: Int) =
-        launch { transferRepository.setPriority(id, priority) }
+    fun moveDownloadToTop(id: String) = store.moveDownloadToTop(id)
 
-    fun reorderDownloads(orderedIds: List<String>) =
-        launch { transferRepository.reorderDownloads(orderedIds) }
+    fun pauseSelected(ids: List<String>) = store.pauseSelected(ids)
 
-    fun moveDownloadToTop(id: String) =
-        launch { transferRepository.moveDownloadToTop(id) }
+    fun resumeSelected(ids: List<String>) = store.resumeSelected(ids)
 
-    fun pauseSelected(ids: List<String>) = launch {
-        ids.forEach { transferRepository.pause(it) }
-    }
+    fun cancelSelected(ids: List<String>) = store.cancelSelected(ids)
 
-    fun resumeSelected(ids: List<String>) = launch {
-        ids.forEach { transferRepository.resume(it) }
-    }
+    fun retrySelected(ids: List<String>) = store.retrySelected(ids)
 
-    fun cancelSelected(ids: List<String>) = launch {
-        ids.forEach { transferRepository.cancel(it) }
-    }
+    fun pauseAll() = store.pauseAll()
 
-    fun retrySelected(ids: List<String>) = launch {
-        ids.forEach { transferRepository.retry(it) }
-    }
+    fun resumeAll() = store.resumeAll()
 
-    fun pauseAll() = launch { transferRepository.pauseAll() }
+    fun cancelAll() = store.cancelAll()
 
-    fun resumeAll() = launch { transferRepository.resumeAll() }
-
-    fun cancelAll() = launch { transferRepository.cancelAll() }
-
-    fun clearFinished() = launch { transferRepository.clearFinished() }
-
-    private fun launch(block: suspend () -> Unit) {
-        viewModelScope.launch { block() }
-    }
-
-    private companion object {
-        /**
-         * Capped: reading tens of thousands of rows into one cursor overflows it while workers
-         * write progress to the table.
-         */
-        const val SECTION_LIMIT = 200
-
-        /**
-         * One order for every section, so bulk actions move rows between sections without
-         * reshuffling them.
-         */
-        val TRANSFER_ORDER: Comparator<TransferTask> =
-            compareByDescending<TransferTask> { it.progress }.thenBy { it.createdAt }
-
-        val FINISHED_ORDER: Comparator<TransferTask> =
-            compareByDescending<TransferTask> { it.completedAt ?: it.updatedAt }
-    }
+    fun clearFinished() = store.clearFinished()
 }

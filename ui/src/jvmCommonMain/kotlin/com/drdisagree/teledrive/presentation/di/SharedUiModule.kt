@@ -16,6 +16,7 @@ import com.drdisagree.teledrive.presentation.proxy.ProxyViewModel
 import com.drdisagree.teledrive.presentation.search.SearchViewModel
 import com.drdisagree.teledrive.presentation.settings.ExclusionsViewModel
 import com.drdisagree.teledrive.presentation.settings.SettingsViewModel
+import com.drdisagree.teledrive.presentation.transfers.TransfersStore
 import com.drdisagree.teledrive.presentation.transfers.TransfersViewModel
 import com.drdisagree.teledrive.presentation.trash.TrashViewModel
 import org.koin.core.module.dsl.singleOf
@@ -25,6 +26,12 @@ import org.koin.dsl.module
 val sharedUiModule = module {
     singleOf(::PreviewContentResolver)
     singleOf(::FileClipboard)
+    // One transfers state holder for the whole app (round 6, PC-26):
+    // the Transfers screen's ViewModel and the desktop widgets all bind
+    // to this single instance. Explicit factory: the store's third
+    // constructor parameter (its scope) has a default and must not be
+    // resolved by Koin.
+    single { TransfersStore(get(), get()) }
     viewModelOf(::AppViewModel)
     viewModelOf(::PreviewViewModel)
     viewModelOf(::ChannelsViewModel)

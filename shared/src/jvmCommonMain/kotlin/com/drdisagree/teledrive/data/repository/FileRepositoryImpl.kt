@@ -1308,6 +1308,29 @@ class FileRepositoryImpl(
         return Markdown.plain(firstLine).take(NOTE_TITLE_LIMIT)
     }
 
+    override suspend fun findLocalOnlyImport(
+        folderId: String?,
+        name: String,
+        sizeBytes: Long
+    ): DriveFile? = fileDao.localOnlyMatch(
+        folderId = folderId,
+        name = name,
+        sizeBytes = sizeBytes,
+        chatId = activeChannel.id()
+    )?.takeIf { entity ->
+        // The row is only reusable while its staged copy is still on
+        // disk; a row whose copy vanished is not an import to resume.
+        entity.localPath?.let { File(it).isFile } == true
+    }?.toDomain()
+
+    override suspend fun deleteLocalOnlyRow(id: String) {
+        val entity = fileDao.byId(id) ?: return
+        // Never delete a row that has gained a remote copy meanwhile:
+        // this unwind is only for entries that never left the device.
+        if (entity.messageId != null) return
+        fileDao.deleteByIds(listOf(id))
+    }
+
     override suspend fun findDuplicate(localPath: String): DriveFile? {
         val source = File(localPath)
         if (!source.exists() || !source.isFile) return null

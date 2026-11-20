@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.data.repository
 import com.drdisagree.teledrive.core.common.AppError
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.StorageInspector
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramException
@@ -41,7 +42,8 @@ class TransferRepositoryImpl(
     private val settingsRepository: SettingsRepository,
     private val validateUpload: ValidateUploadUseCase,
     private val storageInspector: StorageInspector,
-    private val backupSessionTracker: BackupSessionTracker
+    private val backupSessionTracker: BackupSessionTracker,
+    private val storagePaths: AppStoragePaths
 ) : TransferRepository {
 
     private val enqueueLock = Mutex()
@@ -414,6 +416,11 @@ class TransferRepositoryImpl(
             transferDao.setState(id, TransferState.CANCELLED, System.currentTimeMillis())
             transfer.fileId?.let { fileDao.setBackupStateIfLocalOnly(it, BackupState.NONE) }
         }
+        // The cancelled item's staged artifacts (encryption staging
+        // copy, split-upload scratch parts) are engine-created and
+        // reproducible from the file's own bytes — they must not be
+        // left behind as disk fill (round 6, PC-26).
+        deleteStagingArtifacts(transfer.fileId)
         syncFileStates()
         backupSessionTracker.refresh(transfer.backupSessionId)
     }
@@ -453,6 +460,7 @@ class TransferRepositoryImpl(
             transferDao.cancelAll(System.currentTimeMillis())
         }
         SafeLog.d(TAG, "Cancel-all invoked: $cancelled transfers cancelled")
+        sweepAllStagingArtifacts()
         syncFileStates()
         backupSessionTracker.refreshActive()
     }
@@ -602,9 +610,67 @@ class TransferRepositoryImpl(
 
     override suspend fun recoverOrphanedTransfers() {
         transferDao.requeueRunning()
+        sweepOrphanedStagingArtifacts()
         syncFileStates()
         kickWorker()
     }
+
+    /**
+     * The engine's staged artifacts for one file (round 6, PC-26): the
+     * encryption staging copy (`staging/<fileId>.tde`, written by
+     * TransferExecutor) and any split-upload scratch parts
+     * (`parts/<fileId>.<index>.part`, written by PartUploader). The
+     * executor deletes these on every orderly outcome; a cancel or a
+     * killed process can leave them behind, and leftovers are pure disk
+     * fill. Best-effort by design: cleanup must never break a cancel.
+     * User originals and completed files are never staged here, so
+     * nothing in these directories is user data.
+     */
+    private fun deleteStagingArtifacts(fileId: String?) {
+        if (fileId == null) return
+        runCatching {
+            File(stagingDir(), "$fileId.tde").delete()
+            partsDir().listFiles().orEmpty()
+                .filter { it.name.startsWith("$fileId.") }
+                .forEach { it.delete() }
+        }
+    }
+
+    /** Every staged artifact belongs to an unfinished transfer; cancel-all ends them all. */
+    private fun sweepAllStagingArtifacts() {
+        runCatching {
+            stagingDir().listFiles().orEmpty().forEach { it.delete() }
+            partsDir().listFiles().orEmpty().forEach { it.delete() }
+        }
+    }
+
+    /**
+     * Startup recovery: staged artifacts whose file has no unfinished
+     * transfer are leftovers of a killed process. Artifacts of still
+     * unfinished transfers are kept — their transfers resume.
+     */
+    private suspend fun sweepOrphanedStagingArtifacts() {
+        val stagedFileIds = runCatching {
+            val ids = mutableSetOf<String>()
+            stagingDir().listFiles().orEmpty().forEach { file ->
+                ids += file.name.removeSuffix(".tde")
+            }
+            partsDir().listFiles().orEmpty().forEach { file ->
+                ids += file.name.substringBefore('.')
+            }
+            ids
+        }.getOrDefault(emptySet())
+        for (fileId in stagedFileIds) {
+            val stillUnfinished = runCatching {
+                transferDao.unfinishedIdsForFiles(listOf(fileId)).isNotEmpty()
+            }.getOrDefault(true)
+            if (!stillUnfinished) deleteStagingArtifacts(fileId)
+        }
+    }
+
+    private fun stagingDir(): File = File(storagePaths.cacheDir, STAGING_DIR)
+
+    private fun partsDir(): File = File(storagePaths.cacheDir, PARTS_DIR)
 
     override suspend fun wakeWorker() {
         val prefs = settingsRepository.preferences.first()
@@ -659,5 +725,11 @@ class TransferRepositoryImpl(
         private const val TAG = "TransferRepository"
         private const val STORAGE_MARGIN = 100L * 1024 * 1024
         private const val SQL_BATCH = 500
+
+        // Directory names under the cache dir, shared with the engine:
+        // TransferExecutor stages encrypted uploads in "staging",
+        // PartUploader's SCRATCH_DIR is "parts".
+        private const val STAGING_DIR = "staging"
+        private const val PARTS_DIR = "parts"
     }
 }

@@ -41,6 +41,32 @@ class DesktopFileImporterTest {
         }
     }
 
+    @Test
+    fun `sweep reclaims local copies no row references and keeps referenced ones`() {
+        val root = Files.createTempDirectory("teledrive-sweep-test").toFile()
+        try {
+            val filesDir = File(root, "app/files").apply { mkdirs() }
+            val copiesDir = File(filesDir, "local-copies").apply { mkdirs() }
+            val referenced = File(copiesDir, "referenced.bin").apply {
+                writeBytes(byteArrayOf(1))
+            }
+            val orphaned = File(copiesDir, "orphaned.bin").apply {
+                writeBytes(byteArrayOf(2))
+            }
+            val importer = DesktopFileImporter(testStoragePaths(filesDir))
+
+            importer.sweepOrphans(setOf(referenced.absolutePath))
+
+            assertTrue("a copy a surviving row references is kept", referenced.isFile)
+            assertFalse(
+                "a copy whose row was deleted (the PC-26 leak) is reclaimed",
+                orphaned.exists()
+            )
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     private fun testStoragePaths(appFilesDir: File): AppStoragePaths = object : AppStoragePaths {
         override val filesDir: File = appFilesDir
         override val cacheDir: File = File(appFilesDir.parentFile, "cache")
