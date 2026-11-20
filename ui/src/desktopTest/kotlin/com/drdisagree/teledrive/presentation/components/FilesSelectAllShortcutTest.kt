@@ -1,7 +1,9 @@
 package com.drdisagree.teledrive.presentation.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,7 +33,10 @@ import org.junit.Test
  * the workspace Box carries [collectionCommandShortcuts] in preview
  * mode (Files has no inline text editor in that layer), and the
  * collection inside it carries its own item-level shortcuts bound to
- * the same action.
+ * the same action. Item focus is reached the way a keyboard user
+ * reaches it: Tab to the collection's container tab stop, then an
+ * arrow key steps into the first item (the collection's ENTER_KEYS
+ * are the arrows/Home/End, not Enter).
  */
 @OptIn(ExperimentalTestApi::class)
 class FilesSelectAllShortcutTest {
@@ -45,6 +50,13 @@ class FilesSelectAllShortcutTest {
         selectAllFires = 0
         rule.setContent {
             val requester = rememberCollectionCommandFocusRequester()
+            Column {
+            Box(
+                modifier = Modifier
+                    .testTag("before")
+                    .size(10.dp)
+                    .focusable()
+            )
             Box(
                 modifier = Modifier
                     .testTag("workspace")
@@ -80,6 +92,7 @@ class FilesSelectAllShortcutTest {
                     }
                 }
             }
+            }
         }
         rule.waitForIdle()
     }
@@ -109,8 +122,17 @@ class FilesSelectAllShortcutTest {
     @Test
     fun `ctrl+a fires exactly once when an item holds focus`() {
         setWorkspace()
-        rule.onNodeWithTag("collection").requestFocus()
-        rule.onNodeWithTag("collection").performKeyInput { pressKey(Key.Enter) }
+        // The keyboard user's path: Tab from before the workspace lands
+        // on the workspace tab stop, Tab again on the collection's
+        // container tab stop, and an arrow key steps into item 0.
+        rule.onNodeWithTag("before").requestFocus()
+        rule.onNodeWithTag("before").performKeyInput { pressKey(Key.Tab) }
+        rule.waitForIdle()
+        rule.onNodeWithTag("workspace").assertIsFocused()
+        rule.onNodeWithTag("workspace").performKeyInput { pressKey(Key.Tab) }
+        rule.waitForIdle()
+        rule.onNodeWithTag("collection").assertIsFocused()
+        rule.onNodeWithTag("collection").performKeyInput { pressKey(Key.DirectionDown) }
         rule.waitForIdle()
         rule.onNodeWithTag("item-0").assertIsFocused()
 
