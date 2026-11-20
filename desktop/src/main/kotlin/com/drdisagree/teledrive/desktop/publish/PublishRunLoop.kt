@@ -86,15 +86,24 @@ internal class PublishRunLoop(
 
     /** Waits out a backoff delay, returning early when [kick] or [cancel] lands. */
     private suspend fun awaitWakeOrTimeout(seconds: Int) {
-        // Consume the current signal and install the next one, so a kick
-        // that arrives between two waits is never lost.
-        val signal = synchronized(wakeLock) {
-            val current = wakeSignal
-            wakeSignal = CompletableDeferred()
-            current
-        }
+        // Await the CURRENT signal — the very deferred signalWake()
+        // completes. (An earlier version swapped in a fresh deferred
+        // before awaiting the old one, so a kick completed the new
+        // deferred while the loop slept on the old one: the wake was
+        // lost and the loop slept out the whole backoff. The
+        // PublishRunLoopTest re-kick case caught exactly that.)
+        val signal = synchronized(wakeLock) { wakeSignal }
         if (!signal.isCompleted) {
             withTimeoutOrNull(seconds.seconds) { signal.await() }
+        }
+        // Retire the consumed signal so the next wait starts fresh. A
+        // kick that lands after the wait already ended is not lost: it
+        // also set the rerun flag, and the loop drains again right
+        // after any wait ends.
+        synchronized(wakeLock) {
+            if (wakeSignal === signal && signal.isCompleted) {
+                wakeSignal = CompletableDeferred()
+            }
         }
     }
 

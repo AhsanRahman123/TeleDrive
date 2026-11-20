@@ -121,9 +121,17 @@ class DesktopUploadPickerDialogTest {
             )
         }
         waitForText("sub")
+        // Click into the subfolder first (the real folder-picking flow,
+        // and it puts focus inside the dialog exactly as a click does
+        // for a user), then walk back out one Escape at a time.
+        rule.onNodeWithText("sub").performClick()
+        waitForText(File(child, "sub").absolutePath)
+        pressEscape()
+        waitForText(child.absolutePath)
+        assertFalse("one Escape in folder mode must not close the picker", cancelled.get())
         pressEscape()
         waitForText(base.absolutePath)
-        assertFalse("one Escape in folder mode must not close the picker", cancelled.get())
+        assertFalse("Escape above a root must not close the picker", cancelled.get())
         base.deleteRecursively()
     }
 
