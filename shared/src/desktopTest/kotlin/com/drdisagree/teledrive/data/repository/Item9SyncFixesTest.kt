@@ -55,10 +55,19 @@ class Item9SyncFixesTest {
             files.rename("f1", "b.jpg", 5_000)
             files.markPendingPublish(listOf("f1"))
             telegram.onEditCaption = { throw TelegramException(400, "MESSAGE_ID_INVALID") }
+            val failures = mutableListOf<String>()
 
-            val drained = drainer().drain(isStopped = { false })
+            val drained = drainer().drain(
+                isStopped = { false },
+                onFailure = { fileId, _ -> failures += fileId }
+            )
 
-            assertFalse(drained)
+            // PC-32: a permanent rejection no longer fails the drain —
+            // the row is skipped for this drain and surfaced instead, so
+            // it cannot wedge the backlog behind it. What must never
+            // change: the row stays pending and its baseline is intact.
+            assertTrue(drained)
+            assertEquals(listOf("f1"), failures)
             assertTrue(files.byId("f1")!!.pendingPublish)
             assertEquals(baselineBefore, files.byId("f1")!!.remoteBase)
         }
@@ -67,12 +76,14 @@ class Item9SyncFixesTest {
     fun `a local-only file defers its publish instead of sealing it as published`() = runBlocking {
         files.upsert(file("local1", null).copy(pendingPublish = true))
 
-        // The drain reports not-drained (a deferred row remains, so the
-        // scheduler will retry after the upload lands) — and, critically,
-        // it returns at all instead of spinning on the deferred batch.
+        // PC-32: the drain no longer fetches local-only rows at all (it
+        // cannot publish what has no channel message), so it completes
+        // instead of reporting not-drained — and, critically, it returns
+        // at all instead of spinning on a deferred batch. The row keeps
+        // its flag, unsealed, until its upload lands.
         val drained = drainer().drain(isStopped = { false })
 
-        assertFalse(drained)
+        assertTrue(drained)
         assertTrue(files.byId("local1")!!.pendingPublish)
         assertNull(files.byId("local1")!!.remoteBase)
     }
