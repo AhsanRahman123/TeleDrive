@@ -202,6 +202,17 @@ class Round6TransferFixesTest {
     fun `localOnlyMatch finds only the still local row for the same folder name and size`() =
         runBlocking {
             val dao = database.fileDao()
+            // files.folderId is a foreign key: the folder row must exist.
+            database.folderDao().upsert(
+                com.drdisagree.teledrive.data.local.entity.FolderEntity(
+                    id = "folder-1",
+                    chatId = TEST_CHAT,
+                    parentId = null,
+                    name = "Folder",
+                    createdAt = 1,
+                    modifiedAt = 1
+                )
+            )
             suspend fun row(
                 id: String,
                 folderId: String?,
