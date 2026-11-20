@@ -14,6 +14,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -744,5 +747,75 @@ class DragSelectPointerTest {
         }
         rule.waitForIdle()
         assertEquals(setOf(3), selected)
+    }
+
+    @Test
+    fun `picker-style list drag - undrag un-paints and release commits the final range`() {
+        // The desktop picker's exact wiring (PC-15): a LazyColumn list, a
+        // snapshot base captured on drag start, ranges applied against the
+        // snapshot, and release-position processing on. This is the
+        // sequence from the user's recording: drag down paints, dragging
+        // back up must un-paint within the same gesture, and the release
+        // completes the gesture with no further mouse movement.
+        var selected by mutableStateOf(emptySet<Int>())
+        var rangeBase by mutableStateOf(emptySet<Int>())
+
+        rule.setContent {
+            val listState = rememberLazyListState()
+            val dragSelect = rememberDragSelect(
+                listState = listState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) {
+                        rangeBase + range
+                    } else {
+                        rangeBase - range.toSet()
+                    }
+                },
+                onEnd = {},
+                resolveNearestVisibleItem = true,
+                processReleasePosition = true
+            )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .size(width = 180.dp, height = 220.dp)
+                    .testTag("picker-list")
+                    .then(dragSelect)
+            ) {
+                items((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .background(if (index in selected) Color.Blue else Color.Gray)
+                    )
+                }
+            }
+        }
+
+        rule.onNodeWithTag("picker-list").performMouseInput {
+            moveTo(Offset(50f, 30f))
+            press()
+            moveTo(Offset(50f, 150f), delayMillis = 100)
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0, 1, 2), selected)
+
+        // Undrag: back up to the anchor row within the same press.
+        rule.onNodeWithTag("picker-list").performMouseInput {
+            moveTo(Offset(50f, 30f), delayMillis = 100)
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0), selected)
+
+        // Release commits exactly what is painted - nothing more arrives
+        // afterwards, and no re-entry is needed.
+        rule.onNodeWithTag("picker-list").performMouseInput {
+            release()
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0), selected)
     }
 }
