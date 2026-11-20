@@ -116,10 +116,18 @@ class SubtitleAppearanceDeltaTest {
     }
 
     @Test
-    fun `in VLC defaults mode the size still changes only the relative font size`() {
+    fun `in VLC defaults mode the size changes the relative font size and selects the renderer`() {
         val defaults = SubtitleAppearance(useSystemDefaults = true)
+        // Designed delta (PC-19): at the default size, defaults mode
+        // emits nothing at all. A size override rides the instance
+        // route — the relative font size plus an explicit freetype
+        // renderer selection (VLC's stock Windows text renderer, so
+        // the stock look is unchanged) that makes the size take effect
+        // deterministically instead of depending on the module
+        // auto-pick. Nothing else may move: no font, colour,
+        // background or edge option appears.
         assertEquals(
-            setOf("freetype-rel-fontsize"),
+            setOf("text-renderer", "freetype-rel-fontsize"),
             changedOptions(defaults, defaults.copy(textScale = 0.75f))
         )
     }
