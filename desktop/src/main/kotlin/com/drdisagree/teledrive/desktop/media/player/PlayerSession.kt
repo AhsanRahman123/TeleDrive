@@ -228,11 +228,6 @@ internal class PlayerSession(
             onSwapSettled()
             return
         }
-        val candidateFactory = dedicated ?: VlcPlayback.factory ?: run {
-            machine.settle(generation, candidateReady = false)
-            onSwapSettled()
-            return
-        }
         // PC-28: the swap gets TWO players from the candidate instance
         // (see SwapPlayers): a disposable proof player and the virgin
         // flip player. Creating either failing is a free rollback —
