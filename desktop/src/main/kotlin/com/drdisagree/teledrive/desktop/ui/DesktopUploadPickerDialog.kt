@@ -49,6 +49,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -94,11 +95,16 @@ internal enum class DesktopPickerSort { NAME, SIZE, MODIFIED, TYPE }
  *   only file-mode-only behaviours are selection (checkboxes, drag
  *   multi-select) and thumbnails, which have no meaning for a
  *   single-folder pick (PC-18);
- * - **Esc ladder, always consumed by the picker**: clear the search, then
- *   clear the selection, then step up one folder, and only at a filesystem
- *   root close the picker. The key can never fall through to the screen
- *   behind the dialog (one Esc used to close the picker AND navigate the
- *   app back). Backspace steps up one folder, as in Files.
+ * - **One back ladder for Esc and the title back button** (PC-15,
+ *   unified PC-22): clear the search, then clear the selection, then
+ *   step up one folder, and only at a filesystem root close the picker.
+ *   Both inputs run the same [pickerBackAction] implementation, and the
+ *   key handler is attached at the dialog level as well as on the
+ *   content column, so Escape reaches the ladder whichever part of the
+ *   dialog holds focus — it can never fall through to the dialog's own
+ *   dismiss (which closed the whole folder picker in one press) or to
+ *   the screen behind the dialog. Backspace steps up one folder, as in
+ *   Files.
  *
  * Every filesystem root on the machine (on Windows: every drive letter) is
  * offered in the drive row — the tree is never trapped on the drive it
@@ -154,26 +160,47 @@ internal fun DesktopUploadPickerDialog(
         currentDir.parentFile?.let { navigateTo(it) }
     }
 
-    // Esc ladder (PC-15): the picker consumes Escape itself, in the preview
-    // pass, so it can never also reach the screen behind the dialog.
-    fun handleEscape(): Boolean {
-        if (search.isNotBlank()) {
-            search = ""
-            return true
+    // The one-step back ladder (PC-15, unified PC-22): Escape and the
+    // title back button both run THIS function — a single implementation,
+    // so the two inputs can never drift apart again. Every step consumes
+    // the press; only the last one closes the picker.
+    fun handleBack() {
+        when (pickerBackAction(search, selected.isNotEmpty(), currentDir.parentFile != null)) {
+            PickerBackAction.CLEAR_SEARCH -> search = ""
+            PickerBackAction.CLEAR_SELECTION -> selected = emptySet()
+            PickerBackAction.NAVIGATE_UP -> stepUp()
+            PickerBackAction.CLOSE -> onCancel()
         }
-        return when (pickerEscapeAction(selected.isNotEmpty(), currentDir.parentFile != null)) {
-            PickerEscapeAction.CLEAR_SELECTION -> {
-                selected = emptySet()
+    }
+
+    // Key routing for the ladder. A preview key handler only sees the
+    // keys whose focus path passes through its node — and inside a
+    // dialog, focus can sit on the title's back button or on the dialog
+    // buttons, which are OUTSIDE the content column that carried this
+    // handler alone. There, Escape fell through to the dialog's own
+    // dismiss and closed the whole folder picker at once (PC-22). The
+    // handler is therefore attached at the dialog level as well (the
+    // AlertDialog modifier, an ancestor of title + content + buttons);
+    // both attachments call this one function, and whichever is on the
+    // path consumes the key first.
+    fun handlePickerKeyEvent(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        return when (event.key) {
+            Key.Escape -> {
+                handleBack()
                 true
             }
-            PickerEscapeAction.NAVIGATE_UP -> {
-                stepUp()
-                true
+            Key.Backspace -> {
+                // Files steps up on Backspace; while typing in the search
+                // field it must delete text.
+                if (!searchFocused && currentDir.parentFile != null) {
+                    stepUp()
+                    true
+                } else {
+                    false
+                }
             }
-            PickerEscapeAction.CLOSE -> {
-                onCancel()
-                true
-            }
+            else -> false
         }
     }
 
@@ -232,12 +259,19 @@ internal fun DesktopUploadPickerDialog(
 
     AlertDialog(
         onDismissRequest = onCancel,
+        // Dialog-level key routing for the back ladder (PC-22): this
+        // modifier sits on the dialog's content surface, an ancestor of
+        // the title, the content and the buttons, so Escape reaches the
+        // ladder whichever of them holds focus. The content column below
+        // carries the same handler as a second layer.
+        modifier = Modifier.onPreviewKeyEvent { event -> handlePickerKeyEvent(event) },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (currentDir.parentFile != null) {
-                    IconButton(onClick = { stepUp() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up")
-                    }
+                // Always present (PC-22): one step of the shared ladder —
+                // at a root, where there is nothing left to clear or step
+                // up from, the step closes the picker.
+                IconButton(onClick = { handleBack() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
                 Text(
                     text = currentDir.absolutePath,
@@ -252,23 +286,7 @@ internal fun DesktopUploadPickerDialog(
                 modifier = Modifier
                     .focusRequester(focusRequester)
                     .focusable()
-                    .onPreviewKeyEvent { event ->
-                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                        when (event.key) {
-                            Key.Escape -> handleEscape()
-                            Key.Backspace -> {
-                                // Files steps up on Backspace; while typing
-                                // in the search field it must delete text.
-                                if (!searchFocused && currentDir.parentFile != null) {
-                                    stepUp()
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                            else -> false
-                        }
-                    }
+                    .onPreviewKeyEvent { event -> handlePickerKeyEvent(event) }
             ) {
                 if (roots.size > 1) {
                     Row(
@@ -554,6 +572,40 @@ internal fun pickerEscapeAction(hasSelection: Boolean, hasParent: Boolean): Pick
         hasSelection -> PickerEscapeAction.CLEAR_SELECTION
         hasParent -> PickerEscapeAction.NAVIGATE_UP
         else -> PickerEscapeAction.CLOSE
+    }
+
+/** What one step back does inside the picker (PC-22). */
+internal enum class PickerBackAction { CLEAR_SEARCH, CLEAR_SELECTION, NAVIGATE_UP, CLOSE }
+
+/**
+ * The picker's ONE back ladder, run by both Escape and the title back
+ * button, in both modes (PC-22): clear the search first, then the
+ * selection, then step up one folder, and only at a filesystem root
+ * (no parent) close the picker. The steps after the search are exactly
+ * [pickerEscapeAction]'s — the search step is added in front of that
+ * single source rather than forking a second ladder.
+ *
+ * Before this unification the two inputs were NOT the same code: the
+ * back button called `stepUp()` directly (skipping the clear steps and
+ * disappearing entirely at a root, where a step back should close the
+ * picker), and the Esc handler lived only on the content column, so
+ * when focus sat on the title or the dialog buttons its preview
+ * handler was not on the key's path at all and the dialog's own
+ * dismiss closed the whole folder picker in one press.
+ */
+internal fun pickerBackAction(
+    search: String,
+    hasSelection: Boolean,
+    hasParent: Boolean
+): PickerBackAction =
+    if (search.isNotBlank()) {
+        PickerBackAction.CLEAR_SEARCH
+    } else {
+        when (pickerEscapeAction(hasSelection, hasParent)) {
+            PickerEscapeAction.CLEAR_SELECTION -> PickerBackAction.CLEAR_SELECTION
+            PickerEscapeAction.NAVIGATE_UP -> PickerBackAction.NAVIGATE_UP
+            PickerEscapeAction.CLOSE -> PickerBackAction.CLOSE
+        }
     }
 
 /** Search filter for the picker listing: name contains the query, case-insensitive. */
