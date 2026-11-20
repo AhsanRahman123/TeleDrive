@@ -757,6 +757,14 @@ class DragSelectPointerTest {
         // sequence from the user's recording: drag down paints, dragging
         // back up must un-paint within the same gesture, and the release
         // completes the gesture with no further mouse movement.
+        //
+        // Each gesture runs inside ONE performMouseInput block: the
+        // drag-select helper paints per frame while a drag is active, so
+        // waiting for idle mid-gesture (pointer still down) never settles
+        // - the same reason the touch tests in this file pump frames
+        // instead. The final states below can only occur if the undrag
+        // un-painted during the gesture: with incremental (non-snapshot)
+        // application the first gesture would end with {0, 1, 2}.
         var selected by mutableStateOf(emptySet<Int>())
         var rangeBase by mutableStateOf(emptySet<Int>())
 
@@ -795,27 +803,27 @@ class DragSelectPointerTest {
             }
         }
 
+        // Gesture 1: press row 0, drag down over rows 1-2, drag back up to
+        // the anchor, release. Snapshot semantics end with just the anchor.
         rule.onNodeWithTag("picker-list").performMouseInput {
             moveTo(Offset(50f, 30f))
             press()
             moveTo(Offset(50f, 150f), delayMillis = 100)
-        }
-        rule.waitForIdle()
-        assertEquals(setOf(0, 1, 2), selected)
-
-        // Undrag: back up to the anchor row within the same press.
-        rule.onNodeWithTag("picker-list").performMouseInput {
             moveTo(Offset(50f, 30f), delayMillis = 100)
-        }
-        rule.waitForIdle()
-        assertEquals(setOf(0), selected)
-
-        // Release commits exactly what is painted - nothing more arrives
-        // afterwards, and no re-entry is needed.
-        rule.onNodeWithTag("picker-list").performMouseInput {
             release()
         }
         rule.waitForIdle()
         assertEquals(setOf(0), selected)
+
+        // Gesture 2: press row 1, drag to row 2, release right there - the
+        // painted range including the release row commits at once.
+        rule.onNodeWithTag("picker-list").performMouseInput {
+            moveTo(Offset(50f, 90f))
+            press()
+            moveTo(Offset(50f, 150f), delayMillis = 100)
+            release()
+        }
+        rule.waitForIdle()
+        assertEquals(setOf(0, 1, 2), selected)
     }
 }
