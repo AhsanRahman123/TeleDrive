@@ -888,6 +888,30 @@ fun FilesScreen(
                                         contentDescription = stringResource(Res.string.common_select)
                                     )
                                 }
+                                // PC-29: select-all is reachable without first
+                                // entering selection mode — the selection bar's
+                                // own toggle was invisible until a selection
+                                // already existed, which is why it read as
+                                // "there is no select-all button".
+                                TooltipIconButton(
+                                    tooltip = stringResource(if (allSelected) Res.string.common_deselect_all else Res.string.common_select_all),
+                                    onClick = {
+                                        if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = if (allSelected) {
+                                            Icons.Filled.Deselect
+                                        } else {
+                                            Icons.Filled.SelectAll
+                                        },
+                                        contentDescription = if (allSelected) {
+                                            stringResource(Res.string.common_deselect_all)
+                                        } else {
+                                            stringResource(Res.string.common_select_all)
+                                        }
+                                    )
+                                }
                                 TooltipIconButton(tooltip = "View thumbnail queue", onClick = onViewThumbnailQueue) {
                                     Icon(
                                         Icons.Filled.CloudQueue,

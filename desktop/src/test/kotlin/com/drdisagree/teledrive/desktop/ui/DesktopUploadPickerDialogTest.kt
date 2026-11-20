@@ -160,6 +160,23 @@ class DesktopUploadPickerDialogTest {
         rule.onNodeWithContentDescription("Select all").performClick()
         waitForText("Select (2)")
 
+        // With the search field focused, Ctrl+A is the FIELD's select
+        // text, never the picker's select-all: type a query that hides
+        // every file, press Ctrl+A, and the existing selection must be
+        // untouched (a hijack would replace it with the empty visible
+        // set and the count would drop to Select (0)).
+        rule.onNode(hasSetTextAction()).performTextInput("zz")
+        rule.waitUntil(5_000) {
+            rule.onAllNodesWithText("No files here").fetchSemanticsNodes().isNotEmpty()
+        }
+        rule.onNode(hasSetTextAction()).performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.A)
+            keyUp(Key.CtrlLeft)
+        }
+        rule.waitForIdle()
+        waitForText("Select (2)")
+
         assertFalse(cancelled.get())
         child.parentFile?.deleteRecursively()
     }
