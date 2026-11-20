@@ -95,8 +95,9 @@ internal enum class DesktopPickerSort { NAME, SIZE, MODIFIED, TYPE }
  *   only file-mode-only behaviours are selection (checkboxes, drag
  *   multi-select) and thumbnails, which have no meaning for a
  *   single-folder pick (PC-18);
- * - **One back ladder for Esc and the title back button** (PC-15,
- *   unified PC-22): clear the search, then clear the selection, then
+ * - **One back ladder for Esc and the back button** (PC-15, unified
+ *   PC-22; the button sits beside the grid/list view toggle since
+ *   PC-24): clear the search, then clear the selection, then
  *   step up one folder, and only at a filesystem root close the picker.
  *   Both inputs run the same [pickerBackAction] implementation, and the
  *   key handler is attached at the dialog level as well as on the
@@ -161,7 +162,7 @@ internal fun DesktopUploadPickerDialog(
     }
 
     // The one-step back ladder (PC-15, unified PC-22): Escape and the
-    // title back button both run THIS function — a single implementation,
+    // back button both run THIS function — a single implementation,
     // so the two inputs can never drift apart again. Every step consumes
     // the press; only the last one closes the picker.
     fun handleBack() {
@@ -175,9 +176,8 @@ internal fun DesktopUploadPickerDialog(
 
     // Key routing for the ladder. A preview key handler only sees the
     // keys whose focus path passes through its node — and inside a
-    // dialog, focus can sit on the title's back button or on the dialog
-    // buttons, which are OUTSIDE the content column that carried this
-    // handler alone. There, Escape fell through to the dialog's own
+    // dialog, focus can sit on the dialog buttons, which are OUTSIDE
+    // the content column that carried this handler alone. There, Escape fell through to the dialog's own
     // dismiss and closed the whole folder picker at once (PC-22). The
     // handler is therefore attached at the dialog level as well (the
     // AlertDialog modifier, an ancestor of title + content + buttons);
@@ -266,20 +266,12 @@ internal fun DesktopUploadPickerDialog(
         // carries the same handler as a second layer.
         modifier = Modifier.onPreviewKeyEvent { event -> handlePickerKeyEvent(event) },
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Always present (PC-22): one step of the shared ladder —
-                // at a root, where there is nothing left to clear or step
-                // up from, the step closes the picker.
-                IconButton(onClick = { handleBack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                }
-                Text(
-                    text = currentDir.absolutePath,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                text = currentDir.absolutePath,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         },
         text = {
             Column(
@@ -353,6 +345,13 @@ internal fun DesktopUploadPickerDialog(
                         )
                     }
                     Box(modifier = Modifier.weight(1f))
+                    // Beside the view toggle (PC-24, moved from the
+                    // title): one step of the shared back ladder — at a
+                    // root, where there is nothing left to clear or step
+                    // up from, the step closes the picker.
+                    IconButton(onClick = { handleBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
                     IconButton(onClick = { gridView = !gridView }) {
                         Icon(
                             imageVector = if (gridView) {
@@ -578,7 +577,7 @@ internal fun pickerEscapeAction(hasSelection: Boolean, hasParent: Boolean): Pick
 internal enum class PickerBackAction { CLEAR_SEARCH, CLEAR_SELECTION, NAVIGATE_UP, CLOSE }
 
 /**
- * The picker's ONE back ladder, run by both Escape and the title back
+ * The picker's ONE back ladder, run by both Escape and the back
  * button, in both modes (PC-22): clear the search first, then the
  * selection, then step up one folder, and only at a filesystem root
  * (no parent) close the picker. The steps after the search are exactly

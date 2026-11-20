@@ -7,7 +7,7 @@ import org.junit.Test
 
 /**
  * PC-22(b): ONE back ladder for the picker, run identically by Escape
- * and by the title back button, in file mode and folder mode alike:
+ * and by the back button, in file mode and folder mode alike:
  * clear the search → clear the selection → up one folder level → close
  * only at the top. Before the unification, folder mode's Esc could
  * bypass the ladder entirely (focus outside the content column let the
