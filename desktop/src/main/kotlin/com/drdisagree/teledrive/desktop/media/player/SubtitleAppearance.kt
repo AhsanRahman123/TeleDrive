@@ -168,6 +168,30 @@ internal fun SubtitleAppearance.toVlcMediaOptions(videoHeight: Int = 1080): List
     }
 
 /**
+ * The full media-option list for one media start on the lifelong player
+ * (PC-13): the appearance's media options, plus — for an appearance-Apply
+ * reload — the resume position carried by `:start-time` (part of the
+ * start itself, not a post-start seek) and `:start-paused` when the video
+ * was paused. For an ordinary first start [restartPositionMs] is null and
+ * only the appearance options are emitted. Pure and pinned by tests so the
+ * Apply sequence (switch track -> Apply -> same position, same play state,
+ * controls untouched) cannot silently regress.
+ */
+internal fun mediaStartOptions(
+    appearance: SubtitleAppearance,
+    restartPositionMs: Long?,
+    restartWasPlaying: Boolean
+): List<String> = buildList {
+    addAll(appearance.toVlcMediaOptions())
+    if (restartPositionMs != null) {
+        if (restartPositionMs >= 1_000L) {
+            add(":start-time=${restartPositionMs / 1000.0}")
+        }
+        if (!restartWasPlaying) add(":start-paused")
+    }
+}
+
+/**
  * The `freetype-rel-fontsize` value for a text scale (1.0 = 100%).
  *
  * VLC 3.0's freetype renderer treats this option as a DIVISOR, not a size:

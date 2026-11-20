@@ -583,15 +583,11 @@ internal fun DesktopMediaPlayer(
                     // one — on this same player, with the position carried
                     // by :start-time as part of the start itself instead of
                     // a post-start seek racing the event stream.
-                    val startOptions = buildList {
-                        addAll(subtitleAppearance.toVlcMediaOptions())
-                        if (restart != null) {
-                            if (restart.positionMs >= 1_000L) {
-                                add(":start-time=${restart.positionMs / 1000.0}")
-                            }
-                            if (!restart.wasPlaying) add(":start-paused")
-                        }
-                    }
+                    val startOptions = mediaStartOptions(
+                        appearance = subtitleAppearance,
+                        restartPositionMs = restart?.positionMs,
+                        restartWasPlaying = restart?.wasPlaying ?: true
+                    )
                     val started = runCatching {
                         player.media().start(mrl, *startOptions.toTypedArray())
                     }.getOrDefault(false)
