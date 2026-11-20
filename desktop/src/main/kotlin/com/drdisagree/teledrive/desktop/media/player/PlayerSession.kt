@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit
 import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
+import uk.co.caprica.vlcj.player.embedded.EmbeddedMediaPlayer
 
 /**
  * The stable player facade the media viewer binds to (PC-19, report 20).
@@ -47,7 +48,7 @@ import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
  */
 internal class PlayerSession(
     private val eventGate: PlayerEventGate<MediaPlayer>,
-    private val configurePlayer: (MediaPlayer) -> Unit,
+    private val configurePlayer: (EmbeddedMediaPlayer) -> Unit,
     private val onSwapSettled: () -> Unit
 ) {
 
@@ -373,7 +374,7 @@ internal class PlayerSession(
     private fun createPlayer(
         factory: MediaPlayerFactory,
         dedicatedFactory: MediaPlayerFactory?
-    ): MediaPlayer {
+    ): EmbeddedMediaPlayer {
         val player = factory.mediaPlayers().newEmbeddedMediaPlayer()
         if (dedicatedFactory != null) {
             VlcFactoryLifecycle.register(dedicatedFactory, player)
