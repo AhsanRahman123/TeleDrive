@@ -7,6 +7,7 @@ import com.drdisagree.teledrive.core.network.NetworkMonitor
 import com.drdisagree.teledrive.core.network.NetworkStatus
 import com.drdisagree.teledrive.core.permissions.PermissionChecker
 import com.drdisagree.teledrive.core.power.PowerMonitor
+import com.drdisagree.teledrive.core.publish.PublishRunState
 import com.drdisagree.teledrive.core.publish.PublishScheduler
 import com.drdisagree.teledrive.core.security.AppLockManager
 import com.drdisagree.teledrive.core.transfer.BackupGate
@@ -228,6 +229,16 @@ class HomeViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PendingSync())
 
     fun syncNow() = publishScheduler.kick()
+
+    /**
+     * The publish run's visible state (PC-32): the banner renders it next
+     * to the pending count, so a running, retrying, stopped or failed
+     * sync no longer looks identical to a working one.
+     */
+    val syncRunState: StateFlow<PublishRunState> = publishScheduler.runState
+
+    /** Cooperative, lossless stop of the active publish run (PC-32). */
+    fun cancelSync() = publishScheduler.cancel()
 
     val sections: StateFlow<HomeSections> = settingsRepository.preferences
         .map(HomeSections::of)

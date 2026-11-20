@@ -319,6 +319,12 @@
     <string name="home_scan_now">Scan now</string>
     <string name="home_scanning">Scanning…</string>
     <string name="home_sync_now">Sync now</string>
+    <string name="home_sync_cancel">Cancel</string>
+    <string name="home_sync_stopped">Sync stopped</string>
+    <string name="home_sync_failed">Some changes could not be saved</string>
+    <string name="home_sync_failed_count">%1$d files were rejected by Telegram and are still waiting</string>
+    <string name="home_sync_retrying">Sync hit a problem — retrying…</string>
+    <string name="home_sync_progress">%1$d of %2$d saved in this run</string>
     <string name="home_section_favorites">Favorites</string>
     <string name="home_section_recent">Recent</string>
     <string name="home_section_storage">Storage</string>

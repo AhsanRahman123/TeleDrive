@@ -18,7 +18,7 @@ import kotlinx.serialization.json.Json
 
 internal class FakeTelegram : TelegramClient by unused() {
     var documents: List<RemoteDocument> = emptyList()
-    val editedCaptions = mutableMapOf<Long, String>()
+    val editedCaptions = java.util.concurrent.ConcurrentHashMap<Long, String>()
     val uploads = mutableListOf<Pair<String, String>>()
     val deletedMessages = mutableListOf<Long>()
     val managedDownloadRemovalRequests = mutableListOf<String>()

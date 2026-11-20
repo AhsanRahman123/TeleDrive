@@ -83,6 +83,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import PublishRunState
 import com.drdisagree.teledrive.core.telegram.TelegramConnectionState
 import com.drdisagree.teledrive.domain.model.BackupHold
 import com.drdisagree.teledrive.domain.model.BackupSessionStatus
@@ -189,6 +190,7 @@ fun HomeScreen(
     var lastConnectionStatus by remember { mutableStateOf<ConnectionStatus?>(null) }
     val scanning by viewModel.scanning.collectAsStateWithLifecycle()
     val pendingSync by viewModel.pendingSync.collectAsStateWithLifecycle()
+    val syncRunState by viewModel.syncRunState.collectAsStateWithLifecycle()
     var shownSync by remember { mutableStateOf(pendingSync) }
     if (pendingSync.visible) shownSync = pendingSync
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -352,7 +354,12 @@ fun HomeScreen(
             if (pendingSync.visible) {
                 item(key = "pending-sync") {
                     Column(Modifier.animateItem()) {
-                        PendingSyncCard(pending = shownSync, onSyncNow = viewModel::syncNow)
+                        PendingSyncCard(
+                            pending = shownSync,
+                            runState = syncRunState,
+                            onSyncNow = viewModel::syncNow,
+                            onCancelSync = viewModel::cancelSync
+                        )
                     }
                 }
             }
@@ -544,7 +551,19 @@ private fun CollectionLinks(
 }
 
 @Composable
-private fun PendingSyncCard(pending: PendingSync, onSyncNow: () -> Unit) {
+private fun PendingSyncCard(
+    pending: PendingSync,
+    runState: PublishRunState,
+    onSyncNow: () -> Unit,
+    onCancelSync: () -> Unit
+) {
+    // PC-32: the banner renders the publish run's real state. Before,
+    // a stalled, retrying or cancelled sync was indistinguishable from
+    // a working one — the count just froze. Cancel appears only while
+    // a run is actually active (or waiting to retry); the count text
+    // always shows the true remaining backlog, including after a stop.
+    val runActive = runState is PublishRunState.Running ||
+        runState is PublishRunState.WaitingRetry
     GroupedList(horizontalPadding = 0.dp) {
         add {
             Row(
@@ -561,22 +580,46 @@ private fun PendingSyncCard(pending: PendingSync, onSyncNow: () -> Unit) {
                 Spacer(Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        stringResource(Res.string.home_saving_changes),
+                        stringResource(
+                            when (runState) {
+                                is PublishRunState.Stopped ->
+                                    Res.string.home_sync_stopped
+                                is PublishRunState.Failed ->
+                                    Res.string.home_sync_failed
+                                else -> Res.string.home_saving_changes
+                            }
+                        ),
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Text(
-                        text = if (pending.files > 0) {
-                            pluralStringResource(
-                                Res.plurals.home_saving_changes_left,
-                                pending.files,
-                                pending.files
-                            )
-                        } else {
-                            stringResource(Res.string.home_saving_folder_changes)
+                        text = when (runState) {
+                            is PublishRunState.Running ->
+                                if (runState.total > 0) {
+                                    stringResource(
+                                        Res.string.home_sync_progress,
+                                        runState.published,
+                                        runState.total
+                                    )
+                                } else {
+                                    pendingCountText(pending)
+                                }
+                            is PublishRunState.WaitingRetry ->
+                                stringResource(Res.string.home_sync_retrying)
+                            is PublishRunState.Failed ->
+                                stringResource(
+                                    Res.string.home_sync_failed_count,
+                                    runState.failedFiles
+                                )
+                            else -> pendingCountText(pending)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+                if (runActive) {
+                    TextButton(onClick = onCancelSync, shapes = ButtonDefaults.shapes()) {
+                        Text(stringResource(Res.string.home_sync_cancel))
+                    }
                 }
                 TextButton(onClick = onSyncNow, shapes = ButtonDefaults.shapes()) {
                     Text(stringResource(Res.string.home_sync_now))
@@ -585,6 +628,18 @@ private fun PendingSyncCard(pending: PendingSync, onSyncNow: () -> Unit) {
         }
     }
 }
+
+@Composable
+private fun pendingCountText(pending: PendingSync): String =
+    if (pending.files > 0) {
+        pluralStringResource(
+            Res.plurals.home_saving_changes_left,
+            pending.files,
+            pending.files
+        )
+    } else {
+        stringResource(Res.string.home_saving_folder_changes)
+    }
 
 @Composable
 private fun CollectionRow(

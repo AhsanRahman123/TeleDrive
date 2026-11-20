@@ -45,7 +45,8 @@ class PublishOutboxDrainer(
     suspend fun drain(
         isStopped: () -> Boolean,
         onProgress: suspend (published: Int, total: Int) -> Unit = { _, _ -> },
-        onWaiting: suspend (secondsLeft: Int) -> Unit = {}
+        onWaiting: suspend (secondsLeft: Int) -> Unit = {},
+        onFailure: suspend (fileId: String, error: AppError) -> Unit = { _, _ -> }
     ): Boolean {
         var lastPublished = 0
         var lastTotal = 0
@@ -61,7 +62,8 @@ class PublishOutboxDrainer(
                 lastTotal = total
                 onProgress(publishedNow, total)
             },
-            onWaiting = onWaiting
+            onWaiting = onWaiting,
+            onFailure = onFailure
         )
         SafeLog.d(
             TAG,
@@ -73,17 +75,36 @@ class PublishOutboxDrainer(
     private suspend fun drainOutbox(
         isStopped: () -> Boolean,
         onProgress: suspend (published: Int, total: Int) -> Unit,
-        onWaiting: suspend (secondsLeft: Int) -> Unit
+        onWaiting: suspend (secondsLeft: Int) -> Unit,
+        onFailure: suspend (fileId: String, error: AppError) -> Unit
     ): Boolean {
         if (!replayDeletes(isStopped)) return false
 
+        // PC-32: only rows that can actually be published are fetched.
+        // The old fetch took the oldest pending rows of ANY kind, so a
+        // backlog whose head was local-only import rows (no channel
+        // message yet — nothing to caption-edit) filled every batch,
+        // published nothing, failed the drain, and was refetched
+        // identically forever: the pending count could not move by one
+        // and no error ever surfaced. Those rows keep their flag here
+        // and publish once their upload lands. Rows this drain finds
+        // permanently rejected join [excludedIds] for the rest of the
+        // drain so one poisoned row cannot block the rows behind it
+        // either; the next drain retries them.
+        val excludedIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
         val published = AtomicInteger(0)
         while (true) {
             if (isStopped()) return false
-            val batch = fileDao.pendingPublish(BATCH_SIZE)
+            val batch = if (excludedIds.isEmpty()) {
+                fileDao.pendingPublishable(BATCH_SIZE)
+            } else {
+                fileDao.pendingPublishableExcluding(BATCH_SIZE, excludedIds.toList())
+            }
             if (batch.isEmpty()) break
             onProgress(published.get(), published.get() + fileDao.pendingPublishCount())
-            if (!publishBatch(batch, published, isStopped, onProgress, onWaiting)) return false
+            if (!publishBatch(batch, published, excludedIds, isStopped, onProgress, onWaiting, onFailure)) {
+                return false
+            }
         }
 
         SafeLog.d(
@@ -109,23 +130,26 @@ class PublishOutboxDrainer(
      * once. Everything on the publish path already tolerates concurrent callers: the
      * manifest publisher is stateless per file, the Telegram pacer serializes edit starts
      * and holds an account-wide flood deadline, and [clearIfUnchanged] seals each file
-     * inside its own transaction. Per-file outcomes match the old one-by-one loop exactly:
-     * success seals and clears the row, a short rate limit waits and retries the same
-     * file, a permanent rejection keeps the row pending and stops the drain, and a transient failure or an
-     * over-long rate limit stops the drain with unstarted files still flagged for the
-     * next run.
+     * inside its own transaction. Per-file outcomes (PC-32):
+     * success seals and clears the row; a short rate limit waits and retries the same
+     * file; a local-only row (its message vanished between fetch and publish) is
+     * excluded for the rest of this drain and stays pending for a later one; a
+     * permanent rejection keeps the row pending, is reported through `onFailure`,
+     * excludes the row for the rest of this drain, and does NOT stop it — the rows
+     * behind it still publish; a transient failure or an over-long rate limit stops
+     * the drain with unstarted files still flagged for the next run.
      */
     private suspend fun publishBatch(
         batch: List<FileEntity>,
         published: AtomicInteger,
+        excludedIds: MutableSet<String>,
         isStopped: () -> Boolean,
         onProgress: suspend (published: Int, total: Int) -> Unit,
-        onWaiting: suspend (secondsLeft: Int) -> Unit
+        onWaiting: suspend (secondsLeft: Int) -> Unit,
+        onFailure: suspend (fileId: String, error: AppError) -> Unit
     ): Boolean = coroutineScope {
         val slots = Semaphore(MAX_PARALLEL_PUBLISHES)
         val aborted = AtomicBoolean(false)
-        val deferred = AtomicInteger(0)
-        val publishedAtStart = published.get()
         val progressLock = Mutex()
 
         suspend fun reportProgress() {
@@ -163,29 +187,35 @@ class PublishOutboxDrainer(
                                 ) {
                                     // No channel message yet: keep the row
                                     // pending (it publishes once the upload
-                                    // lands) but do not block this drain.
+                                    // lands) and exclude it for the rest of
+                                    // this drain so it cannot be refetched.
+                                    // (The drain fetches publishable rows
+                                    // only, so this is now just the race
+                                    // where the message vanished mid-drain.)
                                     SafeLog.d(
                                         TAG,
                                         "Deferring publish for local-only file ${entity.id}"
                                     )
-                                    deferred.incrementAndGet()
+                                    excludedIds += entity.id
                                     return@withPermit
                                 } else if (isPermanent(error)) {
                                     // Never dead-letter into silence: the row
-                                    // stays pending with its baseline intact,
-                                    // the failure is logged, and the drain
-                                    // stops so the scheduler retries with
-                                    // backoff instead of the caption edit
-                                    // being dropped forever.
+                                    // stays pending with its baseline intact
+                                    // and the failure is surfaced, but the
+                                    // drain continues — one rejected caption
+                                    // must not wedge the backlog behind it
+                                    // (PC-32). The next drain retries it.
                                     SafeLog.w(
                                         TAG,
                                         "Caption publish permanently rejected for " +
                                             "${entity.id} (message ${entity.messageId}); " +
                                             "keeping it pending for retry: $error"
                                     )
-                                    aborted.set(true)
+                                    excludedIds += entity.id
+                                    onFailure(entity.id, error)
                                     return@withPermit
                                 } else {
+                                    onFailure(entity.id, error)
                                     aborted.set(true)
                                     return@withPermit
                                 }
@@ -196,12 +226,7 @@ class PublishOutboxDrainer(
             }
         }
         jobs.awaitAll()
-        // A batch in which every file was deferred (local-only, nothing could
-        // be published) must stop the drain: the rows stay pending, so
-        // refetching the batch would spin forever. The scheduler retries
-        // later; once the upload lands, the publish proceeds normally.
-        val madeProgress = published.get() > publishedAtStart
-        !aborted.get() && !isStopped() && !(deferred.get() > 0 && !madeProgress)
+        !aborted.get() && !isStopped()
     }
 
     /**

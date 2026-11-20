@@ -78,6 +78,31 @@ interface FileDao {
     @Query("SELECT * FROM files WHERE pendingPublish = 1 LIMIT :limit")
     suspend fun pendingPublish(limit: Int): List<FileEntity>
 
+    /**
+     * Pending rows that can actually be published right now: a manifest
+     * publish edits the caption of the file's channel message, so a row
+     * without one (a local-only import whose upload has not landed — or
+     * was cancelled) has nothing to edit yet. The publish drainer fetches
+     * ONLY these (PC-32): fetching the unpublishable ones too let a head
+     * of local-only rows fill every batch, publish nothing, and wedge
+     * the whole backlog behind them while the pending count never moved.
+     * Local-only rows keep their flag and become publishable the moment
+     * their upload lands.
+     */
+    @Query(
+        "SELECT * FROM files WHERE pendingPublish = 1 " +
+            "AND chatId IS NOT NULL AND messageId IS NOT NULL LIMIT :limit"
+    )
+    suspend fun pendingPublishable(limit: Int): List<FileEntity>
+
+    /** [pendingPublishable] minus the rows this drain already knows are rejected. */
+    @Query(
+        "SELECT * FROM files WHERE pendingPublish = 1 " +
+            "AND chatId IS NOT NULL AND messageId IS NOT NULL " +
+            "AND id NOT IN (:excludeIds) LIMIT :limit"
+    )
+    suspend fun pendingPublishableExcluding(limit: Int, excludeIds: List<String>): List<FileEntity>
+
     @Query("SELECT * FROM files WHERE id = :id")
     suspend fun byId(id: String): FileEntity?
 
