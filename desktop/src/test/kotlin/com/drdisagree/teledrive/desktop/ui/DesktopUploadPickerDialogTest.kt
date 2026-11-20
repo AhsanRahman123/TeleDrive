@@ -121,11 +121,16 @@ class DesktopUploadPickerDialogTest {
             )
         }
         waitForText("sub")
-        // Click into the subfolder first (the real folder-picking flow,
-        // and it puts focus inside the dialog exactly as a click does
-        // for a user), then walk back out one Escape at a time.
+        // Click into the subfolder first (the real folder-picking
+        // flow), then walk back out one Escape at a time. The search
+        // field is clicked after the navigation to give the dialog a
+        // persistent focus home: the clicked row leaves the
+        // composition when the listing reloads, and key input in the
+        // test scene needs a live focus target (in the files-mode test
+        // the search field plays this role after the search step).
         rule.onNodeWithText("sub").performClick()
         waitForText(File(child, "sub").absolutePath)
+        rule.onNode(hasSetTextAction()).performClick()
         pressEscape()
         waitForText(child.absolutePath)
         assertFalse("one Escape in folder mode must not close the picker", cancelled.get())
