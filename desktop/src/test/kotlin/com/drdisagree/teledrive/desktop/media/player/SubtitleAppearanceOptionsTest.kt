@@ -12,6 +12,36 @@ class SubtitleAppearanceOptionsTest {
     }
 
     @Test
+    fun `VLC defaults with a changed text size emit the size through the instance route`() {
+        // PC-19: Text size is changeable in VLC-defaults mode. The size is a
+        // freetype config value, so defaults mode emits the renderer
+        // selection and the corrected divisor mapping — and NOTHING else:
+        // font, colours, background and edge stay VLC's own.
+        val options = SubtitleAppearance(textScale = 1.5f)
+            .toVlcFactoryArguments(videoHeight = 1080)
+
+        assertEquals(
+            listOf("--text-renderer=freetype", "--freetype-rel-fontsize=11"),
+            options
+        )
+    }
+
+    @Test
+    fun `VLC defaults with size and position emit exactly those three arguments`() {
+        val options = SubtitleAppearance(textScale = 0.5f, verticalPosition = 0.5f)
+            .toVlcFactoryArguments(videoHeight = 1080)
+
+        assertEquals(
+            listOf(
+                "--text-renderer=freetype",
+                "--freetype-rel-fontsize=32",
+                "--sub-margin=410"
+            ),
+            options
+        )
+    }
+
+    @Test
     fun `custom appearance maps supported settings to VLC factory arguments`() {
         val options = SubtitleAppearance(
             useSystemDefaults = false,
@@ -105,7 +135,9 @@ class SubtitleAppearanceOptionsTest {
                 edgeType = EDGE_SHADOW,
                 verticalPosition = 0.92f
             ),
-            SubtitleAppearance(verticalPosition = 0.5f)
+            SubtitleAppearance(verticalPosition = 0.5f),
+            SubtitleAppearance(textScale = 2.0f),
+            SubtitleAppearance(textScale = 0.5f, verticalPosition = 0.08f)
         )
         val emitted = appearances.flatMap { appearance ->
             appearance.toVlcFactoryArguments(videoHeight = 1080)

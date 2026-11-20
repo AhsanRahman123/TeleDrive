@@ -134,6 +134,25 @@ internal fun SubtitleAppearance.toVlcFactoryArguments(videoHeight: Int = 1080): 
         options += "--freetype-shadow-opacity=${if (hasShadow) (value.edgeOpacity * 160f).roundToInt() else 0}"
     }
 
+    if (value.useSystemDefaults &&
+        kotlin.math.abs(value.textScale - 1f) > 0.001f
+    ) {
+        // VLC-defaults mode keeps VLC's own font, colours, background and
+        // edge (no freetype-font/-color/-background arguments are emitted),
+        // but the TEXT SIZE is changeable there too (PC-19): size is a
+        // freetype config value, so it rides the same verified instance
+        // route as Custom mode. The freetype renderer is selected
+        // explicitly — it is VLC's stock Windows text renderer, so the
+        // stock look is unchanged — which makes the size deterministic
+        // instead of depending on the module auto-pick. Emitting the size
+        // through per-media options instead was proven inert on the user's
+        // PC (1.6.3: Apply changed nothing), and libVLC exposes no live
+        // variable API (see report 20), so instance config is the only
+        // channel that demonstrably reaches the renderer.
+        options += "--text-renderer=freetype"
+        options += "--freetype-rel-fontsize=${freetypeRelFontSize(value.textScale)}"
+    }
+
     if (videoHeight > 0 &&
         kotlin.math.abs(value.verticalPosition - DEFAULT_SUBTITLE_VERTICAL_POSITION) > 0.001f
     ) {
