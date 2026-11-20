@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.desktop.resources.Res as DesktopRes
 import com.drdisagree.teledrive.desktop.resources.bubble_active_count
+import com.drdisagree.teledrive.desktop.resources.bubble_cancel_all
 import com.drdisagree.teledrive.desktop.resources.bubble_downloading
 import com.drdisagree.teledrive.desktop.resources.bubble_file_active
 import com.drdisagree.teledrive.desktop.resources.bubble_files_active

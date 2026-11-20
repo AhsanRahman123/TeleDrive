@@ -160,7 +160,13 @@ import com.drdisagree.teledrive.resources.home_status_syncing
 import com.drdisagree.teledrive.resources.home_status_rebuilding
 import com.drdisagree.teledrive.resources.home_storage_percent
 import com.drdisagree.teledrive.resources.home_storage_percent_min
+import com.drdisagree.teledrive.resources.home_sync_cancel
+import com.drdisagree.teledrive.resources.home_sync_failed
+import com.drdisagree.teledrive.resources.home_sync_failed_count
 import com.drdisagree.teledrive.resources.home_sync_now
+import com.drdisagree.teledrive.resources.home_sync_progress
+import com.drdisagree.teledrive.resources.home_sync_retrying
+import com.drdisagree.teledrive.resources.home_sync_stopped
 import com.drdisagree.teledrive.resources.home_transfer_history
 import com.drdisagree.teledrive.resources.home_transfer_history_subtitle
 import com.drdisagree.teledrive.resources.home_waiting_count
