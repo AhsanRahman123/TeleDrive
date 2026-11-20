@@ -154,6 +154,8 @@ import com.drdisagree.teledrive.resources.settings_set
 import com.drdisagree.teledrive.resources.settings_set_passphrase
 import com.drdisagree.teledrive.resources.settings_share_debug_log
 import com.drdisagree.teledrive.resources.settings_share_debug_log_subtitle
+import com.drdisagree.teledrive.resources.settings_show_transfer_bubble
+import com.drdisagree.teledrive.resources.settings_show_transfer_bubble_subtitle
 import com.drdisagree.teledrive.resources.settings_shown_channels_private_owned
 import com.drdisagree.teledrive.resources.settings_shows_archived_collection_home
 import com.drdisagree.teledrive.resources.settings_shows_hidden_collection_home
@@ -201,6 +203,7 @@ import com.drdisagree.teledrive.presentation.platform.LocalDeviceOwnerGate
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
 import com.drdisagree.teledrive.presentation.platform.LocalFolderPicker
 import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
+import com.drdisagree.teledrive.presentation.platform.LocalTransferBubblePreference
 import com.drdisagree.teledrive.presentation.platform.PickResult
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
@@ -974,6 +977,7 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
     var showDisplayRefreshRateDialog by remember { mutableStateOf(false) }
     var unsupportedDisplayRefreshRate by remember { mutableStateOf<Int?>(null) }
     val displayRefreshRateController = LocalDisplayRefreshRateController.current
+    val transferBubblePreference = LocalTransferBubblePreference.current
     val supportedRefreshRatesLabel = displayRefreshRateController?.supportedRates()
         ?.sorted()?.joinToString(" / ") { "$it Hz" }?.ifBlank { "none detected" } ?: "none detected"
     var showLanguageDialog by remember { mutableStateOf(false) }
@@ -1103,6 +1107,22 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                     supportedRefreshRatesLabel
                 ),
                 onClick = { showDisplayRefreshRateDialog = true }
+            )
+        }
+        // Desktop-only: the floating transfer bubble's master switch. The
+        // platform hook is null elsewhere, so the row never renders there.
+        add(visible = transferBubblePreference != null) {
+            var bubbleEnabled by remember {
+                mutableStateOf(transferBubblePreference!!.isEnabled())
+            }
+            SettingsSwitchRow(
+                title = stringResource(Res.string.settings_show_transfer_bubble),
+                subtitle = stringResource(Res.string.settings_show_transfer_bubble_subtitle),
+                checked = bubbleEnabled,
+                onChange = { value ->
+                    bubbleEnabled = value
+                    transferBubblePreference!!.setEnabled(value)
+                }
             )
         }
         add {
