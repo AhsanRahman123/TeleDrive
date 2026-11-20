@@ -118,21 +118,31 @@ internal class WindowsBorderlessFullscreenController(
             // RESTORE_PLACEMENT has run synchronously above. Run the
             // remaining exit steps (see fullscreenExitSteps) deferred:
             // Compose applies WindowState changes asynchronously, and —
-            // the PC-20/PC-21 defect — restoring the SAME bounds never
-            // produces a real size change, so the Compose scene keeps
-            // its stale fullscreen surface (UI cut / scaled wrong) until
-            // one arrives. The user's own workaround is a WINDOWS snap
-            // to half screen and back — a window-manager operation. The
-            // 1.6.4 attempt imitated it with AWT setSize nudges, which
-            // the window layer can coalesce into nothing (a 1 px change
-            // that AWT/Compose may absorb without any frame
-            // recalculation ever reaching the native window). A floating
-            // exit therefore now performs the snap itself through the
-            // native channel: SetWindowPos to a genuinely different
-            // rect (half the work area) and back to the exact restored
-            // rect, both with SWP_FRAMECHANGED (see
-            // forceNativeSnapCycle). Every step is guarded by the exit
-            // token — a fast re-enter (or a newer exit) supersedes it.
+            // the PC-20/PC-21/PC-23 defect — restoring the SAME bounds
+            // never produces a real size change, so the Compose scene
+            // keeps its stale fullscreen surface (UI cut / scaled /
+            // ghosted) until one arrives. The user's own workaround is
+            // a WINDOWS snap to half screen and back — a window-manager
+            // operation. The 1.6.4 attempt imitated it with AWT setSize
+            // nudges, which the window layer can coalesce into nothing
+            // (a 1 px change that AWT/Compose may absorb without any
+            // frame recalculation ever reaching the native window).
+            // 1.6.5 performed the snap natively for FLOATING restores
+            // (see forceNativeSnapCycle) — but skipped the cycle for a
+            // MAXIMIZED restore on the assumption that Windows resizes
+            // such a window itself. His 1.6.5 test video disproves that
+            // assumption: the window was maximized (the title bar shows
+            // the restore-down glyph before and after the exit), the
+            // cycle never ran, and the scene stayed stale. A maximized
+            // exit is in fact the worst case: fullscreen and maximized
+            // share (nearly) the same outer rect, so the ONLY change is
+            // the frame coming back and shrinking the client area — no
+            // genuine resize at all. A maximized restore therefore now
+            // runs its own excursion through the window manager's show
+            // states (see forceMaximizedResync), the only operations
+            // that resize a maximized window. Every step is guarded by
+            // the exit token — a fast re-enter (or a newer exit)
+            // supersedes it.
             runExitSteps(
                 fullscreenExitSteps(
                     wasMaximized =
@@ -173,7 +183,13 @@ internal class WindowsBorderlessFullscreenController(
             if (lastExit === snapshot && !isFullscreen) {
                 when (steps.first()) {
                     FullscreenExitStep.FORCE_RESIZE_CYCLE ->
-                        forceNativeSnapCycle(snapshot, steps.drop(1))
+                        if (snapshot.placement.composePlacement ==
+                            WindowPlacement.Maximized
+                        ) {
+                            forceMaximizedResync(snapshot, steps.drop(1))
+                        } else {
+                            forceNativeSnapCycle(snapshot, steps.drop(1))
+                        }
 
                     FullscreenExitStep.REASSERT_PLACEMENT -> {
                         runCatching {
@@ -235,6 +251,66 @@ internal class WindowsBorderlessFullscreenController(
                 Rect(call.rect.left, call.rect.top, call.rect.right, call.rect.bottom),
                 call.flags
             )
+        }
+        refreshAwtLayout()
+        runExitSteps(remaining, snapshot, first = false)
+    }
+
+    /**
+     * The FORCE_RESIZE_CYCLE for a MAXIMIZED restore (PC-23): an
+     * excursion through the window manager's own show states —
+     * SW_RESTORE to the snapshot's normal rect, a native snap to half
+     * the work area, then SW_SHOWMAXIMIZED back — executed from the
+     * pure plan in [fullscreenExitMaximizedResync].
+     *
+     * Why show states and not rects: while a window is maximized the
+     * window manager owns its rectangle, and SetWindowPos cannot
+     * resize it (the rect is ignored; only the stored normal position
+     * moves). Every rect-based cycle — the 1.6.4 AWT nudge, the 1.6.5
+     * native snap — is therefore a no-op against a maximized window,
+     * which is exactly the window he runs (restore-down glyph in the
+     * 1.6.5 test video). The only operations that genuinely resize a
+     * maximized window are show-state changes, and they are also
+     * literally his manual cure: snapping a maximized window first
+     * restores it to floating, and putting it back re-maximizes it.
+     * Each transition is performed and completed by the window manager
+     * itself (client area changes by hundreds of pixels each time),
+     * so the render surface is forced through real size changes that
+     * cannot be coalesced into a no-op the way a same-size or
+     * rect-only call can. The three operations run back-to-back on
+     * this EDT turn, so a re-enter cannot interleave mid-excursion,
+     * and the excursion ends in SW_SHOWMAXIMIZED — the window manager's
+     * own maximized state on the snapshot's monitor (the snap rect is
+     * inside that monitor's work area), identical to the state
+     * RESTORE_PLACEMENT established.
+     */
+    private fun forceMaximizedResync(snapshot: Snapshot, remaining: List<FullscreenExitStep>) {
+        val hwnd = hwnd()
+        val normal = WindowRect(
+            snapshot.placement.normalLeft, snapshot.placement.normalTop,
+            snapshot.placement.normalRight, snapshot.placement.normalBottom
+        )
+        val work = WindowRect(
+            snapshot.work.left, snapshot.work.top,
+            snapshot.work.right, snapshot.work.bottom
+        )
+        fullscreenExitMaximizedResync(normal, work).forEach { step ->
+            when (step.kind) {
+                MaximizedResyncStepKind.RESTORE_TO_NORMAL ->
+                    User32.INSTANCE.ShowWindow(hwnd, WinUser.SW_RESTORE)
+
+                MaximizedResyncStepKind.SNAP_TO_HALF -> {
+                    val rect = requireNotNull(step.rect) { "SNAP_TO_HALF carries a rect." }
+                    setBounds(
+                        hwnd,
+                        Rect(rect.left, rect.top, rect.right, rect.bottom),
+                        step.flags
+                    )
+                }
+
+                MaximizedResyncStepKind.REMAXIMIZE ->
+                    User32.INSTANCE.ShowWindow(hwnd, WinUser.SW_SHOWMAXIMIZED)
+            }
         }
         refreshAwtLayout()
         runExitSteps(remaining, snapshot, first = false)
@@ -372,7 +448,12 @@ internal enum class FullscreenExitStep {
     /** Restore the snapshot style + native placement + Compose geometry. */
     RESTORE_PLACEMENT,
 
-    /** Force a real native resize: the snap cycle (see [fullscreenExitSnapCycle]). */
+    /**
+     * Force real native resizes the render surface cannot coalesce
+     * away: the snap cycle for a floating restore
+     * ([fullscreenExitSnapCycle]), the show-state excursion for a
+     * maximized one ([fullscreenExitMaximizedResync]).
+     */
     FORCE_RESIZE_CYCLE,
 
     /** Re-assert the restored placement after the deferred steps. */
@@ -380,25 +461,25 @@ internal enum class FullscreenExitStep {
 }
 
 /**
- * The ordered exit sequence (PC-20). A floating window gets the resize
- * cycle: restoring identical bounds emits no real WM_SIZE, so without it
- * the Compose scene stays stale until the user resizes by hand. A
- * maximized restore skips it — Windows generates genuine resizes itself
- * when a window returns to maximized, so the scene re-lays out anyway.
+ * The ordered exit sequence (PC-20, corrected PC-23). EVERY restore
+ * gets the resize cycle: restoring identical bounds emits no real
+ * WM_SIZE, so without it the Compose scene stays stale until the user
+ * resizes by hand. [wasMaximized] no longer changes the step list —
+ * up to 1.6.5 a maximized restore skipped the cycle on the assumption
+ * that "Windows generates genuine resizes itself when a window returns
+ * to maximized". The 1.6.5 test video disproved that on his machine:
+ * the window was maximized throughout (restore-down glyph), the exit
+ * changed nothing but the frame, the cycle never ran, and the scene
+ * stayed ghosted. What differs for a maximized restore is only HOW
+ * the cycle is executed (show-state excursion instead of rect calls —
+ * see [fullscreenExitMaximizedResync]), never whether it runs.
  */
 internal fun fullscreenExitSteps(wasMaximized: Boolean): List<FullscreenExitStep> =
-    if (wasMaximized) {
-        listOf(
-            FullscreenExitStep.RESTORE_PLACEMENT,
-            FullscreenExitStep.REASSERT_PLACEMENT
-        )
-    } else {
-        listOf(
-            FullscreenExitStep.RESTORE_PLACEMENT,
-            FullscreenExitStep.FORCE_RESIZE_CYCLE,
-            FullscreenExitStep.REASSERT_PLACEMENT
-        )
-    }
+    listOf(
+        FullscreenExitStep.RESTORE_PLACEMENT,
+        FullscreenExitStep.FORCE_RESIZE_CYCLE,
+        FullscreenExitStep.REASSERT_PLACEMENT
+    )
 
 /** A window rectangle in virtual-screen pixels, Win32 RECT semantics. */
 internal data class WindowRect(val left: Int, val top: Int, val right: Int, val bottom: Int) {
@@ -448,4 +529,51 @@ internal fun fullscreenExitSnapCycle(
     listOf(
         NativeSetWindowPosCall(snapHalfRect(work, normal), fullscreenSnapCycleFlags),
         NativeSetWindowPosCall(normal, fullscreenSnapCycleFlags)
+    )
+
+/** One native operation of the maximized-restore resync excursion. */
+internal enum class MaximizedResyncStepKind {
+    /** ShowWindow(SW_RESTORE): leave maximized for the snapshot's normal rect. */
+    RESTORE_TO_NORMAL,
+
+    /** SetWindowPos to half the work area, [fullscreenSnapCycleFlags]. */
+    SNAP_TO_HALF,
+
+    /** ShowWindow(SW_SHOWMAXIMIZED): return to the maximized state. */
+    REMAXIMIZE
+}
+
+/** One planned operation of [fullscreenExitMaximizedResync]. */
+internal data class MaximizedResyncStep(
+    val kind: MaximizedResyncStepKind,
+    /** Target rect — only [MaximizedResyncStepKind.SNAP_TO_HALF] carries one. */
+    val rect: WindowRect? = null,
+    /** SetWindowPos flags — only [MaximizedResyncStepKind.SNAP_TO_HALF] carries any. */
+    val flags: Int = 0
+)
+
+/**
+ * The FORCE_RESIZE_CYCLE for a MAXIMIZED restore (PC-23), as a pure
+ * plan: restore to the snapshot's normal rect, snap to half the work
+ * area, re-maximize. A maximized window's rectangle belongs to the
+ * window manager — SetWindowPos cannot resize it — so genuine resizes
+ * can only be produced by changing the show state, which is also
+ * exactly the user's manual cure (snap un-maximizes his window;
+ * restoring it re-maximizes it). The snap step reuses [snapHalfRect],
+ * so its rect is always genuinely different from the normal rect, and
+ * it sits inside the snapshot monitor's work area, so the final
+ * re-maximize lands on the same monitor the window was maximized on.
+ */
+internal fun fullscreenExitMaximizedResync(
+    normal: WindowRect,
+    work: WindowRect
+): List<MaximizedResyncStep> =
+    listOf(
+        MaximizedResyncStep(MaximizedResyncStepKind.RESTORE_TO_NORMAL),
+        MaximizedResyncStep(
+            MaximizedResyncStepKind.SNAP_TO_HALF,
+            snapHalfRect(work, normal),
+            fullscreenSnapCycleFlags
+        ),
+        MaximizedResyncStep(MaximizedResyncStepKind.REMAXIMIZE)
     )

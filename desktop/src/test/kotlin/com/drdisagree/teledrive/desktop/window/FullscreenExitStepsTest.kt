@@ -1,17 +1,23 @@
 package com.drdisagree.teledrive.desktop.window
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The PC-20 exit contract: after fullscreen, the app must do to the
- * window what the user's manual snap-to-half-and-restore does — force a
- * REAL native resize — because restoring identical bounds emits no
- * WM_SIZE and the Compose scene keeps rendering at the stale fullscreen
- * surface. These tests pin the step plan the controller executes; the
- * actual Win32 timing can only be confirmed on his Windows PC.
+ * The PC-20 exit contract, corrected by PC-23: after fullscreen, the
+ * app must do to the window what the user's manual
+ * snap-to-half-and-restore does — force REAL native resizes — because
+ * restoring identical bounds emits no WM_SIZE and the Compose scene
+ * keeps rendering at the stale fullscreen surface. Up to 1.6.5 a
+ * maximized exit skipped the cycle on the assumption that Windows
+ * resizes a re-maximized window itself; his 1.6.5 test video (window
+ * maximized throughout — restore-down glyph — scene ghosted after the
+ * exit) disproved that, so a maximized exit now runs the cycle too
+ * (executed as a show-state excursion, see
+ * [fullscreenExitMaximizedResync]). These tests pin the step plan the
+ * controller executes; the actual Win32 behaviour can only be
+ * confirmed on his Windows PC.
  */
 class FullscreenExitStepsTest {
 
@@ -28,16 +34,17 @@ class FullscreenExitStepsTest {
     }
 
     @Test
-    fun `a maximized exit skips the resize cycle - windows resizes it itself`() {
+    fun `a maximized exit also forces a resize cycle - it is not skipped`() {
         val steps = fullscreenExitSteps(wasMaximized = true)
         assertEquals(
             listOf(
                 FullscreenExitStep.RESTORE_PLACEMENT,
+                FullscreenExitStep.FORCE_RESIZE_CYCLE,
                 FullscreenExitStep.REASSERT_PLACEMENT
             ),
             steps
         )
-        assertFalse(steps.contains(FullscreenExitStep.FORCE_RESIZE_CYCLE))
+        assertTrue(steps.contains(FullscreenExitStep.FORCE_RESIZE_CYCLE))
     }
 
     @Test
