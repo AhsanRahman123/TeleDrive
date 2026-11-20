@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.desktop.files
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.ImportSource
 import com.drdisagree.teledrive.core.files.expandDirectory
+import com.drdisagree.teledrive.core.files.expandDirectoryTree
 import com.drdisagree.teledrive.core.files.FileImporter
 import com.drdisagree.teledrive.core.files.FileNameUtils
 import com.drdisagree.teledrive.core.files.ImportedFile
@@ -55,6 +56,11 @@ class DesktopFileImporter(
 
     override fun expand(reference: String): List<ImportSource> =
         expandDirectory(reference) ?: listOf(ImportSource(reference, ""))
+
+    // The complete directory tree of a picked folder — empty folders
+    // included — so the import can create the whole structure (PC-22).
+    override fun expandFolders(reference: String): List<String> =
+        expandDirectoryTree(reference)?.folders.orEmpty()
 
     // Managed local copies are permanent until the user invokes Free up space.
     override fun isStaged(path: String): Boolean =

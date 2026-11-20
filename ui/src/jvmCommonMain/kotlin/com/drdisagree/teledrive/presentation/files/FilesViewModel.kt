@@ -12,6 +12,7 @@ import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
 import com.drdisagree.teledrive.core.files.FileImporter
 import com.drdisagree.teledrive.core.files.ImportSource
+import com.drdisagree.teledrive.core.files.parentBeforeChild
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.files.PendingShare
 import com.drdisagree.teledrive.domain.model.DriveFile
@@ -1182,13 +1183,17 @@ class FilesViewModel(
             // invalidates this token even if the import has not reached its first upload yet.
             val uploadGeneration = transferRepository.uploadQueueGeneration()
             val sources = uris.flatMap { uri -> fileImporter.expand(uri) }
+            // The picks' complete directory trees (PC-22): directories
+            // that contain no files appear in no source's relativeFolder,
+            // so they travel separately and are created explicitly.
+            val folders = uris.flatMap { uri -> fileImporter.expandFolders(uri) }
             val existing = fileRepository.folderNamesIn(target)
-            val clashes = sources
-                .mapNotNull { it.relativeFolder.substringBefore('/').takeIf(String::isNotEmpty) }
+            val clashes = (sources.map { it.relativeFolder } + folders)
+                .mapNotNull { it.substringBefore('/').takeIf(String::isNotEmpty) }
                 .distinct()
                 .filter { name -> existing.any { it.equals(name, ignoreCase = true) } }
             if (clashes.isEmpty()) {
-                runImport(sources, target, uploadGeneration)
+                runImport(sources, folders, target, uploadGeneration)
                 return@launch
             }
             val taken = existing.mapTo(mutableSetOf()) { it.lowercase() }
@@ -1198,13 +1203,16 @@ class FilesViewModel(
                     .first { it.lowercase() !in taken }
                     .also { taken += it.lowercase() }
             }
-            _folderConflict.value = FolderConflict(clashes, renamed, sources, target, uploadGeneration)
+            _folderConflict.value =
+                FolderConflict(clashes, renamed, sources, folders, target, uploadGeneration)
         }
     }
 
     fun mergeIntoExistingFolders() {
         val conflict = _folderConflict.getAndUpdate { null } ?: return
-        importScope.launch { runImport(conflict.sources, conflict.target, conflict.uploadGeneration) }
+        importScope.launch {
+            runImport(conflict.sources, conflict.folders, conflict.target, conflict.uploadGeneration)
+        }
     }
 
     fun keepBothFolders() {
@@ -1214,7 +1222,14 @@ class FilesViewModel(
             val replacement = conflict.renamed[top] ?: return@map source
             source.copy(relativeFolder = replacement + source.relativeFolder.removePrefix(top))
         }
-        importScope.launch { runImport(sources, conflict.target, conflict.uploadGeneration) }
+        // The directory trees get the same top-segment rename as the
+        // files, so the structure lands inside the renamed folder too.
+        val folders = conflict.folders.map { folder ->
+            val top = folder.substringBefore('/')
+            val replacement = conflict.renamed[top] ?: return@map folder
+            replacement + folder.removePrefix(top)
+        }
+        importScope.launch { runImport(sources, folders, conflict.target, conflict.uploadGeneration) }
     }
 
     fun cancelFolderImport() {
@@ -1223,10 +1238,21 @@ class FilesViewModel(
 
     private suspend fun runImport(
         sources: List<ImportSource>,
+        folders: List<String>,
         target: String?,
         uploadGeneration: Long
     ) {
         _messages.tryEmit(UiText.Resource(Res.string.files_import_preparing))
+        // Create the picks' complete directory structure first (PC-22):
+        // directories that contain no files are pointed into by no
+        // source, so without this pass they would never exist in the
+        // library. Same mechanism the file loop below uses for every
+        // file's destination — resolveImportFolder (resolve-or-create),
+        // parents before children. An entirely empty picked folder is
+        // just the single first entry here.
+        for (folderPath in parentBeforeChild(folders)) {
+            fileRepository.resolveImportFolder(folderPath, target)
+        }
         var imported = 0
         var localImports = 0
         var uploadsCancelled = false

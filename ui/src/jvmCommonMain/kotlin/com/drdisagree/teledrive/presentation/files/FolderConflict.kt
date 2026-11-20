@@ -6,6 +6,8 @@ data class FolderConflict(
     val names: List<String>,
     val renamed: Map<String, String>,
     val sources: List<ImportSource>,
+    /** The picks' directory trees (PC-22), renamed alongside [sources] on Keep Both. */
+    val folders: List<String>,
     val target: String?,
     val uploadGeneration: Long
 )
