@@ -114,21 +114,24 @@ internal class WindowsBorderlessFullscreenController(
             saved = null
             lastExit = snapshot
 
-            // Mirror enter()'s deferred re-assert: Compose applies
-            // WindowState changes asynchronously, so re-assert the restored
-            // native placement once that update has landed. Guarded by the
-            // exit token — a fast re-enter (or a newer exit) supersedes it.
-            EventQueue.invokeLater {
-                EventQueue.invokeLater {
-                    if (lastExit === snapshot && !isFullscreen) {
-                        runCatching {
-                            writePlacement(hwnd, snapshot.placement)
-                            frameChanged(hwnd)
-                            refreshAwtLayout()
-                        }
-                    }
-                }
-            }
+            // RESTORE_PLACEMENT has run synchronously above. Run the
+            // remaining exit steps (see fullscreenExitSteps) deferred:
+            // Compose applies WindowState changes asynchronously, and —
+            // the PC-20 defect — restoring the SAME bounds never produces
+            // a real size change, so the Compose scene keeps its stale
+            // fullscreen surface (UI cut / scaled wrong) until one
+            // arrives. The user's own workaround was a native snap to
+            // half screen and back; a floating exit now performs that
+            // resize cycle itself. Every step is guarded by the exit
+            // token — a fast re-enter (or a newer exit) supersedes it.
+            runExitSteps(
+                fullscreenExitSteps(
+                    wasMaximized =
+                        snapshot.placement.composePlacement == WindowPlacement.Maximized
+                ).drop(1),
+                snapshot,
+                first = true
+            )
         } catch (failure: Throwable) {
             // Keep the borderless state and the snapshot so F11 can retry.
             runCatching {
@@ -142,6 +145,69 @@ internal class WindowsBorderlessFullscreenController(
                 refreshAwtLayout()
             }
             throw failure
+        }
+    }
+
+    /**
+     * Runs the deferred exit steps one EDT turn at a time (the first step
+     * waits two turns, matching the timing the old deferred re-assert
+     * used, so Compose's asynchronous placement application has landed).
+     * Aborts silently when a newer transition supersedes this exit.
+     */
+    private fun runExitSteps(
+        steps: List<FullscreenExitStep>,
+        snapshot: Snapshot,
+        first: Boolean
+    ) {
+        if (steps.isEmpty()) return
+        val runStep = Runnable {
+            if (lastExit === snapshot && !isFullscreen) {
+                when (steps.first()) {
+                    FullscreenExitStep.FORCE_RESIZE_CYCLE ->
+                        forceResizeCycle(snapshot, steps.drop(1))
+
+                    FullscreenExitStep.REASSERT_PLACEMENT -> {
+                        runCatching {
+                            writePlacement(hwnd(), snapshot.placement)
+                            frameChanged(hwnd())
+                            refreshAwtLayout()
+                        }
+                        runExitSteps(steps.drop(1), snapshot, first = false)
+                    }
+
+                    // Already performed synchronously in exit(); skip.
+                    FullscreenExitStep.RESTORE_PLACEMENT ->
+                        runExitSteps(steps.drop(1), snapshot, first = false)
+                }
+            }
+        }
+        if (first) {
+            EventQueue.invokeLater { EventQueue.invokeLater(runStep) }
+        } else {
+            EventQueue.invokeLater(runStep)
+        }
+    }
+
+    /**
+     * The resize cycle his snap workaround performs by hand (PC-20):
+     * shrink the window by one pixel, then restore its exact size on the
+     * NEXT EDT turn, so both sizes register as genuine native resizes and
+     * the Compose scene re-lays out against the restored bounds.
+     */
+    private fun forceResizeCycle(snapshot: Snapshot, remaining: List<FullscreenExitStep>) {
+        val width = window.width
+        val height = window.height
+        if (width <= 2 || height <= 2) {
+            runExitSteps(remaining, snapshot, first = false)
+            return
+        }
+        window.setSize(width - 1, height)
+        EventQueue.invokeLater {
+            if (lastExit === snapshot && !isFullscreen) {
+                window.setSize(width, height)
+                refreshAwtLayout()
+                runExitSteps(remaining, snapshot, first = false)
+            }
         }
     }
 
@@ -257,3 +323,36 @@ internal class WindowsBorderlessFullscreenController(
 
 internal fun borderlessWindowStyle(style: Int): Int =
     style and (WinUser.WS_CAPTION or WinUser.WS_THICKFRAME).inv()
+
+/** One step of a fullscreen exit, in execution order. */
+internal enum class FullscreenExitStep {
+    /** Restore the snapshot style + native placement + Compose geometry. */
+    RESTORE_PLACEMENT,
+
+    /** Force a real native resize (size change and change-back). */
+    FORCE_RESIZE_CYCLE,
+
+    /** Re-assert the restored placement after the deferred steps. */
+    REASSERT_PLACEMENT
+}
+
+/**
+ * The ordered exit sequence (PC-20). A floating window gets the resize
+ * cycle: restoring identical bounds emits no real WM_SIZE, so without it
+ * the Compose scene stays stale until the user resizes by hand. A
+ * maximized restore skips it — Windows generates genuine resizes itself
+ * when a window returns to maximized, so the scene re-lays out anyway.
+ */
+internal fun fullscreenExitSteps(wasMaximized: Boolean): List<FullscreenExitStep> =
+    if (wasMaximized) {
+        listOf(
+            FullscreenExitStep.RESTORE_PLACEMENT,
+            FullscreenExitStep.REASSERT_PLACEMENT
+        )
+    } else {
+        listOf(
+            FullscreenExitStep.RESTORE_PLACEMENT,
+            FullscreenExitStep.FORCE_RESIZE_CYCLE,
+            FullscreenExitStep.REASSERT_PLACEMENT
+        )
+    }
