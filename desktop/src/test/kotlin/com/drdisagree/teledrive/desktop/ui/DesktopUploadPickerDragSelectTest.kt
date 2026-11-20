@@ -12,7 +12,7 @@ import org.junit.Test
 class DesktopUploadPickerDragSelectTest {
 
     private fun fixture(): Pair<File, List<File>> {
-        val dir = createTempDir("picker-drag")
+        val dir = java.nio.file.Files.createTempDirectory("picker-drag").toFile()
         val sub = File(dir, "sub").apply { mkdirs() }
         val f1 = File(dir, "a.txt").apply { writeText("a") }
         val f2 = File(dir, "b.txt").apply { writeText("b") }
