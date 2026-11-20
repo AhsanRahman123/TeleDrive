@@ -852,7 +852,7 @@ private fun StripShell(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val windowWidth = maxWidth.value
         val windowHeight = maxHeight.value
-        val density = LocalDensity.current
+        val densityFloat = LocalDensity.current.density
         val accentCol = accentColor(accent)
 
         if (userHidden) {
@@ -895,12 +895,12 @@ private fun StripShell(
             val panelHeightDp = if (panelSize == IntSize.Zero) {
                 estimatePanelHeightDp((state.active + state.paused).size)
             } else {
-                panelSize.height / density.density
+                panelSize.height / densityFloat
             }
             val panelWidthDp = if (panelSize == IntSize.Zero) {
                 stripWidth
             } else {
-                panelSize.width / density.density
+                panelSize.width / densityFloat
             }
             TransferBubblePanel(
                 state = state,
