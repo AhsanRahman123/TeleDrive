@@ -1,6 +1,8 @@
 package com.drdisagree.teledrive.desktop.window
 
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.window.WindowPlacement
+import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import com.sun.jna.Native
 import com.sun.jna.platform.win32.Kernel32
@@ -19,6 +21,10 @@ internal class WindowsBorderlessFullscreenController(
     private val windowState: WindowState
 ) {
     private var saved: Snapshot? = null
+
+    // The most recent completed exit, kept so the deferred re-assert (see
+    // exit()) can verify no newer transition has superseded it.
+    private var lastExit: Snapshot? = null
     val isFullscreen: Boolean get() = saved != null
 
     fun toggle() = setFullscreen(!isFullscreen)
@@ -35,7 +41,11 @@ internal class WindowsBorderlessFullscreenController(
         check(style != 0) { "Could not read window style (Win32 " + Native.getLastError() + ")." }
         val placement = readPlacement(hwnd)
         val monitor = readMonitor(hwnd)
-        val snapshot = Snapshot(style, placement, monitor)
+        val snapshot = Snapshot(
+            style, placement, monitor,
+            windowState.position, windowState.size
+        )
+        lastExit = null
 
         try {
             // Let Compose leave its prior Maximized placement before applying native
@@ -90,8 +100,35 @@ internal class WindowsBorderlessFullscreenController(
             frameChanged(hwnd)
             writePlacement(hwnd, snapshot.placement)
             windowState.placement = snapshot.placement.composePlacement
+            // Also restore the Compose-tracked floating geometry. During
+            // borderless fullscreen the AWT window is monitor-sized, and
+            // WindowState tracks that; if exit only restores the native
+            // placement, Compose's asynchronous placement application can
+            // re-apply the fullscreen size/position afterwards and push
+            // the app UI off-screen (controls cut at half screen, PC-14).
+            if (snapshot.placement.composePlacement == WindowPlacement.Floating) {
+                windowState.position = snapshot.composePosition
+                windowState.size = snapshot.composeSize
+            }
             refreshAwtLayout()
             saved = null
+            lastExit = snapshot
+
+            // Mirror enter()'s deferred re-assert: Compose applies
+            // WindowState changes asynchronously, so re-assert the restored
+            // native placement once that update has landed. Guarded by the
+            // exit token — a fast re-enter (or a newer exit) supersedes it.
+            EventQueue.invokeLater {
+                EventQueue.invokeLater {
+                    if (lastExit === snapshot && !isFullscreen) {
+                        runCatching {
+                            writePlacement(hwnd, snapshot.placement)
+                            frameChanged(hwnd)
+                            refreshAwtLayout()
+                        }
+                    }
+                }
+            }
         } catch (failure: Throwable) {
             // Keep the borderless state and the snapshot so F11 can retry.
             runCatching {
@@ -195,7 +232,13 @@ internal class WindowsBorderlessFullscreenController(
         check(ok) { operation + " failed (Win32 " + Native.getLastError() + ")." }
     }
 
-    private data class Snapshot(val style: Int, val placement: SavedPlacement, val monitor: Rect)
+    private data class Snapshot(
+        val style: Int,
+        val placement: SavedPlacement,
+        val monitor: Rect,
+        val composePosition: WindowPosition,
+        val composeSize: DpSize
+    )
     private data class Rect(val left: Int, val top: Int, val right: Int, val bottom: Int)
 
     private data class SavedPlacement(
