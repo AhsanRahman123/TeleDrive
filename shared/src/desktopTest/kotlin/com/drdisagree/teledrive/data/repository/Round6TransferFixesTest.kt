@@ -76,7 +76,7 @@ class Round6TransferFixesTest {
     private suspend fun localFile(id: String, name: String, sizeBytes: Int): String {
         val source = File(sourceDir, "$id-$name")
         source.writeBytes(ByteArray(sizeBytes) { 7 })
-        database.fileDao().insert(
+        database.fileDao().upsert(
             FileEntity(
                 id = id,
                 folderId = null,
@@ -211,7 +211,7 @@ class Round6TransferFixesTest {
                 trashedAt: Long?,
                 localPath: String?
             ) {
-                dao.insert(
+                dao.upsert(
                     FileEntity(
                         id = id,
                         folderId = folderId,
