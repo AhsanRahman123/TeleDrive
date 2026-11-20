@@ -149,31 +149,36 @@ class SubtitleAppearanceOptionsTest {
         val options = SubtitleAppearance(verticalPosition = 0.5f)
             .toVlcFactoryArguments(videoHeight = 1080)
 
-        assertEquals(listOf("--sub-margin=-410"), options)
+        // Position 0.5 is above the 0.88 default; positive margin moves
+        // subtitles up in VLC: (0.88 - 0.5) * 1080 = 410.4 -> 410.
+        assertEquals(listOf("--sub-margin=410"), options)
     }
 
     @Test
-    fun `margin is clamped to the supported range at both ends`() {
+    fun `margin at both ends of the position range`() {
         val top = SubtitleAppearance(verticalPosition = 0.08f)
             .toVlcFactoryArguments(videoHeight = 1080)
         val bottom = SubtitleAppearance(verticalPosition = 0.92f)
             .toVlcFactoryArguments(videoHeight = 1080)
 
-        // (0.08 - 0.88) * 1080 = -864, clamped to -1080 / 2 = -540.
-        assertEquals(listOf("--sub-margin=-540"), top)
-        // (0.92 - 0.88) * 1080 = 43.2 -> 43.
-        assertEquals(listOf("--sub-margin=43"), bottom)
+        // (0.88 - 0.08) * 1080 = 864, exactly the +4/5-height bound.
+        assertEquals(listOf("--sub-margin=864"), top)
+        // (0.88 - 0.92) * 1080 = -43.2 -> -43 (below default: margin negative,
+        // subtitles move down).
+        assertEquals(listOf("--sub-margin=-43"), bottom)
     }
 
     @Test
-    fun `relative font size is clamped to the freetype range`() {
+    fun `relative font size inverts the scale at both ends of the range`() {
         val small = SubtitleAppearance(useSystemDefaults = false, textScale = 0.5f)
             .toVlcFactoryArguments(videoHeight = 1080)
         val large = SubtitleAppearance(useSystemDefaults = false, textScale = 2.5f)
             .toVlcFactoryArguments(videoHeight = 1080)
 
-        assertTrue(small.contains("--freetype-rel-fontsize=8"))
-        assertTrue(large.contains("--freetype-rel-fontsize=40"))
+        // rel-fontsize is a divisor (glyph = height / rel): 50% -> 32,
+        // 250% -> round(16 / 2.5) = 6.
+        assertTrue(small.contains("--freetype-rel-fontsize=32"))
+        assertTrue(large.contains("--freetype-rel-fontsize=6"))
     }
 
     @Test
