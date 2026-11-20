@@ -146,6 +146,28 @@ internal fun SubtitleAppearance.toVlcFactoryArguments(videoHeight: Int = 1080): 
 }
 
 /**
+ * The same appearance as **per-media options** (`:name=value`), for passing
+ * to a media start on an already-running player (PC-13 rescue, report 18).
+ *
+ * This is the route the VLC ecosystem itself uses (LibVLCSharp's official
+ * Q&A and VLC-Android's VLCOptions both set `freetype-*` through media
+ * options): options attached to an input item are inherited by the module
+ * tree the input spawns (vout -> spu -> text renderer), so the renderer
+ * created for that media picks them up — with the player instance, its
+ * event listener and its render surface left completely untouched.
+ *
+ * It is also strictly safer than instance arguments: an unrecognised
+ * *instance* argument makes libvlc_new return NULL (the report-16
+ * `--no-libass` failure), while an unrecognised *media* option is simply
+ * ignored. The option names and values are exactly the verified factory
+ * set, re-prefixed.
+ */
+internal fun SubtitleAppearance.toVlcMediaOptions(videoHeight: Int = 1080): List<String> =
+    toVlcFactoryArguments(videoHeight).map { factoryArgument ->
+        ":" + factoryArgument.removePrefix("--")
+    }
+
+/**
  * The `freetype-rel-fontsize` value for a text scale (1.0 = 100%).
  *
  * VLC 3.0's freetype renderer treats this option as a DIVISOR, not a size:

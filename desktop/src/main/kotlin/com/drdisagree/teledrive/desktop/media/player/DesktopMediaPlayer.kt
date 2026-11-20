@@ -152,7 +152,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.stringResource
-import uk.co.caprica.vlcj.factory.MediaPlayerFactory
 import uk.co.caprica.vlcj.media.TrackType
 import uk.co.caprica.vlcj.player.base.MediaPlayer
 import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
@@ -194,79 +193,22 @@ internal fun DesktopMediaPlayer(
     onBackgroundPlaybackChange: (Boolean) -> Unit = {},
     mediaTitle: String = ""
 ) {
-    // Subtitle appearance: freetype options are LibVLC instance options, so a
-    // non-default appearance gets its own factory and the player is recreated
-    // from it (keyed by the appearance below). The shared singleton keeps
-    // serving the default appearance and the thumbnail store.
+    // Subtitle appearance (PC-13 rescue, report 18): ONE factory and ONE
+    // player for the viewer's whole life. The appearance is NOT a LibVLC
+    // instance configuration any more — it is passed as per-media options
+    // on every media start (see SubtitleAppearance.toVlcMediaOptions), the
+    // route LibVLCSharp and VLC-Android use, so applying a new appearance
+    // never recreates the factory, the player, its event listener or its
+    // render surface. The previous design (a factory per appearance, the
+    // player keyed on it) destroyed and recreated the native player on
+    // every Apply and wedged the transport controls in the process.
     var subtitleAppearance by remember { mutableStateOf(SubtitleAppearanceStore.load()) }
-    var appearanceFactoryFailed by remember { mutableStateOf(false) }
-    // The per-appearance factory is created OFF the composition thread
-    // (PC-7): libvlc_new loads the native libraries and scans the plugin
-    // directory — seconds of work that used to run inside remember(),
-    // freezing the UI on the first custom-appearance preview and on every
-    // Apply. While a new factory is being created the player keeps running
-    // on the previous one; the swap (and the style restart it triggers)
-    // happens when the new factory lands.
-    var appearanceFactory by remember { mutableStateOf<MediaPlayerFactory?>(null) }
-    LaunchedEffect(subtitleAppearance) {
-        val requested = subtitleAppearance
-        if (requested.toVlcFactoryArguments().isEmpty()) {
-            appearanceFactory = null
-            appearanceFactoryFailed = false
-            return@LaunchedEffect
-        }
-        val created = withContext(Dispatchers.IO) {
-            VlcPlayback.createFactory(requested)
-        }
-        if (subtitleAppearance != requested) {
-            // A newer appearance superseded this one while its factory was
-            // being created; retire the orphan instead of leaking it.
-            created?.let { VlcFactoryLifecycle.retire(it) }
-            return@LaunchedEffect
-        }
-        if (created == null) {
-            // Never silently substitute the argument-less singleton:
-            // the failure is logged in VlcPlayback and surfaced in
-            // the player UI (see the warning overlay below).
-            appearanceFactoryFailed = true
-            com.drdisagree.teledrive.core.common.SafeLog.e(
-                "DesktopMediaPlayer",
-                "Subtitle appearance factory failed; falling back to " +
-                    "default rendering and telling the user"
-            )
-            appearanceFactory = null
-        } else {
-            appearanceFactoryFailed = false
-            appearanceFactory = created
-        }
-    }
-    val factory = appearanceFactory ?: VlcPlayback.factory ?: return
-    DisposableEffect(appearanceFactory) {
-        onDispose {
-            val retired = appearanceFactory
-            if (retired != null && !BackgroundPlayback.ownsFactory(retired)) {
-                // Retire the LibVLC instance: it is released once every player
-                // created from it has finished its own release (see
-                // VlcFactoryLifecycle) — never on a timer, which could free the
-                // factory under a player whose asynchronous teardown overran
-                // it. The shared singleton is never retired here.
-                VlcFactoryLifecycle.retire(retired)
-            }
-        }
-    }
-    // The appearance-failure warning is transient by policy: at most once
-    // per session, and it dismisses itself after a few seconds. It must
-    // never again sit on screen for the whole playback.
-    var appearanceWarningVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(appearanceFactoryFailed) {
-        if (appearanceFactoryFailed &&
-            SubtitleWarningPolicy.claim(SubtitleWarningPolicy.CAUSE_FACTORY_CREATION_FAILED)
-        ) {
-            appearanceWarningVisible = true
-            delay(SubtitleWarningPolicy.DISPLAY_DURATION_MS)
-            appearanceWarningVisible = false
-        }
-    }
+    // Bumped by applySubtitleAppearance: the media start effect below is
+    // keyed on it, so an Apply re-starts the CURRENT media on the SAME
+    // player with the new appearance's media options and a :start-time
+    // resume — the player object the controls are bound to never changes.
+    var appearanceReloadTick by remember { mutableIntStateOf(0) }
+    val factory = VlcPlayback.factory ?: return
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var hasCurrentMediaFrame by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf(false) }
@@ -381,9 +323,6 @@ internal fun DesktopMediaPlayer(
             // a retired player's listener can still fire during its async
             // teardown and must be rejected by identity (see PlayerEventGate).
             eventGate.attach(this)
-            // Track the player against its per-appearance factory so the
-            // factory is only released after this player has been released.
-            appearanceFactory?.let { VlcFactoryLifecycle.register(it, this) }
             if (!isAudio) {
                 videoSurface().set(composeVideoSurface { image ->
                     val generation = eventGate.generation()
@@ -491,7 +430,16 @@ internal fun DesktopMediaPlayer(
                         eventGate.eventsOpen()
                     ) {
                         playerScope.launch {
-                            buffering = newCache < 100f || (!isAudio && !hasCurrentMediaFrame)
+                            // Once a frame of the current media has been
+                            // accepted, the video is by definition rendering:
+                            // a streamed source reports cache < 100 for its
+                            // whole session, and letting those events
+                            // re-raise the spinner left it spinning over a
+                            // playing video (PC-16). Cache events may only
+                            // drive the spinner before the first frame.
+                            if (!hasCurrentMediaFrame) {
+                                buffering = newCache < 100f || !isAudio
+                            }
                         }
                     }
                 }
@@ -578,7 +526,7 @@ internal fun DesktopMediaPlayer(
     }
 
     val fullscreenController = LocalFullscreenController.current
-    LaunchedEffect(player, mrl) {
+    LaunchedEffect(player, mrl, appearanceReloadTick) {
         // Reuse one VLC player for the lifetime of this viewer. Recreating native VLC and
         // its render/event channels for every MRL caused the previously-fixed flash/black frame
         // when moving to the next video. Close the event gate while swapping sources so late
@@ -629,12 +577,24 @@ internal fun DesktopMediaPlayer(
                     // this source's render callbacks into the generation-tagged frame channel.
                     eventGate.setAcceptsFrames(true)
                     val restart = activeRestart
-                    val started = if (restart != null && !restart.wasPlaying) {
-                        runCatching { player.media().play(mrl, ":start-paused") }
-                            .getOrDefault(false)
-                    } else {
-                        runCatching { player.media().start(mrl) }.getOrDefault(false)
+                    // Appearance rides on EVERY start as per-media options
+                    // (report 18): the first playback already honours the
+                    // saved appearance, and an Apply reload picks up the new
+                    // one — on this same player, with the position carried
+                    // by :start-time as part of the start itself instead of
+                    // a post-start seek racing the event stream.
+                    val startOptions = buildList {
+                        addAll(subtitleAppearance.toVlcMediaOptions())
+                        if (restart != null) {
+                            if (restart.positionMs >= 1_000L) {
+                                add(":start-time=${restart.positionMs / 1000.0}")
+                            }
+                            if (!restart.wasPlaying) add(":start-paused")
+                        }
                     }
+                    val started = runCatching {
+                        player.media().start(mrl, *startOptions.toTypedArray())
+                    }.getOrDefault(false)
                     val stillCurrent = eventGate.generation() == mediaGeneration
                     if (!started || !stillCurrent) {
                         eventGate.closeEvents()
@@ -662,28 +622,19 @@ internal fun DesktopMediaPlayer(
     }
 
     DisposableEffect(player) {
-        // Captured from the composition pass that created this effect, i.e. the
-        // appearance factory this player was built from (null for the shared
-        // singleton, which is never released).
-        val playerFactory = appearanceFactory
         onDispose {
-            // Conditional: on a player swap the new player is already
-            // attached, and its gates are its own to manage (see gate docs).
             eventGate.detach(player)
             // The viewer-level effect below may have parked this player for
             // background playback; a parked player must not be released here.
             if (BackgroundPlayback.isParked(player)) return@onDispose
             // Keep teardown serialized with pending play/seek/track commands. Disposing the
             // composable must not race a queued media replacement against native player release.
+            // The player was created from the shared singleton factory, which is never
+            // released — there is no per-player factory bookkeeping (report 18).
             runCatching {
                 player.submit {
                     runCatching { player.controls().stop() }
                     runCatching { player.release() }
-                    // Report from inside the submitted task: the factory's
-                    // release is now structurally ordered after this player's.
-                    if (playerFactory != null) {
-                        VlcFactoryLifecycle.onPlayerReleased(playerFactory, player)
-                    }
                 }
             }
         }
@@ -691,15 +642,14 @@ internal fun DesktopMediaPlayer(
 
     // Background playback: declared after the per-player effect so it is
     // disposed first when the whole viewer leaves (navigation). It parks the
-    // current player instead of letting the teardown above release it. A
-    // player swap inside this viewer (subtitle appearance restart) does not
-    // run this effect, so the outgoing player is still released normally.
+    // current player instead of letting the teardown above release it. The
+    // parked player's factory is the shared singleton (null here): it is
+    // never retired, so parking needs no lifecycle bookkeeping.
     val latestPlayer = rememberUpdatedState(player)
-    val latestAppearanceFactory = rememberUpdatedState(appearanceFactory)
     DisposableEffect(Unit) {
         onDispose {
             if (latestBackgroundPlayback.value && latestPlaying.value && !latestFinished.value) {
-                BackgroundPlayback.park(latestPlayer.value, latestAppearanceFactory.value)
+                BackgroundPlayback.park(latestPlayer.value, null)
             }
         }
     }
@@ -917,6 +867,11 @@ internal fun DesktopMediaPlayer(
         VideoResumeStore.savePosition(mediaId, timeMs, durationMs, force = true)
         SubtitleAppearanceStore.save(normalized)
         subtitleAppearance = normalized
+        // Same player, same factory: the start effect re-runs and re-starts
+        // the current media with the new appearance's media options and a
+        // :start-time resume. Nothing the controls reference is recreated,
+        // so seek/play/pause cannot desync (PC-13).
+        appearanceReloadTick++
         showSubtitleSettings = false
         interactionTick++
     }
@@ -991,7 +946,7 @@ internal fun DesktopMediaPlayer(
         }
     }
 
-    var languagesApplied by remember(mrl, player) { mutableStateOf(false) }
+    var languagesApplied by remember(mrl, player, appearanceReloadTick) { mutableStateOf(false) }
     LaunchedEffect(mrl, trackTick, preferredAudioLanguage, preferredSubtitleLanguage) {
         if (languagesApplied || trackTick == 0) return@LaunchedEffect
         val applied = CompletableDeferred<Boolean>()
@@ -1505,11 +1460,15 @@ internal fun DesktopMediaPlayer(
                             // analytically from the stage size (see
                             // videoPictureTransform), so it cannot jump or
                             // spill over the stage edge when the bar toggles.
-                            val insetPx = if (controlsVisible) {
-                                SUBTITLE_SAFE_AREA_WITH_CONTROLS.toPx()
-                            } else {
-                                0f
-                            }
+                            // The transform NEVER depends on the controls'
+                            // visibility (PC-14): the bar overlays the
+                            // picture, and the picture stays exactly where
+                            // it is when the bar shows or hides. (An earlier
+                            // design shifted the picture up by a subtitle
+                            // safe area while the bar was visible; on
+                            // screen that shift IS the jump the user
+                            // recorded, so the inset is permanently zero.)
+                            val insetPx = 0f
                             val transform = videoPictureTransform(
                                 preset = scalePreset,
                                 stageWidth = stageSize.width,
@@ -1526,20 +1485,6 @@ internal fun DesktopMediaPlayer(
                     contentScale = scaling.contentScale
                 )
             }
-        }
-
-        if (appearanceWarningVisible) {
-            Text(
-                text = "Subtitle appearance could not be applied — " +
-                    "playing with default subtitle rendering.",
-                color = Color.White,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 12.dp)
-                    .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            )
         }
 
         if (buffering && !finished) {
@@ -2618,7 +2563,6 @@ private fun MediaPlayer.submitAudioState(volume: Int, muted: Boolean) {
 }
 
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
-private val SUBTITLE_SAFE_AREA_WITH_CONTROLS = 132.dp
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
 private const val SHORT_KEY_SEEK_STEP_MS = 5_000L
