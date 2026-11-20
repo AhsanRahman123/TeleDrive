@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -24,9 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -90,6 +87,13 @@ internal enum class DesktopPickerSort { NAME, SIZE, MODIFIED, TYPE }
  *   leave the range, and the release position completes the gesture;
  * - a search field and a sort menu (Name / Size / Modified / Type,
  *   folders first, direction toggle);
+ * - **real thumbnails for image files** in list and grid views, decoded
+ *   downscaled and only for composed (visible) items (PC-17, see
+ *   [PickerEntryThumbnail]). Folder mode is this same composable listing
+ *   directories only, so it shares every feature by construction; the
+ *   only file-mode-only behaviours are selection (checkboxes, drag
+ *   multi-select) and thumbnails, which have no meaning for a
+ *   single-folder pick (PC-18);
  * - **Esc ladder, always consumed by the picker**: clear the search, then
  *   clear the selection, then step up one folder, and only at a filesystem
  *   root close the picker. The key can never fall through to the screen
@@ -385,15 +389,7 @@ internal fun DesktopUploadPickerDialog(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Box(contentAlignment = Alignment.TopEnd) {
-                                    Icon(
-                                        imageVector = if (entry.isDirectory) {
-                                            Icons.Filled.Folder
-                                        } else {
-                                            Icons.Filled.InsertDriveFile
-                                        },
-                                        contentDescription = null,
-                                        modifier = Modifier.size(40.dp)
-                                    )
+                                    PickerEntryThumbnail(entry = entry, grid = true)
                                     if (mode == DesktopPickerMode.FILES &&
                                         multiSelect && entry.isFile
                                     ) {
@@ -451,14 +447,7 @@ internal fun DesktopUploadPickerDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(
-                                    imageVector = if (entry.isDirectory) {
-                                        Icons.Filled.Folder
-                                    } else {
-                                        Icons.Filled.InsertDriveFile
-                                    },
-                                    contentDescription = null
-                                )
+                                PickerEntryThumbnail(entry = entry, grid = false)
                                 Text(
                                     text = entry.name,
                                     modifier = Modifier.weight(1f),
