@@ -20,6 +20,7 @@ import com.drdisagree.teledrive.presentation.transfers.TransfersStore
 import com.drdisagree.teledrive.presentation.transfers.TransfersViewModel
 import com.drdisagree.teledrive.presentation.trash.TrashViewModel
 import org.koin.core.module.dsl.singleOf
+import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
@@ -46,6 +47,10 @@ val sharedUiModule = module {
     viewModelOf(::SearchViewModel)
     viewModelOf(::SettingsViewModel)
     viewModelOf(::ExclusionsViewModel)
-    viewModelOf(::TransfersViewModel)
+    // Explicit factory: TransfersViewModel has two constructors (the
+    // store one used here, and a two-repository one for tests), which
+    // viewModelOf cannot disambiguate. The screen's ViewModel wraps the
+    // shared store single above.
+    viewModel { TransfersViewModel(get()) }
     viewModelOf(::TrashViewModel)
 }
