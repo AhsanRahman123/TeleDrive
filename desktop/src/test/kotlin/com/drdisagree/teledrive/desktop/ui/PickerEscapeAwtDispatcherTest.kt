@@ -105,8 +105,23 @@ class PickerEscapeAwtDispatcherTest {
                     deliveredToField.incrementAndGet()
                 }
             })
+            // Reach the physically real state first: the dialog must
+            // be the ACTIVE window with the field owning focus. The
+            // second window was shown after the dialog in setUp and
+            // holds activation; a key event targeted at a component
+            // of a non-focused window is an impossible physical state
+            // and the focus manager discards it before dispatchers.
+            otherWindow.isVisible = false
+            dialog.toFront()
             fieldInDialog.requestFocusInWindow()
         }
+        val focusDeadline = System.currentTimeMillis() + 10_000
+        var focused = false
+        while (!focused && System.currentTimeMillis() < focusDeadline) {
+            SwingUtilities.invokeAndWait { focused = fieldInDialog.isFocusOwner }
+            if (!focused) Thread.sleep(25)
+        }
+        assertTrue("the field must own focus before a physical key can target it", focused)
         dispatcher.install()
         java.awt.Toolkit.getDefaultToolkit().systemEventQueue
             .postEvent(escape(KeyEvent.KEY_PRESSED, fieldInDialog))
