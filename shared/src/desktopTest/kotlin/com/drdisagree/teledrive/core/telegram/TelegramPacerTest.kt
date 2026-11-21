@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.core.telegram
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
@@ -26,6 +27,7 @@ import org.junit.Test
  * the whole test) while its sleeps are virtual, so the 30 s cap is
  * exercised in milliseconds of real time.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class TelegramPacerTest {
 
     @Test
@@ -60,11 +62,13 @@ class TelegramPacerTest {
             // The 429 carries the seconds REMAINING (deadline minus
             // roughly the 30 s cap the call rode out — on the virtual
             // clock the wall-clock remainder stays near the start).
+            // The pacer reports the remainder rounded UP while
+            // floodWaitSeconds rounds down, so allow one second over.
             val remaining = error.retryAfterSeconds
             assertNotNull(remaining)
             assertTrue(
                 "retryAfter $remaining should sit just under the deadline $deadlineAtStart",
-                remaining!! in (deadlineAtStart - 40)..deadlineAtStart
+                remaining!! in (deadlineAtStart - 40)..(deadlineAtStart + 1)
             )
             // The thrown 429 re-armed the deadline from the remainder
             // through the paced catch: the account is still parked,
