@@ -133,7 +133,10 @@ internal class FakeTelegram : TelegramClient by unused() {
         return flowOf(TelegramUploadEvent.Completed(uploaded))
     }
 
+    var onDeleteMessages: suspend (messageIds: List<Long>) -> Unit = {}
+
     override suspend fun deleteMessages(chatId: Long, messageIds: List<Long>) {
+        onDeleteMessages(messageIds)
         deletedMessages += messageIds
         storedFiles.keys.removeAll { it.messageId in messageIds }
     }

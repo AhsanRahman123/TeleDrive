@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.data.repository
 import com.drdisagree.teledrive.core.publish.PublishOutboxDrainer
 import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.data.local.entity.FileEntity
+import com.drdisagree.teledrive.data.local.entity.PendingDeleteEntity
 import com.drdisagree.teledrive.domain.model.BackupState
 import com.drdisagree.teledrive.domain.model.FileCategory
 import java.util.concurrent.atomic.AtomicBoolean
@@ -153,6 +154,57 @@ class PublishOutboxDrainerTest {
             assertTrue(drainer().drain(isStopped = { false }))
             assertEquals(0, files.pendingPublishCount())
             assertEquals(250, telegram.editedCaptions.size)
+        }
+
+    @Test
+    fun `a persistently failing delete batch cannot gate publishing at meltdown scale`() =
+        runBlocking {
+            // Round 8 (PC-32 re-investigation): at the user's scale —
+            // ≈4,370 pending rows of mixed kinds — the drain's FIRST
+            // step was pending-delete replay, and one non-permanent
+            // delete failure ended the drain before a single file
+            // published. The round-7 local-only fix never got a chance
+            // to matter behind that gate. This reproduces the shape:
+            // 4,000 publishable + 370 local-only rows, and a delete
+            // backlog whose Telegram call keeps failing with a
+            // non-permanent (500) error.
+            val publishable = (1..4_000).map { publishableFile("bulk-pub-$it", 100_000L + it) }
+            val localOnly = (1..370).map { localOnlyFile("bulk-local-$it") }
+            files.upsertAll(publishable + localOnly)
+            val deleteRows = (1..50).map { publishableFile("del-$it", 200_000L + it) }
+            files.upsertAll(deleteRows)
+            database.pendingDeleteDao().upsertAll(
+                deleteRows.map {
+                    PendingDeleteEntity(
+                        chatId = TEST_CHAT,
+                        messageId = it.messageId!!,
+                        fileId = it.id
+                    )
+                }
+            )
+            telegram.onDeleteMessages = { throw TelegramException(500, "Internal error") }
+            val failures = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+            val drained = drainer().drain(
+                isStopped = { false },
+                onFailure = { fileId, _ -> failures += fileId }
+            )
+
+            assertTrue("delete replay must not gate the file drain", drained)
+            // Every publishable row behind the gate published anyway.
+            assertEquals(4_000, telegram.editedCaptions.size)
+            assertEquals(370, files.pendingPublishCount())
+            // The deferred deletes are lossless AND surfaced: rows and
+            // pending entries survive for the next drain, and every
+            // deferred file was reported instead of vanishing.
+            assertEquals(50, database.pendingDeleteDao().oldest(100).size)
+            assertEquals(50, failures.size)
+
+            // Next drain with Telegram healthy: the deferred deletes
+            // replay and clear, exactly as before.
+            telegram.onDeleteMessages = {}
+            assertTrue(drainer().drain(isStopped = { false }))
+            assertEquals(0, database.pendingDeleteDao().oldest(100).size)
         }
 
     private fun localOnlyFile(id: String) = FileEntity(

@@ -78,7 +78,7 @@ class PublishOutboxDrainer(
         onWaiting: suspend (secondsLeft: Int) -> Unit,
         onFailure: suspend (fileId: String, error: AppError) -> Unit
     ): Boolean {
-        if (!replayDeletes(isStopped)) return false
+        if (!replayDeletes(isStopped, onFailure)) return false
 
         // PC-32: only rows that can actually be published are fetched.
         // The old fetch took the oldest pending rows of ANY kind, so a
@@ -303,26 +303,61 @@ class PublishOutboxDrainer(
     /**
      * Deleting a message that is already gone is accepted, so replaying after a crash costs
      * nothing.
+     *
+     * Round 8 (PC-32 re-investigation): this replay used to GATE the
+     * whole drain — it runs before any file publishing, and the first
+     * non-permanent delete failure returned false, so the drain ended
+     * having published ZERO files. A persistently failing delete batch
+     * (at the user's scale the meltdown left a large pending-delete
+     * backlog) therefore froze the publish queue at its full count
+     * indefinitely: every Sync now press honestly re-ran the loop and
+     * re-failed at the same gate, before a single caption edit, and
+     * the only trace was a log line. Deletes are idempotent and
+     * independent of publishing, so a failing batch is now DEFERRED
+     * for the rest of this drain — its rows and pending entries stay
+     * untouched for the next drain, the failure is reported through
+     * [onFailure] instead of vanishing — and replay continues with
+     * the remaining batches. Publishing can no longer be blocked by
+     * delete replay; only a user stop aborts it.
      */
-    private suspend fun replayDeletes(isStopped: () -> Boolean): Boolean {
+    private suspend fun replayDeletes(
+        isStopped: () -> Boolean,
+        onFailure: suspend (fileId: String, error: AppError) -> Unit
+    ): Boolean {
+        val attempted = mutableSetOf<Long>()
         while (true) {
             if (isStopped()) return false
-            val batch = pendingDeleteDao.oldest(BATCH_SIZE)
+            // Fetch one window past this drain's attempts and filter in
+            // memory (same pattern as nextBatch): deferred batches stay
+            // in the table, so a plain oldest(BATCH_SIZE) refetch would
+            // meet them first forever.
+            val batch = pendingDeleteDao.oldest(BATCH_SIZE + attempted.size)
+                .filter { it.messageId !in attempted }
+                .take(BATCH_SIZE)
             if (batch.isEmpty()) return true
 
             for ((chatId, pending) in batch.groupBy { it.chatId }) {
                 val messageIds = pending.map { it.messageId }
+                attempted += messageIds
                 try {
                     telegramClient.deleteMessages(chatId, messageIds)
+                    fileDao.deleteByIds(pending.map { it.fileId })
+                    pendingDeleteDao.clear(chatId, messageIds)
                 } catch (e: TelegramException) {
-                    if (e.code !in PERMANENT_CODES) {
-                        SafeLog.w(TAG, "Replaying ${messageIds.size} deletes failed", e)
-                        return false
+                    if (e.code in PERMANENT_CODES) {
+                        SafeLog.w(TAG, "Dropping unrepeatable delete: ${e.message}")
+                        fileDao.deleteByIds(pending.map { it.fileId })
+                        pendingDeleteDao.clear(chatId, messageIds)
+                    } else {
+                        SafeLog.w(
+                            TAG,
+                            "Deferring ${messageIds.size} deletes to the next drain",
+                            e
+                        )
+                        val error = AppError.TelegramError(e.code, e.message)
+                        pending.forEach { onFailure(it.fileId, error) }
                     }
-                    SafeLog.w(TAG, "Dropping unrepeatable delete: ${e.message}")
                 }
-                fileDao.deleteByIds(pending.map { it.fileId })
-                pendingDeleteDao.clear(chatId, messageIds)
             }
         }
     }
