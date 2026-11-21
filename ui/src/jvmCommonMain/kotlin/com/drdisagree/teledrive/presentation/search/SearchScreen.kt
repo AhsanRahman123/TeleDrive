@@ -60,6 +60,9 @@ import com.drdisagree.teledrive.presentation.components.ActionMenu
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
+import com.drdisagree.teledrive.presentation.components.RegisterWindowSelectAll
+import com.drdisagree.teledrive.presentation.components.TextInputFocusTracker
+import com.drdisagree.teledrive.presentation.components.trackTextInputFocus
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
 import com.drdisagree.teledrive.presentation.components.onDesktopContextClick
@@ -114,6 +117,10 @@ fun SearchScreen(
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
 
     val listState = rememberLazyListState()
+    // PC-33: the query field shares this window with the results —
+    // while it holds focus, Ctrl+A must stay select-all-TEXT, so the
+    // window-level registration below asks this tracker first.
+    val searchTextFocus = remember { TextInputFocusTracker() }
     val searchFiltersScrollState = rememberScrollState()
     val lifted by rememberToolbarLift(listState)
     var showSelectionMenu by remember { mutableStateOf(false) }
@@ -183,7 +190,8 @@ fun SearchScreen(
                             onValueChange = viewModel::setQuery,
                             placeholder = { Text(stringResource(Res.string.app_search_files)) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth()
+                                .trackTextInputFocus(searchTextFocus),
                             trailingIcon = {
                                 if (state.query.isNotEmpty()) {
                                     TooltipIconButton(tooltip = stringResource(Res.string.common_clear), onClick = { viewModel.setQuery("") }) {
@@ -259,6 +267,12 @@ fun SearchScreen(
                 }
 
             val commandFocusRequester = rememberCollectionCommandFocusRequester()
+            // PC-33: window-level Ctrl+A (see WindowSelectAllRegistry) —
+            // the same toggle the container shortcut below runs.
+            RegisterWindowSelectAll(
+                isTextInputFocused = { searchTextFocus.anyFocused },
+                onToggleSelectAll = { viewModel.toggleSelectAll(); true }
+            )
             Box(
                 modifier = Modifier
                     .weight(1f)

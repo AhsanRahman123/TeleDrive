@@ -27,8 +27,16 @@ import org.junit.Test
  * events through that pipeline against REAL windows: a showing
  * JDialog standing in for the picker window, a field inside it as
  * the event target (the states the user is actually in: an item
- * clicked, the search field focused), and a second window that must
- * never be touched.
+ * clicked, the search field focused).
+ *
+ * PC-33 (round 10) widened the scope: round 8 consumed only events
+ * targeted at the dialog itself, and his retest still lost presses
+ * after Alt-Tab (focus restored to the MAIN window while the modal
+ * picker was up) and in the no-focus-owner state. While the picker
+ * is up it is modal — an Escape anywhere in the app can only mean
+ * the ladder — so the second window below is now IN scope, and the
+ * old "another window is never the picker's business" pin is
+ * replaced by the widened expectation.
  */
 class PickerEscapeAwtDispatcherTest {
 
@@ -136,9 +144,32 @@ class PickerEscapeAwtDispatcherTest {
     }
 
     @Test
-    fun `escape in another window is never the picker's business`() {
-        assertFalse(dispatcher.dispatchKeyEvent(escape(KeyEvent.KEY_PRESSED, fieldElsewhere)))
-        assertEquals(0, ladderSteps.get())
+    fun `escape targeted at the main window while the picker is up runs exactly one ladder step`() {
+        // PC-33 (round 9 §3 state 1): after an Alt-Tab round trip,
+        // Windows restores AWT focus to the owner frame — the event
+        // targets the main window, not the dialog. The modal picker
+        // is up, so the press can only mean the ladder.
+        assertTrue(dispatcher.dispatchKeyEvent(escape(KeyEvent.KEY_PRESSED, fieldElsewhere)))
+        assertEquals(1, ladderSteps.get())
+    }
+
+    @Test
+    fun `escape with no component at all runs the ladder`() {
+        // PC-33 (round 9 §3 state 2): with no focus owner the event
+        // can carry a null component; the round-8 dispatcher dropped
+        // exactly this shape on the floor.
+        val orphan = object : KeyEvent(
+            dialog,
+            KeyEvent.KEY_PRESSED,
+            System.currentTimeMillis(),
+            0,
+            KeyEvent.VK_ESCAPE,
+            KeyEvent.CHAR_UNDEFINED
+        ) {
+            override fun getComponent(): java.awt.Component? = null
+        }
+        assertTrue(dispatcher.dispatchKeyEvent(orphan))
+        assertEquals(1, ladderSteps.get())
     }
 
     @Test

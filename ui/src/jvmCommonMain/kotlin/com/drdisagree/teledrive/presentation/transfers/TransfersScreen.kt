@@ -88,6 +88,9 @@ import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
+import com.drdisagree.teledrive.presentation.components.RegisterWindowSelectAll
+import com.drdisagree.teledrive.presentation.components.TextInputFocusTracker
+import com.drdisagree.teledrive.presentation.components.trackTextInputFocus
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.keyboardCollection
@@ -161,6 +164,9 @@ fun TransfersScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showTransferSettings by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    // PC-33: while the search field holds focus, Ctrl+A must stay
+    // select-all-TEXT; the window-level registration asks this first.
+    val transfersTextFocus = remember { TextInputFocusTracker() }
     var typeFilter by remember { mutableStateOf("ALL") }
     // The sort choice persists across restarts where the platform provides
     // a store (desktop, PC-6); elsewhere it stays the in-memory default.
@@ -518,6 +524,21 @@ fun TransfersScreen(
         val actionsFocusable: (TransferTask) -> Boolean = { transfer ->
             keyboard.current == rows.indexOf(transfer)
         }
+        // The surface's one select-all toggle: the container shortcut
+        // below and the window-level Ctrl+A registration (PC-33) both
+        // run it.
+        val transfersSelectAllShortcut: () -> Boolean = {
+            selectedTransferIds = if (allVisibleSelected) {
+                selectedTransferIds - visibleIds
+            } else {
+                selectedTransferIds + visibleIds
+            }
+            true
+        }
+        RegisterWindowSelectAll(
+            isTextInputFocused = { transfersTextFocus.anyFocused },
+            onToggleSelectAll = transfersSelectAllShortcut
+        )
         Box(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
             state = listState,
@@ -526,14 +547,7 @@ fun TransfersScreen(
                         .padding(end = 10.dp)
                 .collectionCommandShortcuts(
                     focusRequester = commandFocusRequester,
-                    onSelectAll = {
-                        selectedTransferIds = if (allVisibleSelected) {
-                            selectedTransferIds - visibleIds
-                        } else {
-                            selectedTransferIds + visibleIds
-                        }
-                        true
-                    }
+                    onSelectAll = transfersSelectAllShortcut
                 )
                 .keyboardCollection(keyboard, rows.count { it != null }, shortcuts),
             contentPadding = padding.add(horizontal = 16.dp, top = 16.dp, bottom = 16.dp),
@@ -563,7 +577,8 @@ fun TransfersScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f)
+                                .trackTextInputFocus(transfersTextFocus),
                             singleLine = true,
                             placeholder = { Text("Search downloads and transfers") }
                         )

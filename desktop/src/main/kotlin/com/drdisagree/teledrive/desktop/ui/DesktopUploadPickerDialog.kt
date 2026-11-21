@@ -62,6 +62,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.drdisagree.teledrive.presentation.components.RegisterWindowSelectAll
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -184,6 +185,23 @@ internal fun DesktopUploadPickerDialog(
         }
     }
 
+    // Ctrl+A in the picker (PC-29, toggle PC-29b): in multi-select
+    // file mode it selects every visible (search-filtered) file, or
+    // clears when all of them are already selected — the twin of
+    // the Select all button. One implementation for every delivery
+    // path: the Compose key handler below and the window-level AWT
+    // registration (PC-33) both call this, so they cannot drift.
+    fun toggleSelectAllVisible(): Boolean {
+        if (mode != DesktopPickerMode.FILES || !multiSelect) return false
+        val all = pickerSelectAllPaths(visibleEntries)
+        selected = if (all.isNotEmpty() && selected.containsAll(all)) {
+            emptySet()
+        } else {
+            all
+        }
+        return true
+    }
+
     // Key routing for the ladder and for select-all. A preview key handler
     // only sees the keys whose focus path passes through its node — and
     // inside a dialog, focus can sit on the dialog buttons, which are
@@ -227,19 +245,10 @@ internal fun DesktopUploadPickerDialog(
                 }
             }
             Key.A -> {
-                if (event.isCtrlPressed && !searchFocused &&
-                    mode == DesktopPickerMode.FILES && multiSelect
-                ) {
-                    // Ctrl+A is a toggle (PC-29b), the twin of the
-                    // select-all button: everything visible selected
-                    // clears, anything else selects all visible files.
-                    val all = pickerSelectAllPaths(visibleEntries)
-                    selected = if (all.isNotEmpty() && selected.containsAll(all)) {
-                        emptySet()
-                    } else {
-                        all
-                    }
-                    true
+                // While the search field holds focus the key is NOT
+                // consumed here, so the field keeps select-all-text.
+                if (event.isCtrlPressed && !searchFocused) {
+                    toggleSelectAllVisible()
                 } else {
                     false
                 }
@@ -306,6 +315,19 @@ internal fun DesktopUploadPickerDialog(
         escapeDispatcher.install()
         onDispose { escapeDispatcher.dispose() }
     }
+
+    // PC-33: the picker's Ctrl+A gets the same window-level routing
+    // as the collection surfaces. Registered as modal: while the
+    // picker is up it owns the key whatever window the event
+    // targets (the main window included — the Alt-Tab focus anomaly
+    // of round 9 §3), and the AWT dispatcher consumes the event, so
+    // the Compose handler above never double-fires. While the
+    // search field holds focus the key passes through untouched.
+    RegisterWindowSelectAll(
+        modal = true,
+        isTextInputFocused = { searchFocused },
+        onToggleSelectAll = { toggleSelectAllVisible() }
+    )
 
     fun entryClick(entry: File) {
         when {

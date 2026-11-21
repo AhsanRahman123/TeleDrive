@@ -55,6 +55,7 @@ import com.drdisagree.teledrive.presentation.common.isInitialLoad
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
+import com.drdisagree.teledrive.presentation.components.RegisterWindowSelectAll
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileListItem
@@ -357,6 +358,10 @@ fun CollectionScreen(
             onClear = if (selectionMode) viewModel::clearSelection else null
         )
         val commandFocusRequester = rememberCollectionCommandFocusRequester()
+        // PC-33: window-level Ctrl+A (see WindowSelectAllRegistry) —
+        // the same toggle the container shortcut below runs. This
+        // surface has no text field in its main window.
+        RegisterWindowSelectAll(onToggleSelectAll = { viewModel.toggleSelectAll(); true })
         Box(
             modifier = Modifier
                 .fillMaxSize()

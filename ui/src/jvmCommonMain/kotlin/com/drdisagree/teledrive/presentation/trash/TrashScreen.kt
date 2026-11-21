@@ -74,6 +74,7 @@ import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.ctrlClickSelect
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
+import com.drdisagree.teledrive.presentation.components.RegisterWindowSelectAll
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.FileThumbnail
@@ -317,15 +318,20 @@ fun TrashScreen(
             return@Scaffold
         }
         val commandFocusRequester = rememberCollectionCommandFocusRequester()
+        // The surface's one select-all toggle: the container shortcut
+        // below and the window-level Ctrl+A registration (PC-33) both
+        // run it. This surface has no text field in its main window.
+        val trashSelectAllShortcut: () -> Boolean = {
+            if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
+            true
+        }
+        RegisterWindowSelectAll(onToggleSelectAll = trashSelectAllShortcut)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .collectionCommandShortcuts(
                     focusRequester = commandFocusRequester,
-                    onSelectAll = {
-                        if (allSelected) viewModel.clearSelection() else viewModel.selectAll()
-                        true
-                    }
+                    onSelectAll = trashSelectAllShortcut
                 )
         ) {
             LazyVerticalGrid(

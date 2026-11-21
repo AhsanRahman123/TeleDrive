@@ -147,6 +147,7 @@ import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.ctrlClickSelect
+import com.drdisagree.teledrive.presentation.components.RegisterWindowSelectAll
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.EmptyState
@@ -687,38 +688,52 @@ fun FilesScreen(
     var snackbarHeight by remember { mutableStateOf(0.dp) }
     val fabLift by animateDpAsState(targetValue = snackbarHeight, label = "fabLift")
 
+    // The surface's one select-all toggle: the duplicate-manager /
+    // empty-items guards, the re-entrancy guard, and the
+    // select-then-delete chain. The container shortcut below and
+    // the window-level Ctrl+A registration (PC-33) both run THIS
+    // lambda, so the two delivery paths can never drift apart.
+    val filesSelectAllShortcut: () -> Boolean = {
+        if (showDuplicateManager || showEmptyItems) {
+            false
+        } else {
+            when {
+                selectingAllFromShortcut -> Unit
+                allSelected -> viewModel.clearSelection()
+                else -> {
+                    selectingAllFromShortcut = true
+                    viewModel.selectAll {
+                        selectingAllFromShortcut = false
+                        if (deleteAfterSelectAll) {
+                            deleteAfterSelectAll = false
+                            if (
+                                viewModel.selectionSnapshot.value.count > 0 &&
+                                !showCreateFolder && renameTarget == null
+                            ) {
+                                confirmTrash = true
+                            }
+                        }
+                    }
+                }
+            }
+            true
+        }
+    }
+    // PC-33: Ctrl+A must also arrive when Compose focus sits outside
+    // the workspace container (toolbar chrome, or nowhere after an
+    // Alt-Tab round trip). Files has no text field in its main
+    // window — its text inputs live in dialogs, which the
+    // dispatcher's dialog-window rule covers — so no text-input
+    // check is needed here.
+    RegisterWindowSelectAll(onToggleSelectAll = filesSelectAllShortcut)
+
     FileDropArea(onDropped = { references -> viewModel.importAndUpload(references) }) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .collectionCommandShortcuts(
                     focusRequester = filesCommandFocusRequester,
-                    onSelectAll = {
-                        if (showDuplicateManager || showEmptyItems) {
-                            false
-                        } else {
-                            when {
-                                selectingAllFromShortcut -> Unit
-                                allSelected -> viewModel.clearSelection()
-                                else -> {
-                                    selectingAllFromShortcut = true
-                                    viewModel.selectAll {
-                                        selectingAllFromShortcut = false
-                                        if (deleteAfterSelectAll) {
-                                            deleteAfterSelectAll = false
-                                            if (
-                                                viewModel.selectionSnapshot.value.count > 0 &&
-                                                !showCreateFolder && renameTarget == null
-                                            ) {
-                                                confirmTrash = true
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            true
-                        }
-                    },
+                    onSelectAll = filesSelectAllShortcut,
                     onDelete = {
                         when {
                             showDuplicateManager || showEmptyItems || showCreateFolder || renameTarget != null -> false

@@ -43,6 +43,9 @@ import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
+import com.drdisagree.teledrive.presentation.components.RegisterWindowSelectAll
+import com.drdisagree.teledrive.presentation.components.TextInputFocusTracker
+import com.drdisagree.teledrive.presentation.components.trackTextInputFocus
 import com.drdisagree.teledrive.presentation.components.galleryGridColumnsForWindow
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
@@ -419,6 +422,11 @@ fun GalleryScreen(
     viewModel: GalleryViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    // PC-33: the search field and the advanced-filter fields share
+    // this window with the grids — while any of them holds focus,
+    // Ctrl+A must stay select-all-TEXT, so the window-level
+    // registration asks this tracker first.
+    val galleryTextFocus = remember { TextInputFocusTracker() }
     val androidLayout = LocalAndroidLayout.current
     val selectionModeEnabled by viewModel.selectionModeEnabled.collectAsStateWithLifecycle()
     val selectionMode = state.selectionMode || selectionModeEnabled
@@ -979,6 +987,13 @@ fun GalleryScreen(
                 .fillMaxSize()
                 .padding(top = padding.calculateTopPadding())
         ) {
+            // PC-33: window-level Ctrl+A (see WindowSelectAllRegistry) —
+            // the same toggle both container shortcuts below run,
+            // registered once for the whole surface (albums + media).
+            RegisterWindowSelectAll(
+                isTextInputFocused = { galleryTextFocus.anyFocused },
+                onToggleSelectAll = { viewModel.toggleSelectAll(); true }
+            )
             // Pinned header: the tab selector, search field and filter chips
             // stay fixed while only the media grid / albums list below them
             // scrolls. This block used to hide itself on scroll down and fade
@@ -996,7 +1011,8 @@ fun GalleryScreen(
                 onValueChange = viewModel::setSearchQuery,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .trackTextInputFocus(galleryTextFocus),
                 singleLine = true,
                 placeholder = { Text(stringResource(Res.string.gallery_search_hint)) },
                 leadingIcon = {
@@ -1083,7 +1099,7 @@ fun GalleryScreen(
                         OutlinedTextField(
                             value = state.filters.extensionQuery,
                             onValueChange = { viewModel.setAdvancedFilters(extension = it) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).trackTextInputFocus(galleryTextFocus),
                             singleLine = true,
                             label = { Text("Extension") },
                             placeholder = { Text("jpg") }
@@ -1091,14 +1107,14 @@ fun GalleryScreen(
                         OutlinedTextField(
                             value = state.filters.minSizeMb,
                             onValueChange = { viewModel.setAdvancedFilters(minSizeMb = it) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).trackTextInputFocus(galleryTextFocus),
                             singleLine = true,
                             label = { Text("Min size (MB)") }
                         )
                         OutlinedTextField(
                             value = state.filters.maxSizeMb,
                             onValueChange = { viewModel.setAdvancedFilters(maxSizeMb = it) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).trackTextInputFocus(galleryTextFocus),
                             singleLine = true,
                             label = { Text("Max size (MB)") }
                         )
@@ -1107,7 +1123,7 @@ fun GalleryScreen(
                         OutlinedTextField(
                             value = state.filters.modifiedAfterDate,
                             onValueChange = { viewModel.setAdvancedFilters(modifiedAfterDate = it) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).trackTextInputFocus(galleryTextFocus),
                             singleLine = true,
                             label = { Text("Modified from") },
                             placeholder = { Text("YYYY-MM-DD") }
@@ -1115,7 +1131,7 @@ fun GalleryScreen(
                         OutlinedTextField(
                             value = state.filters.modifiedBeforeDate,
                             onValueChange = { viewModel.setAdvancedFilters(modifiedBeforeDate = it) },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).trackTextInputFocus(galleryTextFocus),
                             singleLine = true,
                             label = { Text("Modified to") },
                             placeholder = { Text("YYYY-MM-DD") }
