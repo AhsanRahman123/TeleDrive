@@ -1657,9 +1657,16 @@ class TdLibTelegramClient(
             .getOrNull()
             ?.takeIf { it.chatId == chatId && it.sendingState == null } != null
 
-    override suspend fun editCaption(chatId: Long, messageId: Long, caption: String) {
+    override val floodWaitSeconds: Int get() = pacer.floodWaitSeconds
+
+    override suspend fun editCaption(
+        chatId: Long,
+        messageId: Long,
+        caption: String,
+        onWaiting: suspend (secondsLeft: Int) -> Unit
+    ) {
         ownWrites.wroteCaption(messageId, caption)
-        pacer.pacedEdit {
+        pacer.pacedEdit({
             withRateLimitRetry {
                 send(
                     TdApi.EditMessageCaption(
@@ -1671,14 +1678,18 @@ class TdLibTelegramClient(
                     )
                 )
             }
-        }
+        }, onWaiting)
     }
 
-    override suspend fun deleteMessages(chatId: Long, messageIds: List<Long>) {
+    override suspend fun deleteMessages(
+        chatId: Long,
+        messageIds: List<Long>,
+        onWaiting: suspend (secondsLeft: Int) -> Unit
+    ) {
         if (messageIds.isEmpty()) return
         ownWrites.deleted(messageIds)
         messageIds.chunked(DELETE_BATCH).forEach { batch ->
-            paced { send(TdApi.DeleteMessages(chatId, batch.toLongArray(), true)) }
+            paced(onWaiting) { send(TdApi.DeleteMessages(chatId, batch.toLongArray(), true)) }
         }
     }
 
@@ -1732,8 +1743,10 @@ class TdLibTelegramClient(
      * A flood wait applies to the whole account, so every message-creating call waits behind one
      * pacer.
      */
-    private suspend fun <T> paced(block: suspend () -> T): T =
-        pacer.paced { withRateLimitRetry(block) }
+    private suspend fun <T> paced(
+        onWaiting: suspend (secondsLeft: Int) -> Unit = {},
+        block: suspend () -> T
+    ): T = pacer.paced({ withRateLimitRetry(block) }, onWaiting)
 
     private suspend fun <T> withRateLimitRetry(block: suspend () -> T): T {
         var attempt = 0

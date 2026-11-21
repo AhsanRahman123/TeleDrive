@@ -33,7 +33,8 @@ class DesktopPublishScheduler(
                 onFailure = onFailure
             )
         },
-        scope = scope
+        scope = scope,
+        floodWaitSeconds = { drainer.floodWaitSeconds }
     )
 
     override fun kick() = loop.kick()

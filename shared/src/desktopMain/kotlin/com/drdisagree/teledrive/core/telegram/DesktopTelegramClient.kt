@@ -1594,9 +1594,16 @@ class DesktopTelegramClient(
             .getOrNull()
             ?.takeIf { it.chatId == chatId && it.sendingState == null } != null
 
-    override suspend fun editCaption(chatId: Long, messageId: Long, caption: String) {
+    override val floodWaitSeconds: Int get() = pacer.floodWaitSeconds
+
+    override suspend fun editCaption(
+        chatId: Long,
+        messageId: Long,
+        caption: String,
+        onWaiting: suspend (secondsLeft: Int) -> Unit
+    ) {
         ownWrites.wroteCaption(messageId, caption)
-        pacedEdit {
+        pacedEdit(onWaiting) {
             send(
                 TdApi.EditMessageCaption(
                     chatId,
@@ -1609,11 +1616,15 @@ class DesktopTelegramClient(
         }
     }
 
-    override suspend fun deleteMessages(chatId: Long, messageIds: List<Long>) {
+    override suspend fun deleteMessages(
+        chatId: Long,
+        messageIds: List<Long>,
+        onWaiting: suspend (secondsLeft: Int) -> Unit
+    ) {
         if (messageIds.isEmpty()) return
         ownWrites.deleted(messageIds)
         messageIds.chunked(DELETE_BATCH).forEach { batch ->
-            paced { send(TdApi.DeleteMessages(chatId, batch.toLongArray(), true)) }
+            paced(onWaiting) { send(TdApi.DeleteMessages(chatId, batch.toLongArray(), true)) }
         }
     }
 
@@ -1667,16 +1678,21 @@ class DesktopTelegramClient(
      * A flood wait applies to the whole account, so every message-creating call waits behind one
      * pacer.
      */
-    private suspend fun <T> paced(block: suspend () -> T): T =
-        pacer.paced { withRateLimitRetry(block) }
+    private suspend fun <T> paced(
+        onWaiting: suspend (secondsLeft: Int) -> Unit = {},
+        block: suspend () -> T
+    ): T = pacer.paced({ withRateLimitRetry(block) }, onWaiting)
 
     /**
      * Caption edits update existing messages rather than creating new ones, so they take the
      * pacer's dedicated edit lane (~4 edits/second) instead of the 20/minute creation lane —
      * the same lane Android's editCaption uses. Bulk moves/renames publish through here.
+     * [onWaiting] carries the pacer's flood-wait ticks to the caller (PC-36).
      */
-    private suspend fun <T> pacedEdit(block: suspend () -> T): T =
-        pacer.pacedEdit { withRateLimitRetry(block) }
+    private suspend fun <T> pacedEdit(
+        onWaiting: suspend (secondsLeft: Int) -> Unit = {},
+        block: suspend () -> T
+    ): T = pacer.pacedEdit({ withRateLimitRetry(block) }, onWaiting)
 
     private suspend fun <T> withRateLimitRetry(block: suspend () -> T): T {
         var attempt = 0

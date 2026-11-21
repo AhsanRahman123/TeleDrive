@@ -19,7 +19,10 @@ class FileManifestPublisher(
     private val filePartDao: FilePartDao
 ) {
 
-    suspend fun publish(entity: FileEntity): AppResult<Unit> {
+    suspend fun publish(
+        entity: FileEntity,
+        onWaiting: suspend (secondsLeft: Int) -> Unit = {}
+    ): AppResult<Unit> {
         // A local-only file has no channel message whose caption could carry
         // its manifest, so there is nothing to publish *yet*. Reporting success
         // here used to seal the row (pending cleared, baseline adopted) while
@@ -62,7 +65,8 @@ class FileManifestPublisher(
             telegramClient.editCaption(
                 chatId,
                 messageId,
-                manifestCodec.encode(manifest, entity.isEncrypted)
+                manifestCodec.encode(manifest, entity.isEncrypted),
+                onWaiting
             )
             AppResult.Success(Unit)
         } catch (e: TelegramException) {

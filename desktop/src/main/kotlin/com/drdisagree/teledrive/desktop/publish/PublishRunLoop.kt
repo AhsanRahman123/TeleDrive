@@ -89,7 +89,16 @@ internal class PublishRunLoop(
     private val initialRetryDelaySeconds: Int = RETRY_DELAY_SECONDS,
     private val maxRetryDelaySeconds: Int = MAX_RETRY_DELAY_SECONDS,
     private val watchdogTimeoutSeconds: Int = WATCHDOG_TIMEOUT_SECONDS,
-    private val clock: () -> Instant = { Instant.now() }
+    private val clock: () -> Instant = { Instant.now() },
+    /**
+     * Seconds left in the pacer's account-wide flood wait (PC-36).
+     * Since PC-36 a pacer park ticks [PublishDrain]'s waiting report
+     * like any other wait, so the watchdog should never fire for one;
+     * if it ever does fire while a flood wait is in effect, the run's
+     * WaitingRetry reason names the flood wait — the truth — instead
+     * of the bare "no progress" text.
+     */
+    private val floodWaitSeconds: () -> Int = { 0 }
 ) {
 
     private val _runState = MutableStateFlow<PublishRunState>(PublishRunState.Idle)
@@ -182,6 +191,7 @@ internal class PublishRunLoop(
         val lastPublished = AtomicInteger(0)
         val lastTotal = AtomicInteger(0)
         val watchdogFired = AtomicBoolean(false)
+        val watchdogReason = AtomicReference<String?>(null)
         val child = async {
             drain.run(
                 isStopped = { stopRequested.get() },
@@ -222,10 +232,26 @@ internal class PublishRunLoop(
                 if (System.currentTimeMillis() - lastActivityMs.get() >
                     watchdogTimeoutSeconds * 1000L
                 ) {
+                    // PC-36: log the idle age and the live flood
+                    // deadline, and let the run's reason name a flood
+                    // wait when one is in effect — the next field
+                    // report should be diagnosable from this one line.
+                    val idleSeconds =
+                        (System.currentTimeMillis() - lastActivityMs.get()) / 1000L
+                    val floodLeft = floodWaitSeconds()
                     SafeLog.w(
                         TAG,
                         "Publish drain made no progress for " +
-                            "${watchdogTimeoutSeconds}s; ending the run"
+                            "${watchdogTimeoutSeconds}s; ending the run " +
+                            "(idle ${idleSeconds}s, flood wait ${floodLeft}s left)"
+                    )
+                    watchdogReason.set(
+                        if (floodLeft > 0) {
+                            "Telegram asked us to slow down — a flood wait " +
+                                "of ${floodLeft}s was still in effect"
+                        } else {
+                            "Sync made no progress for ${watchdogTimeoutSeconds}s"
+                        }
                     )
                     watchdogFired.set(true)
                     child.cancel()
@@ -239,7 +265,8 @@ internal class PublishRunLoop(
             if (!isActive) throw e
             if (watchdogFired.get()) {
                 throw IllegalStateException(
-                    "Sync made no progress for ${watchdogTimeoutSeconds}s"
+                    watchdogReason.get()
+                        ?: "Sync made no progress for ${watchdogTimeoutSeconds}s"
                 )
             }
             false

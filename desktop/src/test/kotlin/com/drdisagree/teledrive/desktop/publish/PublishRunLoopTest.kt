@@ -422,6 +422,62 @@ class PublishRunLoopTest {
         assertTrue(state.reason?.contains("no progress") == true)
     }
 
+    @Test
+    fun `a drain that starts ticking before the watchdog window is not ended by it`() {
+        // PC-36 (audit 35 §7.3 iii): a park that reports nothing for
+        // its first stretch and then ticks — the pacer-park shape
+        // before its first slice lands — must not be watchdog-killed
+        // once the ticks flow: the ticks feed the watchdog, and the
+        // drain is allowed to finish.
+        val loop = PublishRunLoop(
+            drain = PublishDrain { _, _, onWaiting, _ ->
+                delay(1_200)
+                var left = 6
+                while (left > 0) {
+                    onWaiting(left)
+                    delay(400)
+                    left--
+                }
+                true
+            },
+            scope = scope,
+            initialRetryDelaySeconds = 3_600,
+            maxRetryDelaySeconds = 3_600,
+            watchdogTimeoutSeconds = 2
+        )
+
+        loop.kick()
+        awaitState(loop, "the ticking drain completes to Idle") {
+            it == PublishRunState.Idle
+        }
+    }
+
+    @Test
+    fun `a watchdog-ended run names the flood wait when one is in effect`() {
+        // PC-36: if the watchdog ever does end a run while the pacer
+        // holds a flood wait, the WaitingRetry reason tells that
+        // truth instead of the bare "no progress" text.
+        val loop = PublishRunLoop(
+            drain = PublishDrain { _, _, _, _ ->
+                delay(60_000)
+                true
+            },
+            scope = scope,
+            initialRetryDelaySeconds = 3_600,
+            maxRetryDelaySeconds = 3_600,
+            watchdogTimeoutSeconds = 2,
+            floodWaitSeconds = { 700 }
+        )
+
+        loop.kick()
+        awaitState(loop, "the watchdog ends the silent run into WaitingRetry") {
+            it is PublishRunState.WaitingRetry
+        }
+        val state = loop.runState.value as PublishRunState.WaitingRetry
+        assertTrue(state.reason?.contains("slow down") == true)
+        assertTrue(state.reason?.contains("700") == true)
+    }
+
     private fun awaitOutcome(
         loop: PublishRunLoop,
         description: String,

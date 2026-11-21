@@ -42,6 +42,13 @@ class PublishOutboxDrainer(
     private val database: TeleDriveDatabase
 ) {
 
+    /**
+     * Seconds left in the Telegram pacer's account-wide flood wait
+     * (PC-36), read by the publish run loop so a watchdog-ended run
+     * can name the flood wait as its reason.
+     */
+    val floodWaitSeconds: Int get() = telegramClient.floodWaitSeconds
+
     suspend fun drain(
         isStopped: () -> Boolean,
         onProgress: suspend (published: Int, total: Int) -> Unit = { _, _ -> },
@@ -78,7 +85,7 @@ class PublishOutboxDrainer(
         onWaiting: suspend (secondsLeft: Int) -> Unit,
         onFailure: suspend (fileId: String, error: AppError) -> Unit
     ): Boolean {
-        if (!replayDeletes(isStopped, onFailure)) return false
+        if (!replayDeletes(isStopped, onWaiting, onFailure)) return false
         if (isStopped()) return false
 
         // PC-32, second re-investigation (round 8, his test video):
@@ -234,7 +241,7 @@ class PublishOutboxDrainer(
                             aborted.set(true)
                             return@withPermit
                         }
-                        when (val result = manifestPublisher.publish(entity)) {
+                        when (val result = manifestPublisher.publish(entity, onWaiting)) {
                             is AppResult.Success -> {
                                 clearIfUnchanged(entity, accepted = true)
                                 reportProgress()
@@ -419,6 +426,7 @@ class PublishOutboxDrainer(
      */
     private suspend fun replayDeletes(
         isStopped: () -> Boolean,
+        onWaiting: suspend (secondsLeft: Int) -> Unit,
         onFailure: suspend (fileId: String, error: AppError) -> Unit
     ): Boolean {
         // Attempts are keyed by (chatId, messageId) — the entity's own
@@ -439,7 +447,7 @@ class PublishOutboxDrainer(
                 val messageIds = pending.map { it.messageId }
                 attempted += pending.map { it.chatId to it.messageId }
                 try {
-                    telegramClient.deleteMessages(chatId, messageIds)
+                    telegramClient.deleteMessages(chatId, messageIds, onWaiting)
                     fileDao.deleteByIds(pending.map { it.fileId })
                     pendingDeleteDao.clear(chatId, messageIds)
                 } catch (e: TelegramException) {

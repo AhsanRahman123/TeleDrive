@@ -131,7 +131,11 @@ class SplitReuploadCancelTest {
         val settings = FakeSettings(UserPreferences(storageChatId = 1))
         val codec = ManifestCodec(StreamCrypto(), unused())
         val telegram = object : TelegramClient by unused() {
-            override suspend fun deleteMessages(chatId: Long, messageIds: List<Long>) {
+            override suspend fun deleteMessages(
+                chatId: Long,
+                messageIds: List<Long>,
+                onWaiting: suspend (Int) -> Unit
+            ) {
                 deleted += messageIds
             }
         }

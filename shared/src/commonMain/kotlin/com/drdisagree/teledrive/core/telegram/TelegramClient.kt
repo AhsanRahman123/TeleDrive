@@ -244,9 +244,36 @@ interface TelegramClient {
      */
     suspend fun isMessageSettled(chatId: Long, messageId: Long): Boolean = true
 
-    suspend fun editCaption(chatId: Long, messageId: Long, caption: String)
+    /**
+     * Seconds left in the account-wide flood wait the pacer is
+     * currently holding every request behind, 0 when no wait is in
+     * effect (PC-36). Read by the publish run loop so a watchdog-ended
+     * run can name the flood wait as its reason instead of a bare
+     * "no progress". Clients without a pacer report 0.
+     */
+    val floodWaitSeconds: Int get() = 0
 
-    suspend fun deleteMessages(chatId: Long, messageIds: List<Long>)
+    /**
+     * [onWaiting] reports an account flood wait in progress before
+     * the edit can be sent (seconds left, once a second) so callers
+     * with a visible surface — the publish drainer — can show the
+     * wait instead of freezing (PC-36). A wait longer than one call
+     * may ride out ends in a 429 [TelegramException] carrying the
+     * seconds remaining; it never parks silently past that bound.
+     */
+    suspend fun editCaption(
+        chatId: Long,
+        messageId: Long,
+        caption: String,
+        onWaiting: suspend (secondsLeft: Int) -> Unit = {}
+    )
+
+    /** [onWaiting]: the same flood-wait reporting as [editCaption]. */
+    suspend fun deleteMessages(
+        chatId: Long,
+        messageIds: List<Long>,
+        onWaiting: suspend (secondsLeft: Int) -> Unit = {}
+    )
 
     /**
      * Leaves out this session's own sends, edits and deletions, unsent messages and cache-only

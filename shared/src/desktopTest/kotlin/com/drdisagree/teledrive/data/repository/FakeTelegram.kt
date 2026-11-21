@@ -137,7 +137,19 @@ internal class FakeTelegram : TelegramClient by unused() {
 
     var onDeleteMessages: suspend (messageIds: List<Long>) -> Unit = {}
 
-    override suspend fun deleteMessages(chatId: Long, messageIds: List<Long>) {
+    /**
+     * Runs at the head of [deleteMessages] with the caller's waiting
+     * callback (PC-36): a test can reproduce the pacer's flood park
+     * shape — tick the wait, then throw or return — at this seam.
+     */
+    var onDeleteWaiting: suspend (onWaiting: suspend (Int) -> Unit) -> Unit = {}
+
+    override suspend fun deleteMessages(
+        chatId: Long,
+        messageIds: List<Long>,
+        onWaiting: suspend (Int) -> Unit
+    ) {
+        onDeleteWaiting(onWaiting)
         onDeleteMessages(messageIds)
         deletedMessages += messageIds
         storedFiles.keys.removeAll { it.messageId in messageIds }
@@ -193,7 +205,25 @@ internal class FakeTelegram : TelegramClient by unused() {
 
     var onEditCaption: suspend (messageId: Long) -> Unit = {}
 
-    override suspend fun editCaption(chatId: Long, messageId: Long, caption: String) {
+    /**
+     * Runs at the head of [editCaption] with the caller's waiting
+     * callback (PC-36): a test can reproduce the pacer's flood park
+     * shape — tick the wait, then throw a 429 — at this seam, or wire
+     * a real [com.drdisagree.teledrive.core.telegram.TelegramPacer]
+     * into the call.
+     */
+    var onEditWaiting: suspend (
+        messageId: Long,
+        onWaiting: suspend (Int) -> Unit
+    ) -> Unit = { _, _ -> }
+
+    override suspend fun editCaption(
+        chatId: Long,
+        messageId: Long,
+        caption: String,
+        onWaiting: suspend (Int) -> Unit
+    ) {
+        onEditWaiting(messageId, onWaiting)
         onEditCaption(messageId)
         editedCaptions[messageId] = caption
     }
