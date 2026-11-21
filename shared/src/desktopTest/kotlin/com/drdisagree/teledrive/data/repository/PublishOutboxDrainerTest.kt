@@ -96,6 +96,37 @@ class PublishOutboxDrainerTest {
         }
 
     @Test
+    fun `hundreds of rejected rows cannot block the backlog behind them in one drain`() =
+        runBlocking {
+            // The per-drain exclusion used to ride in a SQL NOT IN (...)
+            // parameter list; past a few hundred rejected rows that hits
+            // SQLite's variable limit on strict drivers and fails the
+            // whole drain (second-pass finding, round 7). The exclusion
+            // is filtered in memory now — this many poison rows must
+            // still let everything behind them publish in ONE drain.
+            val poison = (1..600).map { publishableFile("bad-$it", 5_000L + it) }
+            val behind = (1..10).map { publishableFile("good-$it", 9_000L + it) }
+            files.upsertAll(poison + behind)
+            telegram.onEditCaption = { messageId ->
+                if (messageId in 5_001L..5_600L) {
+                    throw TelegramException(400, "MESSAGE_ID_INVALID")
+                }
+            }
+            val failures = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+            val drained = drainer().drain(
+                isStopped = { false },
+                onFailure = { fileId, _ -> failures += fileId }
+            )
+
+            assertTrue("the drain must complete behind a 600-row poison head", drained)
+            assertEquals(10, telegram.editedCaptions.size)
+            assertEquals(600, files.pendingPublishCount())
+            assertEquals(600, failures.size)
+            assertFalse(files.byId("good-1")!!.pendingPublish)
+        }
+
+    @Test
     fun `cancel mid-drain leaves exactly the unpublished remainder pending and resumable`() =
         runBlocking {
             val rows = (1..250).map { publishableFile("bulk-$it", 3_000L + it) }

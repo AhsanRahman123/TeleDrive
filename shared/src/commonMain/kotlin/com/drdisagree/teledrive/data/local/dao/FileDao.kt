@@ -95,14 +95,6 @@ interface FileDao {
     )
     suspend fun pendingPublishable(limit: Int): List<FileEntity>
 
-    /** [pendingPublishable] minus the rows this drain already knows are rejected. */
-    @Query(
-        "SELECT * FROM files WHERE pendingPublish = 1 " +
-            "AND chatId IS NOT NULL AND messageId IS NOT NULL " +
-            "AND id NOT IN (:excludeIds) LIMIT :limit"
-    )
-    suspend fun pendingPublishableExcluding(limit: Int, excludeIds: List<String>): List<FileEntity>
-
     @Query("SELECT * FROM files WHERE id = :id")
     suspend fun byId(id: String): FileEntity?
 

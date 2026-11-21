@@ -68,6 +68,34 @@ class PublishRunLoopTest {
     }
 
     @Test
+    fun `a throwing drain surfaces as WaitingRetry and a re-kick still drains`() {
+        val attempts = AtomicInteger(0)
+        val loop = PublishRunLoop(
+            drain = PublishDrain { _, _, _ ->
+                if (attempts.incrementAndGet() == 1) {
+                    throw IllegalStateException("database is locked")
+                }
+                true
+            },
+            scope = scope,
+            initialRetryDelaySeconds = 3_600,
+            maxRetryDelaySeconds = 3_600
+        )
+
+        loop.kick()
+        awaitState(loop, "the throw parks in WaitingRetry with its message") {
+            it is PublishRunState.WaitingRetry && it.reason == "database is locked"
+        }
+        assertEquals(1, attempts.get())
+
+        loop.kick()
+        awaitState(loop, "the re-kick drains and settles to Idle") {
+            it == PublishRunState.Idle
+        }
+        assertEquals(2, attempts.get())
+    }
+
+    @Test
     fun `cancel mid-drain stops the run and sync now afterwards resumes and drains`() {
         val attempts = AtomicInteger(0)
         val loop = PublishRunLoop(

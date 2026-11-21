@@ -95,11 +95,7 @@ class PublishOutboxDrainer(
         val published = AtomicInteger(0)
         while (true) {
             if (isStopped()) return false
-            val batch = if (excludedIds.isEmpty()) {
-                fileDao.pendingPublishable(BATCH_SIZE)
-            } else {
-                fileDao.pendingPublishableExcluding(BATCH_SIZE, excludedIds.toList())
-            }
+            val batch = nextBatch(excludedIds)
             if (batch.isEmpty()) break
             onProgress(published.get(), published.get() + fileDao.pendingPublishCount())
             if (!publishBatch(batch, published, excludedIds, isStopped, onProgress, onWaiting, onFailure)) {
@@ -123,6 +119,24 @@ class PublishOutboxDrainer(
             }
         }
         return folderDao.pendingPublishCount() == 0
+    }
+
+    /**
+     * The next batch of publishable rows, skipping [excludedIds] in
+     * memory rather than in a `NOT IN (:ids)` parameter list: a drain
+     * that meets hundreds of rejected rows would push the parameter
+     * count past SQLite's variable limit on strict drivers and fail
+     * the whole drain (second-pass finding, round 7). Fetching one
+     * batch-window past the excluded count guarantees a full batch of
+     * fresh rows whenever that many publishable rows remain — the
+     * excluded rows inside the window number at most [excludedIds]'
+     * size — and an empty result means no fresh publishable rows are
+     * left, so the loop still terminates.
+     */
+    private suspend fun nextBatch(excludedIds: Set<String>): List<FileEntity> {
+        if (excludedIds.isEmpty()) return fileDao.pendingPublishable(BATCH_SIZE)
+        val window = fileDao.pendingPublishable(BATCH_SIZE + excludedIds.size)
+        return window.filter { it.id !in excludedIds }.take(BATCH_SIZE)
     }
 
     /**

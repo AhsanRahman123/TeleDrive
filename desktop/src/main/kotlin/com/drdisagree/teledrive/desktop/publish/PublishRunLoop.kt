@@ -1,10 +1,12 @@
 package com.drdisagree.teledrive.desktop.publish
 
 import com.drdisagree.teledrive.core.common.AppError
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.publish.PublishRunState
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -115,13 +117,27 @@ internal class PublishRunLoop(
                 val failures =
                     Collections.synchronizedList(mutableListOf<Pair<String, AppError>>())
                 _runState.value = PublishRunState.Running(0, 0)
-                val drained = drain.run(
-                    isStopped = { stopRequested.get() },
-                    onProgress = { published, total ->
-                        _runState.value = PublishRunState.Running(published, total)
-                    },
-                    onFailure = { fileId, error -> failures += fileId to error }
-                )
+                var drainError: Throwable? = null
+                val drained = try {
+                    drain.run(
+                        isStopped = { stopRequested.get() },
+                        onProgress = { published, total ->
+                            _runState.value = PublishRunState.Running(published, total)
+                        },
+                        onFailure = { fileId, error -> failures += fileId to error }
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A drain that throws (a locked database, a DAO
+                    // failure) must surface like any other failed drain
+                    // — never kill the loop with the state stuck at
+                    // Running and nothing anywhere explaining the stop
+                    // (second-pass finding, round 7).
+                    SafeLog.w(TAG, "Publish drain threw; treating as a failed run", e)
+                    drainError = e
+                    false
+                }
                 when {
                     stopRequested.get() -> {
                         _runState.value = PublishRunState.Stopped
@@ -142,8 +158,9 @@ internal class PublishRunLoop(
                     }
                     else -> {
                         _runState.value = PublishRunState.WaitingRetry(
-                            reason = (failures.lastOrNull()?.second as? AppError.TelegramError)
-                                ?.message
+                            reason = drainError?.message
+                                ?: (failures.lastOrNull()?.second as? AppError.TelegramError)
+                                    ?.message
                         )
                         awaitWakeOrTimeout(delaySeconds)
                         if (stopRequested.get()) {
@@ -166,6 +183,7 @@ internal class PublishRunLoop(
     }
 
     private companion object {
+        const val TAG = "PublishRunLoop"
         const val RETRY_DELAY_SECONDS = 30
         const val MAX_RETRY_DELAY_SECONDS = 300
     }
