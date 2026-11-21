@@ -170,7 +170,7 @@ fun TrashScreen(
     }
     val shortcuts = CollectionShortcuts(
         onToggleSelect = { index -> selectableIdAt(index)?.let(viewModel::toggleSelection) },
-        onSelectAll = viewModel::selectAll,
+        onSelectAll = viewModel::toggleSelectAll,
         onDelete = { index ->
             if (!selectionMode) selectableIdAt(index)?.let(viewModel::toggleSelection)
             if (selectionMode || selectableIdAt(index) != null) confirmDeleteSelected = true

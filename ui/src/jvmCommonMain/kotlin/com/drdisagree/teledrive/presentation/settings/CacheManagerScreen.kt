@@ -377,8 +377,19 @@ fun CacheManagerScreen(
                                                     )
                                                 }
                                             }
-                                            selectedPaths = paths
-                                            selectedFolderIds = folders.map { it.id }.toSet()
+                                            // Ctrl+A toggle (PC-29b): the full
+                                            // matching set already selected
+                                            // clears instead of reselecting.
+                                            val folderIds = folders.map { it.id }.toSet()
+                                            if (paths.isNotEmpty() && selectedPaths == paths &&
+                                                selectedFolderIds == folderIds
+                                            ) {
+                                                selectedPaths = emptySet()
+                                                selectedFolderIds = emptySet()
+                                            } else {
+                                                selectedPaths = paths
+                                                selectedFolderIds = folderIds
+                                            }
                                         } finally {
                                             busy = false
                                         }

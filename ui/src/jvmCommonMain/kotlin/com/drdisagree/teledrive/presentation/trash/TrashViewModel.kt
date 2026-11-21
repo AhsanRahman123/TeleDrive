@@ -180,6 +180,15 @@ class TrashViewModel(
         _selectionModeEnabled.value = ids.isNotEmpty()
     }
 
+    /** Ctrl+A toggle (PC-29b): every selectable row selected → clear, else select all. */
+    fun toggleSelectAll() {
+        val all = uiState.value.rows
+            .filter { row -> row.selectable }
+            .map { row -> row.item.id }
+            .toSet()
+        if (all.isNotEmpty() && selection.value == all) clearSelection() else selectAll()
+    }
+
     fun startRangeSelection() {
         rangeBase = selection.value
         rangeSelectionActive = true

@@ -752,14 +752,25 @@ fun ThumbnailManagerScreen(
                             scope.launch {
                                 selectingAll = true
                                 try {
-                                    selectedIds = cacheRepository.thumbnailFileIdsMatching(
+                                    // Ctrl+A toggle (PC-29b): the full
+                                    // matching set already selected clears.
+                                    val ids = cacheRepository.thumbnailFileIdsMatching(
                                         folderId = folderId,
                                         cacheFilter = cacheFilter.name,
                                         policyFilter = policyFilter.name,
                                         effectivePolicyFilter = effectivePolicyFilter.name,
                                         searchQuery = searchQuery
                                     ).toSet()
-                                    selectedFolderIds = folders.map { it.id }.toSet()
+                                    val folderIds = folders.map { it.id }.toSet()
+                                    if (ids.isNotEmpty() && selectedIds == ids &&
+                                        selectedFolderIds == folderIds
+                                    ) {
+                                        selectedIds = emptySet()
+                                        selectedFolderIds = emptySet()
+                                    } else {
+                                        selectedIds = ids
+                                        selectedFolderIds = folderIds
+                                    }
                                 } finally {
                                     selectingAll = false
                                 }

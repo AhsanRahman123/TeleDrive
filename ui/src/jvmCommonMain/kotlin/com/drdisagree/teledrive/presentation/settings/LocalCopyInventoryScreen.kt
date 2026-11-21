@@ -259,7 +259,13 @@ fun LocalCopyInventoryScreen(modifier: Modifier = Modifier) {
                     .collectionCommandShortcuts(
                         focusRequester = commandFocusRequester,
                         onSelectAll = {
-                            selectedIds = rows.map { it.file.id }.toSet()
+                            // Ctrl+A toggle (PC-29b).
+                            val all = rows.map { it.file.id }.toSet()
+                            selectedIds = if (all.isNotEmpty() && selectedIds == all) {
+                                emptySet()
+                            } else {
+                                all
+                            }
                             true
                         },
                         onCopy = {

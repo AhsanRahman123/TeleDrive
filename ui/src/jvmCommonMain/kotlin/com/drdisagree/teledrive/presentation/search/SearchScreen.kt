@@ -145,7 +145,7 @@ fun SearchScreen(
     }
     val shortcuts = CollectionShortcuts(
         onToggleSelect = { index -> fileIdAt(index)?.let(viewModel::toggleSelection) },
-        onSelectAll = viewModel::selectAll,
+        onSelectAll = viewModel::toggleSelectAll,
         onCopy = { index ->
             if (!selectionMode) fileIdAt(index)?.let(viewModel::toggleSelection)
             viewModel.copyToClipboardSelected()
@@ -265,7 +265,7 @@ fun SearchScreen(
                     .fillMaxWidth()
                     .collectionCommandShortcuts(
                         focusRequester = commandFocusRequester,
-                        onSelectAll = { viewModel.selectAll(); true },
+                        onSelectAll = { viewModel.toggleSelectAll(); true },
                         onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
                         onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false }
                     )

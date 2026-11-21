@@ -333,7 +333,13 @@ fun ThumbnailQueueScreen(
                                 scope.launch {
                                     selectingAll = true
                                     try {
-                                        selectedIds = repository.thumbnailQueueAllFileIds().toSet()
+                                        // Ctrl+A toggle (PC-29b).
+                                        val all = repository.thumbnailQueueAllFileIds().toSet()
+                                        selectedIds = if (all.isNotEmpty() && selectedIds == all) {
+                                            emptySet()
+                                        } else {
+                                            all
+                                        }
                                     } finally {
                                         selectingAll = false
                                     }

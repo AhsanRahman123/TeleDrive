@@ -1687,7 +1687,7 @@ private fun FilesContent(
     val selectIfNone: (Int) -> Unit = { index -> if (!selectionMode) toggleAt(index) }
     val shortcuts = CollectionShortcuts(
         onToggleSelect = toggleAt,
-        onSelectAll = viewModel::selectAll,
+        onSelectAll = viewModel::toggleSelectAll,
         onDelete = { index ->
             selectIfNone(index)
             onRequestTrash()

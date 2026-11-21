@@ -339,7 +339,7 @@ fun CollectionScreen(
         }
         val shortcuts = CollectionShortcuts(
             onToggleSelect = toggleAt,
-            onSelectAll = viewModel::selectAll,
+            onSelectAll = viewModel::toggleSelectAll,
             onDelete = { index ->
                 if (!selectionMode) toggleAt(index)
                 confirmTrash = true
@@ -362,7 +362,7 @@ fun CollectionScreen(
                 .fillMaxSize()
                 .collectionCommandShortcuts(
                     focusRequester = commandFocusRequester,
-                    onSelectAll = { viewModel.selectAll(); true },
+                    onSelectAll = { viewModel.toggleSelectAll(); true },
                     onCopy = { if (viewModel.hasSelection()) { viewModel.copyToClipboardSelected(); true } else false },
                     onCut = { if (viewModel.hasSelection()) { viewModel.cutSelected(); true } else false },
                     onPaste = { if (viewModel.hasClipboardItems()) { viewModel.paste(); true } else false }

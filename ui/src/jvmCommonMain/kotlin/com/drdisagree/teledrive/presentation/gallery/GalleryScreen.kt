@@ -443,7 +443,7 @@ fun GalleryScreen(
         onToggleSelect = { index ->
             state.albums.getOrNull(index)?.folderId?.let(viewModel::toggleAlbumSelection)
         },
-        onSelectAll = viewModel::selectAll,
+        onSelectAll = viewModel::toggleSelectAll,
         onDelete = { index ->
             val folderId = state.albums.getOrNull(index)?.folderId
             if (folderId != null) {
@@ -1153,7 +1153,7 @@ fun GalleryScreen(
                         .fillMaxWidth()
                         .collectionCommandShortcuts(
                             focusRequester = albumCommandFocusRequester,
-                            onSelectAll = { viewModel.selectAll(); true },
+                            onSelectAll = { viewModel.toggleSelectAll(); true },
                             onDelete = {
                                 if (viewModel.hasSelection()) {
                                     confirmTrash = true
@@ -1222,7 +1222,7 @@ fun GalleryScreen(
             }
             val shortcuts = CollectionShortcuts(
                 onToggleSelect = { index -> mediaIdAt(index)?.let(viewModel::toggleSelection) },
-                onSelectAll = viewModel::selectAll,
+                onSelectAll = viewModel::toggleSelectAll,
                 onDelete = { index ->
                     selectIfNone(index)
                     if (viewModel.hasSelection()) confirmTrash = true
@@ -1248,7 +1248,7 @@ fun GalleryScreen(
                     .fillMaxSize()
                     .collectionCommandShortcuts(
                         focusRequester = mediaCommandFocusRequester,
-                        onSelectAll = { viewModel.selectAll(); true },
+                        onSelectAll = { viewModel.toggleSelectAll(); true },
                         onDelete = {
                             if (viewModel.hasSelection()) {
                                 confirmTrash = true

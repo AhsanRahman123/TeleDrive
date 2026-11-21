@@ -427,7 +427,14 @@ fun TransfersScreen(
         val keyboard = rememberKeyboardCollection(listState) { rows.getOrNull(it) != null }
         val commandFocusRequester = rememberCollectionCommandFocusRequester()
         val shortcuts = CollectionShortcuts(
-            onSelectAll = { selectedTransferIds = selectedTransferIds + visibleIds },
+            onSelectAll = {
+                // Ctrl+A toggle (PC-29b): all visible selected → deselect them.
+                selectedTransferIds = if (allVisibleSelected) {
+                    selectedTransferIds - visibleIds
+                } else {
+                    selectedTransferIds + visibleIds
+                }
+            },
             onDelete = { index ->
                 rows.getOrNull(index)
                     ?.takeIf { it !in state.completed }
@@ -519,7 +526,14 @@ fun TransfersScreen(
                         .padding(end = 10.dp)
                 .collectionCommandShortcuts(
                     focusRequester = commandFocusRequester,
-                    onSelectAll = { selectedTransferIds = selectedTransferIds + visibleIds; true }
+                    onSelectAll = {
+                        selectedTransferIds = if (allVisibleSelected) {
+                            selectedTransferIds - visibleIds
+                        } else {
+                            selectedTransferIds + visibleIds
+                        }
+                        true
+                    }
                 )
                 .keyboardCollection(keyboard, rows.count { it != null }, shortcuts),
             contentPadding = padding.add(horizontal = 16.dp, top = 16.dp, bottom = 16.dp),

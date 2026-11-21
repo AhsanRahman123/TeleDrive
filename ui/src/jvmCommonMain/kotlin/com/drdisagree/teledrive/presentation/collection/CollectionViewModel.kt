@@ -178,6 +178,11 @@ class CollectionViewModel(
         }
     }
 
+    /** Ctrl+A toggle (PC-29b): everything selected → clear, else select all. */
+    fun toggleSelectAll() {
+        if (_allSelected.value) clearSelection() else selectAll()
+    }
+
     fun startRangeSelection() {
         rangeBase = _selection.value to _folderSelection.value
     }

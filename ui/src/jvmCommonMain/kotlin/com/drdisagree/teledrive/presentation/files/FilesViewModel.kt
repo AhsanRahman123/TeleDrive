@@ -442,6 +442,18 @@ class FilesViewModel(
 
     fun selectAll() = selectAll(onComplete = null)
 
+    /**
+     * Ctrl+A is a toggle (PC-29b): with everything in the current scope
+     * selected it clears the selection, otherwise it selects all. The
+     * workspace-level shortcut already toggled through the screen's own
+     * state; the item-focus path (KeyboardCollection) called [selectAll]
+     * directly and could never deselect — every Ctrl+A entry point now
+     * lands here so the behaviour cannot drift apart again.
+     */
+    fun toggleSelectAll() {
+        if (_allSelected.value) clearSelection() else selectAll()
+    }
+
     fun selectAll(onComplete: (() -> Unit)?) {
         viewModelScope.launch {
             try {

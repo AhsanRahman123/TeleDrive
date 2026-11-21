@@ -164,6 +164,12 @@ class SearchViewModel(
         selection.value = uiState.value.results.map { it.id }.toSet()
     }
 
+    /** Ctrl+A toggle (PC-29b): the full result set selected → clear, else select all. */
+    fun toggleSelectAll() {
+        val all = uiState.value.results.map { it.id }.toSet()
+        if (all.isNotEmpty() && selection.value == all) clearSelection() else selectAll()
+    }
+
     fun hasSelection(): Boolean = selection.value.isNotEmpty()
 
     fun copyToClipboardSelected() {
