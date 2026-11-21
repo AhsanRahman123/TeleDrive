@@ -180,7 +180,14 @@ class CollectionViewModel(
 
     /** Ctrl+A toggle (PC-29b): everything selected → clear, else select all. */
     fun toggleSelectAll() {
-        if (_allSelected.value) clearSelection() else selectAll()
+        if (_allSelected.value) {
+            clearSelection()
+        } else {
+            // Optimistic flip: selectAll completes asynchronously, and
+            // a rapid second press must already read "all selected".
+            _allSelected.update { true }
+            selectAll()
+        }
     }
 
     fun startRangeSelection() {

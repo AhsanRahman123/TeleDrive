@@ -324,7 +324,9 @@ class PublishOutboxDrainer(
         isStopped: () -> Boolean,
         onFailure: suspend (fileId: String, error: AppError) -> Unit
     ): Boolean {
-        val attempted = mutableSetOf<Long>()
+        // Attempts are keyed by (chatId, messageId) — the entity's own
+        // primary key: a message id is only unique inside its chat.
+        val attempted = mutableSetOf<Pair<Long, Long>>()
         while (true) {
             if (isStopped()) return false
             // Fetch one window past this drain's attempts and filter in
@@ -332,13 +334,13 @@ class PublishOutboxDrainer(
             // in the table, so a plain oldest(BATCH_SIZE) refetch would
             // meet them first forever.
             val batch = pendingDeleteDao.oldest(BATCH_SIZE + attempted.size)
-                .filter { it.messageId !in attempted }
+                .filter { (it.chatId to it.messageId) !in attempted }
                 .take(BATCH_SIZE)
             if (batch.isEmpty()) return true
 
             for ((chatId, pending) in batch.groupBy { it.chatId }) {
                 val messageIds = pending.map { it.messageId }
-                attempted += messageIds
+                attempted += pending.map { it.chatId to it.messageId }
                 try {
                     telegramClient.deleteMessages(chatId, messageIds)
                     fileDao.deleteByIds(pending.map { it.fileId })

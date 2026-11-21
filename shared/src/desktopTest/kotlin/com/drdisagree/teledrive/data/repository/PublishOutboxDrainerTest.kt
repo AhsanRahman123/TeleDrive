@@ -191,8 +191,10 @@ class PublishOutboxDrainerTest {
             )
 
             assertTrue("delete replay must not gate the file drain", drained)
-            // Every publishable row behind the gate published anyway.
-            assertEquals(4_000, telegram.editedCaptions.size)
+            // Every publishable row behind the gate published anyway —
+            // the 4,000 bulk rows plus the 50 delete rows themselves,
+            // which are publishable pending rows too.
+            assertEquals(4_050, telegram.editedCaptions.size)
             assertEquals(370, files.pendingPublishCount())
             // The deferred deletes are lossless AND surfaced: rows and
             // pending entries survive for the next drain, and every

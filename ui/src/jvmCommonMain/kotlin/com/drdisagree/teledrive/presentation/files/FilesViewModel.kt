@@ -451,7 +451,15 @@ class FilesViewModel(
      * lands here so the behaviour cannot drift apart again.
      */
     fun toggleSelectAll() {
-        if (_allSelected.value) clearSelection() else selectAll()
+        if (_allSelected.value) {
+            clearSelection()
+        } else {
+            // Flip the flag before the async select lands, so a rapid
+            // second Ctrl+A reads "all selected" and deselects instead
+            // of queueing a second select-all.
+            _allSelected.update { true }
+            selectAll()
+        }
     }
 
     fun selectAll(onComplete: (() -> Unit)?) {
