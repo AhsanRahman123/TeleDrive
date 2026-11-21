@@ -73,19 +73,23 @@ class Item9SyncFixesTest {
         }
 
     @Test
-    fun `a local-only file defers its publish instead of sealing it as published`() = runBlocking {
+    fun `a local-only file's flag resolves without sealing it as published`() = runBlocking {
         files.upsert(file("local1", null).copy(pendingPublish = true))
 
-        // PC-32: the drain no longer fetches local-only rows at all (it
-        // cannot publish what has no channel message), so it completes
-        // instead of reporting not-drained — and, critically, it returns
-        // at all instead of spinning on a deferred batch. The row keeps
-        // its flag, unsealed, until its upload lands.
+        // PC-32 (round 8 correction): a local-only row has no channel
+        // caption to correct — its manifest ships as the upload's
+        // initial caption — so the drain RESOLVES its flag instead of
+        // leaving it as permanent unreachable backlog (the round-7
+        // keep-the-flag behaviour is what stalled the user's count at
+        // the local-only floor). What must never change: nothing is
+        // sealed — no baseline is adopted for a publish that did not
+        // happen, and the row itself stays, still local-only.
         val drained = drainer().drain(isStopped = { false })
 
         assertTrue(drained)
-        assertTrue(files.byId("local1")!!.pendingPublish)
+        assertFalse(files.byId("local1")!!.pendingPublish)
         assertNull(files.byId("local1")!!.remoteBase)
+        assertNull(files.byId("local1")!!.messageId)
     }
 
     private fun drainer() = PublishOutboxDrainer(

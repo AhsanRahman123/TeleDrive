@@ -86,14 +86,41 @@ interface FileDao {
      * ONLY these (PC-32): fetching the unpublishable ones too let a head
      * of local-only rows fill every batch, publish nothing, and wedge
      * the whole backlog behind them while the pending count never moved.
-     * Local-only rows keep their flag and become publishable the moment
-     * their upload lands.
      */
     @Query(
         "SELECT * FROM files WHERE pendingPublish = 1 " +
             "AND chatId IS NOT NULL AND messageId IS NOT NULL LIMIT :limit"
     )
     suspend fun pendingPublishable(limit: Int): List<FileEntity>
+
+    /** Pending rows with no channel message — see [clearPendingPublishForLocalOnly]. */
+    @Query(
+        "SELECT COUNT(*) FROM files WHERE pendingPublish = 1 " +
+            "AND (chatId IS NULL OR messageId IS NULL)"
+    )
+    suspend fun pendingLocalOnlyCount(): Int
+
+    /**
+     * Resolves the pending flag of rows that have no channel message.
+     * The flag means "the caption on Telegram is stale", and a
+     * local-only row has no caption at all: when its upload eventually
+     * lands, the transfer writes the manifest as the message's initial
+     * caption from the row's then-current state, so there is never a
+     * stale caption for sync to correct. Keeping the flag (the round-7
+     * behaviour) made those rows a permanent, unreachable backlog: the
+     * Home banner counted them as "files left", every drain completed
+     * "successfully" without touching them, the count stalled at
+     * exactly their number (his 4,370 → 1,056), and Sync now was an
+     * instant no-op. The ROWS are untouched — the files stay in the
+     * library as local files — and a later change re-marks the flag
+     * through the normal update paths; by then an uploaded row is
+     * publishable and the drain handles it. Returns the rows resolved.
+     */
+    @Query(
+        "UPDATE files SET pendingPublish = 0 WHERE pendingPublish = 1 " +
+            "AND (chatId IS NULL OR messageId IS NULL)"
+    )
+    suspend fun clearPendingPublishForLocalOnly(): Int
 
     @Query("SELECT * FROM files WHERE id = :id")
     suspend fun byId(id: String): FileEntity?

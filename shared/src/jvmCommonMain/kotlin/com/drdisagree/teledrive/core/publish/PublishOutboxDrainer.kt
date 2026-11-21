@@ -79,6 +79,29 @@ class PublishOutboxDrainer(
         onFailure: suspend (fileId: String, error: AppError) -> Unit
     ): Boolean {
         if (!replayDeletes(isStopped, onFailure)) return false
+        if (isStopped()) return false
+
+        // PC-32, second re-investigation (round 8, his test video):
+        // rows with no channel message are not sync work at all — the
+        // upload that eventually lands writes the manifest as the
+        // message's initial caption from the row's current state, so
+        // there is no stale caption to correct. Resolving their flags
+        // here is what lets the pending count reach zero: while the
+        // round-7 drain merely skipped them, the banner kept counting
+        // them, drains completed "successfully" in seconds, and the
+        // count stalled at exactly the local-only floor (4,370 →
+        // 1,056 on his machine) with Sync now an instant no-op and the
+        // loop Idle — indistinguishable from a frozen sync. The rows
+        // themselves are untouched (see FileDao).
+        val localOnly = fileDao.pendingLocalOnlyCount()
+        if (localOnly > 0) {
+            val resolved = fileDao.clearPendingPublishForLocalOnly()
+            SafeLog.d(
+                TAG,
+                "Resolved $resolved local-only pending rows (no channel " +
+                    "message to publish; their manifest ships with the upload)"
+            )
+        }
 
         // PC-32: only rows that can actually be published are fetched.
         // The old fetch took the oldest pending rows of ANY kind, so a
@@ -86,11 +109,10 @@ class PublishOutboxDrainer(
         // message yet — nothing to caption-edit) filled every batch,
         // published nothing, failed the drain, and was refetched
         // identically forever: the pending count could not move by one
-        // and no error ever surfaced. Those rows keep their flag here
-        // and publish once their upload lands. Rows this drain finds
-        // permanently rejected join [excludedIds] for the rest of the
-        // drain so one poisoned row cannot block the rows behind it
-        // either; the next drain retries them.
+        // and no error ever surfaced. Rows this drain finds permanently
+        // rejected join [excludedIds] for the rest of the drain so one
+        // poisoned row cannot block the rows behind it either; the
+        // next drain retries them.
         val excludedIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
         val published = AtomicInteger(0)
         while (true) {

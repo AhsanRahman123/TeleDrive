@@ -47,27 +47,57 @@ class PublishOutboxDrainerTest {
 
             assertTrue("the drain must complete behind a local-only head", drained)
             assertEquals(50, telegram.editedCaptions.size)
-            // Lossless: the local-only rows keep their flag — they publish
-            // once their upload lands — and everything behind them cleared.
-            assertEquals(150, files.pendingPublishCount())
-            assertTrue(files.byId("local-1")!!.pendingPublish)
+            // The local-only rows are RESOLVED, not published and not
+            // deleted: a local-only row has no caption to correct (its
+            // manifest ships as the upload's initial caption), so its
+            // flag is not sync work. The round-7 behaviour — keep the
+            // flag, skip the row — is exactly what stalled the user's
+            // count at the local-only floor (4,370 → 1,056) with every
+            // drain "succeeding" and Sync now a no-op.
+            assertEquals(0, files.pendingPublishCount())
+            val localRow = files.byId("local-1")!!
+            assertFalse(localRow.pendingPublish)
+            assertEquals(null, localRow.chatId)
             assertFalse(files.byId("pub-1")!!.pendingPublish)
             assertFalse(files.byId("pub-50")!!.pendingPublish)
         }
 
     @Test
-    fun `a local-only row publishes once its upload lands`() = runBlocking {
-        files.upsert(localOnlyFile("late-1"))
-        assertTrue(drainer().drain(isStopped = { false }))
-        assertTrue(files.byId("late-1")!!.pendingPublish)
+    fun `a local-only row needs no publish when its upload lands, and publishes later changes`() =
+        runBlocking {
+            files.upsert(localOnlyFile("late-1"))
+            assertTrue(drainer().drain(isStopped = { false }))
+            // Resolved by the drain: no caption exists to correct.
+            assertFalse(files.byId("late-1")!!.pendingPublish)
+            assertTrue(telegram.editedCaptions.isEmpty())
 
-        // The upload lands: the row gains its channel message.
-        files.upsert(localOnlyFile("late-1").copy(chatId = TEST_CHAT, messageId = 7_777L))
+            // The upload lands: the row gains its channel message, and
+            // the manifest already went up as the upload's initial
+            // caption — still nothing for sync to do.
+            files.upsert(
+                localOnlyFile("late-1").copy(
+                    chatId = TEST_CHAT,
+                    messageId = 7_777L,
+                    pendingPublish = false
+                )
+            )
+            assertTrue(drainer().drain(isStopped = { false }))
+            assertTrue(telegram.editedCaptions.isEmpty())
 
-        assertTrue(drainer().drain(isStopped = { false }))
-        assertFalse(files.byId("late-1")!!.pendingPublish)
-        assertEquals(setOf(7_777L), telegram.editedCaptions.keys)
-    }
+            // A change AFTER the upload re-marks the flag through the
+            // normal update paths; now the row is publishable and the
+            // drain publishes and clears it as usual.
+            files.upsert(
+                localOnlyFile("late-1").copy(
+                    chatId = TEST_CHAT,
+                    messageId = 7_777L,
+                    pendingPublish = true
+                )
+            )
+            assertTrue(drainer().drain(isStopped = { false }))
+            assertFalse(files.byId("late-1")!!.pendingPublish)
+            assertEquals(setOf(7_777L), telegram.editedCaptions.keys)
+        }
 
     @Test
     fun `a permanently rejected row does not block the rows behind it and is surfaced`() =
@@ -195,7 +225,11 @@ class PublishOutboxDrainerTest {
             // the 4,000 bulk rows plus the 50 delete rows themselves,
             // which are publishable pending rows too.
             assertEquals(4_050, telegram.editedCaptions.size)
-            assertEquals(370, files.pendingPublishCount())
+            // The 370 local-only rows were resolved (not published, not
+            // deleted): the pending count reaches zero — the exact
+            // property his machine's count never had.
+            assertEquals(0, files.pendingPublishCount())
+            assertEquals(null, files.byId("bulk-local-1")!!.chatId)
             // The deferred deletes are lossless AND surfaced: rows and
             // pending entries survive for the next drain, and every
             // deferred file was reported instead of vanishing.
