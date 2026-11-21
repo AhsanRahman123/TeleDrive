@@ -65,21 +65,6 @@ internal class AppearanceSwapMachine {
     }
 
     /**
-     * A flip that settled (the candidate became the live player) had to
-     * be undone because the candidate then failed to start the session's
-     * real media (PC-27 flip-then-start): the previous player owns the
-     * session again, so [key] — the argument list IT was built with — is
-     * the settled one once more. Without this, the machine would believe
-     * the new appearance is live while the old instance is rendering,
-     * and a repeat Apply of the same appearance would be swallowed as a
-     * no-op against a key no live instance actually has.
-     */
-    @Synchronized
-    fun revertSettled(key: List<String>) {
-        settledKey = key
-    }
-
-    /**
      * The candidate for [generation] has either proven itself live
      * ([candidateReady] = it reported playing/paused) or failed (error,
      * timeout, factory failure). Only the currently pending generation
