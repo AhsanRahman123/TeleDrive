@@ -139,6 +139,56 @@ class PublishPacerParkTest {
             assertEquals(0, database.pendingDeleteDao().oldest(10).size)
         }
 
+    @Test
+    fun `a rate limited delete replay defers the deletes instead of dropping them`() =
+        runBlocking {
+            // Second-pass finding (PC-36): replayDeletes judged
+            // permanence on the raw code, and 429 sits inside its
+            // 400..499 range — nearly unreachable while the pacer
+            // parked instead of throwing, routine now that the pacer
+            // caps and throws. A 429 here must defer (rows and
+            // pending entries survive), never drop.
+            val row = publishableFile("del-429", 9_101L)
+            files.upsert(row)
+            database.pendingDeleteDao().upsertAll(
+                listOf(
+                    PendingDeleteEntity(
+                        chatId = TEST_CHAT,
+                        messageId = 9_101L,
+                        fileId = "del-429"
+                    )
+                )
+            )
+            telegram.onDeleteWaiting = { onWaiting ->
+                onWaiting(870)
+                throw TelegramException(429, "FLOOD_WAIT: retry after 870", 870)
+            }
+            val failures = Collections.synchronizedList(mutableListOf<String>())
+
+            drainer().drain(
+                isStopped = { false },
+                onFailure = { fileId, _ -> failures += fileId }
+            )
+
+            assertEquals(
+                "the delete is deferred, not dropped",
+                1,
+                database.pendingDeleteDao().oldest(10).size
+            )
+            assertEquals(listOf("del-429"), failures)
+            assertTrue(telegram.deletedMessages.isEmpty())
+            assertFalse(
+                "publishing is not gated by the deferred delete",
+                files.byId("del-429")!!.pendingPublish
+            )
+
+            // Next drain, flood gone: the deferred delete replays.
+            telegram.onDeleteWaiting = {}
+            assertTrue(drainer().drain(isStopped = { false }))
+            assertEquals(0, database.pendingDeleteDao().oldest(10).size)
+            assertEquals(listOf(9_101L), telegram.deletedMessages)
+        }
+
     private fun localOnlyFile(id: String) = FileEntity(
         id = id,
         folderId = null,

@@ -451,7 +451,15 @@ class PublishOutboxDrainer(
                     fileDao.deleteByIds(pending.map { it.fileId })
                     pendingDeleteDao.clear(chatId, messageIds)
                 } catch (e: TelegramException) {
-                    if (e.code in PERMANENT_CODES) {
+                    // PC-36: a rate limit is never "unrepeatable".
+                    // Since the pacer caps its flood sleep and throws
+                    // the remainder as a 429, a delete replay starting
+                    // inside a long flood window now routinely meets
+                    // one here — it must defer like any transient
+                    // failure. Dropping on 429 would delete the local
+                    // rows while the Telegram messages live on, and
+                    // the files would resurrect at the next sync.
+                    if (!e.isRateLimit && e.code in PERMANENT_CODES) {
                         SafeLog.w(TAG, "Dropping unrepeatable delete: ${e.message}")
                         fileDao.deleteByIds(pending.map { it.fileId })
                         pendingDeleteDao.clear(chatId, messageIds)
