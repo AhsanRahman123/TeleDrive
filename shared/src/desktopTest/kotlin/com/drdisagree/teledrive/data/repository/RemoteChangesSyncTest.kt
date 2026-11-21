@@ -39,6 +39,12 @@ class RemoteChangesSyncTest {
                 )
             )
         )
+        // PC-34 (round 11): the initial syncOnStart above ran a FULL sync on the
+        // empty database, which now records the persisted catch-up timestamp —
+        // under the persisted-throttle contract a catch-up seconds later is
+        // legitimately throttled. Age the timestamp so this test exercises the
+        // catch-up itself, as a later launch would.
+        harness.settings.update { it.copy(lastFullSyncAt = 0) }
         val sync = harness.newSync()
 
         sync.incrementalSync()
