@@ -81,6 +81,17 @@ class DesktopUploadPickerDialogTest {
         assertFalse(cancelled.get())
         rule.onNodeWithText(child.absolutePath).assertIsDisplayed()
 
+        // Mouse-click navigation into a subfolder, then Escape: back
+        // up exactly one level, dialog still open (round 8: the state
+        // the user is in when the physical key must work — focus sits
+        // wherever the click left it, not on a handler's node).
+        rule.onNodeWithText("sub").performClick()
+        waitForText(File(child, "sub").absolutePath)
+        pressEscape()
+        waitForText(child.absolutePath)
+        rule.onNodeWithText("a.txt").assertIsDisplayed()
+        assertFalse(cancelled.get())
+
         // Escape with nothing to clear: up exactly one folder.
         pressEscape()
         waitForText(base.absolutePath)
@@ -164,6 +175,22 @@ class DesktopUploadPickerDialogTest {
             keyUp(Key.CtrlLeft)
         }
         // The click selected a.txt; Ctrl+A must now show both files.
+        waitForText("Select (2)")
+
+        // Ctrl+A is a TOGGLE (PC-29b): a second press deselects all,
+        // a third selects all again. On the pre-round-8 handler the
+        // second press just reselected and the count never dropped.
+        rule.onNodeWithText("a.txt").performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.A)
+            keyUp(Key.CtrlLeft)
+        }
+        waitForText("Select (0)")
+        rule.onNodeWithText("a.txt").performKeyInput {
+            keyDown(Key.CtrlLeft)
+            pressKey(Key.A)
+            keyUp(Key.CtrlLeft)
+        }
         waitForText("Select (2)")
 
         // The select-all button toggles back to an empty selection.

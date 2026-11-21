@@ -40,10 +40,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -228,7 +230,15 @@ internal fun DesktopUploadPickerDialog(
                 if (event.isCtrlPressed && !searchFocused &&
                     mode == DesktopPickerMode.FILES && multiSelect
                 ) {
-                    selected = pickerSelectAllPaths(visibleEntries)
+                    // Ctrl+A is a toggle (PC-29b), the twin of the
+                    // select-all button: everything visible selected
+                    // clears, anything else selects all visible files.
+                    val all = pickerSelectAllPaths(visibleEntries)
+                    selected = if (all.isNotEmpty() && selected.containsAll(all)) {
+                        emptySet()
+                    } else {
+                        all
+                    }
                     true
                 } else {
                     false
@@ -276,6 +286,26 @@ internal fun DesktopUploadPickerDialog(
 
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+
+    // PC-30 (round 8): the physical Escape also runs the ladder at the
+    // AWT level, before the key can die anywhere in the window → focus
+    // → scene delivery chain (see PickerEscapeAwtDispatcher). The
+    // dispatcher consumes the event, so the Compose preview handlers
+    // below never double-fire on a real window; in the Compose test
+    // scene (no AWT dialog window) the preview handlers remain the
+    // path. Both end at this one handleBack().
+    val currentHandleBack by rememberUpdatedState({ handleBack() })
+    val sortMenuOpen by rememberUpdatedState(sortExpanded)
+    val escapeDispatcher = remember {
+        PickerEscapeAwtDispatcher(
+            isTransientLayerOpen = { sortMenuOpen },
+            onEscape = { currentHandleBack() }
+        )
+    }
+    DisposableEffect(escapeDispatcher) {
+        escapeDispatcher.install()
+        onDispose { escapeDispatcher.dispose() }
+    }
 
     fun entryClick(entry: File) {
         when {
