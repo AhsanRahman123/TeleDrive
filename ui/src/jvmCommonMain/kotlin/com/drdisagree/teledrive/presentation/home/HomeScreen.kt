@@ -657,7 +657,7 @@ private fun SyncStatusCard(
     onSyncNow: () -> Unit
 ) {
     val lastRunText = lastFinishedAtMs?.let {
-        stringResource(Res.string.home_sync_last_run, formatSyncLastRun(it))
+        stringResource(Res.string.sync_last_run_time, formatSyncLastRun(it))
     }
     GroupedList(horizontalPadding = 0.dp) {
         add {
@@ -681,7 +681,7 @@ private fun SyncStatusCard(
                                     Res.string.home_sync_failed
                                 SyncCardDisplay.StickyStopped ->
                                     Res.string.home_sync_stopped
-                                else -> Res.string.home_all_synced
+                                else -> Res.string.sync_all_done
                             }
                         ),
                         style = MaterialTheme.typography.bodyLarge

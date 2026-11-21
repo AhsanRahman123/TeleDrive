@@ -325,8 +325,6 @@
     <string name="home_sync_failed_count">%1$d files were rejected by Telegram and are still waiting</string>
     <string name="home_sync_retrying">Sync hit a problem — retrying…</string>
     <string name="home_sync_progress">%1$d of %2$d saved in this run</string>
-    <string name="home_all_synced">All synced</string>
-    <string name="home_sync_last_run">Last run %1$s</string>
     <string name="home_section_favorites">Favorites</string>
     <string name="home_section_recent">Recent</string>
     <string name="home_section_storage">Storage</string>
@@ -1140,4 +1138,6 @@
     <string name="settings_preview_background">Image and video background</string>
     <string name="settings_preview_background_theme">Match app theme (default)</string>
     <string name="settings_preview_background_black">Black</string>
+    <string name="sync_all_done">All synced</string>
+    <string name="sync_last_run_time">Last run %1$s</string>
 </resources>
