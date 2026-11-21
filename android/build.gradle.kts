@@ -16,8 +16,10 @@ android {
         applicationId = "com.drdisagree.teledrive.preview2"
         minSdk = 26
         targetSdk = 37
-        versionCode = libs.versions.appVersionCode.get().toInt() +
-            (System.getenv("ANDROID_PREVIEW_BUILD_NUMBER")?.toIntOrNull() ?: 0)
+        // Pinned on this single-purpose branch: it ships exactly one install-over
+        // update above the vc172 rescue build, so the CI run number (which has
+        // drifted well past 163 since) must not leak into the version code.
+        versionCode = 173
         versionName = libs.versions.appVersion.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

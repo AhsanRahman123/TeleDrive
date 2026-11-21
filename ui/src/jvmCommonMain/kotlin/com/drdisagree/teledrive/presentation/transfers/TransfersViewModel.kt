@@ -29,6 +29,15 @@ class TransfersViewModel(
         transferRepository.wakeWorker()
     }
 
+    val sortOrder: StateFlow<String> = settingsRepository.preferences
+        .map { it.transfersSortOrder }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "PRIORITY")
+
+    fun setSortOrder(value: String) = launch {
+        settingsRepository.update { it.copy(transfersSortOrder = value) }
+    }
+
     private val rows = combine(
         transferRepository.observeSection(TransferSection.ACTIVE, SECTION_LIMIT),
         transferRepository.observeSection(TransferSection.PAUSED, SECTION_LIMIT),

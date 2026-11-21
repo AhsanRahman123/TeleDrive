@@ -59,6 +59,7 @@ data class UserPreferences(
 
     val transferConcurrency: Int = 2,
     val transferRetryCount: Int = 3,
+    val transfersSortOrder: String = "PRIORITY",
     val allowMeteredTransfers: Boolean = true,
     val debugLogging: Boolean = false,
 

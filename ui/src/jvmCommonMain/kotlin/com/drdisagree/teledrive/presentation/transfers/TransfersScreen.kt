@@ -160,7 +160,7 @@ fun TransfersScreen(
     var showTransferSettings by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var typeFilter by remember { mutableStateOf("ALL") }
-    var sortOrder by remember { mutableStateOf("PRIORITY") }
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
     var showFilterMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
@@ -477,7 +477,7 @@ fun TransfersScreen(
                                     val moved = reordered.removeAt(fromIndex)
                                     reordered.add(toIndex, moved)
                                     // Manual order becomes the active sort order after a drop.
-                                    sortOrder = "PRIORITY"
+                                    viewModel.setSortOrder("PRIORITY")
                                     viewModel.reorderDownloads(reordered)
                                 }
                                 draggedTransferId = null
@@ -598,7 +598,7 @@ fun TransfersScreen(
                                     DropdownMenuItem(
                                         text = { Text(label) },
                                         onClick = {
-                                            sortOrder = value
+                                            viewModel.setSortOrder(value)
                                             showSortMenu = false
                                         }
                                     )
