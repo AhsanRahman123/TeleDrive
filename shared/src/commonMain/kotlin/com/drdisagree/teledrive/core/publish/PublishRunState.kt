@@ -15,8 +15,19 @@ sealed interface PublishRunState {
     /** No run is active and the last run (if any) finished cleanly. */
     data object Idle : PublishRunState
 
-    /** A drain is publishing; [published] of [total] files are done in this run. */
-    data class Running(val published: Int, val total: Int) : PublishRunState
+    /**
+     * A drain is publishing; [published] of [total] files are done in this run.
+     * [waitingSecondsLeft] is non-null while the drain is parked in a
+     * Telegram rate-limit wait (PC-35): the banner shows the countdown
+     * instead of implying motion with a frozen count — the pre-PC-35
+     * banner sat on "0 of N saved in this run" for hours while the
+     * drain waited silently.
+     */
+    data class Running(
+        val published: Int,
+        val total: Int,
+        val waitingSecondsLeft: Int? = null
+    ) : PublishRunState
 
     /**
      * The last attempt failed and the scheduler is waiting to retry with

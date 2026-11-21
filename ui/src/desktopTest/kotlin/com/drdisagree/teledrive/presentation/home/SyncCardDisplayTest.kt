@@ -49,6 +49,20 @@ class SyncCardDisplayTest {
     }
 
     @Test
+    fun `a drain parked in a rate limit wait shows the active card even at zero pending`() {
+        // PC-35: Running now also carries the rate-limit countdown;
+        // the card stays the active card while it shows.
+        assertEquals(
+            SyncCardDisplay.Active,
+            syncCardDisplay(
+                none,
+                PublishRunState.Running(0, 144, waitingSecondsLeft = 87),
+                null
+            )
+        )
+    }
+
+    @Test
     fun `a drain waiting to retry shows the active card even at zero pending`() {
         assertEquals(
             SyncCardDisplay.Active,

@@ -115,12 +115,31 @@ class PublishOutboxDrainer(
         // next drain retries them.
         val excludedIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
         val published = AtomicInteger(0)
+        // PC-35: rate-limit budget accounting for the whole drain. A
+        // file that spends its per-file budget steps aside (see
+        // publishBatch) and sets [rateLimitDeferred]; the drain then
+        // ends after that batch in the waiting state instead of
+        // marching into the next batch against an account-wide limit.
+        val rateLimitDeferred = AtomicBoolean(false)
+        val drainRateLimitWaitSeconds = AtomicInteger(0)
         while (true) {
             if (isStopped()) return false
             val batch = nextBatch(excludedIds)
             if (batch.isEmpty()) break
             onProgress(published.get(), published.get() + fileDao.pendingPublishCount())
-            if (!publishBatch(batch, published, excludedIds, isStopped, onProgress, onWaiting, onFailure)) {
+            if (!publishBatch(
+                    batch, published, excludedIds, rateLimitDeferred,
+                    drainRateLimitWaitSeconds, isStopped, onProgress, onWaiting, onFailure
+                )
+            ) {
+                return false
+            }
+            if (rateLimitDeferred.get()) {
+                SafeLog.w(
+                    TAG,
+                    "Ending the drain: a file spent its rate-limit budget; " +
+                        "the rest stays pending for the next run"
+                )
                 return false
             }
         }
@@ -166,19 +185,29 @@ class PublishOutboxDrainer(
      * once. Everything on the publish path already tolerates concurrent callers: the
      * manifest publisher is stateless per file, the Telegram pacer serializes edit starts
      * and holds an account-wide flood deadline, and [clearIfUnchanged] seals each file
-     * inside its own transaction. Per-file outcomes (PC-32):
-     * success seals and clears the row; a short rate limit waits and retries the same
-     * file; a local-only row (its message vanished between fetch and publish) is
-     * excluded for the rest of this drain and stays pending for a later one; a
-     * permanent rejection keeps the row pending, is reported through `onFailure`,
-     * excludes the row for the rest of this drain, and does NOT stop it — the rows
-     * behind it still publish; a transient failure or an over-long rate limit stops
+     * inside its own transaction. Per-file outcomes (PC-32, rate limits PC-35):
+     * success seals and clears the row; a short rate limit waits (visibly, through
+     * `onWaiting`) and retries the same file, but only within a bounded budget —
+     * [MAX_RATE_LIMIT_WAITS_PER_FILE] waits and
+     * [MAX_RATE_LIMIT_WAIT_SECONDS_PER_FILE] cumulative seconds per file, plus a
+     * drain-wide wait budget; a file that spends its budget, or meets an over-long
+     * limit, steps aside: it stays pending, is reported through `onFailure`, the
+     * rows behind it still publish, and the drain ends after the batch in the
+     * waiting state. (Pre-PC-35 the rate-limit branch retried the same file
+     * forever with no progress and no log, which froze the banner at "0 of N"
+     * for hours.) A local-only row (its message vanished between fetch and
+     * publish) is excluded for the rest of this drain and stays pending for a
+     * later one; a permanent rejection keeps the row pending, is reported
+     * through `onFailure`, excludes the row for the rest of this drain, and does
+     * NOT stop it — the rows behind it still publish; a transient failure stops
      * the drain with unstarted files still flagged for the next run.
      */
     private suspend fun publishBatch(
         batch: List<FileEntity>,
         published: AtomicInteger,
         excludedIds: MutableSet<String>,
+        rateLimitDeferred: AtomicBoolean,
+        drainRateLimitWaitSeconds: AtomicInteger,
         isStopped: () -> Boolean,
         onProgress: suspend (published: Int, total: Int) -> Unit,
         onWaiting: suspend (secondsLeft: Int) -> Unit,
@@ -196,6 +225,9 @@ class PublishOutboxDrainer(
         val jobs = batch.map { entity ->
             async {
                 slots.withPermit {
+                    // PC-35: this file's rate-limit budget for the drain.
+                    var rateLimitWaits = 0
+                    var rateLimitWaitedSeconds = 0
                     while (true) {
                         if (aborted.get() || isStopped()) return@withPermit
                         if (!awaitInteractionWindow(isStopped)) {
@@ -211,8 +243,51 @@ class PublishOutboxDrainer(
                             is AppResult.Failure -> {
                                 val error = result.error
                                 if (error is AppError.RateLimited) {
+                                    val waitSeconds = error.retryAfterSeconds + 1
+                                    val fileBudgetLeft =
+                                        rateLimitWaits < MAX_RATE_LIMIT_WAITS_PER_FILE &&
+                                            rateLimitWaitedSeconds + waitSeconds <=
+                                            MAX_RATE_LIMIT_WAIT_SECONDS_PER_FILE
+                                    val drainBudgetLeft =
+                                        drainRateLimitWaitSeconds.get() + waitSeconds <=
+                                            MAX_DRAIN_RATE_LIMIT_WAIT_SECONDS
                                     if (error.retryAfterSeconds > INLINE_WAIT_LIMIT ||
-                                        !waitOut(error.retryAfterSeconds + 1, isStopped, onWaiting)
+                                        !fileBudgetLeft || !drainBudgetLeft
+                                    ) {
+                                        // The bounded budget is spent: the
+                                        // file steps aside — it stays
+                                        // pending, the failure is surfaced,
+                                        // and the drain ends in the waiting
+                                        // state after this batch — instead of
+                                        // retrying this file forever.
+                                        SafeLog.w(
+                                            TAG,
+                                            "Rate limit budget spent for ${entity.id} " +
+                                                "(message ${entity.messageId}); leaving it " +
+                                                "pending for the next run: $error"
+                                        )
+                                        rateLimitDeferred.set(true)
+                                        onFailure(entity.id, error)
+                                        return@withPermit
+                                    }
+                                    rateLimitWaits++
+                                    rateLimitWaitedSeconds += waitSeconds
+                                    drainRateLimitWaitSeconds.addAndGet(waitSeconds)
+                                    SafeLog.w(
+                                        TAG,
+                                        "Rate limited publishing ${entity.id} " +
+                                            "(message ${entity.messageId}); waiting " +
+                                            "${waitSeconds}s (wait $rateLimitWaits of " +
+                                            "$MAX_RATE_LIMIT_WAITS_PER_FILE, " +
+                                            "${rateLimitWaitedSeconds}s of the " +
+                                            "$MAX_RATE_LIMIT_WAIT_SECONDS_PER_FILE s " +
+                                            "per-file budget)"
+                                    )
+                                    if (!waitOut(
+                                            waitSeconds,
+                                            isStopped = { isStopped() || aborted.get() },
+                                            onWaiting = onWaiting
+                                        )
                                     ) {
                                         aborted.set(true)
                                         return@withPermit
@@ -395,7 +470,10 @@ class PublishOutboxDrainer(
         const val BATCH_SIZE = 100
         const val MAX_PARALLEL_PUBLISHES = 4
         const val INLINE_WAIT_LIMIT = 900
-        const val WAIT_TICK_SECONDS = 15
+        const val WAIT_TICK_SECONDS = 1
+        const val MAX_RATE_LIMIT_WAITS_PER_FILE = 3
+        const val MAX_RATE_LIMIT_WAIT_SECONDS_PER_FILE = 180
+        const val MAX_DRAIN_RATE_LIMIT_WAIT_SECONDS = 300
         const val MAX_FOLDER_PUSHES = 3
         const val INTERACTION_POLL_MS = 200L
         const val MAX_INTERACTION_WAIT_MS = 30_000L

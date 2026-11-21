@@ -1685,10 +1685,18 @@ class DesktopTelegramClient(
                 return block()
             } catch (e: TelegramException) {
                 if (!e.isRateLimit || attempt++ >= RATE_LIMIT_RETRIES) throw e
-                delay(
-                    (((e.retryAfterSeconds
-                        ?: RATE_LIMIT_FALLBACK_SECONDS) + 1) * 1000L).milliseconds
-                )
+                val retryAfterSeconds = e.retryAfterSeconds ?: RATE_LIMIT_FALLBACK_SECONDS
+                // PC-35: a long flood wait is never slept out inline.
+                // This delay used to be uncapped, so a single call could
+                // park for 5 × (retryAfter + 1) seconds with nothing
+                // visible anywhere — one of the layers that froze the
+                // publish banner at "0 of N" for hours. Short waits are
+                // still ridden out here; a long one throws and lets the
+                // caller's own retry cadence (the publish run loop's
+                // backoff, a transfer's retry policy) own the wait,
+                // where it is visible and cancellable.
+                if (retryAfterSeconds > MAX_INLINE_RATE_LIMIT_DELAY_SECONDS) throw e
+                delay(((retryAfterSeconds + 1) * 1000L).milliseconds)
             }
         }
     }
@@ -1746,6 +1754,7 @@ class DesktopTelegramClient(
         private const val DELETE_BATCH = 100
         private const val RATE_LIMIT_RETRIES = 5
         private const val RATE_LIMIT_FALLBACK_SECONDS = 5
+        private const val MAX_INLINE_RATE_LIMIT_DELAY_SECONDS = 30
         private const val STREAM_PRIORITY = 32
         private val MARKER_SEPARATOR = System.lineSeparator()
         private const val DISCOVERY_ATTEMPTS = 8

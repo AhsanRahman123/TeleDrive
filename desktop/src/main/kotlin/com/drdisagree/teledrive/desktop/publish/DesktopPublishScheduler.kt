@@ -25,10 +25,11 @@ class DesktopPublishScheduler(
     private val scope = CoroutineScope(SupervisorJob() + dispatchers.io)
 
     private val loop = PublishRunLoop(
-        drain = PublishDrain { isStopped, onProgress, onFailure ->
+        drain = PublishDrain { isStopped, onProgress, onWaiting, onFailure ->
             drainer.drain(
                 isStopped = isStopped,
                 onProgress = onProgress,
+                onWaiting = onWaiting,
                 onFailure = onFailure
             )
         },

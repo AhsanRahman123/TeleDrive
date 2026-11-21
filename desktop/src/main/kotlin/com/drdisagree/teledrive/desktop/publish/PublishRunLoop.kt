@@ -7,21 +7,35 @@ import com.drdisagree.teledrive.core.publish.PublishRunState
 import java.time.Instant
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** One publish attempt: drains the outbox once, honouring [isStopped] between batches. */
+/**
+ * One publish attempt: drains the outbox once, honouring [isStopped] between batches.
+ * [onWaiting] reports a rate-limit wait in progress (seconds left, once a
+ * second; 0 when a wait ends) so the loop can show the wait and a "Sync
+ * now" press can cut it short (PC-35).
+ */
 internal fun interface PublishDrain {
     suspend fun run(
         isStopped: () -> Boolean,
         onProgress: suspend (published: Int, total: Int) -> Unit,
+        onWaiting: suspend (secondsLeft: Int) -> Unit,
         onFailure: suspend (fileId: String, error: AppError) -> Unit
     ): Boolean
 }
@@ -48,12 +62,33 @@ internal fun interface PublishDrain {
  *   stay pending, and the state lands on [PublishRunState.Stopped];
  * - surfaces a drain that completed with permanently rejected files as
  *   [PublishRunState.Failed] instead of pretending success.
+ *
+ * PC-35 addendum — the three guarantees the frozen "0 of 144" banner
+ * broke, now held by construction:
+ *
+ * - **Cancel lands promptly from any point in a run.** [cancel] also
+ *   cancels the drain's own job: every wait on the drain path (the
+ *   drainer's waits, the pacer's flood sleep, the client's retry
+ *   delays) is a cancellable delay, so the run stops within seconds
+ *   instead of whenever the current wait happens to notice the flag.
+ * - **"Sync now" is never a dead button.** During a run it owes one
+ *   more pass (as before); during a rate-limit WAIT it additionally
+ *   cancels the drain job, cutting the wait short — the loop lands in
+ *   its retry path with the rerun flag set, so the retry starts at
+ *   once. A drain that is actively publishing is not interrupted.
+ * - **No run can hang in Running.** Each drain runs under a
+ *   no-progress watchdog: if it reports neither progress, a failure,
+ *   nor a waiting countdown for the watchdog window, the drain job is
+ *   cancelled and the run ends in [PublishRunState.WaitingRetry] —
+ *   the last-resort bound behind the drainer's per-file budgets, so
+ *   no unforeseen wait anywhere in the path can freeze the banner.
  */
 internal class PublishRunLoop(
     private val drain: PublishDrain,
     private val scope: CoroutineScope,
     private val initialRetryDelaySeconds: Int = RETRY_DELAY_SECONDS,
     private val maxRetryDelaySeconds: Int = MAX_RETRY_DELAY_SECONDS,
+    private val watchdogTimeoutSeconds: Int = WATCHDOG_TIMEOUT_SECONDS,
     private val clock: () -> Instant = { Instant.now() }
 ) {
 
@@ -83,6 +118,12 @@ internal class PublishRunLoop(
     private val rerunRequested = AtomicBoolean(false)
     private val loopActive = AtomicBoolean(false)
 
+    /** The in-flight drain's job, so [cancel] / a wait-cutting [kick] can stop it (PC-35). */
+    private val activeDrainJob = AtomicReference<Job?>(null)
+
+    /** True while the drain's latest report is a rate-limit wait (PC-35). */
+    private val drainWaiting = AtomicBoolean(false)
+
     private val wakeLock = Any()
     private var wakeSignal = CompletableDeferred<Unit>()
 
@@ -93,6 +134,16 @@ internal class PublishRunLoop(
         } else {
             rerunRequested.set(true)
             signalWake()
+            // PC-35: a press while the drain is parked in a rate-limit
+            // wait is an explicit "try again now" — cut the wait short
+            // instead of only owing a pass after a drain that may not
+            // end for minutes. The cancelled drain lands the loop in
+            // its retry path, and the rerun flag above makes that
+            // retry start at once. A drain that is actively
+            // publishing is NOT interrupted; the rerun flag covers it.
+            if (drainWaiting.get()) {
+                activeDrainJob.get()?.cancel()
+            }
         }
     }
 
@@ -100,11 +151,102 @@ internal class PublishRunLoop(
         if (!loopActive.get()) return
         stopRequested.set(true)
         signalWake()
+        // PC-35: cancel the drain itself, not just the flag. The flag
+        // is only observed between waits, and a drain parked inside
+        // the pacer or the client's retry delay could sit out a long
+        // flood wait before noticing it. Every wait on the drain path
+        // is a cancellable delay, so this stops the run promptly from
+        // any point; rows already sealed keep their cleared flags and
+        // the rest stay pending, exactly as with the cooperative stop.
+        activeDrainJob.get()?.cancel()
     }
 
     private fun signalWake() {
         synchronized(wakeLock) {
             if (!wakeSignal.isCompleted) wakeSignal.complete(Unit)
+        }
+    }
+
+    /**
+     * Runs one drain as a child job of the loop (PC-35), wiring its
+     * reports into the run state and standing a no-progress watchdog
+     * over it. Returns the drain's own verdict; a drain child cancelled
+     * by [cancel], a wait-cutting [kick] or the watchdog reads as a
+     * failed drain — the caller sorts out which from the flags — while
+     * cancellation of the loop itself (shutdown) propagates.
+     */
+    private suspend fun runDrain(
+        failures: MutableList<Pair<String, AppError>>
+    ): Boolean = coroutineScope {
+        val lastActivityMs = AtomicLong(System.currentTimeMillis())
+        val lastPublished = AtomicInteger(0)
+        val lastTotal = AtomicInteger(0)
+        val watchdogFired = AtomicBoolean(false)
+        val child = async {
+            drain.run(
+                isStopped = { stopRequested.get() },
+                onProgress = { published, total ->
+                    lastActivityMs.set(System.currentTimeMillis())
+                    lastPublished.set(published)
+                    lastTotal.set(total)
+                    drainWaiting.set(false)
+                    _runState.value = PublishRunState.Running(published, total)
+                },
+                onWaiting = { secondsLeft ->
+                    lastActivityMs.set(System.currentTimeMillis())
+                    if (secondsLeft > 0) {
+                        drainWaiting.set(true)
+                        _runState.value = PublishRunState.Running(
+                            published = lastPublished.get(),
+                            total = lastTotal.get(),
+                            waitingSecondsLeft = secondsLeft
+                        )
+                    } else {
+                        drainWaiting.set(false)
+                        _runState.value = PublishRunState.Running(
+                            published = lastPublished.get(),
+                            total = lastTotal.get()
+                        )
+                    }
+                },
+                onFailure = { fileId, error ->
+                    lastActivityMs.set(System.currentTimeMillis())
+                    failures += fileId to error
+                }
+            )
+        }
+        activeDrainJob.set(child)
+        val watchdog = launch {
+            while (child.isActive) {
+                delay(WATCHDOG_POLL_SECONDS.seconds)
+                if (System.currentTimeMillis() - lastActivityMs.get() >
+                    watchdogTimeoutSeconds * 1000L
+                ) {
+                    SafeLog.w(
+                        TAG,
+                        "Publish drain made no progress for " +
+                            "${watchdogTimeoutSeconds}s; ending the run"
+                    )
+                    watchdogFired.set(true)
+                    child.cancel()
+                    break
+                }
+            }
+        }
+        try {
+            child.await()
+        } catch (e: CancellationException) {
+            if (!isActive) throw e
+            if (watchdogFired.get()) {
+                throw IllegalStateException(
+                    "Sync made no progress for ${watchdogTimeoutSeconds}s"
+                )
+            }
+            false
+        } finally {
+            watchdog.cancel()
+            activeDrainJob.compareAndSet(child, null)
+            drainWaiting.set(false)
         }
     }
 
@@ -141,13 +283,7 @@ internal class PublishRunLoop(
                 _runState.value = PublishRunState.Running(0, 0)
                 var drainError: Throwable? = null
                 val drained = try {
-                    drain.run(
-                        isStopped = { stopRequested.get() },
-                        onProgress = { published, total ->
-                            _runState.value = PublishRunState.Running(published, total)
-                        },
-                        onFailure = { fileId, error -> failures += fileId to error }
-                    )
+                    runDrain(failures)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -194,6 +330,11 @@ internal class PublishRunLoop(
                                 ?: (failures.lastOrNull()?.second as? AppError.TelegramError)
                                     ?.message
                         )
+                        // If a "Sync now" press landed during the run
+                        // (it cut a wait short, or simply asked for
+                        // another pass), it already completed the wake
+                        // signal, so this wait returns at once and the
+                        // retry starts immediately (PC-35).
                         awaitWakeOrTimeout(delaySeconds)
                         if (stopRequested.get()) {
                             _runState.value = PublishRunState.Stopped
@@ -219,5 +360,7 @@ internal class PublishRunLoop(
         const val TAG = "PublishRunLoop"
         const val RETRY_DELAY_SECONDS = 30
         const val MAX_RETRY_DELAY_SECONDS = 300
+        const val WATCHDOG_TIMEOUT_SECONDS = 180
+        const val WATCHDOG_POLL_SECONDS = 1
     }
 }

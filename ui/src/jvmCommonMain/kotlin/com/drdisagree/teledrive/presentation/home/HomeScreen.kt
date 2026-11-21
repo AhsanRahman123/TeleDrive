@@ -610,7 +610,17 @@ private fun PendingSyncCard(
                     Text(
                         text = when (runState) {
                             is PublishRunState.Running ->
-                                if (runState.total > 0) {
+                                if (runState.waitingSecondsLeft != null) {
+                                    // PC-35: a drain parked in a Telegram
+                                    // rate-limit wait says so, with the
+                                    // countdown — the pre-PC-35 banner
+                                    // repeated the frozen progress count
+                                    // for the whole wait.
+                                    stringResource(
+                                        Res.string.home_sync_waiting_telegram,
+                                        runState.waitingSecondsLeft
+                                    )
+                                } else if (runState.total > 0) {
                                     stringResource(
                                         Res.string.home_sync_progress,
                                         runState.published,

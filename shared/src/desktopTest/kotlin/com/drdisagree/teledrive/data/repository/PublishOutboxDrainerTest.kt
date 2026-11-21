@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.data.repository
 
+import com.drdisagree.teledrive.core.common.AppError
 import com.drdisagree.teledrive.core.publish.PublishOutboxDrainer
 import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.data.local.entity.FileEntity
@@ -241,6 +242,138 @@ class PublishOutboxDrainerTest {
             telegram.onDeleteMessages = {}
             assertTrue(drainer().drain(isStopped = { false }))
             assertEquals(0, database.pendingDeleteDao().oldest(100).size)
+        }
+
+    @Test
+    fun `a persistently rate limited file steps aside and the run ends waiting with the rest published`() =
+        runBlocking {
+            // PC-35, the frozen "0 of 144": one file whose caption edit
+            // is always answered 429. Before the fix its per-file loop
+            // waited and retried forever — no progress, no failure, no
+            // log — while the account-wide limit stalled the slots
+            // behind it. The waits here are retry-after 0, so each
+            // waited retry costs one second.
+            val poison = publishableFile("flooded", 6_001L)
+            val behind = (1..10).map { publishableFile("ok-$it", 6_100L + it) }
+            files.upsertAll(listOf(poison) + behind)
+            val attempts = AtomicInteger(0)
+            telegram.onEditCaption = { messageId ->
+                if (messageId == 6_001L) {
+                    attempts.incrementAndGet()
+                    throw TelegramException(429, "Too Many Requests: retry after 0", 0)
+                }
+            }
+            val failures =
+                java.util.Collections.synchronizedList(mutableListOf<Pair<String, AppError>>())
+            val waits = java.util.Collections.synchronizedList(mutableListOf<Int>())
+
+            val startedAt = System.currentTimeMillis()
+            val drained = drainer().drain(
+                isStopped = { false },
+                onWaiting = { waits += it },
+                onFailure = { fileId, error -> failures += fileId to error }
+            )
+            val elapsedMs = System.currentTimeMillis() - startedAt
+
+            assertFalse("a rate-limited run ends in the waiting state, not success", drained)
+            // No head-of-line poisoning: the rest of the batch
+            // published behind the limited file.
+            assertEquals(10, telegram.editedCaptions.size)
+            // The limited file stays pending, alone, and was surfaced.
+            assertEquals(1, files.pendingPublishCount())
+            assertTrue(files.byId("flooded")!!.pendingPublish)
+            assertEquals(1, failures.size)
+            assertEquals("flooded", failures[0].first)
+            assertTrue(failures[0].second is AppError.RateLimited)
+            // The budget is exact: the initial attempt plus the
+            // drainer's 3 waited retries (MAX_RATE_LIMIT_WAITS_PER_FILE)
+            // — never an unbounded loop — and every wait was reported
+            // through onWaiting instead of passing in silence.
+            assertEquals(1 + 3, attempts.get())
+            assertTrue("the waits were surfaced", waits.isNotEmpty())
+            assertTrue("bounded in time (was ${elapsedMs}ms)", elapsedMs < 30_000)
+        }
+
+    @Test
+    fun `a rate limit that clears mid-run lets the drain complete with full progress`() =
+        runBlocking {
+            val rows = (1..5).map { publishableFile("flaky-$it", 7_000L + it) }
+            files.upsertAll(rows)
+            val attempts = AtomicInteger(0)
+            telegram.onEditCaption = { messageId ->
+                if (messageId == 7_001L && attempts.incrementAndGet() <= 2) {
+                    throw TelegramException(429, "Too Many Requests: retry after 0", 0)
+                }
+            }
+            val progress =
+                java.util.Collections.synchronizedList(mutableListOf<Pair<Int, Int>>())
+
+            val drained = drainer().drain(
+                isStopped = { false },
+                onProgress = { published, total -> progress += published to total }
+            )
+
+            assertTrue(drained)
+            assertEquals(0, files.pendingPublishCount())
+            assertEquals(5, telegram.editedCaptions.size)
+            // Two limited attempts, then the edit went through.
+            assertEquals(3, attempts.get())
+            // Honest progress: the counter ends at the full count.
+            assertEquals(5, progress.last().first)
+        }
+
+    @Test
+    fun `when every file is rate limited the run ends promptly with everything still pending`() =
+        runBlocking {
+            val rows = (1..8).map { publishableFile("flood-$it", 8_000L + it) }
+            files.upsertAll(rows)
+            telegram.onEditCaption = {
+                throw TelegramException(429, "Too Many Requests: retry after 0", 0)
+            }
+            val failures = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+            val startedAt = System.currentTimeMillis()
+            val drained = drainer().drain(
+                isStopped = { false },
+                onFailure = { fileId, _ -> failures += fileId }
+            )
+            val elapsedMs = System.currentTimeMillis() - startedAt
+
+            assertFalse(drained)
+            // Nothing published, nothing dropped: every file stepped
+            // aside after its bounded budget and stays pending, and
+            // every one was surfaced.
+            assertEquals(8, files.pendingPublishCount())
+            assertTrue(telegram.editedCaptions.isEmpty())
+            assertEquals(8, failures.size)
+            assertTrue("bounded in time (was ${elapsedMs}ms)", elapsedMs < 30_000)
+        }
+
+    @Test
+    fun `an over-long rate limit steps aside at once and does not block the rows behind it`() =
+        runBlocking {
+            // A single retry-after far beyond the inline limit used to
+            // abort the whole drain on the spot; the rows behind the
+            // limited file never got their attempt. Now the file steps
+            // aside after ONE attempt and the batch proceeds.
+            val poison = publishableFile("long-flood", 9_001L)
+            val behind = (1..5).map { publishableFile("ok-$it", 9_100L + it) }
+            files.upsertAll(listOf(poison) + behind)
+            val attempts = AtomicInteger(0)
+            telegram.onEditCaption = { messageId ->
+                if (messageId == 9_001L) {
+                    attempts.incrementAndGet()
+                    throw TelegramException(429, "Too Many Requests: retry after 5000", 5_000)
+                }
+            }
+
+            val drained = drainer().drain(isStopped = { false })
+
+            assertFalse("the run ends in the waiting state", drained)
+            assertEquals(1, attempts.get())
+            assertEquals(5, telegram.editedCaptions.size)
+            assertEquals(1, files.pendingPublishCount())
+            assertTrue(files.byId("long-flood")!!.pendingPublish)
         }
 
     private fun localOnlyFile(id: String) = FileEntity(

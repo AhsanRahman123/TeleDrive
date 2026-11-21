@@ -79,19 +79,30 @@ class TelegramPacer {
         }
     }
 
+    /**
+     * The wait is computed under the lock but slept OUTSIDE it (PC-35).
+     * This used to delay inside [editMutex], so one caller's flood
+     * sleep serialised every other caller behind the mutex for the
+     * whole flood window — a publisher could sit in this sleep while
+     * the other publish slots queued behind it before a single edit
+     * was attempted. Now each waiter sleeps in parallel and re-checks
+     * the shared deadline afterwards (so a flood that is extended —
+     * or expires — while sleeping is honoured promptly), and edit
+     * starts stay spaced [EDIT_INTERVAL_MS] apart because the start
+     * stamp is still taken under the lock.
+     */
     private suspend fun awaitEditClearance() {
-        editMutex.withLock {
-            while (true) {
+        while (true) {
+            val waitMs = editMutex.withLock {
                 val now = System.currentTimeMillis()
                 val floodWait = (floodUntil - now).coerceAtLeast(0L)
                 val intervalWait = (EDIT_INTERVAL_MS - (now - lastEditAt)).coerceAtLeast(0L)
                 val wait = maxOf(floodWait, intervalWait)
-                if (wait == 0L) {
-                    lastEditAt = System.currentTimeMillis()
-                    break
-                }
-                delay(wait.milliseconds)
+                if (wait == 0L) lastEditAt = now
+                wait
             }
+            if (waitMs == 0L) return
+            delay(waitMs.milliseconds)
         }
     }
 
