@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.drdisagree.teledrive.core.crypto.CredentialCipher
 import com.drdisagree.teledrive.core.crypto.FileWrappedKeyRepository
@@ -191,6 +192,13 @@ val desktopModule = module {
                 MIGRATION_18_19
             )
             .setDriver(BundledSQLiteDriver())
+            // Round 11: pin WAL explicitly. No journal mode was configured
+            // before, so the mode depended on the driver default; in
+            // rollback-journal mode every startup/background write
+            // transaction blocks Home's readers outright, while WAL lets
+            // readers and the single writer proceed concurrently. The
+            // D/Startup journal_mode marker in Main logs the live value.
+            .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
             .setQueryCoroutineContext(Dispatchers.IO)
             .build()
     }

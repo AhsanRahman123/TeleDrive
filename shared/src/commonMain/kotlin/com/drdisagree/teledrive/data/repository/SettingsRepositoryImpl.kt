@@ -131,6 +131,8 @@ class SettingsRepositoryImpl(
                 ?: defaults.updateCheckEnabled,
             lastUpdateCheckAt = this[PreferenceKeys.LAST_UPDATE_CHECK_AT]
                 ?: defaults.lastUpdateCheckAt,
+            lastFullSyncAt = this[PreferenceKeys.LAST_FULL_SYNC_AT]
+                ?: defaults.lastFullSyncAt,
             notifiedUpdateVersion = this[PreferenceKeys.NOTIFIED_UPDATE_VERSION]
                 ?: defaults.notifiedUpdateVersion,
             skippedUpdateVersion = this[PreferenceKeys.SKIPPED_UPDATE_VERSION]
@@ -221,6 +223,7 @@ class SettingsRepositoryImpl(
         this[PreferenceKeys.LINK_PREVIEWS] = prefs.linkPreviews
         this[PreferenceKeys.UPDATE_CHECK_ENABLED] = prefs.updateCheckEnabled
         this[PreferenceKeys.LAST_UPDATE_CHECK_AT] = prefs.lastUpdateCheckAt
+        this[PreferenceKeys.LAST_FULL_SYNC_AT] = prefs.lastFullSyncAt
         this[PreferenceKeys.NOTIFIED_UPDATE_VERSION] = prefs.notifiedUpdateVersion
         this[PreferenceKeys.SKIPPED_UPDATE_VERSION] = prefs.skippedUpdateVersion
         this[PreferenceKeys.PROXY_ENABLED] = prefs.proxyEnabled

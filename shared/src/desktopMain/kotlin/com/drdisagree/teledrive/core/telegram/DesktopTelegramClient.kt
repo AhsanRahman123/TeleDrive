@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.core.telegram
 
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.common.StartupTrace
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.domain.model.Country
@@ -108,6 +109,7 @@ class DesktopTelegramClient(
                 }
                 _authState.value = TelegramAuthState.Initializing
                 parametersReady = false
+                StartupTrace.markOnce("tdlib_create_start")
                 client = createClient()
             }
         }
@@ -199,8 +201,10 @@ class DesktopTelegramClient(
             is TdApi.AuthorizationStateWaitRegistration ->
                 _authState.value = TelegramAuthState.RegistrationRequired
 
-            is TdApi.AuthorizationStateReady ->
+            is TdApi.AuthorizationStateReady -> {
                 _authState.value = TelegramAuthState.Ready
+                StartupTrace.markOnce("tdlib_auth_ready")
+            }
 
             is TdApi.AuthorizationStateLoggingOut ->
                 _authState.value = TelegramAuthState.LoggingOut

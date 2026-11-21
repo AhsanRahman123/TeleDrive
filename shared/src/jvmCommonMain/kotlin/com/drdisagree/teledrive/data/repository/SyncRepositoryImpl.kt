@@ -79,8 +79,30 @@ class SyncRepositoryImpl(
     // A new instance starts at zero so work left pending across an app restart is kicked once.
     private var lastScheduledPendingPublishCount = 0
 
+    /**
+     * Round 11: the full-sync timestamp now lives in the settings store
+     * ([com.drdisagree.teledrive.domain.model.UserPreferences.lastFullSyncAt]),
+     * not in this field. The in-memory copy was initialised to 0 on every
+     * cold start, which defeated the [catchUpWithRemote] throttle and made
+     * every launch page the entire channel history. This mirror is only a
+     * fast path for the current process; the persisted value is authoritative
+     * and is re-read whenever the mirror is empty.
+     */
     @Volatile
-    private var lastFullSyncAt = 0L
+    private var lastFullSyncAtMirror = 0L
+
+    private suspend fun lastFullSyncAt(): Long {
+        val mirror = lastFullSyncAtMirror
+        if (mirror > 0L) return mirror
+        val persisted = settingsRepository.preferences.first().lastFullSyncAt
+        if (persisted > 0L) lastFullSyncAtMirror = persisted
+        return persisted
+    }
+
+    private suspend fun recordFullSyncCompleted(now: Long) {
+        lastFullSyncAtMirror = now
+        settingsRepository.update { it.copy(lastFullSyncAt = now) }
+    }
 
     override suspend fun fullResync(): AppResult<SyncStats> =
         runSync(incremental = false)
@@ -95,7 +117,7 @@ class SyncRepositoryImpl(
 
     override suspend fun catchUpWithRemote(): AppResult<SyncStats>? {
         if (syncMutex.isLocked) return null
-        val since = System.currentTimeMillis() - lastFullSyncAt
+        val since = System.currentTimeMillis() - lastFullSyncAt()
         if (since in 0 until CATCH_UP_INTERVAL_MS) return null
         return runSync(incremental = false, quiet = true)
     }
@@ -112,7 +134,7 @@ class SyncRepositoryImpl(
             try {
                 doSync(incremental, quiet).also { result ->
                     if (!incremental && result is AppResult.Success) {
-                        lastFullSyncAt = System.currentTimeMillis()
+                        recordFullSyncCompleted(System.currentTimeMillis())
                     }
                     val pendingNow = fileDao.pendingPublishCount()
                     // Kick once when pending work first appears in this instance, including

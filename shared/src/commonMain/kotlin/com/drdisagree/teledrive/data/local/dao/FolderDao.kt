@@ -327,6 +327,51 @@ interface FolderDao {
     )
     fun observeFolderTotalSizes(chatId: Long?): Flow<List<FolderTotalSize>>
 
+    /**
+     * Round 11: the same recursive totals as [observeFolderTotalSizes], but
+     * rooted ONLY at [rootIds] — the folders actually on screen. The
+     * whole-tree variant walks every folder and every file in the drive on
+     * each invalidation; a Files listing only ever displays the totals of
+     * its visible rows, so the recursion is scoped to those subtrees.
+     * Callers must not pass an empty [rootIds] (guard with an empty flow).
+     */
+    @Query(
+        """WITH RECURSIVE folder_tree(rootId, id) AS (
+               SELECT id, id FROM folders
+                WHERE chatId IS :chatId AND trashedAt IS NULL AND id IN (:rootIds)
+               UNION
+               SELECT folder_tree.rootId, child.id FROM folders AS child
+               JOIN folder_tree ON child.parentId = folder_tree.id
+               WHERE child.trashedAt IS NULL
+           )
+           SELECT folder_tree.rootId AS folderId,
+                  COALESCE(SUM(files.sizeBytes), 0) AS totalBytes
+             FROM folder_tree
+             LEFT JOIN files ON files.folderId = folder_tree.id
+               AND files.trashedAt IS NULL AND files.chatId IS :chatId
+            GROUP BY folder_tree.rootId"""
+    )
+    fun observeFolderTotalSizesForRoots(chatId: Long?, rootIds: List<String>): Flow<List<FolderTotalSize>>
+
+    /** Suspend variant of the scoped totals, for one-shot reads and tests. */
+    @Query(
+        """WITH RECURSIVE folder_tree(rootId, id) AS (
+               SELECT id, id FROM folders
+                WHERE chatId IS :chatId AND trashedAt IS NULL AND id IN (:rootIds)
+               UNION
+               SELECT folder_tree.rootId, child.id FROM folders AS child
+               JOIN folder_tree ON child.parentId = folder_tree.id
+               WHERE child.trashedAt IS NULL
+           )
+           SELECT folder_tree.rootId AS folderId,
+                  COALESCE(SUM(files.sizeBytes), 0) AS totalBytes
+             FROM folder_tree
+             LEFT JOIN files ON files.folderId = folder_tree.id
+               AND files.trashedAt IS NULL AND files.chatId IS :chatId
+            GROUP BY folder_tree.rootId"""
+    )
+    suspend fun folderTotalSizesForRoots(chatId: Long?, rootIds: List<String>): List<FolderTotalSize>
+
     @Query(
         """WITH RECURSIVE folder_tree(rootId, id) AS (
                SELECT id, id FROM folders WHERE chatId IS :chatId AND trashedAt IS NULL

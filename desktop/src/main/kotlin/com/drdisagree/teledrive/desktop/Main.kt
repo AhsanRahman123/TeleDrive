@@ -34,7 +34,12 @@ import coil3.compose.setSingletonImageLoaderFactory
 import coil3.key.Keyer
 import coil3.request.Options
 import coil3.request.crossfade
+import androidx.compose.runtime.withFrameNanos
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.common.StartupTrace
+import com.drdisagree.teledrive.data.local.database.TeleDriveDatabase
+import com.drdisagree.teledrive.desktop.startup.DeferredStartupAction
+import com.drdisagree.teledrive.desktop.startup.readJournalMode
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.PendingShare
 import com.drdisagree.teledrive.core.media.ThumbnailFetcherFactory
@@ -88,10 +93,12 @@ import org.koin.core.context.startKoin
 import org.koin.java.KoinJavaComponent.getKoin
 
 fun main() {
+    StartupTrace.markMainEntry()
     SafeLog.verbose = true
     startKoin {
         modules(desktopModule)
     }
+    StartupTrace.mark("koin_ready")
     val storagePaths = getKoin().get<AppStoragePaths>()
     if (!SingleInstanceLock(storagePaths.filesDir).acquire()) {
         JOptionPane.showMessageDialog(
@@ -104,22 +111,42 @@ fun main() {
     }
     val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     getKoin().get<DebugLogController>().start(backgroundScope, alwaysVerbose = true)
-    // Warm the shared libVLC factory on a background thread (PC-7): creating
-    // it loads the native libraries and scans the VLC plugin directory,
-    // which takes seconds on a cold start. It used to happen lazily inside
-    // the preview's composition — on the UI thread — the first time a video
-    // was opened, which froze the app (Gallery -> open a video). The
-    // per-appearance factories are created off the UI thread too (see
-    // DesktopMediaPlayer).
+    // Round 11: time the first Room open and record the live journal mode
+    // (D/Startup). The pragma read opens the database if nothing else has
+    // yet; either way the mark bounds the open.
     backgroundScope.launch {
-        runCatching { com.drdisagree.teledrive.desktop.media.player.VlcPlayback.factory }
+        runCatching {
+            val mode = getKoin().get<TeleDriveDatabase>().readJournalMode()
+            StartupTrace.mark("db_open_done")
+            SafeLog.d("Startup", "journal_mode=$mode")
+        }
     }
-    backgroundScope.launch {
+    // Round 11: the libVLC warm-up (PC-7) and the repository startup block
+    // no longer run during process/window bring-up. Report 29 measured a
+    // 3.5–7.2 s silent gap in which they competed with Compose/Skiko and
+    // the TDLib client creation for the same CPU/IO. Both are now deferred
+    // until after the window's first frames (see the LaunchedEffect in the
+    // Window content below). Nothing here is required before the UI: the
+    // warm-up only pre-loads what the player path otherwise loads lazily
+    // on first use (PlayerSession reads VlcPlayback.factory directly),
+    // and the startup block only reconciles persisted rows — it was
+    // always fire-and-forget, never awaited by any screen.
+    val vlcWarmup = DeferredStartupAction(backgroundScope) {
+        StartupTrace.mark("vlc_warm_start")
+        runCatching { com.drdisagree.teledrive.desktop.media.player.VlcPlayback.factory }
+        StartupTrace.mark("vlc_warm_done")
+    }
+    val startupBlock = DeferredStartupAction(backgroundScope) {
         runCatching { getKoin().get<TransferRepository>().recoverOrphanedTransfers() }
+        StartupTrace.mark("recover_done")
         runCatching { getKoin().get<FileRepository>().sweepImportOrphans() }
+        StartupTrace.mark("sweep_done")
         runCatching { getKoin().get<FolderOwnershipRepair>().refileStrayFiles() }
+        StartupTrace.mark("refile_done")
         getKoin().get<PublishScheduler>().kick()
+        StartupTrace.mark("kick_done")
         runCatching { getKoin().get<TrashRepository>().repairTrashTree() }
+        StartupTrace.mark("trash_repair_done")
     }
     // Maintenance arming, mirroring Android's TeleDriveApplication.onCreate:
     // without this startup call the desktop scheduler would only arm after
@@ -229,6 +256,16 @@ fun main() {
             }.collectAsState(initial = false)
             LaunchedEffect(blockScreenCapture) {
                 WindowsCaptureBlocker.setBlocked(window, blockScreenCapture)
+            }
+            // Round 11: after the first frames are on screen, release the
+            // deferred startup work (libVLC warm-up + repository startup
+            // block) so it no longer competes with window bring-up.
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                StartupTrace.markOnce("window_shown")
+                withFrameNanos { }
+                vlcWarmup.trigger()
+                startupBlock.trigger()
             }
             // Windows uses an AWT-level dispatcher, so F11 is independent of whichever
             // Compose child currently owns focus. Other desktop platforms retain the

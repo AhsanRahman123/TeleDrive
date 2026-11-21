@@ -28,6 +28,7 @@ internal class FakeTelegram : TelegramClient by unused() {
     val changes = MutableSharedFlow<MessageChange>(extraBufferCapacity = 1_000)
     var openedChats = 0
     var closedChats = 0
+    var fetchDocumentsCalls = 0
     private var nextMessageId = 2_000_000L
     var uploadDateSeconds = 100
     var onFetch: suspend (fromMessageId: Long) -> Unit = {}
@@ -83,6 +84,7 @@ internal class FakeTelegram : TelegramClient by unused() {
         fromMessageId: Long,
         limit: Int
     ): RemoteDocumentPage {
+        fetchDocumentsCalls++
         onFetch(fromMessageId)
         val newestFirst = (documents + listOfNotNull(folderStateDocument) + storedFiles.keys)
             .sortedByDescending { it.messageId }

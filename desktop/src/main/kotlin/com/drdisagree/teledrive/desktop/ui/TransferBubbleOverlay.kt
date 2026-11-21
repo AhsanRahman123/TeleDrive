@@ -79,8 +79,12 @@ import com.drdisagree.teledrive.desktop.resources.bubble_queue_waiting
 import com.drdisagree.teledrive.desktop.resources.bubble_show_transfers
 import com.drdisagree.teledrive.desktop.resources.bubble_transferred_of
 import com.drdisagree.teledrive.desktop.resources.bubble_uploading
+import com.drdisagree.teledrive.desktop.startup.LazyValue
+import com.drdisagree.teledrive.domain.model.TransferSection
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferTask
+import com.drdisagree.teledrive.domain.repository.TransferRepository
+import kotlinx.coroutines.flow.combine
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.platform.TransferWidgetStyle
 import com.drdisagree.teledrive.presentation.transfers.TransfersStore
@@ -130,8 +134,33 @@ fun TransferBubbleOverlay(fullscreenController: FullscreenController?) {
 
 @Composable
 private fun TransferWidgetContent(fullscreenController: FullscreenController?) {
-    val store = remember { getKoin().get<TransfersStore>() }
-    val state by store.uiState.collectAsState()
+    // Round 11: the shared TransfersStore is built lazily. Until now the
+    // overlay resolved it on the first frame, subscribing its eight DAO
+    // flows for the whole session even when no transfer existed. The
+    // shells now render the store's own initial (empty) state until the
+    // store exists — visually identical, since an empty state draws no
+    // bubble and an idle strip — and the store is created on the first
+    // observed transfer activity (four cheap COUNT probes instead of
+    // the store's row flows) or on the first widget control press,
+    // whichever comes first. Once created it stays for the session.
+    val storeProvider = remember { LazyValue { getKoin().get<TransfersStore>() } }
+    var storeActive by remember { mutableStateOf(false) }
+    if (!storeActive) {
+        val transferRepository = remember { getKoin().get<TransferRepository>() }
+        val probedCount by remember(transferRepository) {
+            combine(
+                transferRepository.observeSectionCount(TransferSection.ACTIVE),
+                transferRepository.observeSectionCount(TransferSection.PAUSED),
+                transferRepository.observeSectionCount(TransferSection.FAILED),
+                transferRepository.observeSectionCount(TransferSection.COMPLETED)
+            ) { counts -> counts.sum() }
+        }.collectAsState(initial = 0)
+        LaunchedEffect(probedCount) {
+            if (probedCount > 0) storeActive = true
+        }
+    }
+    val state by (if (storeActive) storeProvider.get().uiState else IDLE_WIDGET_STATE)
+        .collectAsState()
     val style by DesktopTransferBubbleStore.style.collectAsState()
     val colorPreset by DesktopTransferBubbleStore.color.collectAsState()
     val accent = widgetAccent(colorPreset)
@@ -156,7 +185,7 @@ private fun TransferWidgetContent(fullscreenController: FullscreenController?) {
             state = state,
             summary = summary,
             nowMillis = nowMillis,
-            store = store,
+            storeProvider = { storeProvider.get() },
             accent = accent,
             fullscreen = fullscreen
         )
@@ -164,19 +193,23 @@ private fun TransferWidgetContent(fullscreenController: FullscreenController?) {
             state = state,
             summary = summary,
             nowMillis = nowMillis,
-            store = store,
+            storeProvider = { storeProvider.get() },
             accent = accent,
             fullscreen = fullscreen
         )
     }
 }
 
+/** The state the shells render before the lazy store exists (round 11). */
+private val IDLE_WIDGET_STATE =
+    kotlinx.coroutines.flow.MutableStateFlow(TransfersUiState(loading = false))
+
 @Composable
 private fun BubbleShell(
     state: TransfersUiState,
     summary: TransferBubbleSummary,
     nowMillis: Long,
-    store: TransfersStore,
+    storeProvider: () -> TransfersStore,
     accent: WidgetAccent?,
     fullscreen: Boolean
 ) {
@@ -242,12 +275,12 @@ private fun BubbleShell(
                             windowHeight = windowHeight
                         ),
                         onSizeChanged = { panelSize = it },
-                        onPause = store::pause,
-                        onResume = store::resume,
-                        onCancel = store::cancel,
-                        onPauseAll = store::pauseAll,
-                        onResumeAll = store::resumeAll,
-                        onCancelAll = store::cancelAll,
+                        onPause = { id -> storeProvider().pause(id) },
+                        onResume = { id -> storeProvider().resume(id) },
+                        onCancel = { id -> storeProvider().cancel(id) },
+                        onPauseAll = { storeProvider().pauseAll() },
+                        onResumeAll = { storeProvider().resumeAll() },
+                        onCancelAll = { storeProvider().cancelAll() },
                         accent = accent,
                         onHide = {
                             panelOpen = false
@@ -867,7 +900,7 @@ private fun StripShell(
     state: TransfersUiState,
     summary: TransferBubbleSummary,
     nowMillis: Long,
-    store: TransfersStore,
+    storeProvider: () -> TransfersStore,
     accent: WidgetAccent?,
     fullscreen: Boolean
 ) {
@@ -942,12 +975,12 @@ private fun StripShell(
                     windowHeight = windowHeight
                 ),
                 onSizeChanged = { panelSize = it },
-                onPause = store::pause,
-                onResume = store::resume,
-                onCancel = store::cancel,
-                onPauseAll = store::pauseAll,
-                onResumeAll = store::resumeAll,
-                onCancelAll = store::cancelAll,
+                onPause = { id -> storeProvider().pause(id) },
+                onResume = { id -> storeProvider().resume(id) },
+                onCancel = { id -> storeProvider().cancel(id) },
+                onPauseAll = { storeProvider().pauseAll() },
+                onResumeAll = { storeProvider().resumeAll() },
+                onCancelAll = { storeProvider().cancelAll() },
                 accent = accent,
                 onHide = {
                     panelOpen = false

@@ -66,6 +66,8 @@ data class UserPreferences(
 
     val updateCheckEnabled: Boolean = true,
     val lastUpdateCheckAt: Long = 0L,
+    /** Wall-clock time of the last completed full (non-incremental) sync; persisted so the catch-up throttle survives restarts (round 11). */
+    val lastFullSyncAt: Long = 0L,
     val notifiedUpdateVersion: String = "",
     val skippedUpdateVersion: String = "",
 

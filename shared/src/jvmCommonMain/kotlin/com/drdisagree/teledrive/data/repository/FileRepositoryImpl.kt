@@ -65,6 +65,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import java.io.File
@@ -198,13 +199,23 @@ class FileRepositoryImpl(
         sortDirection: SortDirection
     ): Flow<List<DriveFolder>> =
         activeChannel.observe().flatMapLatest { chatId ->
-            combine(
-                folderDao.observeChildrenWithCountsScoped(parentId, chatId, showHidden, showArchived),
-                folderDao.observeFolderTotalSizes(chatId)
-            ) { list, sizes ->
-                val totals = sizes.associate { it.folderId to it.totalBytes }
-                list.map { it.toDomain().copy(totalSizeBytes = totals[it.folder.id] ?: 0L) }
-            }
+            folderDao.observeChildrenWithCountsScoped(parentId, chatId, showHidden, showArchived)
+                .flatMapLatest { list ->
+                    // Round 11: totals are computed only for the folders
+                    // actually listed here (their subtrees), never for the
+                    // whole drive tree — the whole-tree recursion ran on
+                    // every Files invalidation and on first Files entry.
+                    val ids = list.map { it.folder.id }
+                    val totalsFlow = if (ids.isEmpty()) {
+                        flowOf(emptyList())
+                    } else {
+                        folderDao.observeFolderTotalSizesForRoots(chatId, ids)
+                    }
+                    totalsFlow.map { sizes ->
+                        val totals = sizes.associate { it.folderId to it.totalBytes }
+                        list.map { it.toDomain().copy(totalSizeBytes = totals[it.folder.id] ?: 0L) }
+                    }
+                }
                 .distinctUntilChanged()
                 .map { list -> list.sortedBy(sortField, sortDirection) }
         }
@@ -232,18 +243,25 @@ class FileRepositoryImpl(
         showArchived: Boolean
     ): Flow<List<DriveFolder>> =
         activeChannel.observe().flatMapLatest { chatId ->
-            combine(
-                folderDao.observeMatchingWithCountsScoped(
-                    pattern = "%${escapeLike(nameQuery)}%",
-                    chatId = chatId,
-                    showHidden = showHidden,
-                    showArchived = showArchived,
-                    limit = FOLDER_SEARCH_LIMIT
-                ),
-                folderDao.observeFolderTotalSizes(chatId)
-            ) { list, sizes ->
-                val totals = sizes.associate { it.folderId to it.totalBytes }
-                list.map { it.toDomain().copy(totalSizeBytes = totals[it.folder.id] ?: 0L) }
+            folderDao.observeMatchingWithCountsScoped(
+                pattern = "%${escapeLike(nameQuery)}%",
+                chatId = chatId,
+                showHidden = showHidden,
+                showArchived = showArchived,
+                limit = FOLDER_SEARCH_LIMIT
+            ).flatMapLatest { list ->
+                // Round 11: scoped totals for the matched folders only,
+                // as in observeFolders.
+                val ids = list.map { it.folder.id }
+                val totalsFlow = if (ids.isEmpty()) {
+                    flowOf(emptyList())
+                } else {
+                    folderDao.observeFolderTotalSizesForRoots(chatId, ids)
+                }
+                totalsFlow.map { sizes ->
+                    val totals = sizes.associate { it.folderId to it.totalBytes }
+                    list.map { it.toDomain().copy(totalSizeBytes = totals[it.folder.id] ?: 0L) }
+                }
             }
         }
 

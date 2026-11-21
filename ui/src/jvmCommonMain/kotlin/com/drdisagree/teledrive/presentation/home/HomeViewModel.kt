@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.presentation.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.core.common.StartupTrace
 import com.drdisagree.teledrive.core.network.NetworkMonitor
 import com.drdisagree.teledrive.core.network.NetworkStatus
 import com.drdisagree.teledrive.core.permissions.PermissionChecker
@@ -109,7 +110,13 @@ class HomeViewModel(
     @OptIn(FlowPreview::class)
     private val counts: Flow<HomeCounts> = activeChannel.observe().flatMapLatest { chatId ->
         fileDao.observeHomeAggregates(chatId)
-            .debounce(COUNTS_DEBOUNCE_MS.milliseconds)
+            // Round 11: the FIRST emission is not debounced. The 300 ms
+            // quiet window exists to coalesce write bursts, but because
+            // uiState is a combine, holding the first counts hostage to a
+            // quiet window (which startup writers keep postponing) held
+            // Home's skeleton up with it. First value passes immediately;
+            // later values keep the debounce.
+            .debounceExceptFirst(COUNTS_DEBOUNCE_MS.milliseconds)
             .distinctUntilChanged()
             .map { aggregates ->
                 HomeCounts(
@@ -199,6 +206,15 @@ class HomeViewModel(
             backupHold = misc.backupHold
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState())
+
+    init {
+        // Round 11: D/Startup timing mark — the moment Home's first real
+        // content exists. Timing only; no behaviour attached.
+        viewModelScope.launch {
+            uiState.first { !it.loading }
+            StartupTrace.markOnce("home_first_data")
+        }
+    }
 
     /** A folder scan never reaches files added by hand, or canceled or failed on their way up. */
     fun backUpPending() {
@@ -319,5 +335,29 @@ class HomeViewModel(
     private companion object {
         const val COUNTS_DEBOUNCE_MS = 300L
         val firstConnectClaimed = AtomicBoolean(false)
+    }
+}
+
+/**
+ * Round 11: debounce that lets the FIRST value through immediately and
+ * debounces only the values after it. A plain `debounce` emits nothing
+ * until the source has been quiet for the whole window, so a burst of
+ * startup invalidations can defer the first value indefinitely; the
+ * first value is the one a combine gate (Home's skeleton) waits on.
+ *
+ * The first/not-first state is captured per returned flow instance —
+ * create one flow per subscription site (as Home's counts does inside
+ * its flatMapLatest), never share one instance across collectors.
+ */
+@OptIn(FlowPreview::class)
+internal fun <T> Flow<T>.debounceExceptFirst(timeout: kotlin.time.Duration): Flow<T> {
+    var first = true
+    return debounce {
+        if (first) {
+            first = false
+            kotlin.time.Duration.ZERO
+        } else {
+            timeout
+        }
     }
 }
