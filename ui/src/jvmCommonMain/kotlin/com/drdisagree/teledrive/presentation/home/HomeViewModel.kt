@@ -56,7 +56,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModel(
@@ -349,22 +349,24 @@ class HomeViewModel(
  * startup invalidations can defer the first value indefinitely; the
  * first value is the one a combine gate (Home's skeleton) waits on.
  *
- * Implemented as an explicit select loop rather than a stateful
- * `debounce { }` timeout selector: the selector's invocation pattern
- * (when and how often it is called for a pending value) made a
- * first-value flag unreliable — a timing test caught a trailing value
- * passing through undebounced. Here the semantics are exact: first
- * value forwards at once; every later value waits for a full quiet
- * [timeout], with each newer value replacing the pending one and
- * re-arming the wait; a pending value is flushed if upstream closes.
+ * Implemented as an explicit receive/timeout loop rather than a
+ * stateful `debounce { }` timeout selector: the selector's invocation
+ * pattern (when and how often it is called for a pending value) made
+ * a first-value flag unreliable — a timing test caught a trailing
+ * value passing through undebounced. Here the semantics are exact:
+ * first value forwards at once; every later value waits for a full
+ * quiet [timeout], with each newer value replacing the pending one
+ * and re-arming the wait; a pending value is flushed if upstream
+ * closes. Values are boxed so a timeout (null) can never be confused
+ * with a payload.
  */
 internal fun <T> Flow<T>.debounceExceptFirst(timeout: kotlin.time.Duration): Flow<T> {
     val upstream = this
     return channelFlow {
-        val values = Channel<T>(Channel.UNLIMITED)
+        val values = Channel<DebounceBox<T>>(Channel.UNLIMITED)
         launch {
             try {
-                upstream.collect { values.send(it) }
+                upstream.collect { values.send(DebounceBox(it)) }
             } finally {
                 values.close()
             }
@@ -373,7 +375,7 @@ internal fun <T> Flow<T>.debounceExceptFirst(timeout: kotlin.time.Duration): Flo
         var upstreamDone = false
         while (!upstreamDone) {
             val head = try {
-                values.receive()
+                values.receive().value
             } catch (closed: ClosedReceiveChannelException) {
                 break
             }
@@ -385,26 +387,26 @@ internal fun <T> Flow<T>.debounceExceptFirst(timeout: kotlin.time.Duration): Flo
             var pending = head
             var flushed = false
             while (!flushed) {
-                val outcome = select {
-                    values.onReceiveCatching { result ->
-                        result.onSuccess { pending = it }
-                        if (result.isSuccess) 0 else 1
-                    }
-                    onTimeout(timeout) { 2 }
+                val next = try {
+                    withTimeoutOrNull(timeout) { values.receive() }
+                } catch (closed: ClosedReceiveChannelException) {
+                    send(pending)
+                    flushed = true
+                    upstreamDone = true
+                    null
                 }
-                when (outcome) {
-                    0 -> Unit // replaced; the quiet wait re-arms
-                    1 -> {
-                        send(pending)
-                        flushed = true
-                        upstreamDone = true
-                    }
-                    else -> {
+                when {
+                    upstreamDone -> Unit
+                    next == null -> {
+                        // Quiet window elapsed with no newer value.
                         send(pending)
                         flushed = true
                     }
+                    else -> pending = next.value
                 }
             }
         }
     }
 }
+
+private class DebounceBox<T>(val value: T)
