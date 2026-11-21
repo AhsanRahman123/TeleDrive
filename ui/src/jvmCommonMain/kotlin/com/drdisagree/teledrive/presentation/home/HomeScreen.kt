@@ -170,6 +170,8 @@ import com.drdisagree.teledrive.resources.home_sync_stopped
 import com.drdisagree.teledrive.resources.home_transfer_history
 import com.drdisagree.teledrive.resources.home_transfer_history_subtitle
 import com.drdisagree.teledrive.resources.home_waiting_count
+import com.drdisagree.teledrive.resources.sync_all_done
+import com.drdisagree.teledrive.resources.sync_last_run_time
 import com.drdisagree.teledrive.resources.trash
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
