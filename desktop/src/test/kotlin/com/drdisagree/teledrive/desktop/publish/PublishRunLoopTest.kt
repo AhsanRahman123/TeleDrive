@@ -1,8 +1,11 @@
 package com.drdisagree.teledrive.desktop.publish
 
 import com.drdisagree.teledrive.core.common.AppError
+import com.drdisagree.teledrive.core.publish.PublishRunOutcome
 import com.drdisagree.teledrive.core.publish.PublishRunState
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -197,6 +200,122 @@ class PublishRunLoopTest {
         assertEquals(2, state.failedFiles)
         assertEquals("MESSAGE_ID_INVALID", state.reason)
         assertTrue(loop.runState.value != PublishRunState.Idle)
+    }
+
+    // PC-33: the loop must also publish the last FINISHED run's
+    // outcome + finish time — the Home card's resting/sticky states
+    // are built on them. Nothing is recorded for a run that has not
+    // finished (still going, or parked in WaitingRetry).
+
+    @Test
+    fun `a completed drain records a Completed outcome with its finish time`() {
+        val nowMs = AtomicLong(1_700_000_000_000L)
+        val loop = PublishRunLoop(
+            drain = PublishDrain { _, _, _ -> true },
+            scope = scope,
+            clock = { Instant.ofEpochMilli(nowMs.get()) }
+        )
+
+        assertEquals(null, loop.lastOutcome.value)
+        assertEquals(null, loop.lastFinishedAt.value)
+
+        loop.kick()
+        awaitOutcome(loop, "the completed drain records its outcome") {
+            it == PublishRunOutcome.Completed
+        }
+        assertEquals(Instant.ofEpochMilli(1_700_000_000_000L), loop.lastFinishedAt.value)
+    }
+
+    @Test
+    fun `a drain with rejected files records a Failed outcome`() {
+        val loop = PublishRunLoop(
+            drain = PublishDrain { _, _, onFailure ->
+                onFailure("bad-1", AppError.TelegramError(400, "MESSAGE_ID_INVALID"))
+                onFailure("bad-2", AppError.TelegramError(400, "MESSAGE_ID_INVALID"))
+                true
+            },
+            scope = scope,
+            clock = { Instant.ofEpochMilli(42_000L) }
+        )
+
+        loop.kick()
+        awaitOutcome(loop, "the rejected files record a Failed outcome") {
+            it is PublishRunOutcome.Failed
+        }
+        val outcome = loop.lastOutcome.value as PublishRunOutcome.Failed
+        assertEquals(2, outcome.failedFiles)
+        assertEquals("MESSAGE_ID_INVALID", outcome.reason)
+        assertEquals(Instant.ofEpochMilli(42_000L), loop.lastFinishedAt.value)
+    }
+
+    @Test
+    fun `a cancelled run records a Stopped outcome`() {
+        val loop = PublishRunLoop(
+            drain = PublishDrain { isStopped, onProgress, _ ->
+                var published = 0
+                while (!isStopped()) {
+                    published++
+                    onProgress(published, 1_000)
+                    delay(5)
+                }
+                false
+            },
+            scope = scope,
+            clock = { Instant.ofEpochMilli(7_500L) }
+        )
+
+        loop.kick()
+        awaitState(loop, "the run is publishing") {
+            it is PublishRunState.Running && it.published > 0
+        }
+        loop.cancel()
+        awaitOutcome(loop, "the cancel records a Stopped outcome") {
+            it == PublishRunOutcome.Stopped
+        }
+        assertEquals(Instant.ofEpochMilli(7_500L), loop.lastFinishedAt.value)
+    }
+
+    @Test
+    fun `a completed drain after a failure replaces the outcome and clears the stickiness`() {
+        val attempts = AtomicInteger(0)
+        val nowMs = AtomicLong(10_000L)
+        val loop = PublishRunLoop(
+            drain = PublishDrain { _, _, onFailure ->
+                if (attempts.incrementAndGet() == 1) {
+                    onFailure("bad-1", AppError.TelegramError(400, "MESSAGE_ID_INVALID"))
+                    true
+                } else {
+                    true
+                }
+            },
+            scope = scope,
+            clock = { Instant.ofEpochMilli(nowMs.get()) }
+        )
+
+        loop.kick()
+        awaitOutcome(loop, "the first run fails") { it is PublishRunOutcome.Failed }
+        assertEquals(Instant.ofEpochMilli(10_000L), loop.lastFinishedAt.value)
+
+        nowMs.set(20_000L)
+        loop.kick()
+        awaitOutcome(loop, "the retry completes and replaces the outcome") {
+            it == PublishRunOutcome.Completed
+        }
+        assertEquals(Instant.ofEpochMilli(20_000L), loop.lastFinishedAt.value)
+        assertEquals(2, attempts.get())
+    }
+
+    private fun awaitOutcome(
+        loop: PublishRunLoop,
+        description: String,
+        predicate: (PublishRunOutcome?) -> Boolean
+    ) {
+        val deadline = System.currentTimeMillis() + 15_000
+        while (System.currentTimeMillis() < deadline) {
+            if (predicate(loop.lastOutcome.value)) return
+            Thread.sleep(10)
+        }
+        fail("Timed out waiting for: $description; outcome is ${loop.lastOutcome.value}")
     }
 
     private fun awaitState(

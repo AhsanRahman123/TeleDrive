@@ -34,8 +34,30 @@ interface PublishScheduler {
     val runState: StateFlow<PublishRunState>
         get() = idleRunState
 
+    /**
+     * The last FINISHED run's outcome (PC-33), for surfaces like the
+     * Home sync card: it lets the card show an honest resting state
+     * ("All synced") after a completed drain and keep a failed or
+     * stopped run visible until a later drain completes. Schedulers
+     * that cannot report it keep the shared `null` flow (no run has
+     * finished), which renders exactly like the pre-PC-33 card.
+     */
+    val lastOutcome: StateFlow<PublishRunOutcome?>
+        get() = idleOutcome
+
+    /**
+     * When the last run finished, as epoch milliseconds; `null`
+     * until a run finishes. Paired with [lastOutcome].
+     */
+    val lastFinishedAtMs: StateFlow<Long?>
+        get() = idleFinishedAtMs
+
     companion object {
         private val idleRunState: StateFlow<PublishRunState> =
             MutableStateFlow<PublishRunState>(PublishRunState.Idle).asStateFlow()
+        private val idleOutcome: StateFlow<PublishRunOutcome?> =
+            MutableStateFlow<PublishRunOutcome?>(null).asStateFlow()
+        private val idleFinishedAtMs: StateFlow<Long?> =
+            MutableStateFlow<Long?>(null).asStateFlow()
     }
 }

@@ -197,6 +197,7 @@ fun HomeScreen(
     val scanning by viewModel.scanning.collectAsStateWithLifecycle()
     val pendingSync by viewModel.pendingSync.collectAsStateWithLifecycle()
     val syncRunState by viewModel.syncRunState.collectAsStateWithLifecycle()
+    val syncCardState by viewModel.syncCardState.collectAsStateWithLifecycle()
     var shownSync by remember { mutableStateOf(pendingSync) }
     if (pendingSync.visible) shownSync = pendingSync
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -357,15 +358,22 @@ fun HomeScreen(
                     }
                 }
             }
-            if (pendingSync.visible) {
+            if (syncCardState.visible) {
                 item(key = "pending-sync") {
                     Column(Modifier.animateItem()) {
-                        PendingSyncCard(
-                            pending = shownSync,
-                            runState = syncRunState,
-                            onSyncNow = viewModel::syncNow,
-                            onCancelSync = viewModel::cancelSync
-                        )
+                        when (val display = syncCardState.display) {
+                            SyncCardDisplay.Active -> PendingSyncCard(
+                                pending = shownSync,
+                                runState = syncRunState,
+                                onSyncNow = viewModel::syncNow,
+                                onCancelSync = viewModel::cancelSync
+                            )
+                            else -> SyncStatusCard(
+                                display = display,
+                                lastFinishedAtMs = syncCardState.lastFinishedAtMs,
+                                onSyncNow = viewModel::syncNow
+                            )
+                        }
                     }
                 }
             }
@@ -625,6 +633,72 @@ private fun PendingSyncCard(
                 if (runActive) {
                     TextButton(onClick = onCancelSync, shapes = ButtonDefaults.shapes()) {
                         Text(stringResource(Res.string.home_sync_cancel))
+                    }
+                }
+                TextButton(onClick = onSyncNow, shapes = ButtonDefaults.shapes()) {
+                    Text(stringResource(Res.string.home_sync_now))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The sync card's resting and sticky states (PC-33), rendered when
+ * the backlog is zero so Home always carries an honest sync status:
+ * "All synced" after a completed drain, and a failed or stopped run
+ * that stays visible until a later drain completes. The Sync now
+ * button is retained in every state — the surface never disappears.
+ */
+@Composable
+private fun SyncStatusCard(
+    display: SyncCardDisplay,
+    lastFinishedAtMs: Long?,
+    onSyncNow: () -> Unit
+) {
+    val lastRunText = lastFinishedAtMs?.let {
+        stringResource(Res.string.home_sync_last_run, formatSyncLastRun(it))
+    }
+    GroupedList(horizontalPadding = 0.dp) {
+        add {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.CloudSync,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(
+                            when (display) {
+                                is SyncCardDisplay.StickyFailed ->
+                                    Res.string.home_sync_failed
+                                SyncCardDisplay.StickyStopped ->
+                                    Res.string.home_sync_stopped
+                                else -> Res.string.home_all_synced
+                            }
+                        ),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    val subtitle = when (display) {
+                        is SyncCardDisplay.StickyFailed -> stringResource(
+                            Res.string.home_sync_failed_count,
+                            display.failedFiles
+                        )
+                        else -> lastRunText
+                    }
+                    if (subtitle != null) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
                 TextButton(onClick = onSyncNow, shapes = ButtonDefaults.shapes()) {

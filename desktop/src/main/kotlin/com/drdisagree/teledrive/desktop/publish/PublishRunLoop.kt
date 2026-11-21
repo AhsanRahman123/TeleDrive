@@ -2,7 +2,9 @@ package com.drdisagree.teledrive.desktop.publish
 
 import com.drdisagree.teledrive.core.common.AppError
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.publish.PublishRunOutcome
 import com.drdisagree.teledrive.core.publish.PublishRunState
+import java.time.Instant
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.seconds
@@ -51,11 +53,31 @@ internal class PublishRunLoop(
     private val drain: PublishDrain,
     private val scope: CoroutineScope,
     private val initialRetryDelaySeconds: Int = RETRY_DELAY_SECONDS,
-    private val maxRetryDelaySeconds: Int = MAX_RETRY_DELAY_SECONDS
+    private val maxRetryDelaySeconds: Int = MAX_RETRY_DELAY_SECONDS,
+    private val clock: () -> Instant = { Instant.now() }
 ) {
 
     private val _runState = MutableStateFlow<PublishRunState>(PublishRunState.Idle)
     val runState: StateFlow<PublishRunState> = _runState.asStateFlow()
+
+    /**
+     * The last FINISHED run's outcome and finish time (PC-33).
+     * Recorded only at the loop's terminal transitions — a run that
+     * is still going or waiting to retry has not finished and leaves
+     * the previous outcome untouched, so a Failed/Stopped outcome
+     * stays on record (and on the Home card) until a later drain
+     * completes and replaces it.
+     */
+    private val _lastOutcome = MutableStateFlow<PublishRunOutcome?>(null)
+    val lastOutcome: StateFlow<PublishRunOutcome?> = _lastOutcome.asStateFlow()
+
+    private val _lastFinishedAt = MutableStateFlow<Instant?>(null)
+    val lastFinishedAt: StateFlow<Instant?> = _lastFinishedAt.asStateFlow()
+
+    private fun recordOutcome(outcome: PublishRunOutcome) {
+        _lastOutcome.value = outcome
+        _lastFinishedAt.value = clock()
+    }
 
     private val stopRequested = AtomicBoolean(false)
     private val rerunRequested = AtomicBoolean(false)
@@ -141,18 +163,28 @@ internal class PublishRunLoop(
                 when {
                     stopRequested.get() -> {
                         _runState.value = PublishRunState.Stopped
+                        recordOutcome(PublishRunOutcome.Stopped)
                         return
                     }
                     drained && failures.isEmpty() -> {
                         if (rerunRequested.get()) continue
                         _runState.value = PublishRunState.Idle
+                        recordOutcome(PublishRunOutcome.Completed)
                         return
                     }
                     drained -> {
                         if (rerunRequested.get()) continue
+                        val reason =
+                            (failures.first().second as? AppError.TelegramError)?.message
                         _runState.value = PublishRunState.Failed(
                             failedFiles = failures.size,
-                            reason = (failures.first().second as? AppError.TelegramError)?.message
+                            reason = reason
+                        )
+                        recordOutcome(
+                            PublishRunOutcome.Failed(
+                                failedFiles = failures.size,
+                                reason = reason
+                            )
                         )
                         return
                     }
@@ -165,6 +197,7 @@ internal class PublishRunLoop(
                         awaitWakeOrTimeout(delaySeconds)
                         if (stopRequested.get()) {
                             _runState.value = PublishRunState.Stopped
+                            recordOutcome(PublishRunOutcome.Stopped)
                             return
                         }
                         delaySeconds = minOf(delaySeconds * 2, maxRetryDelaySeconds)

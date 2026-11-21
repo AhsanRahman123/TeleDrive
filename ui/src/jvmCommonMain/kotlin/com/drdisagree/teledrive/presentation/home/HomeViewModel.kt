@@ -237,6 +237,24 @@ class HomeViewModel(
      */
     val syncRunState: StateFlow<PublishRunState> = publishScheduler.runState
 
+    /**
+     * The Home sync card's full state (PC-33): backlog + run state +
+     * the last finished run's outcome and finish time, mapped by
+     * [syncCardDisplay]. This is what gives the card a permanent
+     * honest presence — an "All synced" resting state at a zero
+     * backlog, and failed/stopped runs that stay visible until a
+     * later drain completes — instead of the card vanishing the
+     * moment the count reached zero.
+     */
+    val syncCardState: StateFlow<SyncCardState> = combine(
+        pendingSync,
+        syncRunState,
+        publishScheduler.lastOutcome,
+        publishScheduler.lastFinishedAtMs
+    ) { pending, runState, outcome, finishedAt ->
+        SyncCardState(pending, runState, outcome, finishedAt)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SyncCardState())
+
     /** Cooperative, lossless stop of the active publish run (PC-32). */
     fun cancelSync() = publishScheduler.cancel()
 
