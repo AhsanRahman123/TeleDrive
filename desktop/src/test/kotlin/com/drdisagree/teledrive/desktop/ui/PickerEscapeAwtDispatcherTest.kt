@@ -89,12 +89,35 @@ class PickerEscapeAwtDispatcherTest {
     }
 
     @Test
-    fun `escape driven through the KeyboardFocusManager is consumed before component delivery`() {
+    fun `escape posted to the AWT event queue is consumed before component delivery`() {
+        // The genuine pipeline a physical key traverses: the system
+        // event queue -> KeyboardFocusManager (dispatchers first) ->
+        // the focus owner's listeners. Calling the manager's
+        // dispatchKeyEvent directly out-of-band is NOT that pipeline
+        // (it can swallow events for unfocused windows before any
+        // dispatcher runs), so this test posts to the queue and
+        // asserts both halves of "consumed before delivery": the
+        // ladder ran AND the field's own key listener never saw it.
+        val deliveredToField = AtomicInteger(0)
+        SwingUtilities.invokeAndWait {
+            fieldInDialog.addKeyListener(object : java.awt.event.KeyAdapter() {
+                override fun keyPressed(e: KeyEvent) {
+                    deliveredToField.incrementAndGet()
+                }
+            })
+            fieldInDialog.requestFocusInWindow()
+        }
         dispatcher.install()
-        val consumed = KeyboardFocusManager.getCurrentKeyboardFocusManager()
-            .dispatchKeyEvent(escape(KeyEvent.KEY_PRESSED, fieldInDialog))
-        assertTrue("the manager must report the event consumed", consumed)
-        assertEquals(1, ladderSteps.get())
+        java.awt.Toolkit.getDefaultToolkit().systemEventQueue
+            .postEvent(escape(KeyEvent.KEY_PRESSED, fieldInDialog))
+        val deadline = System.currentTimeMillis() + 10_000
+        while (ladderSteps.get() == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25)
+        }
+        assertEquals("the dispatcher must run for a queued Escape", 1, ladderSteps.get())
+        // Give any (wrong) component delivery a chance to happen.
+        Thread.sleep(300)
+        assertEquals("a consumed Escape must never reach the component", 0, deliveredToField.get())
     }
 
     @Test

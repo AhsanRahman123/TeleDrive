@@ -83,10 +83,14 @@ class DesktopUploadPickerDialogTest {
 
         // Mouse-click navigation into a subfolder, then Escape: back
         // up exactly one level, dialog still open (round 8: the state
-        // the user is in when the physical key must work — focus sits
-        // wherever the click left it, not on a handler's node).
+        // the user is in when the physical key must work). Same focus
+        // pattern as the folder-mode test below: the clicked row
+        // leaves the composition when the listing reloads, so the
+        // search field is clicked to give the test scene's key input
+        // a live focus target before the Escape.
         rule.onNodeWithText("sub").performClick()
         waitForText(File(child, "sub").absolutePath)
+        rule.onNode(hasSetTextAction()).performClick()
         pressEscape()
         waitForText(child.absolutePath)
         rule.onNodeWithText("a.txt").assertIsDisplayed()
