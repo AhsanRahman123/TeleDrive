@@ -167,6 +167,7 @@ import com.drdisagree.teledrive.resources.home_sync_now
 import com.drdisagree.teledrive.resources.home_sync_progress
 import com.drdisagree.teledrive.resources.home_sync_retrying
 import com.drdisagree.teledrive.resources.home_sync_stopped
+import com.drdisagree.teledrive.resources.home_sync_waiting_telegram
 import com.drdisagree.teledrive.resources.home_transfer_history
 import com.drdisagree.teledrive.resources.home_transfer_history_subtitle
 import com.drdisagree.teledrive.resources.home_waiting_count
