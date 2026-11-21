@@ -325,7 +325,6 @@
     <string name="home_sync_failed_count">%1$d files were rejected by Telegram and are still waiting</string>
     <string name="home_sync_retrying">Sync hit a problem — retrying…</string>
     <string name="home_sync_progress">%1$d of %2$d saved in this run</string>
-    <string name="home_sync_waiting_telegram">Telegram asked us to slow down — waiting %1$d s, then continuing</string>
     <string name="home_section_favorites">Favorites</string>
     <string name="home_section_recent">Recent</string>
     <string name="home_section_storage">Storage</string>
@@ -1141,4 +1140,5 @@
     <string name="settings_preview_background_black">Black</string>
     <string name="sync_all_done">All synced</string>
     <string name="sync_last_run_time">Last run %1$s</string>
+    <string name="home_sync_waiting_telegram">Telegram asked us to slow down — waiting %1$d s, then continuing</string>
 </resources>
