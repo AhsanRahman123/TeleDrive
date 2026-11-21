@@ -35,6 +35,7 @@ class WindowSelectAllDispatcherTest {
     private lateinit var textField: JTextField
     private lateinit var dialog: JDialog
     private lateinit var fieldInDialog: JTextField
+    private lateinit var buttonInDialog: JButton
 
     private val dispatcher = WindowSelectAllAwtDispatcher()
     private val toggles = AtomicInteger(0)
@@ -61,8 +62,11 @@ class WindowSelectAllDispatcherTest {
 
             dialog = JDialog(frame)
             dialog.setSize(300, 200)
+            dialog.contentPane.layout = java.awt.FlowLayout()
             fieldInDialog = JTextField()
             dialog.add(fieldInDialog)
+            buttonInDialog = JButton("in dialog")
+            dialog.add(buttonInDialog)
         }
     }
 
@@ -201,7 +205,11 @@ class WindowSelectAllDispatcherTest {
         // window (the Alt-Tab focus anomaly).
         registerSurface(modal = true)
         assertTrue(dispatcher.dispatchKeyEvent(ctrlA(toolbarButton)))
-        assertTrue(dispatcher.dispatchKeyEvent(ctrlA(fieldInDialog)))
+        assertTrue(dispatcher.dispatchKeyEvent(ctrlA(buttonInDialog)))
+        assertEquals(2, toggles.get())
+        // …but the text-field exclusion still wins inside the modal:
+        // Ctrl+A in the dialog's own text field selects its text.
+        assertFalse(dispatcher.dispatchKeyEvent(ctrlA(fieldInDialog)))
         assertEquals(2, toggles.get())
     }
 
