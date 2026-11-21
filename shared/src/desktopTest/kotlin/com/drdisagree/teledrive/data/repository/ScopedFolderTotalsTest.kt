@@ -4,6 +4,7 @@ import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.FileImporter
+import com.drdisagree.teledrive.core.files.NoteStore
 import com.drdisagree.teledrive.data.local.dao.FolderDao
 import com.drdisagree.teledrive.data.local.dao.FolderTotalSize
 import com.drdisagree.teledrive.data.local.entity.FileEntity
