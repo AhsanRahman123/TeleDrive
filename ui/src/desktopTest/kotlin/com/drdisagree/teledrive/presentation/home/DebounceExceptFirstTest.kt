@@ -23,7 +23,12 @@ import org.junit.Test
  * trailing burst value still waits for the quiet window.
  *
  * The source is a cold flow builder so emissions begin exactly when
- * collection starts — no subscription race.
+ * collection starts — no subscription race. It then stays OPEN:
+ * debounce semantics flush a pending value when the upstream
+ * completes, so a source that ends right after its last emission
+ * would deliver the trailing value at once and the quiet window
+ * could never be observed (that completion flush is what the first
+ * version of this test actually measured).
  */
 class DebounceExceptFirstTest {
 
@@ -39,6 +44,9 @@ class DebounceExceptFirstTest {
                 emit(2)
                 delay(50)
                 emit(3)
+                // Stay open: take(2) cancels collection long before this
+                // elapses; it only stops the completion flush (see above).
+                delay(60_000)
             }.debounceExceptFirst(2_000.milliseconds).take(2).collect { value ->
                 received += value to (System.nanoTime() - startedAt) / 1_000_000
             }
