@@ -37,6 +37,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,6 +47,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -53,6 +56,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HomeViewModel(
@@ -345,19 +349,62 @@ class HomeViewModel(
  * startup invalidations can defer the first value indefinitely; the
  * first value is the one a combine gate (Home's skeleton) waits on.
  *
- * The first/not-first state is captured per returned flow instance —
- * create one flow per subscription site (as Home's counts does inside
- * its flatMapLatest), never share one instance across collectors.
+ * Implemented as an explicit select loop rather than a stateful
+ * `debounce { }` timeout selector: the selector's invocation pattern
+ * (when and how often it is called for a pending value) made a
+ * first-value flag unreliable — a timing test caught a trailing value
+ * passing through undebounced. Here the semantics are exact: first
+ * value forwards at once; every later value waits for a full quiet
+ * [timeout], with each newer value replacing the pending one and
+ * re-arming the wait; a pending value is flushed if upstream closes.
  */
-@OptIn(FlowPreview::class)
 internal fun <T> Flow<T>.debounceExceptFirst(timeout: kotlin.time.Duration): Flow<T> {
-    var first = true
-    return debounce {
-        if (first) {
-            first = false
-            kotlin.time.Duration.ZERO
-        } else {
-            timeout
+    val upstream = this
+    return channelFlow {
+        val values = Channel<T>(Channel.UNLIMITED)
+        launch {
+            try {
+                upstream.collect { values.send(it) }
+            } finally {
+                values.close()
+            }
+        }
+        var first = true
+        var upstreamDone = false
+        while (!upstreamDone) {
+            val head = try {
+                values.receive()
+            } catch (closed: ClosedReceiveChannelException) {
+                break
+            }
+            if (first) {
+                first = false
+                send(head)
+                continue
+            }
+            var pending = head
+            var flushed = false
+            while (!flushed) {
+                val outcome = select {
+                    values.onReceiveCatching { result ->
+                        result.onSuccess { pending = it }
+                        if (result.isSuccess) 0 else 1
+                    }
+                    onTimeout(timeout) { 2 }
+                }
+                when (outcome) {
+                    0 -> Unit // replaced; the quiet wait re-arms
+                    1 -> {
+                        send(pending)
+                        flushed = true
+                        upstreamDone = true
+                    }
+                    else -> {
+                        send(pending)
+                        flushed = true
+                    }
+                }
+            }
         }
     }
 }
