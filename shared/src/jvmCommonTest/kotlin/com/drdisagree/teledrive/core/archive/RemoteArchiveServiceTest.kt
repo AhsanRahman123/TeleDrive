@@ -172,6 +172,36 @@ class RemoteArchiveServiceTest {
         return out.toByteArray()
     }
 
+    /** Raw stored-entry ZIP builder that (unlike ZipOutputStream) allows duplicate names. */
+    private fun handBuiltStoredZip(entries: List<Pair<String, ByteArray>>): ByteArray {
+        val out = ByteArrayOutputStream()
+        fun w16(v: Int) { out.write(v and 0xFF); out.write((v shr 8) and 0xFF) }
+        fun w32(v: Long) { for (i in 0 until 4) out.write((v shr (8 * i)).toInt() and 0xFF) }
+        data class Rec(val name: ByteArray, val crc: Long, val size: Long, val offset: Long)
+        val records = mutableListOf<Rec>()
+        for ((name, data) in entries) {
+            val nameBytes = name.toByteArray(Charsets.UTF_8)
+            val crc = CRC32(); crc.update(data)
+            val offset = out.size().toLong()
+            w32(0x04034b50); w16(20); w16(0x0800); w16(0); w16(0); w16(0)
+            w32(crc.value); w32(data.size.toLong()); w32(data.size.toLong())
+            w16(nameBytes.size); w16(0)
+            out.write(nameBytes); out.write(data)
+            records += Rec(nameBytes, crc.value, data.size.toLong(), offset)
+        }
+        val cdOffset = out.size().toLong()
+        for (rec in records) {
+            w32(0x02014b50); w16(20); w16(20); w16(0x0800); w16(0); w16(0); w16(0)
+            w32(rec.crc); w32(rec.size); w32(rec.size)
+            w16(rec.name.size); w16(0); w16(0); w16(0); w16(0); w32(0); w32(rec.offset)
+            out.write(rec.name)
+        }
+        val cdSize = out.size().toLong() - cdOffset
+        w32(0x06054b50); w16(0); w16(0); w16(records.size); w16(records.size)
+        w32(cdSize); w32(cdOffset); w16(0)
+        return out.toByteArray()
+    }
+
     private fun driveFile(
         encrypted: Boolean = false,
         chatId: Long? = 100L,
@@ -315,7 +345,8 @@ class RemoteArchiveServiceTest {
 
     @Test
     fun `duplicate names extract their own bytes by occurrence`() = runBlocking {
-        val zipBytes = storedZip(
+        // ZipOutputStream refuses duplicate names, so this fixture is built by hand.
+        val zipBytes = handBuiltStoredZip(
             listOf(
                 "dup.txt" to "first-content".toByteArray(),
                 "dup.txt" to "second-content".toByteArray()
