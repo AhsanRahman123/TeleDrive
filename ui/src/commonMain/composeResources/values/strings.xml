@@ -530,6 +530,13 @@
     <string name="preview_zip_corrupt">This zip archive is damaged or incomplete, so its contents can't be listed.</string>
     <string name="preview_zip_multi_disk">This zip is split across multiple parts, so it can't be browsed as a single file. Download all of its parts and open it locally instead.</string>
     <string name="preview_zip_entry_saved">Saved %1$s to your downloads folder</string>
+    <string name="preview_zip_entries_saved">Saved %1$d files to your downloads folder</string>
+    <string name="preview_zip_entry_failed">Could not save %1$s: %2$s</string>
+    <string name="preview_zip_none_saved">None of the selected files could be saved</string>
+    <string name="preview_zip_folder_empty">The selected folder is empty — nothing to download</string>
+    <string name="preview_zip_download_selected">Download selected</string>
+    <string name="preview_zip_search_entries">Search inside this zip</string>
+    <string name="preview_zip_too_large_preview">%1$s is too large to preview here (%2$s). Download it instead.</string>
     <string name="preview_zip_entry_local_only">This zip is only on this device, so its files can't be downloaded from inside it here. Upload the zip first, or extract it locally outside the app.</string>
     <string name="preview_remove_favorites">Remove from favorites</string>
     <string name="preview_removed_favorites">Removed from favorites</string>

@@ -397,6 +397,85 @@ class RemoteArchiveServiceTest {
         }
 
     @Test
+    fun `temp file extraction returns verified bytes with the entry name and extension`() =
+        runBlocking {
+            val content = "preview me".toByteArray()
+            val zipOut = ByteArrayOutputStream()
+            ZipOutputStream(zipOut).use { zip ->
+                zip.putNextEntry(ZipEntry("docs/readme.txt"))
+                zip.write(content)
+                zip.closeEntry()
+            }
+            val service = service(source = ArraySource(zipOut.toByteArray()))
+            val temp = service.extractEntryToTempFile(driveFile(), "docs/readme.txt")
+            try {
+                assertTrue(temp.name.startsWith("teledrive-zip-entry-readme-"))
+                assertTrue(temp.name.endsWith(".txt"))
+                assertArrayEquals(content, temp.readBytes())
+            } finally {
+                temp.delete()
+            }
+        }
+
+    @Test
+    fun `temp file extraction with a bad crc hands out no file`() = runBlocking {
+        val data = "integrity matters".toByteArray()
+        val bytes = storedZip(listOf("file.txt" to data))
+        val nameLength = (bytes[26].toInt() and 0xFF) or ((bytes[27].toInt() and 0xFF) shl 8)
+        val extraLength = (bytes[28].toInt() and 0xFF) or ((bytes[29].toInt() and 0xFF) shl 8)
+        bytes[30 + nameLength + extraLength] =
+            (bytes[30 + nameLength + extraLength] + 1).toByte()
+        val tempDir = java.io.File(System.getProperty("java.io.tmpdir"))
+        val before = tempDir.list()?.toSet().orEmpty()
+        try {
+            service(source = ArraySource(bytes)).extractEntryToTempFile(driveFile(), "file.txt")
+            fail("Expected CrcMismatch")
+        } catch (failure: ZipArchiveException.CrcMismatch) {
+            // expected — and the service must have deleted the unverified temp file
+        }
+        val leaked = (tempDir.list()?.toSet().orEmpty() - before)
+            .filter { it.startsWith("teledrive-zip-entry-") }
+        assertEquals(emptyList<String>(), leaked)
+    }
+
+    @Test
+    fun `folder downloads join the in-zip parent path under the library folder`() = runBlocking {
+        val content = "nested".toByteArray()
+        val zipOut = ByteArrayOutputStream()
+        ZipOutputStream(zipOut).use { zip ->
+            zip.putNextEntry(ZipEntry("dir/sub/nested.txt"))
+            zip.write(content)
+            zip.closeEntry()
+        }
+        val writer = FakeDownloadWriter()
+        val service = service(writer = writer, source = ArraySource(zipOut.toByteArray()))
+        service.extractEntry(driveFile(), "dir/sub/nested.txt", subFolderPath = "dir/sub")
+        assertEquals("dir/sub", writer.savedFolderPath)
+        assertEquals("nested.txt", writer.savedName)
+        assertArrayEquals(content, writer.savedBytes)
+    }
+
+    @Test
+    fun `listing carries the dos timestamp and zero when the archive has none`() = runBlocking {
+        val zipOut = ByteArrayOutputStream()
+        ZipOutputStream(zipOut).use { zip ->
+            val timed = ZipEntry("timed.txt")
+            timed.time = 1_700_000_000_000L
+            zip.putNextEntry(timed)
+            zip.write("x".toByteArray())
+            zip.closeEntry()
+        }
+        val dated = service(source = ArraySource(zipOut.toByteArray()))
+            .listEntries(driveFile())
+        assertTrue(dated.single().modifiedAtMillis > 0)
+
+        // The hand-built stored zip writes zero DOS date/time fields.
+        val undated = service(source = ArraySource(storedZip(listOf("plain.txt" to "y".toByteArray()))))
+            .listEntries(driveFile())
+        assertEquals(0L, undated.single().modifiedAtMillis)
+    }
+
+    @Test
     fun `extracting a missing entry reports it plainly`() = runBlocking {
         val zipOut = ByteArrayOutputStream()
         ZipOutputStream(zipOut).use { zip ->

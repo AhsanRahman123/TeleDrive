@@ -205,6 +205,7 @@ class ZipArchiveReader(private val source: MediaByteSource) {
             }
             val flags = u16(fixed, 8)
             val method = u16(fixed, 10)
+            val modifiedAtMillis = dosDateTimeToEpochMillis(u16(fixed, 12), u16(fixed, 14))
             val crc = u32(fixed, 16)
             var compressed = u32(fixed, 20)
             var uncompressed = u32(fixed, 24)
@@ -271,7 +272,8 @@ class ZipArchiveReader(private val source: MediaByteSource) {
                 method = method,
                 crc32 = crc,
                 localHeaderOffset = localHeaderOffset,
-                isEncrypted = flags and FLAG_ENCRYPTED != 0
+                isEncrypted = flags and FLAG_ENCRYPTED != 0,
+                modifiedAtMillis = modifiedAtMillis
             )
         }
         return entries

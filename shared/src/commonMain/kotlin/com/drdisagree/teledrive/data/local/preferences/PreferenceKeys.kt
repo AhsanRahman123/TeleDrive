@@ -64,6 +64,8 @@ object PreferenceKeys {
     val SORT_DIRECTION = stringPreferencesKey("sort_direction")
     val GALLERY_SORT_FIELD = stringPreferencesKey("gallery_sort_field")
     val GALLERY_SORT_DIRECTION = stringPreferencesKey("gallery_sort_direction")
+    val ARCHIVE_SORT_FIELD = stringPreferencesKey("archive_sort_field")
+    val ARCHIVE_SORT_DIRECTION = stringPreferencesKey("archive_sort_direction")
 
     val BACKGROUND_PLAYBACK = booleanPreferencesKey("background_playback")
     val USE_NATIVE_FILE_PICKER = booleanPreferencesKey("use_native_file_picker")

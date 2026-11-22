@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.desktop.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -54,6 +55,8 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -82,6 +85,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -134,12 +138,16 @@ import com.drdisagree.teledrive.desktop.resources.preview_open_failed
 import com.drdisagree.teledrive.desktop.resources.preview_stream
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
+import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.LinkedText
 import com.drdisagree.teledrive.presentation.common.MarkdownText
 import com.drdisagree.teledrive.presentation.common.load
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
+import com.drdisagree.teledrive.presentation.components.SelectionCheckbox
+import com.drdisagree.teledrive.presentation.components.SortMenu
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.ErrorState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
@@ -184,6 +192,8 @@ import com.drdisagree.teledrive.resources.preview_remove_favorites
 import com.drdisagree.teledrive.resources.preview_requires_download
 import com.drdisagree.teledrive.resources.preview_truncated_download_view
 import com.drdisagree.teledrive.resources.preview_unarchive
+import com.drdisagree.teledrive.resources.preview_zip_download_selected
+import com.drdisagree.teledrive.resources.preview_zip_search_entries
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.getString
@@ -1552,77 +1562,405 @@ private fun PreviewPane(
                 val archiveScrollState = rememberLazyListState()
                 val previewUiState by viewModel.uiState.collectAsState()
                 val entryDownload = previewUiState.archiveEntryDownload
-                Box(modifier = Modifier.fillMaxSize()) {
-                LazyColumn(
-                    state = archiveScrollState,
-                    modifier = Modifier.fillMaxSize().padding(end = 10.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
+                val batchProgress = previewUiState.archiveBatchProgress
+                val archivePreview = previewUiState.archivePreview
+                val listing = current.entries
+                val archiveSort by viewModel.archiveSort.collectAsState()
+                val (archiveSortField, archiveSortDirection) = archiveSort
+                var sortMenuOpen by remember { mutableStateOf(false) }
+                var query by remember(displayedFile.id) { mutableStateOf("") }
+                var selectedFiles by remember(displayedFile.id) {
+                    mutableStateOf<Set<Int>>(emptySet())
+                }
+                var selectedFolders by remember(displayedFile.id) {
+                    mutableStateOf<Set<String>>(emptySet())
+                }
+                var rangeBase by remember(displayedFile.id) {
+                    mutableStateOf<Pair<Set<Int>, Set<String>>?>(null)
+                }
+                fun folderPathOf(entry: ArchiveEntry): String =
+                    entry.name.replace('\\', '/').trim('/')
+                val visibleIndices = remember(listing, query) {
+                    archiveVisibleIndices(listing, query)
+                }
+                // Filtering prunes the selection to what is still visible (identity by
+                // listing index / folder path), mirroring the main view's search.
+                LaunchedEffect(visibleIndices) {
+                    selectedFiles = pruneArchiveSelection(selectedFiles, visibleIndices)
+                    selectedFolders = selectedFolders.filter { path ->
+                        listing.indices.any {
+                            listing[it].isDirectory && folderPathOf(listing[it]) == path &&
+                                it in visibleIndices
+                        }
+                    }.toSet()
+                }
+                val displayIndices = remember(
+                    listing, visibleIndices, archiveSortField, archiveSortDirection
                 ) {
-                itemsIndexed(current.entries) { entryIndex, entry ->
-                    val entryBusy = entryDownload != null &&
-                        entryDownload.entryName == entry.name &&
-                        entryDownload.status == ArchiveEntryDownloadState.Status.RUNNING
-                    val anyBusy = entryDownload?.status ==
-                        ArchiveEntryDownloadState.Status.RUNNING
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (!entry.isDirectory && !anyBusy) {
-                                    Modifier.clickable {
-                                        viewModel.downloadArchiveEntry(
-                                            file = displayedFile,
-                                            entry = entry,
-                                            entryIndex = entryIndex,
-                                            entries = current.entries
-                                        )
-                                    }
-                                } else {
-                                    Modifier
-                                }
-                            )
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (entry.isDirectory) {
-                                Icons.Filled.Folder
-                            } else {
-                                Icons.AutoMirrored.Filled.InsertDriveFile
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = entry.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (!entry.isDirectory) {
-                            Text(
-                                text = Formatters.bytes(entry.sizeBytes),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    sortArchiveIndices(
+                        listing, visibleIndices.sorted(), archiveSortField, archiveSortDirection
+                    )
+                }
+                val selectionMode = selectedFiles.isNotEmpty() ||
+                    selectedFolders.isNotEmpty() || rangeBase != null
+                val anyBusy = entryDownload?.status ==
+                    ArchiveEntryDownloadState.Status.RUNNING || batchProgress != null
+                fun toggleRow(entryIndex: Int) {
+                    val entry = listing[entryIndex]
+                    if (entry.isDirectory) {
+                        val path = folderPathOf(entry)
+                        selectedFolders = if (path in selectedFolders) {
+                            selectedFolders - path
+                        } else {
+                            selectedFolders + path
                         }
-                        if (entryBusy) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .padding(start = 12.dp)
-                                    .size(18.dp),
-                                strokeWidth = 2.dp
-                            )
-                        }
-                    }
+                    } else {
+                        selectedFiles = toggleArchiveSelection(selectedFiles, entryIndex)
                     }
                 }
-                DesktopVerticalScrollbar(
-                    state = archiveScrollState,
-                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                // Drag selection mirrors the PC main file view: the shared
+                // rememberDragSelect over a base-snapshot range model — a drag paints a
+                // range onto the snapshot taken when the drag started.
+                val archiveDragSelect = rememberDragSelect(
+                    listState = archiveScrollState,
+                    onStart = { rangeBase = selectedFiles to selectedFolders },
+                    isSelected = { position ->
+                        displayIndices.getOrNull(position)?.let { entryIndex ->
+                            val entry = listing[entryIndex]
+                            if (entry.isDirectory) {
+                                folderPathOf(entry) in selectedFolders
+                            } else {
+                                entryIndex in selectedFiles
+                            }
+                        } == true
+                    },
+                    onRange = { range, shouldSelect ->
+                        val base = rangeBase ?: (selectedFiles to selectedFolders)
+                        val fileIndices = range.mapNotNull { displayIndices.getOrNull(it) }
+                            .filter { !listing[it].isDirectory }
+                        val folderPaths = range.mapNotNull { displayIndices.getOrNull(it) }
+                            .filter { listing[it].isDirectory }
+                            .map { folderPathOf(listing[it]) }
+                        selectedFiles = applyArchiveRangeSelection(
+                            base.first, fileIndices, shouldSelect
+                        )
+                        selectedFolders = if (shouldSelect) {
+                            base.second + folderPaths
+                        } else {
+                            base.second - folderPaths.toSet()
+                        }
+                    },
+                    onEnd = { rangeBase = null },
+                    mouseDragAddsToSelection = false,
+                    resolveNearestVisibleItem = true
                 )
+                // Leaving the archive view closes any in-archive preview and deletes
+                // its temp file.
+                DisposableEffect(Unit) {
+                    onDispose { viewModel.dismissArchivePreview() }
+                }
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        // Header: search + sort over the already-loaded listing (no new
+                        // Telegram reads), following the main view's patterns.
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp, 12.dp, 16.dp, 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                placeholder = {
+                                    Text(stringResource(Res.string.preview_zip_search_entries))
+                                },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Box {
+                                TooltipIconButton(
+                                    tooltip = "Sort",
+                                    onClick = { sortMenuOpen = true }
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Sort,
+                                        contentDescription = "Sort"
+                                    )
+                                }
+                                SortMenu(
+                                    expanded = sortMenuOpen,
+                                    current = archiveSortField,
+                                    direction = archiveSortDirection,
+                                    onDismiss = { sortMenuOpen = false },
+                                    onSelect = { field, direction ->
+                                        sortMenuOpen = false
+                                        viewModel.setArchiveSort(field, direction)
+                                    },
+                                    fields = listOf(
+                                        FileSortField.NAME,
+                                        FileSortField.SIZE,
+                                        FileSortField.DATE_MODIFIED,
+                                        FileSortField.TYPE
+                                    )
+                                )
+                            }
+                        }
+                        if (batchProgress != null) {
+                            Text(
+                                text = "Downloading ${batchProgress.done} of " +
+                                    "${batchProgress.total} files…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp, 4.dp)
+                            )
+                        } else if (selectionMode) {
+                            Text(
+                                text = "${selectedFiles.size + selectedFolders.size} selected",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(16.dp, 4.dp)
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            LazyColumn(
+                                state = archiveScrollState,
+                                modifier = Modifier.fillMaxSize().padding(end = 10.dp)
+                                    .then(archiveDragSelect),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
+                            ) {
+                                items(
+                                    count = displayIndices.size,
+                                    key = { position -> displayIndices[position] }
+                                ) { position ->
+                                    val entryIndex = displayIndices[position]
+                                    val entry = listing[entryIndex]
+                                    val entryBusy = entryDownload != null &&
+                                        entryDownload.entryName == entry.name &&
+                                        entryDownload.status ==
+                                        ArchiveEntryDownloadState.Status.RUNNING
+                                    val rowSelected = if (entry.isDirectory) {
+                                        folderPathOf(entry) in selectedFolders
+                                    } else {
+                                        entryIndex in selectedFiles
+                                    }
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .then(
+                                                if (rowSelected) {
+                                                    Modifier.background(
+                                                        MaterialTheme.colorScheme.secondaryContainer
+                                                    )
+                                                } else {
+                                                    Modifier
+                                                }
+                                            )
+                                            .clickable {
+                                                if (selectionMode) {
+                                                    toggleRow(entryIndex)
+                                                } else if (!entry.isDirectory && !anyBusy) {
+                                                    viewModel.onArchiveEntryTap(
+                                                        file = displayedFile,
+                                                        entry = entry,
+                                                        entryIndex = entryIndex,
+                                                        entries = listing
+                                                    )
+                                                }
+                                            }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (selectionMode) {
+                                            SelectionCheckbox(
+                                                checked = rowSelected,
+                                                onClick = { toggleRow(entryIndex) }
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = if (entry.isDirectory) {
+                                                Icons.Filled.Folder
+                                            } else {
+                                                Icons.AutoMirrored.Filled.InsertDriveFile
+                                            },
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = entry.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            modifier = Modifier.weight(1f)
+                                                .padding(horizontal = 12.dp),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (!entry.isDirectory) {
+                                            if (entry.modifiedAtMillis > 0) {
+                                                Text(
+                                                    text = Formatters.date(entry.modifiedAtMillis),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(end = 12.dp)
+                                                )
+                                            }
+                                            Text(
+                                                text = Formatters.bytes(entry.sizeBytes),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        if (entryBusy) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier
+                                                    .padding(start = 12.dp)
+                                                    .size(18.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            DesktopVerticalScrollbar(
+                                state = archiveScrollState,
+                                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                            )
+                        }
+                        if (selectionMode) {
+                            // The viewer's only selection action: Download selected.
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    .padding(16.dp, 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    enabled = !anyBusy,
+                                    onClick = {
+                                        viewModel.downloadArchiveSelection(
+                                            file = displayedFile,
+                                            entries = listing,
+                                            entryIndices = selectedFiles,
+                                            folderPaths = selectedFolders
+                                        )
+                                        selectedFiles = emptySet()
+                                        selectedFolders = emptySet()
+                                    }
+                                ) {
+                                    Text(
+                                        stringResource(Res.string.preview_zip_download_selected)
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        selectedFiles = emptySet()
+                                        selectedFolders = emptySet()
+                                    },
+                                    modifier = Modifier.padding(start = 12.dp)
+                                ) {
+                                    Text("Clear")
+                                }
+                            }
+                        }
+                    }
+                    // In-archive preview overlay: image in the desktop image viewer,
+                    // audio in the desktop player, text read-only. Video never reaches
+                    // here — its tap action is DOWNLOAD.
+                    when (val preview = archivePreview) {
+                        is ArchiveEntryPreview.Image -> {
+                            val painter = rememberAsyncImagePainter(File(preview.path))
+                            Box(
+                                modifier = Modifier.fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.background)
+                            ) {
+                                Image(
+                                    painter = painter,
+                                    contentDescription = preview.name,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit
+                                )
+                                FilledIconButton(
+                                    onClick = { viewModel.dismissArchivePreview() },
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Close"
+                                    )
+                                }
+                            }
+                        }
+                        is ArchiveEntryPreview.Audio -> {
+                            Box(
+                                modifier = Modifier.fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.background)
+                            ) {
+                                if (VlcPlayback.available) {
+                                    DesktopMediaPlayer(
+                                        mrl = preview.path,
+                                        isAudio = true,
+                                        mediaId = "archive-audio-${preview.name}",
+                                        mediaTitle = preview.name,
+                                        preferredAudioLanguage = preferredAudioLanguage,
+                                        preferredSubtitleLanguage = preferredSubtitleLanguage,
+                                        onPreferredAudioLanguage =
+                                            viewModel::setPreferredAudioLanguage,
+                                        onPreferredSubtitleLanguage =
+                                            viewModel::setPreferredSubtitleLanguage,
+                                        backgroundPlayback = backgroundPlayback,
+                                        onBackgroundPlaybackChange = { enabled ->
+                                            viewModel.setBackgroundPlayback(enabled)
+                                        }
+                                    )
+                                } else {
+                                    OpenExternallyState(
+                                        icon = Icons.Filled.Audiotrack,
+                                        file = displayedFile,
+                                        path = preview.path,
+                                        snackbarHostState = snackbarHostState
+                                    )
+                                }
+                                FilledIconButton(
+                                    onClick = { viewModel.dismissArchivePreview() },
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Close"
+                                    )
+                                }
+                            }
+                        }
+                        is ArchiveEntryPreview.Text -> {
+                            val textScrollState = rememberScrollState()
+                            Box(
+                                modifier = Modifier.fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.background)
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxSize()
+                                        .verticalScroll(textScrollState)
+                                        .padding(24.dp)
+                                ) {
+                                    Text(
+                                        text = preview.text,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = FontFamily.Monospace
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                FilledIconButton(
+                                    onClick = { viewModel.dismissArchivePreview() },
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Close"
+                                    )
+                                }
+                            }
+                        }
+                        null -> Unit
+                    }
                 }
             }
 
