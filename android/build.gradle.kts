@@ -17,9 +17,9 @@ android {
         minSdk = 26
         targetSdk = 37
         // Pinned on this single-purpose branch: it ships exactly one install-over
-        // update above the vc172 rescue build, so the CI run number (which has
+        // update above the vc173 build (vc174), so the CI run number (which has
         // drifted well past 163 since) must not leak into the version code.
-        versionCode = 173
+        versionCode = 174
         versionName = libs.versions.appVersion.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
