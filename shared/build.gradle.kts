@@ -66,6 +66,14 @@ kotlin {
                 implementation(libs.junit)
             }
         }
+        // Android unit tests (testDebugUnitTest in CI) must run the same jvmCommonTest suite —
+        // without this they only ever executed as desktop tests.
+        named("androidUnitTest") {
+            dependsOn(jvmCommonTest)
+            dependencies {
+                implementation(libs.junit)
+            }
+        }
     }
 }
 
