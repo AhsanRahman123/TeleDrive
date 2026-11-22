@@ -103,9 +103,9 @@ class TransferWidgetRound6Test {
 
         override fun observeActiveCount(): Flow<Int> = flowOf(0)
 
-        override fun observeCompletedTotals(incoming: Boolean) = flowOf(TransferWorkTotals())
+        override fun observeCompletedTotals(incoming: Boolean) = flowOf(TransferWorkTotals(0, 0))
 
-        override fun observeRemainingWork(incoming: Boolean) = flowOf(TransferRemainingWork())
+        override fun observeRemainingWork(incoming: Boolean) = flowOf(TransferRemainingWork(0, 0, 0))
 
         override fun observeActiveForFile(fileId: String): Flow<TransferTask?> = flowOf(null)
 
