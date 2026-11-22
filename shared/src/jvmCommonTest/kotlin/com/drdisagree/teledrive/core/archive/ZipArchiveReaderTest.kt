@@ -172,6 +172,34 @@ class ZipArchiveReaderTest {
             }
         }
 
+    @Test(timeout = 60_000)
+    fun `valid deflated entry with compressed size over 512 KiB extracts exactly across chunk boundaries`() =
+        runBlocking {
+            // Regression: a VALID deflated entry whose compressed data spans several of
+            // the reader's 512 KiB chunks. Mid-stream, inflate() returns 0 with
+            // needsInput() == true at a chunk boundary; the loop must feed the next
+            // chunk and continue, not refuse the entry as Corrupt. Seeded-random data is
+            // incompressible, so deflate output stays ~100% of the ~2.5 MB input.
+            val data = ByteArray(2_500_000).also { kotlin.random.Random(1234).nextBytes(it) }
+            val bytes = zipBytes("song.bin" to data)
+
+            // A small per-read cap forces the byte source to hand the data over in many
+            // short pieces, so chunk assembly and inflater feeding cross many boundaries.
+            val source = RecordingSource(bytes, maxPerRead = 100 * 1024)
+            val reader = ZipArchiveReader(source)
+            val entry = reader.entries().single()
+            assertEquals(8, entry.method)
+            assertTrue(
+                "compressed size ${entry.compressedBytes} must exceed one 512 KiB chunk",
+                entry.compressedBytes > 512 * 1024
+            )
+
+            val out = ByteArrayOutputStream()
+            reader.extract(entry, out)
+
+            assertArrayEquals(data, out.toByteArray())
+        }
+
     @Test
     fun `encrypted entries list but extraction refuses`() = runBlocking {
         val bytes = zipBytes("secret.txt" to "hidden".toByteArray())
