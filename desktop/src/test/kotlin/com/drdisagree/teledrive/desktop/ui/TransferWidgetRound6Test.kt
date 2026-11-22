@@ -111,14 +111,19 @@ class TransferWidgetRound6Test {
 
         override fun observeActiveDownloads(): Flow<List<TransferTask>> = flowOf(emptyList())
 
-        override suspend fun enqueueUpload(fileId: String, priority: Int): AppResult<String> =
+        override suspend fun enqueueUpload(
+            fileId: String,
+            priority: Int,
+            batchId: String?
+        ): AppResult<String> =
             AppResult.Success(fileId)
 
         override suspend fun uploadQueueGeneration(): Long = 0L
 
         override suspend fun enqueueUploadForGeneration(
             fileId: String,
-            generation: Long
+            generation: Long,
+            batchId: String?
         ): AppResult<Boolean> = AppResult.Success(true)
 
         override suspend fun enqueuePendingUploads(): AppResult<Int> = AppResult.Success(0)
@@ -130,7 +135,8 @@ class TransferWidgetRound6Test {
 
         override suspend fun enqueueDownload(
             fileId: String,
-            priority: Int
+            priority: Int,
+            batchId: String?
         ): AppResult<String> = AppResult.Success(fileId)
 
         override suspend fun pause(id: String) {

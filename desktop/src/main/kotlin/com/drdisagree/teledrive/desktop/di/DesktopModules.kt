@@ -55,6 +55,7 @@ import com.drdisagree.teledrive.data.local.database.MIGRATION_16_17
 import com.drdisagree.teledrive.data.local.database.MIGRATION_17_18
 import com.drdisagree.teledrive.data.local.database.MIGRATION_18_19
 import com.drdisagree.teledrive.data.local.database.MIGRATION_19_20
+import com.drdisagree.teledrive.data.local.database.MIGRATION_20_21
 import com.drdisagree.teledrive.data.local.database.MIGRATION_1_2
 import com.drdisagree.teledrive.data.local.database.MIGRATION_2_3
 import com.drdisagree.teledrive.data.local.database.MIGRATION_3_4
@@ -191,7 +192,8 @@ val desktopModule = module {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
-                MIGRATION_19_20
+                MIGRATION_19_20,
+                MIGRATION_20_21
             )
             .setDriver(BundledSQLiteDriver())
             // Round 11: pin WAL explicitly. No journal mode was configured

@@ -64,14 +64,16 @@ class TransferRepositoryImpl(
 
     override suspend fun enqueueUploadForGeneration(
         fileId: String,
-        generation: Long
+        generation: Long,
+        batchId: String?
     ): AppResult<Boolean> = when (
         val result = enqueueInternal(
             fileId = fileId,
             type = TransferType.UPLOAD,
             priority = 0,
             sessionId = null,
-            expectedUploadGeneration = generation
+            expectedUploadGeneration = generation,
+            batchId = batchId
         )
     ) {
         is EnqueueOutcome.Enqueued -> AppResult.Success(true)
@@ -153,8 +155,11 @@ class TransferRepositoryImpl(
             listOf(TransferType.UPLOAD, TransferType.BACKUP)
         }
 
-    override suspend fun enqueueUpload(fileId: String, priority: Int): AppResult<String> =
-        enqueue(fileId, TransferType.UPLOAD, priority)
+    override suspend fun enqueueUpload(
+        fileId: String,
+        priority: Int,
+        batchId: String?
+    ): AppResult<String> = enqueue(fileId, TransferType.UPLOAD, priority, batchId = batchId)
 
     /**
      * Orphans whose bytes exist are queued again; ones with nothing on disk or in Telegram are
@@ -188,7 +193,11 @@ class TransferRepositoryImpl(
         )
     }
 
-    override suspend fun enqueueDownload(fileId: String, priority: Int): AppResult<String> {
+    override suspend fun enqueueDownload(
+        fileId: String,
+        priority: Int,
+        batchId: String?
+    ): AppResult<String> {
         val entity = fileDao.byId(fileId) ?: return AppResult.Failure(AppError.NotFound)
         if (entity.remoteFileId == null) {
             return AppResult.Failure(AppError.NoRemoteCopy)
@@ -209,7 +218,8 @@ class TransferRepositoryImpl(
                 entity.chatId,
                 TransferType.DOWNLOAD,
                 priority,
-                null
+                null,
+                batchId
             )
         }
     }
@@ -218,7 +228,9 @@ class TransferRepositoryImpl(
         fileId: String,
         sessionId: String,
         priority: Int = 0
-    ): AppResult<String> = enqueue(fileId, TransferType.BACKUP, priority, sessionId)
+    ): AppResult<String> =
+        // A backup session IS the fair-share group for its transfers.
+        enqueue(fileId, TransferType.BACKUP, priority, sessionId, batchId = sessionId)
 
     override suspend fun enqueueBackupBatch(
         fileIds: List<String>,
@@ -233,6 +245,12 @@ class TransferRepositoryImpl(
         sessionId: String?
     ): Int {
         if (fileIds.isEmpty()) return 0
+
+        // PC-40: one batch call is one fair-share group. A backup batch
+        // groups under its session id (the same group across scan
+        // chunks and repeat calls); any other batch mints one id here,
+        // before its first row lands.
+        val batchId = sessionId ?: UUID.randomUUID().toString()
 
         val limits = currentLimits()
         val prefs = settingsRepository.preferences.first()
@@ -279,6 +297,7 @@ class TransferRepositoryImpl(
                     state = TransferState.QUEUED,
                     priority = 0,
                     backupSessionId = sessionId,
+                    batchId = batchId,
                     createdAt = now,
                     updatedAt = now
                 )
@@ -296,14 +315,16 @@ class TransferRepositoryImpl(
         fileId: String,
         type: TransferType,
         priority: Int,
-        sessionId: String? = null
+        sessionId: String? = null,
+        batchId: String? = null
     ): AppResult<String> = when (
         val result = enqueueInternal(
             fileId = fileId,
             type = type,
             priority = priority,
             sessionId = sessionId,
-            expectedUploadGeneration = null
+            expectedUploadGeneration = null,
+            batchId = batchId
         )
     ) {
         is EnqueueOutcome.Enqueued -> AppResult.Success(result.id)
@@ -318,7 +339,8 @@ class TransferRepositoryImpl(
         type: TransferType,
         priority: Int,
         sessionId: String?,
-        expectedUploadGeneration: Long?
+        expectedUploadGeneration: Long?,
+        batchId: String?
     ): EnqueueOutcome {
         val entity = fileDao.byId(fileId)
             ?: return EnqueueOutcome.Failed(AppError.NotFound)
@@ -360,7 +382,8 @@ class TransferRepositoryImpl(
                     entity.chatId,
                     type,
                     priority,
-                    sessionId
+                    sessionId,
+                    batchId
                 )
             ) {
                 is AppResult.Success -> EnqueueOutcome.Enqueued(inserted.value)
@@ -376,7 +399,8 @@ class TransferRepositoryImpl(
         chatId: Long?,
         type: TransferType,
         priority: Int,
-        sessionId: String?
+        sessionId: String?,
+        batchId: String?
     ): AppResult<String> {
         val now = System.currentTimeMillis()
         val transfer = TransferEntity(
@@ -393,7 +417,11 @@ class TransferRepositoryImpl(
             priority = priority,
             backupSessionId = sessionId,
             createdAt = now,
-            updatedAt = now
+            updatedAt = now,
+            // PC-40: an operation that passes no group gets a fresh
+            // one-item group of its own — never the legacy group, which
+            // is reserved for rows written before the column existed.
+            batchId = batchId ?: UUID.randomUUID().toString()
         )
         transferDao.upsert(transfer)
         SafeLog.d(

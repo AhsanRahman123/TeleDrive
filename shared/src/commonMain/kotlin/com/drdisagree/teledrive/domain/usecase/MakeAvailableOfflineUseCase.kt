@@ -17,7 +17,8 @@ class MakeAvailableOfflineUseCase(
     suspend operator fun invoke(
         fileIds: List<String>,
         folderIds: List<String> = emptyList(),
-        available: Boolean
+        available: Boolean,
+        batchId: String? = null
     ): Int {
         if (fileIds.isNotEmpty()) fileRepository.setFilesAvailableOffline(fileIds, available)
         folderIds.forEach { fileRepository.setFolderAvailableOffline(it, available) }
@@ -27,11 +28,14 @@ class MakeAvailableOfflineUseCase(
         if (ids.isEmpty()) return 0
         val missing = fileRepository.filesByIds(ids)
             .filter { it.hasRemoteCopy && !it.hasLocalCopy }
-        missing.forEach { transferRepository.enqueueDownload(it.id) }
+        // PC-40: one operation = one fair-share group ([batchId]).
+        missing.forEach { transferRepository.enqueueDownload(it.id, batchId = batchId) }
         return missing.size
     }
 
-    suspend fun downloadMissing(): Int =
+    suspend fun downloadMissing(batchId: String? = null): Int =
         fileRepository.observeAvailableOfflineMissingIds().first()
-            .count { transferRepository.enqueueDownload(it) is AppResult.Success }
+            .count {
+                transferRepository.enqueueDownload(it, batchId = batchId) is AppResult.Success
+            }
 }

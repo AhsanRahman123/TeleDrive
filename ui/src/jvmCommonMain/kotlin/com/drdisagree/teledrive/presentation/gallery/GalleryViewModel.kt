@@ -916,9 +916,11 @@ class GalleryViewModel(
         val (fileIds, folderIds) = takeSelection()
         viewModelScope.launch {
             val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
+            // PC-40: one selection = one fair-share group.
+            val batchId = java.util.UUID.randomUUID().toString()
             var queued = 0
             ids.forEach { id ->
-                when (val result = transferRepository.enqueueDownload(id)) {
+                when (val result = transferRepository.enqueueDownload(id, batchId = batchId)) {
                     is AppResult.Success -> queued++
                     is AppResult.Failure -> report(result.error)
                 }
@@ -931,9 +933,11 @@ class GalleryViewModel(
         val (fileIds, folderIds) = takeSelection()
         viewModelScope.launch {
             val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
+            // PC-40: one selection = one fair-share group.
+            val batchId = java.util.UUID.randomUUID().toString()
             var queued = 0
             ids.forEach { id ->
-                when (val result = transferRepository.enqueueUpload(id)) {
+                when (val result = transferRepository.enqueueUpload(id, batchId = batchId)) {
                     is AppResult.Success -> queued++
                     is AppResult.Failure -> report(result.error)
                 }
@@ -975,7 +979,10 @@ class GalleryViewModel(
     fun setSelectedAvailableOffline(available: Boolean) {
         val (ids, folders) = takeSelection()
         viewModelScope.launch {
-            val queued = makeAvailableOffline(ids, folders, available)
+            val queued = makeAvailableOffline(
+                ids, folders, available,
+                batchId = java.util.UUID.randomUUID().toString()
+            )
             if (queued > 0) _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
         }
     }

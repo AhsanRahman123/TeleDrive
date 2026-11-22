@@ -169,7 +169,13 @@ internal class StormHarness(prefs: UserPreferences) : AutoCloseable {
     }
 
     /** A local file + its queued UPLOAD transfer, as a folder import creates them. */
-    suspend fun seedUpload(id: String, name: String, bytes: ByteArray, createdAt: Long) {
+    suspend fun seedUpload(
+        id: String,
+        name: String,
+        bytes: ByteArray,
+        createdAt: Long,
+        batchId: String? = null
+    ) {
         val source = File(sourceDir, name)
         source.writeBytes(bytes)
         files.upsert(
@@ -207,13 +213,21 @@ internal class StormHarness(prefs: UserPreferences) : AutoCloseable {
                 state = TransferState.QUEUED,
                 priority = 0,
                 createdAt = createdAt,
-                updatedAt = createdAt
+                updatedAt = createdAt,
+                batchId = batchId
             )
         )
     }
 
     /** A backed-up file + its queued DOWNLOAD transfer. */
-    suspend fun seedDownload(id: String, name: String, bytes: ByteArray, createdAt: Long, index: Int) {
+    suspend fun seedDownload(
+        id: String,
+        name: String,
+        bytes: ByteArray,
+        createdAt: Long,
+        index: Int,
+        batchId: String? = null
+    ) {
         val remoteFileId = "rf-$id"
         telegram.downloadContents[remoteFileId] = bytes
         files.upsert(
@@ -251,7 +265,8 @@ internal class StormHarness(prefs: UserPreferences) : AutoCloseable {
                 state = TransferState.QUEUED,
                 priority = 0,
                 createdAt = createdAt,
-                updatedAt = createdAt
+                updatedAt = createdAt,
+                batchId = batchId
             )
         )
     }

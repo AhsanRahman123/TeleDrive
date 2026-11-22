@@ -690,9 +690,13 @@ class FilesViewModel(
         val ids = selection.value.toList()
         clearSelection()
         viewModelScope.launch {
+            // PC-40: one selection = one fair-share group.
+            val batchId = java.util.UUID.randomUUID().toString()
             var failures = 0
             ids.forEach { id ->
-                if (transferRepository.enqueueUpload(id) is AppResult.Failure) failures++
+                if (transferRepository.enqueueUpload(id, batchId = batchId)
+                    is AppResult.Failure
+                ) failures++
             }
             _messages.tryEmit(
                 if (failures == 0) {
@@ -716,9 +720,13 @@ class FilesViewModel(
                 _messages.tryEmit(UiText.Resource(Res.string.message_nothing_to_download))
                 return@launch
             }
+            // PC-40: one selection = one fair-share group.
+            val batchId = java.util.UUID.randomUUID().toString()
             var failures = 0
             ids.forEach { id ->
-                if (transferRepository.enqueueDownload(id) is AppResult.Failure) failures++
+                if (transferRepository.enqueueDownload(id, batchId = batchId)
+                    is AppResult.Failure
+                ) failures++
             }
             _messages.tryEmit(
                 if (failures == 0) {
@@ -735,7 +743,10 @@ class FilesViewModel(
         val folderIds = folderSelection.value.toList()
         clearSelection()
         viewModelScope.launch {
-            val queued = makeAvailableOffline(ids, folderIds, available)
+            val queued = makeAvailableOffline(
+                ids, folderIds, available,
+                batchId = java.util.UUID.randomUUID().toString()
+            )
             if (queued > 0) {
                 _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
             }
@@ -1218,6 +1229,10 @@ class FilesViewModel(
             // Capture before expanding or showing the folder-conflict dialog. Cancel all
             // invalidates this token even if the import has not reached its first upload yet.
             val uploadGeneration = transferRepository.uploadQueueGeneration()
+            // PC-40: one import operation = one fair-share group, so a
+            // second import added mid-run shares the lane with this one
+            // instead of queueing behind its whole backlog.
+            val importBatchId = java.util.UUID.randomUUID().toString()
             val sources = uris.flatMap { uri -> fileImporter.expand(uri) }
             // The picks' complete directory trees (PC-22): directories
             // that contain no files appear in no source's relativeFolder,
@@ -1229,7 +1244,7 @@ class FilesViewModel(
                 .distinct()
                 .filter { name -> existing.any { it.equals(name, ignoreCase = true) } }
             if (clashes.isEmpty()) {
-                runImport(sources, folders, target, uploadGeneration)
+                runImport(sources, folders, target, uploadGeneration, importBatchId)
                 return@launch
             }
             val taken = existing.mapTo(mutableSetOf()) { it.lowercase() }
@@ -1240,7 +1255,9 @@ class FilesViewModel(
                     .also { taken += it.lowercase() }
             }
             _folderConflict.value =
-                FolderConflict(clashes, renamed, sources, folders, target, uploadGeneration)
+                FolderConflict(
+                    clashes, renamed, sources, folders, target, uploadGeneration, importBatchId
+                )
           } finally {
             activeImportKeys.remove(importKey)
           }
@@ -1250,7 +1267,10 @@ class FilesViewModel(
     fun mergeIntoExistingFolders() {
         val conflict = _folderConflict.getAndUpdate { null } ?: return
         importScope.launch {
-            runImport(conflict.sources, conflict.folders, conflict.target, conflict.uploadGeneration)
+            runImport(
+                conflict.sources, conflict.folders, conflict.target,
+                conflict.uploadGeneration, conflict.importBatchId
+            )
         }
     }
 
@@ -1268,7 +1288,12 @@ class FilesViewModel(
             val replacement = conflict.renamed[top] ?: return@map folder
             replacement + folder.removePrefix(top)
         }
-        importScope.launch { runImport(sources, folders, conflict.target, conflict.uploadGeneration) }
+        importScope.launch {
+            runImport(
+                sources, folders, conflict.target,
+                conflict.uploadGeneration, conflict.importBatchId
+            )
+        }
     }
 
     fun cancelFolderImport() {
@@ -1279,7 +1304,8 @@ class FilesViewModel(
         sources: List<ImportSource>,
         folders: List<String>,
         target: String?,
-        uploadGeneration: Long
+        uploadGeneration: Long,
+        importBatchId: String
     ) {
         _messages.tryEmit(UiText.Resource(Res.string.files_import_preparing))
         // Create the picks' complete directory structure first (PC-22):
@@ -1334,7 +1360,8 @@ class FilesViewModel(
                 when (
                     val enqueue = transferRepository.enqueueUploadForGeneration(
                         alreadyImported.id,
-                        uploadGeneration
+                        uploadGeneration,
+                        batchId = importBatchId
                     )
                 ) {
                     is AppResult.Success -> {
@@ -1376,7 +1403,8 @@ class FilesViewModel(
                             when (
                                 val result = transferRepository.enqueueUploadForGeneration(
                                     drive.id,
-                                    uploadGeneration
+                                    uploadGeneration,
+                                    batchId = importBatchId
                                 )
                             ) {
                                 is AppResult.Success -> {

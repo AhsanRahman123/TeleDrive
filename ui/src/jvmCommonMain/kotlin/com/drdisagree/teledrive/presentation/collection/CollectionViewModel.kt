@@ -123,7 +123,9 @@ class CollectionViewModel(
 
     fun downloadMissing() {
         viewModelScope.launch {
-            val queued = makeAvailableOffline.downloadMissing()
+            val queued = makeAvailableOffline.downloadMissing(
+                batchId = java.util.UUID.randomUUID().toString()
+            )
             if (queued > 0) {
                 _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
             }
@@ -299,9 +301,13 @@ class CollectionViewModel(
         clearSelection()
         viewModelScope.launch {
             val ids = (fileIds + folderIds.flatMap { fileRepository.fileIdsInTree(it) }).distinct()
+            // PC-40: one selection = one fair-share group.
+            val batchId = java.util.UUID.randomUUID().toString()
             var queued = 0
             ids.forEach { id ->
-                if (transferRepository.enqueueDownload(id) is AppResult.Success) queued++
+                if (transferRepository.enqueueDownload(id, batchId = batchId)
+                    is AppResult.Success
+                ) queued++
             }
             if (queued > 0) {
                 _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))

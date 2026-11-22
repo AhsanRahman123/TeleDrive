@@ -31,5 +31,14 @@ data class TransferEntity(
     val stage: TransferStage? = null,
     val createdAt: Long,
     val updatedAt: Long,
-    val completedAt: Long? = null
+    val completedAt: Long? = null,
+    /**
+     * PC-40 (1.6.18): the fair-share group this transfer belongs to —
+     * one enqueue operation (one folder import, one add selection, one
+     * backup session). The drainer shares each lane's slots across
+     * groups round-robin instead of draining one operation's backlog
+     * before starting the next. Null = the legacy group: rows written
+     * before this column existed (migration 20→21) form one group.
+     */
+    val batchId: String? = null
 )

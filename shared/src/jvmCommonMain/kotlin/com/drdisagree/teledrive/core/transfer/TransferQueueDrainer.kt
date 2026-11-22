@@ -7,6 +7,7 @@ import com.drdisagree.teledrive.data.local.dao.FileDao
 import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
 import com.drdisagree.teledrive.domain.model.BackupState
+import com.drdisagree.teledrive.domain.model.TransferGroupHead
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
 import com.drdisagree.teledrive.domain.model.UserPreferences
@@ -37,6 +38,20 @@ class TransferQueueDrainer(
 
     private val claimLock = Mutex()
     private val executing = mutableMapOf<String, TransferType>()
+
+    /**
+     * PC-40 (1.6.18): fair-share bookkeeping. Each successful claim
+     * records a monotonically increasing sequence number against the
+     * claimed transfer's group (its batchId; null is the legacy group).
+     * The next claim prefers the group with the fewest RUNNING items in
+     * the lane, breaking ties toward the least recently claimed group —
+     * so two enqueue operations with queued work rotate through the
+     * lane's slots and progress together instead of one operation's
+     * backlog draining before the next one starts. Guarded by
+     * [claimLock]: written in [tryClaim], read in [pickFairLocked].
+     */
+    private val lastClaimByGroup = mutableMapOf<String?, Long>()
+    private var claimSequence = 0L
 
     /**
      * PC-39 (1.6.17): uploads and downloads drain through independent lanes,
@@ -200,9 +215,43 @@ class TransferQueueDrainer(
         lane: Lane,
         includeBackups: Boolean,
         skip: Set<String> = emptySet()
+    ): TransferEntity? = claimLock.withLock {
+        pickFairLocked(laneTypes(lane, includeBackups), skip)
+    }
+
+    /**
+     * PC-40 fair-share pick (call with [claimLock] held): among the
+     * groups that have QUEUED work in this lane, choose the group with
+     * the fewest RUNNING items in the lane; ties go to the least
+     * recently claimed group (a group never claimed in this drain
+     * counts as least recent, so newly added work joins the rotation
+     * immediately), then to the group whose oldest queued item is
+     * oldest. Inside the chosen group the standing queue order applies
+     * (priority, then FIFO), so a single group behaves exactly as the
+     * pre-PC-40 queue did, and a group that runs dry simply leaves the
+     * rotation — the remaining groups take every slot.
+     */
+    private suspend fun pickFairLocked(
+        types: List<TransferType>,
+        skip: Set<String>
     ): TransferEntity? {
-        val types = laneTypes(lane, includeBackups)
-        return transferDao.nextQueuedOf(types, skip.size + 1).firstOrNull { it.id !in skip }
+        val heads = transferDao.queuedGroupHeads(types)
+        if (heads.isEmpty()) return null
+        val runningByGroup = transferDao.runningGroupCounts(types)
+            .associate { it.batchId to it.running }
+        val ordered = heads.sortedWith(
+            compareBy<TransferGroupHead>(
+                { runningByGroup[it.batchId] ?: 0 },
+                { lastClaimByGroup[it.batchId] ?: -1L },
+                { it.oldestCreatedAt }
+            )
+        )
+        for (group in ordered) {
+            val candidate = transferDao.nextQueuedInGroup(types, group.batchId, skip.size + 1)
+                .firstOrNull { it.id !in skip }
+            if (candidate != null) return candidate
+        }
+        return null
     }
 
     /**
@@ -217,15 +266,15 @@ class TransferQueueDrainer(
         includeBackups: Boolean,
         limit: Int
     ): ClaimResult = claimLock.withLock {
-        val next = nextClaimable(
-            lane = lane,
-            includeBackups = includeBackups,
+        val next = pickFairLocked(
+            types = laneTypes(lane, includeBackups),
             skip = executing.keys
         ) ?: return@withLock ClaimResult.QueueEmpty
         val activeInLane = executing.values.count { laneOf(it) == lane }
         if (activeInLane >= limit) return@withLock ClaimResult.LimitReached
         transferDao.setState(next.id, TransferState.RUNNING, System.currentTimeMillis())
         executing[next.id] = next.type
+        lastClaimByGroup[next.batchId] = ++claimSequence
         ClaimResult.Claimed(next.id)
     }
 

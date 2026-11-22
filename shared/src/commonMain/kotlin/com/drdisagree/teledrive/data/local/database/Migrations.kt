@@ -4,6 +4,16 @@ import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(connection: SQLiteConnection) {
+        // PC-40: fair-share group key for transfers. Nullable with no
+        // default fill: every existing row keeps its place and joins
+        // the single legacy group (batchId IS NULL), exactly the queue
+        // behaviour those rows had under version 20.
+        connection.execSQL("ALTER TABLE `transfers` ADD COLUMN `batchId` TEXT")
+    }
+}
+
 val MIGRATION_19_20 = object : Migration(19, 20) {
     override fun migrate(connection: SQLiteConnection) {
         // PC-37: durable remote-missing mark for rows whose Telegram

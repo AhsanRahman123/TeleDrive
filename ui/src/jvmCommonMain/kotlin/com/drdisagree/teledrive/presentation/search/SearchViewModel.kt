@@ -196,9 +196,13 @@ class SearchViewModel(
         val ids = selection.value.toList()
         clearSelection()
         viewModelScope.launch {
+            // PC-40: one selection = one fair-share group.
+            val batchId = java.util.UUID.randomUUID().toString()
             var queued = 0
             ids.forEach { id ->
-                if (transferRepository.enqueueDownload(id) is AppResult.Success) queued++
+                if (transferRepository.enqueueDownload(id, batchId = batchId)
+                    is AppResult.Success
+                ) queued++
             }
             if (queued > 0) {
                 _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
@@ -216,7 +220,11 @@ class SearchViewModel(
         val ids = selection.value.toList()
         clearSelection()
         viewModelScope.launch {
-            val queued = makeAvailableOffline(ids, available = available)
+            val queued = makeAvailableOffline(
+                ids,
+                available = available,
+                batchId = java.util.UUID.randomUUID().toString()
+            )
             if (queued > 0) {
                 _messages.tryEmit(UiText.Resource(Res.string.files_queued_for_download, queued))
             }

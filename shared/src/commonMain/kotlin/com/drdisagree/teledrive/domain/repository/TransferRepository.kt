@@ -26,7 +26,17 @@ interface TransferRepository {
     /** PC-39 ETA feed: queued + running work left in one direction. */
     fun observeRemainingWork(incoming: Boolean): Flow<TransferRemainingWork>
 
-    suspend fun enqueueUpload(fileId: String, priority: Int = 0): AppResult<String>
+    /**
+     * [batchId] is the PC-40 fair-share group: all transfers enqueued by
+     * one user operation share one id, and the drainer rotates the
+     * lane's slots across groups. Null lets the repository mint a fresh
+     * one-item group for this call.
+     */
+    suspend fun enqueueUpload(
+        fileId: String,
+        priority: Int = 0,
+        batchId: String? = null
+    ): AppResult<String>
 
     /**
      * A batch captures this generation before it starts importing. Cancel all advances the
@@ -35,7 +45,11 @@ interface TransferRepository {
     suspend fun uploadQueueGeneration(): Long
 
     /** Returns false when [generation] was invalidated by Cancel all. */
-    suspend fun enqueueUploadForGeneration(fileId: String, generation: Long): AppResult<Boolean>
+    suspend fun enqueueUploadForGeneration(
+        fileId: String,
+        generation: Long,
+        batchId: String? = null
+    ): AppResult<Boolean>
 
     suspend fun enqueuePendingUploads(): AppResult<Int>
 
@@ -45,7 +59,11 @@ interface TransferRepository {
      */
     suspend fun enqueueBackupBatch(fileIds: List<String>, sessionId: String): AppResult<Int>
 
-    suspend fun enqueueDownload(fileId: String, priority: Int = 0): AppResult<String>
+    suspend fun enqueueDownload(
+        fileId: String,
+        priority: Int = 0,
+        batchId: String? = null
+    ): AppResult<String>
 
     suspend fun pause(id: String)
 

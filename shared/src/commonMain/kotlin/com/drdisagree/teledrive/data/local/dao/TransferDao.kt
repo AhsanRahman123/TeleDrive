@@ -6,6 +6,8 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
+import com.drdisagree.teledrive.domain.model.TransferGroupHead
+import com.drdisagree.teledrive.domain.model.TransferGroupRunning
 import com.drdisagree.teledrive.domain.model.TransferRemainingWork
 import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
@@ -97,6 +99,42 @@ interface TransferDao {
            ORDER BY priority DESC, createdAt ASC LIMIT :limit"""
     )
     suspend fun nextQueuedOf(types: List<TransferType>, limit: Int): List<TransferEntity>
+
+    /**
+     * PC-40 (1.6.18) fair-share claiming: one row per group that has
+     * QUEUED work in the lane — the group key and its oldest queued
+     * createdAt. SQLite's GROUP BY folds every NULL batchId into the
+     * single legacy group.
+     */
+    @Query(
+        """SELECT batchId AS batchId, MIN(createdAt) AS oldestCreatedAt FROM transfers
+           WHERE state = 'QUEUED' AND type IN (:types) GROUP BY batchId"""
+    )
+    suspend fun queuedGroupHeads(types: List<TransferType>): List<TransferGroupHead>
+
+    /** PC-40: RUNNING counts per group in the lane — the fairness input. */
+    @Query(
+        """SELECT batchId AS batchId, COUNT(*) AS running FROM transfers
+           WHERE state = 'RUNNING' AND type IN (:types) GROUP BY batchId"""
+    )
+    suspend fun runningGroupCounts(types: List<TransferType>): List<TransferGroupRunning>
+
+    /**
+     * PC-40: the next claimable transfer INSIDE one group, in the
+     * queue's standing order (priority first, then FIFO). A null
+     * [batchId] matches exactly the legacy group's NULL rows.
+     */
+    @Query(
+        """SELECT * FROM transfers
+           WHERE state = 'QUEUED' AND type IN (:types)
+             AND (batchId = :batchId OR (batchId IS NULL AND :batchId IS NULL))
+           ORDER BY priority DESC, createdAt ASC LIMIT :limit"""
+    )
+    suspend fun nextQueuedInGroup(
+        types: List<TransferType>,
+        batchId: String?,
+        limit: Int
+    ): List<TransferEntity>
 
     /** Active incoming transfers in the same order used by TeleDrive's worker queue. */
     @Query(
