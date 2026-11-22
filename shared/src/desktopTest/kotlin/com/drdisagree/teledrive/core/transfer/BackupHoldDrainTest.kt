@@ -99,7 +99,7 @@ class BackupHoldDrainTest {
     fun `a parked slot does not wait forever on held backups`() = runBlocking {
         queue("backup", TransferType.BACKUP)
         val drainer = drainer(
-            UserPreferences(backupChargingOnly = true, transferConcurrency = 1),
+            UserPreferences(backupChargingOnly = true, uploadConcurrency = 1),
             charging = false
         )
 

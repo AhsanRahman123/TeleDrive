@@ -10,6 +10,7 @@ import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.core.telegram.TelegramLimits
 import com.drdisagree.teledrive.core.transfer.BackupSessionTracker
 import com.drdisagree.teledrive.core.transfer.FileParts
+import com.drdisagree.teledrive.core.transfer.TransferConcurrency
 import com.drdisagree.teledrive.core.transfer.TransferScheduler
 import com.drdisagree.teledrive.core.transfer.UploadBatchGeneration
 import com.drdisagree.teledrive.data.local.dao.FileDao
@@ -19,8 +20,10 @@ import com.drdisagree.teledrive.data.mapper.toDomain
 import com.drdisagree.teledrive.domain.model.BackupState
 import com.drdisagree.teledrive.domain.model.TransferSection
 import com.drdisagree.teledrive.domain.model.TransferState
+import com.drdisagree.teledrive.domain.model.TransferRemainingWork
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.domain.model.TransferWorkTotals
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.domain.usecase.ValidateUploadUseCase
@@ -136,6 +139,19 @@ class TransferRepositoryImpl(
         transferDao.observeActiveDownloads()
             .distinctUntilChanged()
             .map { list -> list.map { it.toDomain() } }
+
+    override fun observeCompletedTotals(incoming: Boolean): Flow<TransferWorkTotals> =
+        transferDao.observeCompletedTotals(directionTypes(incoming)).distinctUntilChanged()
+
+    override fun observeRemainingWork(incoming: Boolean): Flow<TransferRemainingWork> =
+        transferDao.observeRemainingWork(directionTypes(incoming)).distinctUntilChanged()
+
+    private fun directionTypes(incoming: Boolean): List<TransferType> =
+        if (incoming) {
+            listOf(TransferType.DOWNLOAD, TransferType.RESTORE)
+        } else {
+            listOf(TransferType.UPLOAD, TransferType.BACKUP)
+        }
 
     override suspend fun enqueueUpload(fileId: String, priority: Int): AppResult<String> =
         enqueue(fileId, TransferType.UPLOAD, priority)
@@ -532,8 +548,12 @@ class TransferRepositoryImpl(
      */
     private suspend fun freeWorkerSlotForPromotedDownload(promoted: TransferEntity) {
         if (!promoted.type.isIncoming || promoted.state != TransferState.QUEUED) return
-        val maxWorkers = settingsRepository.preferences.first().transferConcurrency.coerceIn(1, 6)
-        val runningCount = transferDao.runningTransferCount()
+        // PC-39: promotion is scoped to the download lane — running uploads
+        // no longer count against the downloads a promotion may start.
+        val maxWorkers = TransferConcurrency.downloadLimit(
+            settingsRepository.preferences.first()
+        )
+        val runningCount = transferDao.runningIncomingTransfers().size
         val slotsToFree = (runningCount - maxWorkers + 1).coerceAtLeast(0)
         if (slotsToFree == 0) return
 

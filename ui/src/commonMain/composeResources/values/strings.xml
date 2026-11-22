@@ -1142,4 +1142,6 @@
     <string name="sync_all_done">All synced</string>
     <string name="sync_last_run_time">Last run %1$s</string>
     <string name="home_sync_waiting_telegram">Telegram asked us to slow down — waiting %1$d s, then continuing</string>
+    <string name="settings_simultaneous_uploads">Simultaneous uploads</string>
+    <string name="settings_simultaneous_downloads">Simultaneous downloads</string>
 </resources>

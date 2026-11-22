@@ -60,6 +60,17 @@ data class UserPreferences(
     val failureNotifications: Boolean = true,
 
     val transferConcurrency: Int = 2,
+
+    /**
+     * PC-39 (1.6.17): per-direction simultaneous-transfer limits, each
+     * 1..6, replacing the single shared [transferConcurrency] pool (which
+     * capped uploads + downloads COMBINED). Defaults are the user's
+     * proven-safe 2/2; he raises them himself, live, from Settings.
+     * [transferConcurrency] is kept and still persisted for compatibility;
+     * on first read it seeds both values when the new keys were never set.
+     */
+    val uploadConcurrency: Int = 2,
+    val downloadConcurrency: Int = 2,
     val transferRetryCount: Int = 3,
     val allowMeteredTransfers: Boolean = true,
     val debugLogging: Boolean = false,

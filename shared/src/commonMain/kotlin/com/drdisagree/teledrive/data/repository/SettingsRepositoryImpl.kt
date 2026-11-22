@@ -174,6 +174,15 @@ class SettingsRepositoryImpl(
                 ?: defaults.failureNotifications,
             transferConcurrency = this[PreferenceKeys.TRANSFER_CONCURRENCY]
                 ?: defaults.transferConcurrency,
+            // PC-39: the per-direction limits seed from the legacy shared
+            // value when their own keys were never written, so an existing
+            // install's chosen number carries over to both directions.
+            uploadConcurrency = this[PreferenceKeys.UPLOAD_CONCURRENCY]
+                ?: this[PreferenceKeys.TRANSFER_CONCURRENCY]
+                ?: defaults.uploadConcurrency,
+            downloadConcurrency = this[PreferenceKeys.DOWNLOAD_CONCURRENCY]
+                ?: this[PreferenceKeys.TRANSFER_CONCURRENCY]
+                ?: defaults.downloadConcurrency,
             transferRetryCount = this[PreferenceKeys.TRANSFER_RETRY_COUNT]
                 ?: defaults.transferRetryCount,
             allowMeteredTransfers = this[PreferenceKeys.ALLOW_METERED_TRANSFERS]
@@ -242,6 +251,8 @@ class SettingsRepositoryImpl(
         this[PreferenceKeys.BACKUP_NOTIFICATIONS] = prefs.backupNotifications
         this[PreferenceKeys.FAILURE_NOTIFICATIONS] = prefs.failureNotifications
         this[PreferenceKeys.TRANSFER_CONCURRENCY] = prefs.transferConcurrency
+        this[PreferenceKeys.UPLOAD_CONCURRENCY] = prefs.uploadConcurrency
+        this[PreferenceKeys.DOWNLOAD_CONCURRENCY] = prefs.downloadConcurrency
         this[PreferenceKeys.TRANSFER_RETRY_COUNT] = prefs.transferRetryCount
         this[PreferenceKeys.ALLOW_METERED_TRANSFERS] = prefs.allowMeteredTransfers
         this[PreferenceKeys.DEBUG_LOGGING] = prefs.debugLogging

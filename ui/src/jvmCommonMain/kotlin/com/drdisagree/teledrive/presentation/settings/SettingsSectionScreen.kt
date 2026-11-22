@@ -133,7 +133,8 @@ import com.drdisagree.teledrive.resources.settings_log_telegram
 import com.drdisagree.teledrive.resources.settings_no_folders_selected
 import com.drdisagree.teledrive.resources.settings_no_recovery_passphrase
 import com.drdisagree.teledrive.resources.settings_only_charging
-import com.drdisagree.teledrive.resources.settings_parallel_transfers
+import com.drdisagree.teledrive.resources.settings_simultaneous_downloads
+import com.drdisagree.teledrive.resources.settings_simultaneous_uploads
 import com.drdisagree.teledrive.resources.settings_play_videos_load_instead
 import com.drdisagree.teledrive.resources.settings_protects_cached_previews_device
 import com.drdisagree.teledrive.resources.settings_proxy
@@ -1446,11 +1447,21 @@ private fun AdvancedSection(
         }
         add {
             SettingsSliderRow(
-                title = stringResource(Res.string.settings_parallel_transfers),
-                value = prefs.transferConcurrency,
+                title = stringResource(Res.string.settings_simultaneous_uploads),
+                value = prefs.uploadConcurrency,
                 range = 1..6,
                 onChange = { value ->
-                    viewModel.update { it.copy(transferConcurrency = value) }
+                    viewModel.update { it.copy(uploadConcurrency = value) }
+                }
+            )
+        }
+        add {
+            SettingsSliderRow(
+                title = stringResource(Res.string.settings_simultaneous_downloads),
+                value = prefs.downloadConcurrency,
+                range = 1..6,
+                onChange = { value ->
+                    viewModel.update { it.copy(downloadConcurrency = value) }
                 }
             )
         }

@@ -6,9 +6,11 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
+import com.drdisagree.teledrive.domain.model.TransferRemainingWork
 import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.domain.model.TransferWorkTotals
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -127,6 +129,27 @@ interface TransferDao {
 
     @Query("SELECT COUNT(*) FROM transfers WHERE state IN ('QUEUED', 'RUNNING')")
     fun observeActiveCount(): Flow<Int>
+
+    /**
+     * PC-39 ETA feed: everything ever completed in one direction. The ETA
+     * estimator differences these totals between timed snapshots, so a
+     * burst of small completions between two UI frames is still measured
+     * (the 200-row section lists would silently drop it).
+     */
+    @Query(
+        """SELECT COUNT(*) AS files, COALESCE(SUM(sizeBytes), 0) AS bytes
+           FROM transfers WHERE state = 'COMPLETED' AND type IN (:types)"""
+    )
+    fun observeCompletedTotals(types: List<TransferType>): Flow<TransferWorkTotals>
+
+    /** PC-39 ETA feed: queued + running work left in one direction. */
+    @Query(
+        """SELECT COUNT(*) AS files,
+                  COALESCE(SUM(sizeBytes - transferredBytes), 0) AS bytes,
+                  COALESCE(SUM(CASE WHEN state = 'RUNNING' THEN 1 ELSE 0 END), 0) AS running
+           FROM transfers WHERE state IN ('QUEUED', 'RUNNING') AND type IN (:types)"""
+    )
+    fun observeRemainingWork(types: List<TransferType>): Flow<TransferRemainingWork>
 
     @Query(
         """SELECT * FROM transfers

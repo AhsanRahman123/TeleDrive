@@ -151,14 +151,16 @@ fun TransfersScreen(
     viewModel: TransfersViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val transferConcurrency by viewModel.transferConcurrency.collectAsStateWithLifecycle()
+    val uploadConcurrency by viewModel.uploadConcurrency.collectAsStateWithLifecycle()
+    val downloadConcurrency by viewModel.downloadConcurrency.collectAsStateWithLifecycle()
     val fileRevealer = LocalFileRevealer.current
     val fileOpener = LocalFileOpener.current
     val telegramClient = koinInject<TelegramClient>()
     val speedLimitDirection by telegramClient.speedLimitNotifications
         .map { isUpload -> if (isUpload) 1 else 0 }
         .collectAsStateWithLifecycle(initialValue = -1)
-    var concurrencyDraft by remember { mutableIntStateOf(transferConcurrency) }
+    var uploadDraft by remember { mutableIntStateOf(uploadConcurrency) }
+    var downloadDraft by remember { mutableIntStateOf(downloadConcurrency) }
     var confirmClearFinished by remember { mutableStateOf(false) }
     var confirmCancelAll by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
@@ -191,8 +193,9 @@ fun TransfersScreen(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(transferConcurrency) {
-        concurrencyDraft = transferConcurrency
+    androidx.compose.runtime.LaunchedEffect(uploadConcurrency, downloadConcurrency) {
+        uploadDraft = uploadConcurrency
+        downloadDraft = downloadConcurrency
     }
 
     if (showTransferSettings) {
@@ -201,15 +204,22 @@ fun TransfersScreen(
             title = { Text("Transfer concurrency") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Maximum simultaneous Telegram transfer jobs: $concurrencyDraft of 6")
+                    Text("Simultaneous uploads: $uploadDraft of 6")
                     Slider(
-                        value = concurrencyDraft.toFloat(),
-                        onValueChange = { concurrencyDraft = it.toInt().coerceIn(1, 6) },
+                        value = uploadDraft.toFloat(),
+                        onValueChange = { uploadDraft = it.toInt().coerceIn(1, 6) },
+                        valueRange = 1f..6f,
+                        steps = 4
+                    )
+                    Text("Simultaneous downloads: $downloadDraft of 6")
+                    Slider(
+                        value = downloadDraft.toFloat(),
+                        onValueChange = { downloadDraft = it.toInt().coerceIn(1, 6) },
                         valueRange = 1f..6f,
                         steps = 4
                     )
                     Text(
-                        "Applies to uploads, backups and downloads. Telegram still manages its own network limits; higher values can use more bandwidth and disk activity.",
+                        "Uploads and downloads run at the same time, each up to its own limit, and changes apply live — running transfers are never restarted. Telegram still manages its own network limits; if it asks the app to slow down, transfers pause and resume instead of failing.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -217,13 +227,15 @@ fun TransfersScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.setTransferConcurrency(concurrencyDraft)
+                    viewModel.setUploadConcurrency(uploadDraft)
+                    viewModel.setDownloadConcurrency(downloadDraft)
                     showTransferSettings = false
                 }) { Text("Apply") }
             },
             dismissButton = {
                 TextButton(onClick = {
-                    concurrencyDraft = transferConcurrency
+                    uploadDraft = uploadConcurrency
+                    downloadDraft = downloadConcurrency
                     showTransferSettings = false
                 }) { Text("Cancel") }
             }
@@ -282,7 +294,8 @@ fun TransfersScreen(
                 },
                 actions = {
                     TooltipIconButton(tooltip = "Transfer settings", onClick = {
-                        concurrencyDraft = transferConcurrency
+                        uploadDraft = uploadConcurrency
+                        downloadDraft = downloadConcurrency
                         showTransferSettings = true
                     }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Transfer settings")
@@ -664,7 +677,7 @@ fun TransfersScreen(
                             )
                             if (visibleActive.isNotEmpty()) {
                                 Text(
-                                    "${runningCount} downloading · ${waitingCount} waiting · ${queuedCount} queued · max ${transferConcurrency}",
+                                    "${runningCount} downloading · ${waitingCount} waiting · ${queuedCount} queued · max ↑${uploadConcurrency} ↓${downloadConcurrency}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

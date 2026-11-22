@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.presentation.transfers
 
+import com.drdisagree.teledrive.core.transfer.EtaEstimate
+import com.drdisagree.teledrive.core.transfer.TransferEtaEstimator
+import com.drdisagree.teledrive.core.transfer.overallEta
 import com.drdisagree.teledrive.domain.model.TransferSection
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
@@ -7,10 +10,12 @@ import com.drdisagree.teledrive.domain.repository.TransferRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -41,13 +46,23 @@ class TransfersStore(
         CoroutineScope(SupervisorJob() + Dispatchers.Default)
 ) {
 
-    val transferConcurrency: StateFlow<Int> = settingsRepository.preferences
-        .map { it.transferConcurrency.coerceIn(1, 6) }
+    val uploadConcurrency: StateFlow<Int> = settingsRepository.preferences
+        .map { it.uploadConcurrency.coerceIn(1, 6) }
         .distinctUntilChanged()
         .stateIn(scope, SharingStarted.WhileSubscribed(5_000), 2)
 
-    fun setTransferConcurrency(value: Int) = launch {
-        settingsRepository.update { it.copy(transferConcurrency = value.coerceIn(1, 6)) }
+    val downloadConcurrency: StateFlow<Int> = settingsRepository.preferences
+        .map { it.downloadConcurrency.coerceIn(1, 6) }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), 2)
+
+    fun setUploadConcurrency(value: Int) = launch {
+        settingsRepository.update { it.copy(uploadConcurrency = value.coerceIn(1, 6)) }
+        transferRepository.wakeWorker()
+    }
+
+    fun setDownloadConcurrency(value: Int) = launch {
+        settingsRepository.update { it.copy(downloadConcurrency = value.coerceIn(1, 6)) }
         transferRepository.wakeWorker()
     }
 
@@ -89,6 +104,43 @@ class TransfersStore(
             loading = false
         )
     }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), TransfersUiState())
+
+    // PC-39 ETA: each direction's estimator is fed the direction's
+    // cumulative completed totals about once a second (the ticker keeps
+    // snapshots flowing even when the table is quiet, so a stall decays
+    // the measured rate instead of freezing a stale ETA on screen).
+    private val uploadEtaEstimator = TransferEtaEstimator()
+    private val downloadEtaEstimator = TransferEtaEstimator()
+
+    val transferEtas: StateFlow<TransferEtas> = combine(
+        transferRepository.observeCompletedTotals(incoming = false),
+        transferRepository.observeCompletedTotals(incoming = true),
+        transferRepository.observeRemainingWork(incoming = false),
+        transferRepository.observeRemainingWork(incoming = true),
+        flow {
+            while (true) {
+                emit(Unit)
+                delay(ETA_SAMPLE_MS)
+            }
+        }
+    ) { upDone, downDone, upLeft, downLeft, _ ->
+        val now = System.currentTimeMillis()
+        uploadEtaEstimator.onSnapshot(now, upDone.files, upDone.bytes)
+        downloadEtaEstimator.onSnapshot(now, downDone.files, downDone.bytes)
+        val upload = uploadEtaEstimator.estimate(
+            nowMs = now,
+            remainingFiles = upLeft.files,
+            remainingBytes = upLeft.bytes,
+            running = upLeft.running
+        )
+        val download = downloadEtaEstimator.estimate(
+            nowMs = now,
+            remainingFiles = downLeft.files,
+            remainingBytes = downLeft.bytes,
+            running = downLeft.running
+        )
+        TransferEtas(upload = upload, download = download, overall = overallEta(upload, download))
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), TransferEtas())
 
     fun pause(id: String) = launch { transferRepository.pause(id) }
 
@@ -151,5 +203,15 @@ class TransfersStore(
 
         val FINISHED_ORDER: Comparator<TransferTask> =
             compareByDescending<TransferTask> { it.completedAt ?: it.updatedAt }
+
+        /** ETA sampling cadence: fast enough to feel live, slow enough to be free. */
+        const val ETA_SAMPLE_MS = 1_000L
     }
 }
+
+/** Both directions' ETAs plus the combined one (PC-39); see [TransferEtaEstimator]. */
+data class TransferEtas(
+    val upload: EtaEstimate = EtaEstimate.Hidden,
+    val download: EtaEstimate = EtaEstimate.Hidden,
+    val overall: EtaEstimate = EtaEstimate.Hidden
+)

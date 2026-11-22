@@ -74,6 +74,8 @@ object PreferenceKeys {
     val FAILURE_NOTIFICATIONS = booleanPreferencesKey("failure_notifications")
 
     val TRANSFER_CONCURRENCY = intPreferencesKey("transfer_concurrency")
+    val UPLOAD_CONCURRENCY = intPreferencesKey("upload_concurrency")
+    val DOWNLOAD_CONCURRENCY = intPreferencesKey("download_concurrency")
     val TRANSFER_RETRY_COUNT = intPreferencesKey("transfer_retry_count")
     val ALLOW_METERED_TRANSFERS = booleanPreferencesKey("allow_metered_transfers")
     val DEBUG_LOGGING = booleanPreferencesKey("debug_logging")

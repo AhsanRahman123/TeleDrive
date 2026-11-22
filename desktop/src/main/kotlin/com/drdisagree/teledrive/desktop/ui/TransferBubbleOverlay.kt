@@ -87,6 +87,8 @@ import com.drdisagree.teledrive.domain.repository.TransferRepository
 import kotlinx.coroutines.flow.combine
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.platform.TransferWidgetStyle
+import com.drdisagree.teledrive.core.transfer.formatEta
+import com.drdisagree.teledrive.presentation.transfers.TransferEtas
 import com.drdisagree.teledrive.presentation.transfers.TransfersStore
 import com.drdisagree.teledrive.presentation.transfers.TransfersUiState
 import com.drdisagree.teledrive.resources.Res
@@ -161,6 +163,8 @@ private fun TransferWidgetContent(fullscreenController: FullscreenController?) {
     }
     val state by (if (storeActive) storeProvider.get().uiState else IDLE_WIDGET_STATE)
         .collectAsState()
+    val etas by (if (storeActive) storeProvider.get().transferEtas else IDLE_WIDGET_ETAS)
+        .collectAsState()
     val style by DesktopTransferBubbleStore.style.collectAsState()
     val colorPreset by DesktopTransferBubbleStore.color.collectAsState()
     val accent = widgetAccent(colorPreset)
@@ -184,6 +188,7 @@ private fun TransferWidgetContent(fullscreenController: FullscreenController?) {
         TransferWidgetStyle.BUBBLE -> BubbleShell(
             state = state,
             summary = summary,
+            etas = etas,
             nowMillis = nowMillis,
             storeProvider = { storeProvider.get() },
             accent = accent,
@@ -192,6 +197,7 @@ private fun TransferWidgetContent(fullscreenController: FullscreenController?) {
         TransferWidgetStyle.BOTTOM_STRIP -> StripShell(
             state = state,
             summary = summary,
+            etas = etas,
             nowMillis = nowMillis,
             storeProvider = { storeProvider.get() },
             accent = accent,
@@ -204,10 +210,14 @@ private fun TransferWidgetContent(fullscreenController: FullscreenController?) {
 private val IDLE_WIDGET_STATE =
     kotlinx.coroutines.flow.MutableStateFlow(TransfersUiState(loading = false))
 
+private val IDLE_WIDGET_ETAS =
+    kotlinx.coroutines.flow.MutableStateFlow(TransferEtas())
+
 @Composable
 private fun BubbleShell(
     state: TransfersUiState,
     summary: TransferBubbleSummary,
+    etas: TransferEtas,
     nowMillis: Long,
     storeProvider: () -> TransfersStore,
     accent: WidgetAccent?,
@@ -283,6 +293,7 @@ private fun BubbleShell(
                     TransferBubblePanel(
                         state = state,
                         summary = summary,
+                        etas = etas,
                         nowMillis = nowMillis,
                         offset = TransferBubbleLayout.panelOffset(
                             bubble = effectiveOffset,
@@ -583,6 +594,7 @@ private fun TransferBubbleTab(
 private fun TransferBubblePanel(
     state: TransfersUiState,
     summary: TransferBubbleSummary,
+    etas: TransferEtas,
     nowMillis: Long,
     offset: BubbleOffset,
     onSizeChanged: (IntSize) -> Unit,
@@ -668,6 +680,21 @@ private fun TransferBubblePanel(
                 modifier = Modifier.fillMaxWidth(),
                 color = accentColor(accent)
             )
+            // PC-39: the overall ETA — the slower direction's estimate,
+            // since the two pools run in parallel. Absent when nothing
+            // is running (the estimator's Hidden state formats to null).
+            formatEta(etas.overall)?.let { overallEtaText ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Text(
+                        text = overallEtaText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             Spacer(Modifier.height(14.dp))
             BubbleDirectionRow(
                 uploading = true,
@@ -675,7 +702,8 @@ private fun TransferBubblePanel(
                 speedBytesPerSecond = summary.uploadingSpeedBytesPerSecond,
                 transferredBytes = summary.uploadingTransferredBytes,
                 totalBytes = summary.uploadingTotalBytes,
-                progress = summary.uploadingProgress
+                progress = summary.uploadingProgress,
+                etaText = formatEta(etas.upload)
             )
             Spacer(Modifier.height(12.dp))
             BubbleDirectionRow(
@@ -684,7 +712,8 @@ private fun TransferBubblePanel(
                 speedBytesPerSecond = summary.downloadingSpeedBytesPerSecond,
                 transferredBytes = summary.downloadingTransferredBytes,
                 totalBytes = summary.downloadingTotalBytes,
-                progress = summary.downloadingProgress
+                progress = summary.downloadingProgress,
+                etaText = formatEta(etas.download)
             )
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -783,7 +812,8 @@ private fun BubbleDirectionRow(
     speedBytesPerSecond: Long,
     transferredBytes: Long,
     totalBytes: Long,
-    progress: Float
+    progress: Float,
+    etaText: String?
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -851,7 +881,7 @@ private fun BubbleDirectionRow(
                             DesktopRes.string.bubble_files_active
                         },
                         activeCount
-                    ),
+                    ) + (etaText?.let { " · $it" } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -974,6 +1004,7 @@ private fun bubbleTransferSublabel(task: TransferTask, nowMillis: Long): String 
 private fun StripShell(
     state: TransfersUiState,
     summary: TransferBubbleSummary,
+    etas: TransferEtas,
     nowMillis: Long,
     storeProvider: () -> TransfersStore,
     accent: WidgetAccent?,
@@ -1042,6 +1073,7 @@ private fun StripShell(
             TransferBubblePanel(
                 state = state,
                 summary = summary,
+                etas = etas,
                 nowMillis = nowMillis,
                 offset = TransferStripLayout.panelOffset(
                     panelWidth = panelWidthDp,

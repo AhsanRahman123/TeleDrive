@@ -1,8 +1,10 @@
 package com.drdisagree.teledrive.domain.repository
 
 import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.domain.model.TransferRemainingWork
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.model.TransferSection
+import com.drdisagree.teledrive.domain.model.TransferWorkTotals
 import kotlinx.coroutines.flow.Flow
 
 interface TransferRepository {
@@ -17,6 +19,12 @@ interface TransferRepository {
     fun observeActiveForFile(fileId: String): Flow<TransferTask?>
 
     fun observeActiveDownloads(): Flow<List<TransferTask>>
+
+    /** PC-39 ETA feed: completed totals for one direction (incoming = downloads). */
+    fun observeCompletedTotals(incoming: Boolean): Flow<TransferWorkTotals>
+
+    /** PC-39 ETA feed: queued + running work left in one direction. */
+    fun observeRemainingWork(incoming: Boolean): Flow<TransferRemainingWork>
 
     suspend fun enqueueUpload(fileId: String, priority: Int = 0): AppResult<String>
 

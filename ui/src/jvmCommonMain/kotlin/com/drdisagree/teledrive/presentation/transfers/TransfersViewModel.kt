@@ -24,9 +24,13 @@ class TransfersViewModel(
         settingsRepository: SettingsRepository
     ) : this(TransfersStore(transferRepository, settingsRepository))
 
-    val transferConcurrency: StateFlow<Int> = store.transferConcurrency
+    val uploadConcurrency: StateFlow<Int> = store.uploadConcurrency
 
-    fun setTransferConcurrency(value: Int) = store.setTransferConcurrency(value)
+    val downloadConcurrency: StateFlow<Int> = store.downloadConcurrency
+
+    fun setUploadConcurrency(value: Int) = store.setUploadConcurrency(value)
+
+    fun setDownloadConcurrency(value: Int) = store.setDownloadConcurrency(value)
 
     val uiState: StateFlow<TransfersUiState> = store.uiState
 
