@@ -17,5 +17,5 @@ val sharedFilesModule = module {
     // has no lambda parameter, which is why only the PC build broke. Calling the
     // constructor with its four container-resolved arguments lets the default factory
     // (primeFromStart = false) apply, exactly as the unit tests construct it.
-    singleOf(::RemoteArchiveService) // TEMP-PROOF-REVERT
+    single { RemoteArchiveService(get(), get(), get(), get()) }
 }
