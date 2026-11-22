@@ -166,7 +166,13 @@ class ZipArchiveReader(
                     produced += consumed
                 } else {
                     inflater.setInput(chunk, 0, consumed)
-                    while (!inflater.needsInput() && !inflater.finished()) {
+                    // An inflate() that produces nothing is NOT by itself corruption: when a
+                    // chunk ends mid-symbol or mid-block-header, the inflater simply needs the
+                    // next chunk. That case breaks to the outer loop, which either feeds the
+                    // next chunk (input remains) or, after the loop, reports a truncated entry
+                    // (no input remains and the stream never finished). Only a no-progress
+                    // inflate that neither needs input nor finished is genuine damage.
+                    while (!inflater.finished()) {
                         val count = inflater.inflate(outBuffer)
                         when {
                             count > 0 -> emit(count)
@@ -174,6 +180,7 @@ class ZipArchiveReader(
                                 "\"${entry.name}\" needs a preset dictionary and cannot be extracted."
                             )
                             inflater.finished() -> break
+                            inflater.needsInput() -> break
                             else -> throw corrupt(
                                 "The compressed data of \"${entry.name}\" is damaged and cannot be extracted."
                             )
@@ -406,7 +413,9 @@ class ZipArchiveReader(
         private const val ZIP64_EOCD_MIN_SIZE = 56
         private const val TAIL_WINDOW_BYTES = 65_600L
         private const val MAX_ENTRIES = 200_000
-        private const val MAX_CD_BYTES = 256L * 1024 * 1024
+        // 200,000 entries at ~160 bytes of central-directory record each is ≲32 MB, so
+        // 64 MB leaves generous headroom while keeping the in-memory cap proportionate.
+        private const val MAX_CD_BYTES = 64L * 1024 * 1024
         private const val CHUNK_BYTES = 512 * 1024
         private const val OUTPUT_BUFFER_SIZE = 64 * 1024
         private const val METHOD_STORED = 0

@@ -249,26 +249,29 @@ class PreviewViewModel(
     }
 
     /**
-     * Downloads just [entry] out of a remotely listed ZIP, saved to Downloads like a normal
-     * download. A listing that came from a local copy has no remote source to extract from, so it
-     * gets a clear message instead of a failure.
+     * Downloads just the entry at [entryIndex] in the stored listing out of a remotely listed
+     * ZIP, saved to Downloads like a normal download. Identity is the listing index, never the
+     * entry value, so duplicate names each download their own bytes. A listing that came from a
+     * local-only copy has no remote source to extract from, so it gets a clear message instead
+     * of a failure.
      */
-    fun downloadArchiveEntry(file: DriveFile, entry: ArchiveEntry) {
-        if (entry.isDirectory) return
-        if (_uiState.value.archiveEntryBusyName != null) return
+    fun downloadArchiveEntry(file: DriveFile, entryIndex: Int) {
+        if (_uiState.value.archiveEntryBusyIndex != null) return
         val listing = _uiState.value.archiveListings[file.id]
         if (listing == null) {
             _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
             return
         }
-        val index = listing.indexOf(entry).coerceAtLeast(0)
-        // Occurrence counts only non-directory entries with this name - the same rule
-        // RemoteArchiveService uses to pick the entry, so both sides agree.
-        val occurrence = listing.subList(0, index).count { it.name == entry.name && !it.isDirectory }
+        val entry = listing.getOrNull(entryIndex) ?: return
+        if (entry.isDirectory) return
+        // Occurrence counts only non-directory entries with this name before this index -
+        // the same rule RemoteArchiveService uses to pick the entry, so both sides agree.
+        val occurrence = archiveEntryOccurrence(listing, entryIndex)
+        if (occurrence < 0) return
         val displayName = entry.name.substringAfterLast('/').substringAfterLast('\\')
             .ifBlank { entry.name }
         viewModelScope.launch {
-            _uiState.update { it.copy(archiveEntryBusyName = entry.name) }
+            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
             try {
                 remoteArchiveService.extractEntry(file, entry.name, occurrence)
                 _messages.tryEmit(
@@ -283,7 +286,7 @@ class PreviewViewModel(
             } catch (failure: Exception) {
                 _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
             } finally {
-                _uiState.update { it.copy(archiveEntryBusyName = null) }
+                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
             }
         }
     }

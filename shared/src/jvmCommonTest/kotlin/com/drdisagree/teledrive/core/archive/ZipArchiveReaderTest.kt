@@ -254,6 +254,28 @@ class ZipArchiveReaderTest {
             }
         }
 
+    @Test(timeout = 60_000)
+    fun `valid deflated entry larger than one chunk extracts through tiny reads`() = runBlocking {
+        // ~2 MiB of seeded-random data barely compresses, so the deflated entry's compressed
+        // size stays well above the reader's 512 KiB chunk. Serving it 8 bytes at a time
+        // forces hundreds of thousands of chunk boundaries, including boundaries inside the
+        // deflate block header and mid-symbol, where inflate() legitimately returns 0 with
+        // needsInput() set. The old loop treated that as Corrupt; the fixed loop must feed
+        // the next chunk and produce the exact original bytes.
+        val data = ByteArray(2 * 1024 * 1024)
+        java.util.Random(20261122L).nextBytes(data)
+        val bytes = zipOf(listOf(Triple("big.bin", data, ZipEntry.DEFLATED)))
+        val archive = ZipArchiveReader(ShortReadSource(bytes, maxPerRead = 8))
+        val entry = archive.entries().single()
+        assertTrue(
+            "compressed size ${entry.compressedBytes} must exceed one 512 KiB chunk",
+            entry.compressedBytes > 512 * 1024
+        )
+        val out = ByteArrayOutputStream()
+        archive.extract(entry, out)
+        assertArrayEquals(data, out.toByteArray())
+    }
+
     @Test
     fun `listing a zip with a large entry reads only a small fraction`() = runBlocking {
         val large = ByteArray(2 * 1024 * 1024) { (it % 253).toByte() }

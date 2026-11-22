@@ -7,8 +7,8 @@ data class PreviewUiState(
     val initialIndex: Int = 0,
     val ready: Boolean = false,
     val closed: Boolean = false,
-    /** Full archive path of the entry currently being extracted from a remote ZIP, if any. */
-    val archiveEntryBusyName: String? = null,
+    /** Listing index of the entry currently being extracted from a remote ZIP, if any. */
+    val archiveEntryBusyIndex: Int? = null,
     /** Latest remote-ZIP listing per file id, so an entry tap can resolve duplicate-name occurrence. */
     val archiveListings: Map<String, List<ArchiveEntry>> = emptyMap()
 )

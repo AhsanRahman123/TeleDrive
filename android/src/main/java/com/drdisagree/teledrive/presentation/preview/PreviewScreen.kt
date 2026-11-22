@@ -379,8 +379,8 @@ fun PreviewScreen(
                     onToggleChrome = { chromeVisible = !chromeVisible },
                     onChromeRequested = { visible -> chromeVisible = visible },
                     playerSession = playerSession,
-                    onArchiveEntryDownload = { entry -> viewModel.downloadArchiveEntry(file, entry) },
-                    archiveEntryBusyName = state.archiveEntryBusyName
+                    onArchiveEntryDownload = { entryIndex -> viewModel.downloadArchiveEntry(file, entryIndex) },
+                    archiveEntryBusyIndex = state.archiveEntryBusyIndex
                 )
             }
 
@@ -653,8 +653,8 @@ private fun PreviewPage(
     playerSession: PlayerSession,
     storedTextScale: Float,
     onTextScaleChange: (Float) -> Unit,
-    onArchiveEntryDownload: (ArchiveEntry) -> Unit,
-    archiveEntryBusyName: String?
+    onArchiveEntryDownload: (Int) -> Unit,
+    archiveEntryBusyIndex: Int?
 ) {
     // One state for the screen's life: re-creating it on save would leave the gesture writing to a
     // state nothing renders.
@@ -821,7 +821,7 @@ private fun PreviewPage(
 
         is PreviewContent.Archive -> ArchiveList(
             archive = content,
-            busyEntryName = archiveEntryBusyName,
+            busyEntryIndex = archiveEntryBusyIndex,
             onEntryDownload = onArchiveEntryDownload
         )
         is PreviewContent.RequiresDownload -> EmptyState(
@@ -884,11 +884,10 @@ private fun previewContentPadding(): PaddingValues =
 @Composable
 private fun ArchiveList(
     archive: PreviewContent.Archive,
-    busyEntryName: String? = null,
-    onEntryDownload: (ArchiveEntry) -> Unit = {}
+    busyEntryIndex: Int? = null,
+    onEntryDownload: (Int) -> Unit = {}
 ) {
     val root = remember(archive) { buildArchiveTree(archive.entries) }
-    val entriesByPath = remember(archive) { archive.entries.associateBy { it.name } }
     var expanded by remember(archive) { mutableStateOf(emptySet<String>()) }
     val rows = remember(root, expanded) { flattenArchive(root, expanded) }
     val files = remember(archive) { archive.entries.filterNot { it.isDirectory } }
@@ -968,13 +967,16 @@ private fun ArchiveList(
                 }
             }
         }
-        items(rows, key = { it.node.path }) { row ->
+        items(
+            rows,
+            key = { row -> row.node.entryIndex?.let { "entry-$it" } ?: row.node.path }
+        ) { row ->
             ArchiveRow(
                 row = row,
                 canDownload = archive.remote && !row.node.isDirectory,
-                isBusy = busyEntryName != null && busyEntryName == row.node.path,
+                isBusy = busyEntryIndex != null && busyEntryIndex == row.node.entryIndex,
                 onFileClick = {
-                    entriesByPath[row.node.path]?.let(onEntryDownload)
+                    row.node.entryIndex?.let(onEntryDownload)
                 },
                 onToggle = {
                     expanded = if (row.node.path in expanded) {
@@ -1117,70 +1119,6 @@ private fun ArchiveRow(
     }
 }
 
-/**
- * ZIP stores flat paths, so folders without their own entry are created from the paths below them.
- */
-private fun buildArchiveTree(entries: List<ArchiveEntry>): ArchiveNode {
-    val root = ArchiveNode(path = "", name = "", isDirectory = true)
-    for (entry in entries) {
-        val segments = entry.name.split(SEPARATOR).filter { it.isNotEmpty() }
-        if (segments.isEmpty()) continue
-        var current = root
-        segments.forEachIndexed { index, segment ->
-            val leaf = index == segments.lastIndex && !entry.isDirectory
-            val path = if (current.path.isEmpty()) segment else current.path + SEPARATOR + segment
-            val child = current.children.getOrPut(segment) {
-                ArchiveNode(path = path, name = segment, isDirectory = !leaf)
-            }
-            if (leaf) {
-                child.sizeBytes = entry.sizeBytes
-                child.compressedBytes = entry.compressedBytes
-            }
-            current = child
-        }
-    }
-    aggregateSizes(root)
-    return root
-}
-
-private fun aggregateSizes(node: ArchiveNode): Pair<Long, Long> {
-    if (!node.isDirectory) return node.sizeBytes to node.compressedBytes
-    var size = 0L
-    var packed = 0L
-    node.children.values.forEach { child ->
-        val (childSize, childPacked) = aggregateSizes(child)
-        size += childSize
-        packed += childPacked
-    }
-    node.sizeBytes = size
-    node.compressedBytes = packed
-    return size to packed
-}
-
-private fun countFolders(node: ArchiveNode): Int =
-    node.children.values.sumOf { child ->
-        if (child.isDirectory) 1 + countFolders(child) else 0
-    }
-
-private fun flattenArchive(
-    root: ArchiveNode,
-    expanded: Set<String>,
-    depth: Int = 0,
-    out: MutableList<ArchiveRowState> = mutableListOf()
-): List<ArchiveRowState> {
-    val sorted = root.children.values.sortedWith(
-        compareByDescending<ArchiveNode> { it.isDirectory }
-            .thenBy { it.name.lowercase() }
-    )
-    for (child in sorted) {
-        val isOpen = child.isDirectory && child.path in expanded
-        out.add(ArchiveRowState(child, depth, isOpen))
-        if (isOpen) flattenArchive(child, expanded, depth + 1, out)
-    }
-    return out
-}
-
-private const val SEPARATOR = "/"
 private const val ROW_FADE_MS = 180
 private const val CHEVRON_ROTATE_MS = 220
 private val INDENT_STEP = 16.dp

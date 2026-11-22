@@ -61,7 +61,20 @@ class PreviewContentResolver(
         emit(PreviewContent.Loading)
         val localPath = file.localPath?.takeIf { File(it).exists() }
         if (localPath != null) {
-            emit(fromLocal(file, localPath))
+            val content = fromLocal(file, localPath)
+            // A ZIP with BOTH copies keeps its (identical) local listing, but is marked
+            // remote: entry extraction re-lists the online copy and picks by name +
+            // occurrence in the same central-directory order, so its rows are tappable.
+            // A local-ONLY zip stays remote = false with the existing local-only message.
+            emit(
+                if (content is PreviewContent.Archive && content.format == "ZIP" &&
+                    file.hasRemoteCopy
+                ) {
+                    content.copy(remote = true)
+                } else {
+                    content
+                }
+            )
             return@flow
         }
 
