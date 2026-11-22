@@ -58,6 +58,9 @@ object TransferBubbleLayout {
     /** Extra air between the bubble's default spot and the FAB's top edge. */
     const val FAB_CLEARANCE_DP = 16f
 
+    /** Distance from the window bottom to the top edge of the FAB. */
+    val fabTopFromBottomDp: Float = FAB_MARGIN_DP + FAB_SIZE_DP
+
     /**
      * The first-run position: bottom-right, sitting above the Create button with
      * [FAB_CLEARANCE_DP] of air — never covering it.
