@@ -76,7 +76,18 @@ class RemoteMessageResolver(
             }
             for (document in page.documents) {
                 manifestOf(document)?.let { manifest ->
-                    byUuid.putIfAbsent(manifest.fileId, document)
+                    // Split files: every part message carries the
+                    // parent uuid, but only part 0's message is the
+                    // row's binding. Pages arrive newest-first, so a
+                    // later part can precede part 0 — prefer the
+                    // adoptable (non-later-part) document for a uuid.
+                    val existing = byUuid[manifest.fileId]
+                    val existingIsLaterPart = existing?.let { manifestOf(it) }
+                        ?.let { it.isPart && it.partIndex != 0 } == true
+                    val thisIsLaterPart = manifest.isPart && manifest.partIndex != 0
+                    if (existing == null || (existingIsLaterPart && !thisIsLaterPart)) {
+                        byUuid[manifest.fileId] = document
+                    }
                 }
                 byUniqueId.putIfAbsent(document.uniqueFileId, document)
             }

@@ -54,7 +54,14 @@ class Item9SyncFixesTest {
             val baselineBefore = files.byId("f1")!!.remoteBase
             files.rename("f1", "b.jpg", 5_000)
             files.markPendingPublish(listOf("f1"))
-            telegram.onEditCaption = { throw TelegramException(400, "MESSAGE_ID_INVALID") }
+            // PC-37: the two mis-bound signatures (MESSAGE_ID_INVALID,
+            // "Message can't be edited") no longer take this generic
+            // path — the repair ladder handles them (MisboundRepairTest).
+            // This test pins the generic permanent-rejection contract
+            // with a different permanent 400.
+            telegram.onEditCaption = {
+                throw TelegramException(400, "Bad Request: MESSAGE_NOT_MODIFIED")
+            }
             val failures = mutableListOf<String>()
 
             val drained = drainer().drain(

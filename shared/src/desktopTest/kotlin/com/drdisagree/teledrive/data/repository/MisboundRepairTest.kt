@@ -123,7 +123,7 @@ class MisboundRepairTest {
                 telegram.fetchDocumentsCalls == 0)
             assertTrue(telegram.deletedMessages.isEmpty())
             assertTrue(telegram.editedCaptions.isEmpty())
-            local.delete()
+            assertTrue(local.delete())
         }
 
     @Test
@@ -224,7 +224,7 @@ class MisboundRepairTest {
             assertEquals(999L, landed.messageId)
             assertEquals(5_000L, landed.trashedAt)
             assertTrue(telegram.deletedMessages.isEmpty())
-            local.delete()
+            assertTrue(local.delete())
         }
 
     @Test
@@ -304,12 +304,16 @@ class MisboundRepairTest {
 
         drainer().drain(isStopped = { false })
 
-        assertEquals("one channel pass serves every repair in the drain",
-            1, telegram.fetchDocumentsCalls)
+        assertEquals(
+            "one channel pass serves every repair in the drain " +
+                "(a content page plus the terminating empty page — " +
+                "per-file scans would cost three passes)",
+            2, telegram.fetchDocumentsCalls
+        )
         assertTrue(telegram.editedCaptions.containsKey(900L))
         assertEquals(setOf("scan-a", "scan-b"), harness.reuploads.toSet())
-        localA.delete()
-        localB.delete()
+        assertTrue(localA.delete())
+        assertTrue(localB.delete())
     }
 
     @Test
