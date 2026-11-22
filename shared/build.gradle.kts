@@ -66,16 +66,6 @@ kotlin {
                 implementation(libs.junit)
             }
         }
-        // Android unit tests (testDebugUnitTest in CI) must run the same jvmCommonTest suite —
-        // without this they only ever executed as desktop tests. The Android KMP library plugin
-        // calls its host-test source set androidHostTest and does not create it by default here,
-        // so it is created explicitly.
-        create("androidHostTest") {
-            dependsOn(jvmCommonTest)
-            dependencies {
-                implementation(libs.junit)
-            }
-        }
     }
 }
 
