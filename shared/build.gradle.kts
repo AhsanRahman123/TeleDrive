@@ -67,8 +67,9 @@ kotlin {
             }
         }
         // Android unit tests (testDebugUnitTest in CI) must run the same jvmCommonTest suite —
-        // without this they only ever executed as desktop tests.
-        named("androidUnitTest") {
+        // without this they only ever executed as desktop tests. This KMP setup does not create
+        // the androidUnitTest source set by default, so it is created explicitly here.
+        create("androidUnitTest") {
             dependsOn(jvmCommonTest)
             dependencies {
                 implementation(libs.junit)
