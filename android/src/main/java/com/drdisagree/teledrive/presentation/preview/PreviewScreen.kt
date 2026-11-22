@@ -35,9 +35,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -298,7 +300,16 @@ fun PreviewScreen(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = {
+            // The preview draws edge to edge and this scaffold takes no window insets, so
+            // without this padding the snackbar sits under the system navigation bar and
+            // its lower half (and its action) is cut off. Respect the navigation-bar inset
+            // so the whole message is visible.
+            SnackbarHost(
+                snackbarHostState,
+                modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+            )
+        }
     ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
             HorizontalPager(

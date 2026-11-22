@@ -19,6 +19,8 @@ import com.drdisagree.teledrive.resources.files_queued_for_upload
 import com.drdisagree.teledrive.resources.files_queued_partial
 import com.drdisagree.teledrive.resources.message_download_queued
 import com.drdisagree.teledrive.resources.message_upload_queued
+import com.drdisagree.teledrive.resources.preview_archive_entries_saved
+import com.drdisagree.teledrive.resources.preview_archive_entry_saved
 import com.drdisagree.teledrive.resources.snackbar_view_transfers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -69,7 +71,7 @@ fun CollectSnackbarMessages(
     }
 }
 
-private fun UiText.isTransferMessage(): Boolean {
+internal fun UiText.isTransferMessage(): Boolean {
     if (this !is UiText.Resource) return false
     return resource == Res.string.files_import_preparing ||
             resource == Res.string.files_import_uploading ||
@@ -81,5 +83,9 @@ private fun UiText.isTransferMessage(): Boolean {
             resource == Res.string.files_queued_for_download ||
             resource == Res.string.files_queued_partial ||
             resource == Res.string.message_upload_queued ||
-            resource == Res.string.message_download_queued
+            resource == Res.string.message_download_queued ||
+            // A file saved out of a ZIP lands in Downloads exactly like a normal
+            // download, so its completion carries the same View -> Transfers action.
+            resource == Res.string.preview_archive_entry_saved ||
+            resource == Res.string.preview_archive_entries_saved
 }
