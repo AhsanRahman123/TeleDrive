@@ -29,7 +29,10 @@ class RemoteArchiveService(
                 telegramClient,
                 file.remoteFileId ?: error("Remote file id missing"),
                 file.chatId,
-                file.messageId
+                file.messageId,
+                // Range-only contract: never prime a whole-file download from offset 0;
+                // each ranged read requests exactly its own window via awaitAvailable().
+                primeFromStart = false
             )
         )
     }

@@ -103,9 +103,16 @@ class ZipArchiveReader(private val source: MediaByteSource) {
             val inflater = Inflater(true)
             try {
                 val plain = ByteArray(PLAIN_BUFFER_SIZE)
-                while (remaining > 0 || !inflater.finished()) {
+                // Exit as soon as the deflate stream finishes, whatever `remaining` says:
+                // a finished inflater with unconsumed input returns 0 from inflate()
+                // forever, so keying the loop on `remaining > 0` as well would busy-spin.
+                while (!inflater.finished()) {
                     if (inflater.needsInput()) {
-                        if (remaining <= 0) break
+                        if (remaining <= 0) {
+                            throw ZipArchiveException.Corrupt(
+                                "entry \"${entry.name}\" ends before its data is complete"
+                            )
+                        }
                         val chunk = readChunk(position, remaining)
                         position += chunk.size
                         remaining -= chunk.size
@@ -118,16 +125,24 @@ class ZipArchiveReader(private val source: MediaByteSource) {
                             "entry \"${entry.name}\" has damaged compressed data"
                         )
                     }
-                    if (count > 0) accountFor(plain, 0, count)
-                    if (count == 0 && !inflater.needsInput() && !inflater.finished()) {
+                    if (count > 0) {
+                        accountFor(plain, 0, count)
+                    } else if (!inflater.finished() && !inflater.needsInput()) {
+                        // No progress and not waiting for more input (e.g. a dictionary
+                        // request or a stream state inflate() can never advance): refuse
+                        // instead of spinning.
                         throw ZipArchiveException.Corrupt(
                             "entry \"${entry.name}\" has damaged compressed data"
                         )
                     }
+                    // count == 0 with needsInput() loops back to feed the next chunk (or
+                    // fail above when none is left); count == 0 with finished() exits.
                 }
-                if (!inflater.finished()) {
+                if (remaining > 0 || inflater.remaining > 0) {
+                    // The stream ended before the central directory's compressed size was
+                    // consumed: the recorded size overstates the real deflate stream.
                     throw ZipArchiveException.Corrupt(
-                        "entry \"${entry.name}\" ends before its data is complete"
+                        "entry \"${entry.name}\" has damaged compressed data"
                     )
                 }
             } finally {
@@ -237,11 +252,16 @@ class ZipArchiveReader(private val source: MediaByteSource) {
                 }
                 extraCursor = valueStart + fieldSize
             }
-            if (diskStart == 0xFFFF && zip64DiskStart != 0L) throw ZipArchiveException.MultiDisk()
-            if (diskStart == 0xFFFF && zip64DiskStart < 0) {
-                throw ZipArchiveException.Corrupt("an entry is missing its ZIP64 disk number")
+            if (diskStart == 0xFFFF) {
+                // Missing field first: zip64DiskStart stays -1 when the saturated disk
+                // start has no ZIP64 value, and -1 != 0 would otherwise misclassify it
+                // as MultiDisk before the Corrupt branch could ever run.
+                if (zip64DiskStart < 0) {
+                    throw ZipArchiveException.Corrupt("an entry is missing its ZIP64 disk number")
+                }
+                if (zip64DiskStart != 0L) throw ZipArchiveException.MultiDisk()
             }
-            val charset = if (flags and FLAG_UTF8 != 0) Charsets.UTF_8 else IBM437
+            val charset = if (flags and FLAG_UTF8 != 0) Charsets.UTF_8 else CP437
             val name = String(nameBytes, charset)
             entries += ZipEntryInfo(
                 name = name,
@@ -385,7 +405,14 @@ class ZipArchiveReader(private val source: MediaByteSource) {
         private const val METHOD_STORED = 0
         private const val METHOD_DEFLATED = 8
 
-        private val IBM437: Charset = Charset.forName("IBM437")
+        /**
+         * CP437 lives in the `jdk.charsets` module, which a packaged runtime can lack;
+         * resolve it lazily and fall back to ISO-8859-1 (a standard charset, always
+         * present) for non-UTF-8 names rather than failing the whole listing.
+         */
+        private val CP437: Charset by lazy {
+            runCatching { Charset.forName("IBM437") }.getOrElse { Charsets.ISO_8859_1 }
+        }
 
         internal fun u16(bytes: ByteArray, offset: Int): Int =
             (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)

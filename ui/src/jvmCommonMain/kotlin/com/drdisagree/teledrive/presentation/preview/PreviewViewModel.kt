@@ -265,8 +265,10 @@ class PreviewViewModel(
         ) {
             return
         }
+        // Count only non-directory predecessors, exactly as RemoteArchiveService indexes
+        // its matches (it filters directories out before applying the occurrence).
         val occurrence = entries.take(entryIndex.coerceIn(0, entries.size))
-            .count { it.name == entry.name }
+            .count { it.name == entry.name && !it.isDirectory }
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -291,6 +293,9 @@ class PreviewViewModel(
                     .ifBlank { entry.name.substringAfterLast('/') }
                 _messages.tryEmit(UiText.Resource(Res.string.preview_zip_entry_saved, savedName))
             } catch (failure: CancellationException) {
+                // Reset before rethrowing, or the state stays RUNNING and blocks every
+                // further entry download for this ViewModel's life.
+                _uiState.update { it.copy(archiveEntryDownload = null) }
                 throw failure
             } catch (failure: Exception) {
                 _uiState.update {

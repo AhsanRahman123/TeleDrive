@@ -143,6 +143,35 @@ class ZipArchiveReaderTest {
         }
     }
 
+    @Test(timeout = 20_000)
+    fun `deflate entry whose recorded compressed size overstates the stream fails as corrupt instead of spinning`() =
+        runBlocking {
+            // Incompressible data, so the real deflate stream is ~750 KB: it ends inside
+            // the reader's second 512 KB chunk. Padding the recorded compressed size by
+            // 400 KB leaves unfed bytes (remaining > 0) and unconsumed junk in the chunk
+            // when the inflater finishes — the exact state that used to busy-spin forever.
+            // This test completing at all (within its timeout) is the regression proof.
+            val data = ByteArray(750_000).also { kotlin.random.Random(42).nextBytes(it) }
+            val bytes = zipBytes("big.bin" to data)
+            val pad = 400_000
+            val eocd = bytes.size - 22 // ZipOutputStream writes no comment
+            val cdOffset = u32(bytes, eocd + 16).toInt()
+            val realCompressed = u32(bytes, cdOffset + 20)
+            val padded = ByteArray(bytes.size + pad)
+            bytes.copyInto(padded, 0, 0, cdOffset)
+            bytes.copyInto(padded, cdOffset + pad, cdOffset)
+            put32(padded, cdOffset + pad + 20, realCompressed + pad)
+            put32(padded, eocd + pad + 16, (cdOffset + pad).toLong())
+
+            val reader = ZipArchiveReader(RecordingSource(padded))
+            val entry = reader.entries().single()
+            assertEquals(realCompressed + pad, entry.compressedBytes)
+
+            assertThrowsZip(ZipArchiveException.Corrupt::class.java) {
+                reader.extract(entry, ByteArrayOutputStream())
+            }
+        }
+
     @Test
     fun `encrypted entries list but extraction refuses`() = runBlocking {
         val bytes = zipBytes("secret.txt" to "hidden".toByteArray())
@@ -284,6 +313,16 @@ class ZipArchiveReaderTest {
 
     private fun u16(bytes: ByteArray, offset: Int): Int =
         (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)
+
+    private fun u32(bytes: ByteArray, offset: Int): Long {
+        var value = 0L
+        for (i in 0..3) value = value or ((bytes[offset + i].toLong() and 0xFF) shl (8 * i))
+        return value
+    }
+
+    private fun put32(bytes: ByteArray, offset: Int, value: Long) {
+        for (i in 0..3) bytes[offset + i] = (value shr (8 * i)).toByte()
+    }
 
     private fun findSignature(bytes: ByteArray, signature: Int): Int {
         val needle = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(signature).array()

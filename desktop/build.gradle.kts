@@ -289,6 +289,7 @@ compose.desktop {
             modules(
                 "java.instrument",
                 "jdk.accessibility",
+                "jdk.charsets",
                 "java.naming",
                 "java.sql",
                 "jdk.crypto.ec",
