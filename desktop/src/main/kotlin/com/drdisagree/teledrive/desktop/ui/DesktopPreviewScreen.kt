@@ -156,7 +156,14 @@ import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.RenameDialog
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalUrlOpener
+import com.drdisagree.teledrive.presentation.preview.ArchiveEntry
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryDownloadState
+import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
+import com.drdisagree.teledrive.presentation.preview.applyArchiveRangeSelection
+import com.drdisagree.teledrive.presentation.preview.archiveVisibleIndices
+import com.drdisagree.teledrive.presentation.preview.pruneArchiveSelection
+import com.drdisagree.teledrive.presentation.preview.sortArchiveIndices
+import com.drdisagree.teledrive.presentation.preview.toggleArchiveSelection
 import com.drdisagree.teledrive.presentation.preview.PreviewContent
 import com.drdisagree.teledrive.presentation.preview.PreviewViewModel
 import com.drdisagree.teledrive.resources.Res
