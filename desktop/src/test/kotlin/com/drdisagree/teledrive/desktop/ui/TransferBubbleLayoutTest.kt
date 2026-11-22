@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.desktop.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -124,6 +125,120 @@ class TransferBubbleLayoutTest {
         assertTrue(panel.x + 352f <= 480f - TransferBubbleLayout.PANEL_MARGIN_DP + 0.001f)
         assertTrue(panel.y >= TransferBubbleLayout.PANEL_MARGIN_DP)
         assertTrue(panel.y + 460f <= 600f - TransferBubbleLayout.PANEL_MARGIN_DP + 0.001f)
+    }
+
+    @Test
+    fun `sanitize keeps an in-window stored position`() {
+        assertEquals(
+            BubbleOffset(300f, 200f),
+            TransferBubbleLayout.sanitizePosition(BubbleOffset(300f, 200f), 1200f, 800f)
+        )
+    }
+
+    @Test
+    fun `sanitize clamps a partly visible stored position instead of discarding it`() {
+        // Saved on a larger monitor, read back on a smaller window: the
+        // bubble is partly inside, so it clamps into view — the user's
+        // chosen spot is honoured as closely as the window allows.
+        assertEquals(
+            BubbleOffset(1200f - 64f, 800f - 64f),
+            TransferBubbleLayout.sanitizePosition(BubbleOffset(1150f, 780f), 1200f, 800f)
+        )
+        assertEquals(
+            BubbleOffset(0f, 0f),
+            TransferBubbleLayout.sanitizePosition(BubbleOffset(-30f, -30f), 1200f, 800f)
+        )
+    }
+
+    @Test
+    fun `sanitize sends a wholly off-window stored position to the default spot`() {
+        val fallback = TransferBubbleLayout.defaultOffset(1200f, 800f)
+        assertEquals(
+            fallback,
+            TransferBubbleLayout.sanitizePosition(BubbleOffset(5000f, 300f), 1200f, 800f)
+        )
+        assertEquals(
+            fallback,
+            TransferBubbleLayout.sanitizePosition(BubbleOffset(-500f, -500f), 1200f, 800f)
+        )
+        assertEquals(
+            fallback,
+            TransferBubbleLayout.sanitizePosition(BubbleOffset(300f, 900f), 1200f, 800f)
+        )
+    }
+
+    @Test
+    fun `sanitize sends non-finite stored positions to the default spot`() {
+        val fallback = TransferBubbleLayout.defaultOffset(1200f, 800f)
+        assertEquals(
+            fallback,
+            TransferBubbleLayout.sanitizePosition(BubbleOffset(Float.NaN, 100f), 1200f, 800f)
+        )
+        assertEquals(
+            fallback,
+            TransferBubbleLayout.sanitizePosition(
+                BubbleOffset(100f, Float.POSITIVE_INFINITY), 1200f, 800f
+            )
+        )
+        assertEquals(
+            fallback,
+            TransferBubbleLayout.sanitizePosition(
+                BubbleOffset(Float.NEGATIVE_INFINITY, Float.NaN), 1200f, 800f
+            )
+        )
+    }
+
+    @Test
+    fun `drag deltas land on the effective offset not the raw state`() {
+        // A raw state far outside the window displays clamped at the
+        // bottom-right corner; a small drag must move the bubble from
+        // THERE — accumulating onto the raw state instead would leave
+        // the visible bubble pinned until the raw value re-entered the
+        // window, then jump.
+        val effective = TransferBubbleLayout.clampOffset(5000f, 5000f, 1200f, 800f)
+        assertEquals(
+            BubbleOffset(1200f - 64f - 10f, 800f - 64f - 20f),
+            TransferBubbleLayout.movedBy(effective, -10f, -20f, 1200f, 800f)
+        )
+        // A delta that would leave the window still clamps.
+        assertEquals(
+            BubbleOffset(0f, 0f),
+            TransferBubbleLayout.movedBy(effective, -5000f, -5000f, 1200f, 800f)
+        )
+        // From an ordinary in-window position the delta applies exactly.
+        assertEquals(
+            BubbleOffset(310f, 180f),
+            TransferBubbleLayout.movedBy(BubbleOffset(300f, 200f), 10f, -20f, 1200f, 800f)
+        )
+    }
+
+    @Test
+    fun `a cancelled drag restores the start offset and leaves nothing to persist`() {
+        val session = BubbleDragSession()
+        assertFalse(session.active)
+        session.begin(BubbleOffset(100f, 200f))
+        assertTrue(session.active)
+        assertEquals(BubbleOffset(100f, 200f), session.cancel())
+        assertFalse(session.active)
+        // After a cancel there is nothing left to complete or persist.
+        assertNull(session.complete(BubbleOffset(300f, 300f)))
+        assertNull(session.cancel())
+    }
+
+    @Test
+    fun `a completed drag yields the final offset exactly once`() {
+        val session = BubbleDragSession()
+        // Completing with no drag in progress persists nothing.
+        assertNull(session.complete(BubbleOffset(1f, 2f)))
+        session.begin(BubbleOffset(100f, 200f))
+        assertEquals(
+            BubbleOffset(150f, 260f),
+            session.complete(BubbleOffset(150f, 260f))
+        )
+        assertFalse(session.active)
+        // A second completion (or a stray cancel) yields nothing.
+        assertNull(session.complete(BubbleOffset(150f, 260f)))
+        assertNull(session.cancel())
     }
 
     @Test

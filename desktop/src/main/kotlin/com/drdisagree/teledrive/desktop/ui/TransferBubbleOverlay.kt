@@ -56,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -230,13 +231,30 @@ private fun BubbleShell(
         var bubbleOffset by remember {
             mutableStateOf(
                 DesktopTransferBubbleStore.loadPosition()
-                    ?.let { (x, y) -> BubbleOffset(x, y) }
+                    ?.let { (x, y) ->
+                        // Report 40, fix 1: never trust a persisted
+                        // position verbatim — a corrupt or wholly
+                        // off-window value heals to the default spot.
+                        TransferBubbleLayout.sanitizePosition(
+                            BubbleOffset(x, y), windowWidth, windowHeight
+                        )
+                    }
                     ?: TransferBubbleLayout.defaultOffset(windowWidth, windowHeight)
             )
         }
         val effectiveOffset = TransferBubbleLayout.clampOffset(
             bubbleOffset.x, bubbleOffset.y, windowWidth, windowHeight
         )
+        // Report 40, fix 2: state ≡ visible position. Whenever the
+        // clamp disagrees with the stored state (window shrank, healed
+        // position), the state snaps to the clamped value, so a later
+        // drag can never start from a phantom offset. The drag
+        // callbacks below only ever write clamped values, so outside a
+        // live drag this is the one place divergence is repaired.
+        if (bubbleOffset != effectiveOffset) {
+            bubbleOffset = effectiveOffset
+        }
+        val bubbleDrag = remember { BubbleDragSession() }
 
         when (bubbleVisibility(enabled = true, fullscreen = fullscreen, userHidden = userHidden)) {
             BubbleVisibility.GONE -> Unit
@@ -292,14 +310,42 @@ private fun BubbleShell(
                     summary = summary,
                     offset = effectiveOffset,
                     accent = accent,
+                    onDragStart = {
+                        // Reads the live state (the gesture callbacks
+                        // outlive any single composition), clamped to
+                        // the visible position the drag starts from.
+                        bubbleDrag.begin(
+                            TransferBubbleLayout.clampOffset(
+                                bubbleOffset.x, bubbleOffset.y,
+                                windowWidth, windowHeight
+                            )
+                        )
+                    },
                     onDragDelta = { dxDp, dyDp ->
-                        bubbleOffset = TransferBubbleLayout.clampOffset(
-                            bubbleOffset.x + dxDp, bubbleOffset.y + dyDp,
+                        // Report 40, fix 2: deltas accumulate from the
+                        // EFFECTIVE (visible) offset, not raw state.
+                        // The effective offset is derived here from the
+                        // live state: the gesture callbacks outlive any
+                        // single composition, so a captured
+                        // `effectiveOffset` local could be stale.
+                        val effective = TransferBubbleLayout.clampOffset(
+                            bubbleOffset.x, bubbleOffset.y,
+                            windowWidth, windowHeight
+                        )
+                        bubbleOffset = TransferBubbleLayout.movedBy(
+                            effective, dxDp, dyDp,
                             windowWidth, windowHeight
                         )
                     },
                     onDragFinished = {
-                        DesktopTransferBubbleStore.savePosition(bubbleOffset.x, bubbleOffset.y)
+                        bubbleDrag.complete(bubbleOffset)?.let { final ->
+                            DesktopTransferBubbleStore.savePosition(final.x, final.y)
+                        }
+                    },
+                    onDragCancelled = {
+                        // Report 40, fix 3: a cancelled drag restores
+                        // the pre-drag offset and persists nothing.
+                        bubbleDrag.cancel()?.let { restore -> bubbleOffset = restore }
                     },
                     onClick = { panelOpen = !panelOpen }
                 )
@@ -312,34 +358,61 @@ private fun BubbleShell(
  * Drag-vs-click for the bubble: movement past the touch slop is a drag
  * (the release then does NOT toggle the panel); anything less is a click.
  * Dragging persists the position only when the gesture ends.
+ *
+ * Report 40, fix 3 (phantom-drag hardening): only an *unclaimed* press
+ * may arm a drag — a press already consumed by another interaction (for
+ * example the click sequence that starts an import, during which this
+ * bubble first materializes) must not turn into a drag. And a drag
+ * whose pointer is cancelled, or whose tracked change vanishes without
+ * an up (pointer capture lost to an OS drag-and-drop session, a window
+ * drag, …), is a cancellation: the shell restores the pre-drag offset
+ * and nothing is persisted — never a silent mid-value abandonment.
  */
 private fun Modifier.bubbleGestures(
+    onDragStart: () -> Unit,
     onDragDelta: (Float, Float) -> Unit,
     onDragFinished: () -> Unit,
+    onDragCancelled: () -> Unit,
     onClick: () -> Unit
 ): Modifier = pointerInput(Unit) {
     awaitEachGesture {
-        val down = awaitFirstDown(requireUnconsumed = false)
+        val down = awaitFirstDown(requireUnconsumed = true)
         var dragged = false
         var upChange: PointerInputChange? = null
+        var cancelled = false
         while (true) {
             val event = awaitPointerEvent()
-            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+            if (event.type == PointerEventType.Cancel) {
+                cancelled = true
+                break
+            }
+            val change = event.changes.firstOrNull { it.id == down.id }
+            if (change == null) {
+                // The tracked pointer vanished without an up: a
+                // cancellation, never a release.
+                cancelled = true
+                break
+            }
             if (!change.pressed) {
                 upChange = change
                 break
             }
             val delta = change.position - change.previousPosition
-            if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+            if (!dragged &&
+                (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+            ) {
                 dragged = true
+                onDragStart()
             }
             if (dragged && delta != Offset.Zero) {
                 onDragDelta(delta.x / density, delta.y / density)
                 change.consume()
             }
         }
-        if (upChange != null) {
-            if (dragged) onDragFinished() else onClick()
+        when {
+            cancelled -> if (dragged) onDragCancelled()
+            upChange != null -> if (dragged) onDragFinished() else onClick()
+            else -> Unit
         }
     }
 }
@@ -358,8 +431,10 @@ private fun TransferBubble(
     summary: TransferBubbleSummary,
     offset: BubbleOffset,
     accent: WidgetAccent?,
+    onDragStart: () -> Unit,
     onDragDelta: (Float, Float) -> Unit,
     onDragFinished: () -> Unit,
+    onDragCancelled: () -> Unit,
     onClick: () -> Unit
 ) {
     val primary = accentColor(accent)
@@ -374,7 +449,9 @@ private fun TransferBubble(
                 )
             }
             .size(TransferBubbleLayout.BUBBLE_SIZE_DP.dp)
-            .bubbleGestures(onDragDelta, onDragFinished, onClick),
+            .bubbleGestures(
+                onDragStart, onDragDelta, onDragFinished, onDragCancelled, onClick
+            ),
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = 6.dp

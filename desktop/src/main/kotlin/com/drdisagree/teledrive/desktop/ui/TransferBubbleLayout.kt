@@ -86,6 +86,49 @@ object TransferBubbleLayout {
     )
 
     /**
+     * Read-time validation for a persisted bubble position (report 40,
+     * fix 1): a stored point that is non-finite or wholly outside the
+     * current window can only be corruption — or a window that moved
+     * entirely away from where the position was saved — so it falls
+     * back to the default spot instead of being trusted forever. A
+     * point at least partly inside the window (e.g. saved on a larger
+     * monitor, read back on a smaller one) passes through and is
+     * clamped into view as usual.
+     */
+    fun sanitizePosition(
+        raw: BubbleOffset,
+        windowWidth: Float,
+        windowHeight: Float
+    ): BubbleOffset {
+        if (!raw.x.isFinite() || !raw.y.isFinite()) {
+            return defaultOffset(windowWidth, windowHeight)
+        }
+        val partlyInside = raw.x + BUBBLE_SIZE_DP > 0f && raw.x < windowWidth &&
+            raw.y + BUBBLE_SIZE_DP > 0f && raw.y < windowHeight
+        return if (partlyInside) {
+            clampOffset(raw.x, raw.y, windowWidth, windowHeight)
+        } else {
+            defaultOffset(windowWidth, windowHeight)
+        }
+    }
+
+    /**
+     * One drag step (report 40, fix 2): the delta lands on the
+     * *effective* (visible, clamped) offset, never on raw stored state,
+     * so state and visible position cannot diverge — and a diverged
+     * state cannot appear to jump when the first drag starts.
+     */
+    fun movedBy(
+        effective: BubbleOffset,
+        dxDp: Float,
+        dyDp: Float,
+        windowWidth: Float,
+        windowHeight: Float
+    ): BubbleOffset = clampOffset(
+        effective.x + dxDp, effective.y + dyDp, windowWidth, windowHeight
+    )
+
+    /**
      * Where the expanded panel goes: right-aligned with the bubble, above
      * it when that fits (the bubble lives near the bottom by default),
      * otherwise below it; always clamped inside the window with
@@ -135,4 +178,44 @@ object TransferBubbleLayout {
     /** True when the pull-tab for this bubble position hugs the left edge. */
     fun tabOnLeftEdge(bubble: BubbleOffset, windowWidth: Float): Boolean =
         bubble.x + BUBBLE_SIZE_DP / 2f <= windowWidth / 2f
+}
+
+/**
+ * The bubble's drag lifecycle as pure state (report 40, fix 3), kept
+ * Compose-free so the gesture hardening is unit-testable: a drag begins
+ * by remembering the pre-drag offset; completing a drag yields the
+ * final offset exactly once (the shell persists it); cancelling a drag
+ * yields the pre-drag offset (the shell restores it) and persists
+ * nothing — a phantom or interrupted drag can never move the bubble
+ * permanently.
+ */
+class BubbleDragSession {
+
+    private var startOffset: BubbleOffset? = null
+
+    /** True between [begin] and the drag's completion or cancellation. */
+    val active: Boolean get() = startOffset != null
+
+    /** Arms a drag at [offset] — the visible, clamped position. */
+    fun begin(offset: BubbleOffset) {
+        startOffset = offset
+    }
+
+    /**
+     * The drag ended with a pointer-up. Returns the offset to persist,
+     * or null when no drag was in progress (nothing to persist).
+     */
+    fun complete(finalOffset: BubbleOffset): BubbleOffset? =
+        startOffset?.let {
+            startOffset = null
+            finalOffset
+        }
+
+    /**
+     * The drag was cancelled — pointer cancel, or the tracked change
+     * vanished without an up. Returns the pre-drag offset to restore,
+     * or null when no drag was in progress. Never persists.
+     */
+    fun cancel(): BubbleOffset? =
+        startOffset?.also { startOffset = null }
 }

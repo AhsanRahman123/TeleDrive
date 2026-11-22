@@ -91,6 +91,22 @@ class DesktopTransferBubbleStoreTest {
     }
 
     @Test
+    fun `non-finite stored positions are rejected`() = withTemporaryPreferences { node ->
+        node.putFloat("position_x_dp", Float.POSITIVE_INFINITY)
+        node.putFloat("position_y_dp", 100f)
+        node.flush()
+        assertNull(DesktopTransferBubbleStore.loadPosition(node))
+        node.putFloat("position_x_dp", 100f)
+        node.putFloat("position_y_dp", Float.NEGATIVE_INFINITY)
+        node.flush()
+        assertNull(DesktopTransferBubbleStore.loadPosition(node))
+        node.putFloat("position_x_dp", Float.NaN)
+        node.putFloat("position_y_dp", 100f)
+        node.flush()
+        assertNull(DesktopTransferBubbleStore.loadPosition(node))
+    }
+
+    @Test
     fun `a saved position round trips exactly`() = withTemporaryPreferences { node ->
         DesktopTransferBubbleStore.savePosition(node, 123.5f, 456.25f)
         val loaded = DesktopTransferBubbleStore.loadPosition(node)

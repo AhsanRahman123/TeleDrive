@@ -76,7 +76,9 @@ internal object DesktopTransferBubbleStore : TransferBubblePreference {
     internal fun loadPosition(source: Preferences): Pair<Float, Float>? = runCatching {
         val x = source.getFloat(KEY_POSITION_X, Float.NaN)
         val y = source.getFloat(KEY_POSITION_Y, Float.NaN)
-        if (x.isNaN() || y.isNaN()) null else x to y
+        // Report 40, fix 1: a non-finite stored value is corruption,
+        // never a position — reject it here so no caller can trust it.
+        if (!x.isFinite() || !y.isFinite()) null else x to y
     }.getOrNull()
 
     internal fun savePosition(target: Preferences, xDp: Float, yDp: Float) {
