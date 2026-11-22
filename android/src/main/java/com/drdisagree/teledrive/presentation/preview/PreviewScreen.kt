@@ -36,11 +36,13 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -50,6 +52,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
@@ -57,6 +62,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,9 +72,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -112,6 +121,8 @@ import com.drdisagree.teledrive.core.media.PipController
 import com.drdisagree.teledrive.core.media.TelegramDataSourceFactory
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
+import com.drdisagree.teledrive.domain.model.FileSortField
+import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
@@ -128,6 +139,9 @@ import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.ErrorState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.LoadingState
+import com.drdisagree.teledrive.presentation.components.SelectionCheckbox
+import com.drdisagree.teledrive.presentation.components.SortMenu
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.RenameDialog
 import com.drdisagree.teledrive.presentation.components.iconFor
 import com.drdisagree.teledrive.resources.Res
@@ -136,6 +150,11 @@ import com.drdisagree.teledrive.resources.common_back
 import com.drdisagree.teledrive.resources.common_collapse
 import com.drdisagree.teledrive.resources.common_download
 import com.drdisagree.teledrive.resources.files_copy_here
+import com.drdisagree.teledrive.resources.files_search
+import com.drdisagree.teledrive.resources.files_sort
+import com.drdisagree.teledrive.resources.picker_selected_count
+import com.drdisagree.teledrive.resources.preview_archive_download_selected
+import com.drdisagree.teledrive.resources.preview_archive_entry_saving
 import com.drdisagree.teledrive.resources.files_copy_to
 import com.drdisagree.teledrive.resources.files_move_here
 import com.drdisagree.teledrive.resources.files_move_to
@@ -198,6 +217,7 @@ fun PreviewScreen(
     val preferredSubtitleLanguage by
     viewModel.preferredSubtitleLanguage.collectAsStateWithLifecycle()
     val storedTextScale by viewModel.textScale.collectAsStateWithLifecycle()
+    val archiveSort by viewModel.archiveSort.collectAsStateWithLifecycle()
     val previewBackgroundMode by viewModel.previewBackgroundMode.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -391,7 +411,23 @@ fun PreviewScreen(
                     onChromeRequested = { visible -> chromeVisible = visible },
                     playerSession = playerSession,
                     onArchiveEntryDownload = { entryIndex -> viewModel.downloadArchiveEntry(file, entryIndex) },
-                    archiveEntryBusyIndex = state.archiveEntryBusyIndex
+                    onArchiveEntryTap = { entryIndex -> viewModel.onArchiveEntryTap(file, entryIndex) },
+                    onArchiveDownloadSelected = { entries, folders ->
+                        viewModel.downloadArchiveSelection(file, entries, folders)
+                    },
+                    archiveEntryBusyIndex = state.archiveEntryBusyIndex,
+                    archiveBatchProgress = state.archiveBatchProgress,
+                    archiveSortField = archiveSort.first,
+                    archiveSortDirection = archiveSort.second,
+                    onArchiveSortChange = viewModel::setArchiveSort
+                )
+            }
+
+            state.archivePreview?.let { preview ->
+                ArchiveEntryPreviewOverlay(
+                    preview = preview,
+                    dataSourceFactory = dataSourceFactory,
+                    onDismiss = viewModel::dismissArchivePreview
                 )
             }
 
@@ -665,7 +701,13 @@ private fun PreviewPage(
     storedTextScale: Float,
     onTextScaleChange: (Float) -> Unit,
     onArchiveEntryDownload: (Int) -> Unit,
-    archiveEntryBusyIndex: Int?
+    onArchiveEntryTap: (Int) -> Unit,
+    onArchiveDownloadSelected: (Set<Int>, Set<String>) -> Unit,
+    archiveEntryBusyIndex: Int?,
+    archiveBatchProgress: ArchiveBatchProgress?,
+    archiveSortField: FileSortField,
+    archiveSortDirection: SortDirection,
+    onArchiveSortChange: (FileSortField, SortDirection) -> Unit
 ) {
     // One state for the screen's life: re-creating it on save would leave the gesture writing to a
     // state nothing renders.
@@ -833,7 +875,13 @@ private fun PreviewPage(
         is PreviewContent.Archive -> ArchiveList(
             archive = content,
             busyEntryIndex = archiveEntryBusyIndex,
-            onEntryDownload = onArchiveEntryDownload
+            batchProgress = archiveBatchProgress,
+            onEntryTap = onArchiveEntryTap,
+            onEntryDownload = onArchiveEntryDownload,
+            onDownloadSelected = onArchiveDownloadSelected,
+            sortField = archiveSortField,
+            sortDirection = archiveSortDirection,
+            onSortChange = onArchiveSortChange
         )
         is PreviewContent.RequiresDownload -> EmptyState(
             icon = Icons.Filled.Download,
@@ -884,6 +932,82 @@ private fun PreviewPage(
 }
 
 /**
+ * An archive entry opened in place: the verified temp extraction shown with the app's own
+ * image viewer / audio player / text view. Read-only; closing deletes the temp file.
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun ArchiveEntryPreviewOverlay(
+    preview: ArchiveEntryPreview,
+    dataSourceFactory: TelegramDataSourceFactory,
+    onDismiss: () -> Unit
+) {
+    val overlaySession = remember(preview) { PlayerSession() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        when (preview) {
+            is ArchiveEntryPreview.Image -> ZoomableImage(
+                model = preview.path,
+                contentDescription = preview.name,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            is ArchiveEntryPreview.Audio -> MediaPlayer(
+                content = PreviewContent.LocalMedia(preview.path, isAudio = true),
+                title = preview.name,
+                fileId = "archive-entry-${preview.name}",
+                dataSourceFactory = dataSourceFactory,
+                isActivePage = true,
+                session = overlaySession
+            )
+
+            is ArchiveEntryPreview.Text -> Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(previewContentPadding())
+            ) {
+                Text(
+                    text = preview.text,
+                    style = MaterialTheme.typography.bodySmall
+                        .copy(fontFamily = FontFamily.Monospace)
+                        .copy(color = MaterialTheme.colorScheme.onSurface)
+                )
+            }
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(Res.string.common_back)
+                    )
+                }
+                Text(
+                    text = preview.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+/**
  * Previews draw edge to edge under the toolbar and system bars, so scrollable ones pad themselves.
  */
 @Composable
@@ -896,132 +1020,399 @@ private fun previewContentPadding(): PaddingValues =
 private fun ArchiveList(
     archive: PreviewContent.Archive,
     busyEntryIndex: Int? = null,
-    onEntryDownload: (Int) -> Unit = {}
+    batchProgress: ArchiveBatchProgress? = null,
+    onEntryTap: (Int) -> Unit = {},
+    onEntryDownload: (Int) -> Unit = {},
+    onDownloadSelected: (Set<Int>, Set<String>) -> Unit = { _, _ -> },
+    sortField: FileSortField = FileSortField.NAME,
+    sortDirection: SortDirection = SortDirection.ASCENDING,
+    onSortChange: (FileSortField, SortDirection) -> Unit = { _, _ -> }
 ) {
-    val root = remember(archive) { buildArchiveTree(archive.entries) }
+    var query by remember(archive) { mutableStateOf("") }
     var expanded by remember(archive) { mutableStateOf(emptySet<String>()) }
-    val rows = remember(root, expanded) { flattenArchive(root, expanded) }
+    var selectedEntries by remember(archive) { mutableStateOf(emptySet<Int>()) }
+    var selectedFolders by remember(archive) { mutableStateOf(emptySet<String>()) }
+    var rangeBaseEntries by remember(archive) { mutableStateOf<Set<Int>?>(null) }
+    var rangeBaseFolders by remember(archive) { mutableStateOf<Set<String>?>(null) }
+    var showSortMenu by remember(archive) { mutableStateOf(false) }
+
+    val filtering = query.isNotBlank()
+    // Filtering is purely local over the loaded listing; indices always refer to the
+    // FULL listing, so a row's identity survives filtering and re-sorting.
+    val visibleIndices = remember(archive, query) {
+        if (filtering) archiveFilterIndices(archive.entries, query) else archive.entries.indices.toSet()
+    }
+    val root = remember(archive, visibleIndices) {
+        buildArchiveTree(
+            archive.entries.mapIndexedNotNull { index, entry ->
+                if (index in visibleIndices) IndexedArchiveEntry(index, entry) else null
+            }
+        )
+    }
+    // Mirrors SearchViewModel: when the results change, the selection is pruned to what
+    // still matches — a selection cannot outlive the result set it was made from.
+    LaunchedEffect(query) {
+        if (filtering) {
+            selectedEntries = pruneArchiveSelection(selectedEntries, visibleIndices)
+            selectedFolders = selectedFolders intersect allFolderPaths(root)
+        }
+    }
+    val effectiveExpanded = if (filtering) allFolderPaths(root) else expanded
+    val rows = remember(root, effectiveExpanded, sortField, sortDirection) {
+        flattenArchive(root, effectiveExpanded, sortField, sortDirection)
+    }
     val files = remember(archive) { archive.entries.filterNot { it.isDirectory } }
-    val folderCount = remember(root) { countFolders(root) }
+    val folderCount = remember(archive) { countFolders(buildArchiveTree(archive.entries)) }
     val originalBytes = remember(files) { files.sumOf { it.sizeBytes } }
     val storedBytes = remember(files) { files.sumOf { it.compressedBytes } }
     val saved = remember(originalBytes, storedBytes) {
         if (originalBytes <= 0) 0 else (100 - storedBytes * 100 / originalBytes).toInt()
     }
+    val selectionMode = selectedEntries.isNotEmpty() || selectedFolders.isNotEmpty()
+    val busy = busyEntryIndex != null
+    val listState = rememberLazyListState()
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = previewContentPadding(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        item {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = stringResource(
-                            Res.string.preview_archive_format_title,
-                            archive.format
-                        ),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = buildString {
-                            append(
-                                pluralStringResource(
-                                    Res.plurals.file_count,
-                                    files.size,
-                                    files.size
-                                )
+    // The main browser's drag selection, on the shared helper: long-press paints a range
+    // from a snapshot taken at drag start (base ± range), with edge auto-scroll.
+    // LazyColumn item 0 is the header card and the last item is the hint, so list index
+    // i maps to rows[i - 1].
+    val dragSelect = rememberDragSelect(
+        listState = listState,
+        onStart = {
+            rangeBaseEntries = selectedEntries
+            rangeBaseFolders = selectedFolders
+        },
+        isSelected = { listIndex ->
+            val row = rows.getOrNull(listIndex - 1) ?: return@rememberDragSelect false
+            if (row.node.isDirectory) {
+                row.node.path in selectedFolders
+            } else {
+                row.node.entryIndex?.let { it in selectedEntries } == true
+            }
+        },
+        onRange = { range, shouldSelect ->
+            val baseE = rangeBaseEntries ?: selectedEntries
+            val baseF = rangeBaseFolders ?: selectedFolders
+            val entryIdx = mutableListOf<Int>()
+            val folderPaths = mutableListOf<String>()
+            for (listIndex in range) {
+                val row = rows.getOrNull(listIndex - 1) ?: continue
+                if (row.node.isDirectory) {
+                    folderPaths += row.node.path
+                } else {
+                    row.node.entryIndex?.let { entryIdx += it }
+                }
+            }
+            selectedEntries = applyArchiveRangeSelection(baseE, entryIdx, shouldSelect)
+            selectedFolders = if (shouldSelect) {
+                baseF + folderPaths
+            } else {
+                baseF - folderPaths.toSet()
+            }
+        },
+        onEnd = {
+            rangeBaseEntries = null
+            rangeBaseFolders = null
+        },
+        resolveNearestVisibleItem = true
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().then(if (archive.remote) dragSelect else Modifier),
+            contentPadding = previewContentPadding(),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = stringResource(
+                                    Res.string.preview_archive_format_title,
+                                    archive.format
+                                ),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
                             )
-                            if (folderCount > 0) {
-                                append(", ")
-                                append(
-                                    pluralStringResource(
-                                        Res.plurals.folder_count,
-                                        folderCount,
-                                        folderCount
+                            Box {
+                                IconButton(onClick = { showSortMenu = true }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Sort,
+                                        contentDescription = stringResource(Res.string.files_sort)
                                     )
+                                }
+                                SortMenu(
+                                    expanded = showSortMenu,
+                                    current = sortField,
+                                    direction = sortDirection,
+                                    onDismiss = { showSortMenu = false },
+                                    onSelect = { field, direction ->
+                                        showSortMenu = false
+                                        onSortChange(field, direction)
+                                    },
+                                    fields = ARCHIVE_SORT_FIELDS
                                 )
                             }
-                        },
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                    Text(
-                        text = if (saved > 0) {
-                            stringResource(
-                                Res.string.preview_archive_packed_summary_saved,
-                                Formatters.bytes(storedBytes),
-                                Formatters.bytes(originalBytes),
-                                saved
+                        }
+                        Text(
+                            text = buildString {
+                                append(
+                                    pluralStringResource(
+                                        Res.plurals.file_count,
+                                        files.size,
+                                        files.size
+                                    )
+                                )
+                                if (folderCount > 0) {
+                                    append(", ")
+                                    append(
+                                        pluralStringResource(
+                                            Res.plurals.folder_count,
+                                            folderCount,
+                                            folderCount
+                                        )
+                                    )
+                                }
+                            },
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Text(
+                            text = if (saved > 0) {
+                                stringResource(
+                                    Res.string.preview_archive_packed_summary_saved,
+                                    Formatters.bytes(storedBytes),
+                                    Formatters.bytes(originalBytes),
+                                    saved
+                                )
+                            } else {
+                                stringResource(
+                                    Res.string.preview_archive_packed_summary,
+                                    Formatters.bytes(storedBytes),
+                                    Formatters.bytes(originalBytes)
+                                )
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            singleLine = true,
+                            placeholder = { Text(stringResource(Res.string.files_search)) },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Search, contentDescription = null)
+                            },
+                            trailingIcon = if (filtering) {
+                                {
+                                    IconButton(onClick = { query = "" }) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = stringResource(Res.string.common_cancel)
+                                        )
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp)
+                        )
+                        if (batchProgress != null) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    if (batchProgress.total > 0) {
+                                        batchProgress.done.toFloat() / batchProgress.total
+                                    } else {
+                                        0f
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp)
                             )
+                            Text(
+                                text = stringResource(
+                                    Res.string.preview_archive_entry_saving,
+                                    "${batchProgress.done}/${batchProgress.total}"
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            items(
+                rows,
+                key = { row -> row.node.entryIndex?.let { "entry-$it" } ?: row.node.path }
+            ) { row ->
+                val entryIndex = row.node.entryIndex
+                val selected = if (row.node.isDirectory) {
+                    row.node.path in selectedFolders
+                } else {
+                    entryIndex != null && entryIndex in selectedEntries
+                }
+                ArchiveRow(
+                    row = row,
+                    canDownload = archive.remote && !row.node.isDirectory,
+                    isBusy = busyEntryIndex != null && busyEntryIndex == entryIndex,
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    onFileClick = {
+                        if (busy) return@ArchiveRow
+                        if (selectionMode) {
+                            entryIndex?.let {
+                                selectedEntries = toggleArchiveSelection(selectedEntries, it)
+                            }
                         } else {
-                            stringResource(
-                                Res.string.preview_archive_packed_summary,
-                                Formatters.bytes(storedBytes),
-                                Formatters.bytes(originalBytes)
-                            )
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp)
+                            entryIndex?.let(onEntryTap)
+                        }
+                    },
+                    onDownloadClick = {
+                        if (!busy) entryIndex?.let(onEntryDownload)
+                    },
+                    onToggleSelection = {
+                        if (row.node.isDirectory) {
+                            selectedFolders = if (row.node.path in selectedFolders) {
+                                selectedFolders - row.node.path
+                            } else {
+                                selectedFolders + row.node.path
+                            }
+                        } else {
+                            entryIndex?.let {
+                                selectedEntries = toggleArchiveSelection(selectedEntries, it)
+                            }
+                        }
+                    },
+                    onToggle = {
+                        if (selectionMode) {
+                            selectedFolders = if (row.node.path in selectedFolders) {
+                                selectedFolders - row.node.path
+                            } else {
+                                selectedFolders + row.node.path
+                            }
+                        } else {
+                            expanded = if (row.node.path in expanded) {
+                                expanded - row.node.path
+                            } else {
+                                expanded + row.node.path
+                            }
+                        }
+                    },
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = tween(ROW_FADE_MS),
+                        fadeOutSpec = tween(ROW_FADE_MS),
+                        placementSpec = spring(
+                            stiffness = Spring.StiffnessMediumLow,
+                            visibilityThreshold = IntOffset.VisibilityThreshold
+                        )
                     )
+                )
+            }
+            item {
+                Text(
+                    text = stringResource(
+                        if (archive.remote) {
+                            Res.string.preview_archive_remote_hint
+                        } else {
+                            Res.string.preview_extraction_supported_yet_download
+                        }
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 96.dp)
+                )
+            }
+        }
+
+        // The touch selection action bar, mirroring the main browser's: a floating
+        // surface above the system navigation bar. The zip viewer is read-only, so
+        // Download selected is its only action.
+        if (selectionMode) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 8.dp),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 4.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            selectedEntries = emptySet()
+                            selectedFolders = emptySet()
+                        }
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = stringResource(Res.string.common_cancel)
+                        )
+                    }
+                    Text(
+                        text = stringResource(
+                            Res.string.picker_selected_count,
+                            selectedEntries.size + selectedFolders.size
+                        ),
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        enabled = !busy,
+                        onClick = {
+                            val entries = selectedEntries
+                            val folders = selectedFolders
+                            selectedEntries = emptySet()
+                            selectedFolders = emptySet()
+                            onDownloadSelected(entries, folders)
+                        }
+                    ) {
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = stringResource(Res.string.preview_archive_download_selected),
+                            modifier = Modifier.padding(start = 6.dp)
+                        )
+                    }
                 }
             }
         }
-        items(
-            rows,
-            key = { row -> row.node.entryIndex?.let { "entry-$it" } ?: row.node.path }
-        ) { row ->
-            ArchiveRow(
-                row = row,
-                canDownload = archive.remote && !row.node.isDirectory,
-                isBusy = busyEntryIndex != null && busyEntryIndex == row.node.entryIndex,
-                onFileClick = {
-                    row.node.entryIndex?.let(onEntryDownload)
-                },
-                onToggle = {
-                    expanded = if (row.node.path in expanded) {
-                        expanded - row.node.path
-                    } else {
-                        expanded + row.node.path
-                    }
-                },
-                modifier = Modifier.animateItem(
-                    fadeInSpec = tween(ROW_FADE_MS),
-                    fadeOutSpec = tween(ROW_FADE_MS),
-                    placementSpec = spring(
-                        stiffness = Spring.StiffnessMediumLow,
-                        visibilityThreshold = IntOffset.VisibilityThreshold
-                    )
-                )
-            )
-        }
-        item {
-            Text(
-                text = stringResource(
-                    if (archive.remote) {
-                        Res.string.preview_archive_remote_hint
-                    } else {
-                        Res.string.preview_extraction_supported_yet_download
-                    }
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 16.dp)
-            )
-        }
     }
 }
+
+/** The main browser's sort keys that archive entries carry metadata for. */
+private val ARCHIVE_SORT_FIELDS = listOf(
+    FileSortField.NAME,
+    FileSortField.SIZE,
+    FileSortField.DATE_MODIFIED,
+    FileSortField.TYPE
+)
 
 @Composable
 private fun ArchiveRow(
@@ -1030,7 +1421,11 @@ private fun ArchiveRow(
     modifier: Modifier = Modifier,
     canDownload: Boolean = false,
     isBusy: Boolean = false,
-    onFileClick: () -> Unit = {}
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onFileClick: () -> Unit = {},
+    onDownloadClick: () -> Unit = {},
+    onToggleSelection: () -> Unit = {}
 ) {
     val node = row.node
     val icon = if (node.isDirectory) {
@@ -1050,7 +1445,13 @@ private fun ArchiveRow(
             .fillMaxWidth()
             .padding(start = INDENT_STEP * row.depth)
             .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                }
+            )
             .then(
                 when {
                     node.isDirectory -> Modifier.clickable(role = Role.Button) { onToggle() }
@@ -1060,6 +1461,13 @@ private fun ArchiveRow(
             )
             .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
+        if (selectionMode || selected) {
+            SelectionCheckbox(
+                checked = selected,
+                onClick = onToggleSelection,
+                modifier = Modifier.padding(end = 4.dp)
+            )
+        }
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -1126,6 +1534,14 @@ private fun ArchiveRow(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (canDownload && !selectionMode) {
+                IconButton(onClick = onDownloadClick) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = stringResource(Res.string.common_download)
+                    )
+                }
+            }
         }
     }
 }

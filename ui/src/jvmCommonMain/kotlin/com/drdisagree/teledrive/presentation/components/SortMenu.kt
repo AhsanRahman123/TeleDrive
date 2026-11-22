@@ -25,7 +25,7 @@ import com.drdisagree.teledrive.resources.files_sort_type
 import org.jetbrains.compose.resources.stringResource
 
 @Composable
-internal fun SortMenu(
+fun SortMenu(
     expanded: Boolean,
     current: FileSortField,
     direction: SortDirection,
