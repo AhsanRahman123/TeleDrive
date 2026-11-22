@@ -1043,7 +1043,7 @@ private fun ArchiveList(
         if (filtering) archiveFilterIndices(archive.entries, query) else archive.entries.indices.toSet()
     }
     val root = remember(archive, visibleIndices) {
-        buildArchiveTree(
+        buildArchiveTreeIndexed(
             archive.entries.mapIndexedNotNull { index, entry ->
                 if (index in visibleIndices) IndexedArchiveEntry(index, entry) else null
             }

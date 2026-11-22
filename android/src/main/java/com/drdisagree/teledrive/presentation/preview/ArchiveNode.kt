@@ -29,9 +29,9 @@ private const val SEPARATOR = "/"
  * entries with the same name render as two rows and each tap can download its own entry.
  */
 internal fun buildArchiveTree(entries: List<ArchiveEntry>): ArchiveNode =
-    buildArchiveTree(entries.mapIndexed { index, entry -> IndexedArchiveEntry(index, entry) })
+    buildArchiveTreeIndexed(entries.mapIndexed { index, entry -> IndexedArchiveEntry(index, entry) })
 
-internal fun buildArchiveTree(indexed: List<IndexedArchiveEntry>): ArchiveNode {
+internal fun buildArchiveTreeIndexed(indexed: List<IndexedArchiveEntry>): ArchiveNode {
     val root = ArchiveNode(path = "", name = "", isDirectory = true)
     indexed.forEach { (entryIndex, entry) ->
         val segments = entry.name.split(SEPARATOR).filter { it.isNotEmpty() }
