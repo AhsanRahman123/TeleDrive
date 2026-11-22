@@ -56,7 +56,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -363,10 +362,13 @@ private fun BubbleShell(
  * may arm a drag — a press already consumed by another interaction (for
  * example the click sequence that starts an import, during which this
  * bubble first materializes) must not turn into a drag. And a drag
- * whose pointer is cancelled, or whose tracked change vanishes without
- * an up (pointer capture lost to an OS drag-and-drop session, a window
- * drag, …), is a cancellation: the shell restores the pre-drag offset
- * and nothing is persisted — never a silent mid-value abandonment.
+ * whose tracked change vanishes without an up (pointer capture lost to
+ * an OS drag-and-drop session, a window drag, …) is a cancellation:
+ * the shell restores the pre-drag offset and nothing is persisted —
+ * never a silent mid-value abandonment. (This Compose version has no
+ * cancel event type; on desktop a lost pointer manifests exactly as
+ * the change disappearing, and a disposed node's gesture coroutine
+ * dies without firing any callback — also persist-free.)
  */
 private fun Modifier.bubbleGestures(
     onDragStart: () -> Unit,
@@ -382,10 +384,6 @@ private fun Modifier.bubbleGestures(
         var cancelled = false
         while (true) {
             val event = awaitPointerEvent()
-            if (event.type == PointerEventType.Cancel) {
-                cancelled = true
-                break
-            }
             val change = event.changes.firstOrNull { it.id == down.id }
             if (change == null) {
                 // The tracked pointer vanished without an up: a
