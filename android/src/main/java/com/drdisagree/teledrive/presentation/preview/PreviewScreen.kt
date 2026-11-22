@@ -57,6 +57,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -156,6 +157,7 @@ import com.drdisagree.teledrive.resources.preview_archive_packed_summary_saved
 import com.drdisagree.teledrive.resources.preview_chevron
 import com.drdisagree.teledrive.resources.preview_confirm_trash_file_message
 import com.drdisagree.teledrive.resources.preview_download_view
+import com.drdisagree.teledrive.resources.preview_archive_remote_hint
 import com.drdisagree.teledrive.resources.preview_extraction_supported_yet_download
 import com.drdisagree.teledrive.resources.preview_file_info
 import com.drdisagree.teledrive.resources.preview_move_to_trash
@@ -376,7 +378,9 @@ fun PreviewScreen(
                     onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
                     onToggleChrome = { chromeVisible = !chromeVisible },
                     onChromeRequested = { visible -> chromeVisible = visible },
-                    playerSession = playerSession
+                    playerSession = playerSession,
+                    onArchiveEntryDownload = { entry -> viewModel.downloadArchiveEntry(file, entry) },
+                    archiveEntryBusyName = state.archiveEntryBusyName
                 )
             }
 
@@ -648,7 +652,9 @@ private fun PreviewPage(
     loadLinkMetadata: suspend (String) -> LinkMetadata?,
     playerSession: PlayerSession,
     storedTextScale: Float,
-    onTextScaleChange: (Float) -> Unit
+    onTextScaleChange: (Float) -> Unit,
+    onArchiveEntryDownload: (ArchiveEntry) -> Unit,
+    archiveEntryBusyName: String?
 ) {
     // One state for the screen's life: re-creating it on save would leave the gesture writing to a
     // state nothing renders.
@@ -813,7 +819,11 @@ private fun PreviewPage(
             }
         }
 
-        is PreviewContent.Archive -> ArchiveList(content)
+        is PreviewContent.Archive -> ArchiveList(
+            archive = content,
+            busyEntryName = archiveEntryBusyName,
+            onEntryDownload = onArchiveEntryDownload
+        )
         is PreviewContent.RequiresDownload -> EmptyState(
             icon = Icons.Filled.Download,
             title = stringResource(Res.string.preview_download_view),
@@ -856,7 +866,9 @@ private fun PreviewPage(
             )
         }
 
-        is PreviewContent.Failed -> ErrorState(message = stringResource(content.messageRes))
+        is PreviewContent.Failed -> ErrorState(
+            message = content.messageText ?: stringResource(content.messageRes)
+        )
     }
 }
 
@@ -870,8 +882,13 @@ private fun previewContentPadding(): PaddingValues =
         .add(horizontal = 16.dp, top = PreviewTopBarHeight + 8.dp, bottom = 16.dp)
 
 @Composable
-private fun ArchiveList(archive: PreviewContent.Archive) {
+private fun ArchiveList(
+    archive: PreviewContent.Archive,
+    busyEntryName: String? = null,
+    onEntryDownload: (ArchiveEntry) -> Unit = {}
+) {
     val root = remember(archive) { buildArchiveTree(archive.entries) }
+    val entriesByPath = remember(archive) { archive.entries.associateBy { it.name } }
     var expanded by remember(archive) { mutableStateOf(emptySet<String>()) }
     val rows = remember(root, expanded) { flattenArchive(root, expanded) }
     val files = remember(archive) { archive.entries.filterNot { it.isDirectory } }
@@ -954,6 +971,11 @@ private fun ArchiveList(archive: PreviewContent.Archive) {
         items(rows, key = { it.node.path }) { row ->
             ArchiveRow(
                 row = row,
+                canDownload = archive.remote && !row.node.isDirectory,
+                isBusy = busyEntryName != null && busyEntryName == row.node.path,
+                onFileClick = {
+                    entriesByPath[row.node.path]?.let(onEntryDownload)
+                },
                 onToggle = {
                     expanded = if (row.node.path in expanded) {
                         expanded - row.node.path
@@ -973,7 +995,13 @@ private fun ArchiveList(archive: PreviewContent.Archive) {
         }
         item {
             Text(
-                text = stringResource(Res.string.preview_extraction_supported_yet_download),
+                text = stringResource(
+                    if (archive.remote) {
+                        Res.string.preview_archive_remote_hint
+                    } else {
+                        Res.string.preview_extraction_supported_yet_download
+                    }
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 16.dp)
@@ -986,7 +1014,10 @@ private fun ArchiveList(archive: PreviewContent.Archive) {
 private fun ArchiveRow(
     row: ArchiveRowState,
     onToggle: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    canDownload: Boolean = false,
+    isBusy: Boolean = false,
+    onFileClick: () -> Unit = {}
 ) {
     val node = row.node
     val icon = if (node.isDirectory) {
@@ -1008,10 +1039,10 @@ private fun ArchiveRow(
             .clip(MaterialTheme.shapes.large)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .then(
-                if (node.isDirectory) {
-                    Modifier.clickable(role = Role.Button) { onToggle() }
-                } else {
-                    Modifier
+                when {
+                    node.isDirectory -> Modifier.clickable(role = Role.Button) { onToggle() }
+                    canDownload -> Modifier.clickable(role = Role.Button) { onFileClick() }
+                    else -> Modifier
                 }
             )
             .padding(horizontal = 14.dp, vertical = 12.dp)
@@ -1074,6 +1105,8 @@ private fun ArchiveRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.rotate(chevronRotation)
             )
+        } else if (isBusy) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
         } else {
             Text(
                 text = Formatters.bytes(node.compressedBytes),

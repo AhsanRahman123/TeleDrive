@@ -12,6 +12,9 @@ import com.drdisagree.teledrive.resources.message_moved_to_trash
 import com.drdisagree.teledrive.resources.message_renamed
 import com.drdisagree.teledrive.resources.message_upload_queued
 import com.drdisagree.teledrive.resources.preview_added_favorites
+import com.drdisagree.teledrive.resources.preview_archive_entry_saved
+import com.drdisagree.teledrive.resources.preview_archive_failed
+import com.drdisagree.teledrive.resources.preview_archive_local_only
 import com.drdisagree.teledrive.resources.preview_archived
 import com.drdisagree.teledrive.resources.preview_hidden
 import com.drdisagree.teledrive.resources.preview_local_copy_removed
@@ -20,6 +23,8 @@ import com.drdisagree.teledrive.resources.preview_removed_favorites
 import com.drdisagree.teledrive.resources.preview_unarchived
 import com.drdisagree.teledrive.resources.preview_unhidden
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
+import com.drdisagree.teledrive.core.archive.ArchiveException
+import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.DriveFile
@@ -50,6 +55,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -61,7 +67,8 @@ class PreviewViewModel(
     private val trashRepository: TrashRepository,
     private val transferRepository: TransferRepository,
     private val settingsRepository: SettingsRepository,
-    private val contentResolver: PreviewContentResolver
+    private val contentResolver: PreviewContentResolver,
+    private val remoteArchiveService: RemoteArchiveService
 ) : ViewModel() {
 
     private val route: Route.Preview = savedStateHandle.toRoute()
@@ -208,6 +215,13 @@ class PreviewViewModel(
                         contentResolver.resolve(latest)
                     }
                 }
+                .onEach { content ->
+                    if (content is PreviewContent.Archive && content.remote) {
+                        _uiState.update {
+                            it.copy(archiveListings = it.archiveListings + (file.id to content.entries))
+                        }
+                    }
+                }
                 .stateIn(
                     viewModelScope,
                     SharingStarted.WhileSubscribed(5_000),
@@ -229,6 +243,40 @@ class PreviewViewModel(
             when (val result = transferRepository.enqueueDownload(file.id)) {
                 is AppResult.Success -> _messages.tryEmit(UiText.Resource(Res.string.message_download_queued))
                 is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+            }
+        }
+    }
+
+    /**
+     * Downloads just [entry] out of a remotely listed ZIP, saved to Downloads like a normal
+     * download. A listing that came from a local copy has no remote source to extract from, so it
+     * gets a clear message instead of a failure.
+     */
+    fun downloadArchiveEntry(file: DriveFile, entry: ArchiveEntry) {
+        if (entry.isDirectory) return
+        if (_uiState.value.archiveEntryBusyName != null) return
+        val listing = _uiState.value.archiveListings[file.id]
+        if (listing == null) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
+            return
+        }
+        val index = listing.indexOf(entry).coerceAtLeast(0)
+        val occurrence = listing.subList(0, index).count { it.name == entry.name }
+        val displayName = entry.name.substringAfterLast('/').substringAfterLast('\\')
+            .ifBlank { entry.name }
+        viewModelScope.launch {
+            _uiState.update { it.copy(archiveEntryBusyName = entry.name) }
+            try {
+                remoteArchiveService.extractEntry(file, entry.name, occurrence)
+                _messages.tryEmit(
+                    UiText.Resource(Res.string.preview_archive_entry_saved, displayName)
+                )
+            } catch (failure: ArchiveException) {
+                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
+            } catch (failure: Exception) {
+                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+            } finally {
+                _uiState.update { it.copy(archiveEntryBusyName = null) }
             }
         }
     }
