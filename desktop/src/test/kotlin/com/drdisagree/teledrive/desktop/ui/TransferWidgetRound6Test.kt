@@ -4,7 +4,9 @@ import androidx.compose.ui.graphics.Color
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.telegram.TelegramCredentials
 import com.drdisagree.teledrive.domain.model.TransferSection
+import com.drdisagree.teledrive.domain.model.TransferRemainingWork
 import com.drdisagree.teledrive.domain.model.TransferTask
+import com.drdisagree.teledrive.domain.model.TransferWorkTotals
 import com.drdisagree.teledrive.domain.model.UserPreferences
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
@@ -100,6 +102,10 @@ class TransferWidgetRound6Test {
         override fun observeSectionCount(section: TransferSection): Flow<Int> = flowOf(0)
 
         override fun observeActiveCount(): Flow<Int> = flowOf(0)
+
+        override fun observeCompletedTotals(incoming: Boolean) = flowOf(TransferWorkTotals())
+
+        override fun observeRemainingWork(incoming: Boolean) = flowOf(TransferRemainingWork())
 
         override fun observeActiveForFile(fileId: String): Flow<TransferTask?> = flowOf(null)
 
