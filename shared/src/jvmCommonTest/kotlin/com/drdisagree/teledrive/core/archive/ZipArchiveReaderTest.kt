@@ -218,6 +218,42 @@ class ZipArchiveReaderTest {
         }
     }
 
+    /** Serves at most [maxPerRead] bytes per read, like a ranged Telegram source can. */
+    private class ShortReadSource(
+        private val bytes: ByteArray,
+        private val maxPerRead: Int
+    ) : MediaByteSource {
+        override suspend fun size(): Long = bytes.size.toLong()
+        override suspend fun read(position: Long, count: Int): ByteArray {
+            if (position >= bytes.size) return ByteArray(0)
+            val end = minOf(position + minOf(count, maxPerRead), bytes.size.toLong()).toInt()
+            return bytes.copyOfRange(position.toInt(), end)
+        }
+        override fun close() = Unit
+    }
+
+    @Test(timeout = 15_000)
+    fun `deflate stream ending before the recorded compressed size is corrupt, not a hang`() =
+        runBlocking {
+            // The central directory overstates the compressed size by 50 bytes. With short
+            // ranged reads the deflate stream finishes while recorded bytes remain: that must be
+            // a Corrupt error. Completing at all (inside the test timeout) proves there is no
+            // inflater spin.
+            val data = ByteArray(400) { (it % 23).toByte() }
+            val bytes = zipOf(listOf(Triple("entry.bin", data, ZipEntry.DEFLATED)))
+            val central = findSig(bytes, 0x02014b50)
+            val recorded = (bytes[central + 20].toLong() and 0xFF) or
+                ((bytes[central + 21].toLong() and 0xFF) shl 8) or
+                ((bytes[central + 22].toLong() and 0xFF) shl 16) or
+                ((bytes[central + 23].toLong() and 0xFF) shl 24)
+            patchU32(bytes, central + 20, recorded + 50)
+            val archive = ZipArchiveReader(ShortReadSource(bytes, maxPerRead = 64))
+            val entry = archive.entries().single()
+            expectArchiveError(ArchiveErrorKind.CORRUPT) {
+                runBlocking { archive.extract(entry, ByteArrayOutputStream()) }
+            }
+        }
+
     @Test
     fun `listing a zip with a large entry reads only a small fraction`() = runBlocking {
         val large = ByteArray(2 * 1024 * 1024) { (it % 253).toByte() }
@@ -326,6 +362,10 @@ class ZipArchiveReaderTest {
         }
         fail("signature not found")
         return -1
+    }
+
+    private fun patchU32(bytes: ByteArray, at: Int, value: Long) {
+        for (i in 0 until 4) bytes[at + i] = ((value shr (8 * i)) and 0xFF).toByte()
     }
 
     private fun patchU16(bytes: ByteArray, at: Int, value: Int) {

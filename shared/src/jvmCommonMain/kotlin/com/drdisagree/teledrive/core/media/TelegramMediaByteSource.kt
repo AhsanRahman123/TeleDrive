@@ -12,7 +12,13 @@ class TelegramMediaByteSource(
     private val telegramClient: TelegramClient,
     private val remoteFileId: String,
     private val chatId: Long? = null,
-    private val messageId: Long? = null
+    private val messageId: Long? = null,
+    /**
+     * Streaming callers prime an unbounded download from byte 0 on first use. Ranged readers
+     * (the ZIP archive service) must NOT: they pass false and let [awaitAvailable] request the
+     * exact offset each read needs, so no whole-file download is ever started for them.
+     */
+    private val primeFromStart: Boolean = true
 ) : MediaByteSource {
 
     private var fileId: Int = 0
@@ -45,7 +51,7 @@ class TelegramMediaByteSource(
         val info = telegramClient.resolveFile(remoteFileId, chatId, messageId)
         fileId = info.fileId
         totalSize = info.sizeBytes
-        if (!info.isDownloadingCompleted) {
+        if (!info.isDownloadingCompleted && primeFromStart) {
             telegramClient.requestFileRange(fileId, 0, 0)
         }
     }

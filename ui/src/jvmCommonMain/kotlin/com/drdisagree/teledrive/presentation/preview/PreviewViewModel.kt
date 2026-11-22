@@ -41,6 +41,7 @@ import com.drdisagree.teledrive.domain.repository.TrashRepository
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.toUiText
 import com.drdisagree.teledrive.presentation.navigation.Route
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -261,7 +262,9 @@ class PreviewViewModel(
             return
         }
         val index = listing.indexOf(entry).coerceAtLeast(0)
-        val occurrence = listing.subList(0, index).count { it.name == entry.name }
+        // Occurrence counts only non-directory entries with this name - the same rule
+        // RemoteArchiveService uses to pick the entry, so both sides agree.
+        val occurrence = listing.subList(0, index).count { it.name == entry.name && !it.isDirectory }
         val displayName = entry.name.substringAfterLast('/').substringAfterLast('\\')
             .ifBlank { entry.name }
         viewModelScope.launch {
@@ -271,6 +274,10 @@ class PreviewViewModel(
                 _messages.tryEmit(
                     UiText.Resource(Res.string.preview_archive_entry_saved, displayName)
                 )
+            } catch (failure: CancellationException) {
+                // The finally block clears the busy state, so a cancelled download cannot wedge
+                // later ones; cancellation itself must keep propagating.
+                throw failure
             } catch (failure: ArchiveException) {
                 _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
             } catch (failure: Exception) {

@@ -132,7 +132,26 @@ class ZipArchiveReader(
             var position = dataStart
             var remaining = entry.compressedBytes
             val outBuffer = ByteArray(OUTPUT_BUFFER_SIZE)
+
+            fun emit(count: Int) {
+                out.write(outBuffer, 0, count)
+                crc.update(outBuffer, 0, count)
+                produced += count
+                if (produced > entry.sizeBytes) {
+                    throw corrupt("\"${entry.name}\" expands beyond its recorded size.")
+                }
+            }
+
+            // Bounded decoding: every loop below either consumes input, produces output, reaches
+            // the end of the deflate stream, or throws. A corrupt stream can never spin it.
             while (remaining > 0) {
+                if (inflater != null && inflater.finished()) {
+                    // The deflate stream ended before the recorded compressed size was consumed:
+                    // the central directory and the data disagree, so the entry is corrupt.
+                    throw corrupt(
+                        "The compressed data of \"${entry.name}\" ended before its recorded size was used."
+                    )
+                }
                 val want = minOf(CHUNK_BYTES.toLong(), remaining).toInt()
                 val chunk = source.read(position, want)
                 if (chunk.isEmpty()) {
@@ -147,21 +166,17 @@ class ZipArchiveReader(
                     produced += consumed
                 } else {
                     inflater.setInput(chunk, 0, consumed)
-                    while (!inflater.needsInput()) {
+                    while (!inflater.needsInput() && !inflater.finished()) {
                         val count = inflater.inflate(outBuffer)
-                        if (count > 0) {
-                            out.write(outBuffer, 0, count)
-                            crc.update(outBuffer, 0, count)
-                            produced += count
-                            if (produced > entry.sizeBytes) {
-                                throw corrupt("\"${entry.name}\" expands beyond its recorded size.")
-                            }
-                        } else if (inflater.finished()) {
-                            break
-                        } else if (inflater.needsDictionary()) {
-                            throw corrupt("\"${entry.name}\" needs a preset dictionary and cannot be extracted.")
-                        } else {
-                            break
+                        when {
+                            count > 0 -> emit(count)
+                            inflater.needsDictionary() -> throw corrupt(
+                                "\"${entry.name}\" needs a preset dictionary and cannot be extracted."
+                            )
+                            inflater.finished() -> break
+                            else -> throw corrupt(
+                                "The compressed data of \"${entry.name}\" is damaged and cannot be extracted."
+                            )
                         }
                     }
                 }
@@ -170,18 +185,16 @@ class ZipArchiveReader(
                 }
             }
             if (inflater != null) {
-                // Drain anything the inflater still holds after the last input chunk.
-                while (!inflater.finished()) {
+                // Drain anything the inflater still holds after the last input chunk. Each pass
+                // must produce, finish, or run out of input - otherwise it is a typed error.
+                while (!inflater.finished() && !inflater.needsInput()) {
                     val count = inflater.inflate(outBuffer)
-                    if (count > 0) {
-                        out.write(outBuffer, 0, count)
-                        crc.update(outBuffer, 0, count)
-                        produced += count
-                        if (produced > entry.sizeBytes) {
-                            throw corrupt("\"${entry.name}\" expands beyond its recorded size.")
-                        }
-                    } else {
-                        break
+                    when {
+                        count > 0 -> emit(count)
+                        inflater.finished() -> break
+                        else -> throw corrupt(
+                            "The compressed data of \"${entry.name}\" is truncated or damaged."
+                        )
                     }
                 }
                 if (!inflater.finished()) {
@@ -277,7 +290,7 @@ class ZipArchiveReader(
                 cursor = valueStart + fieldSize
             }
 
-            val charset: Charset = if (flags and FLAG_UTF8 != 0) Charsets.UTF_8 else IBM437
+            val charset: Charset = if (flags and FLAG_UTF8 != 0) Charsets.UTF_8 else ibm437
             val name = String(nameBytes, charset)
             entries += ZipEntryInfo(
                 name = name,
@@ -403,7 +416,14 @@ class ZipArchiveReader(
         private const val EXTRA_ZIP64 = 0x0001
         private const val SATURATED_U16 = 0xFFFF
         private const val SATURATED_U32 = 0xFFFF_FFFFL
-        private val IBM437: Charset = Charset.forName("IBM437")
+
+        /**
+         * Resolved lazily and defensively: a platform without IBM437 must not fail a whole
+         * listing over name decoding - ISO-8859-1 is the fallback for non-UTF-8 names.
+         */
+        private val ibm437: Charset by lazy {
+            runCatching { Charset.forName("IBM437") }.getOrElse { Charsets.ISO_8859_1 }
+        }
 
         private fun corrupt(message: String) = ArchiveException(ArchiveErrorKind.CORRUPT, message)
         private fun multiDisk() = ArchiveException(

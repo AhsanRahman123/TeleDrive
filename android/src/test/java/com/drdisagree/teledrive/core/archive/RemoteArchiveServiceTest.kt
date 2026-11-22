@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -116,6 +117,71 @@ class RemoteArchiveServiceTest {
         ) as TelegramClient
     }
 
+    /**
+     * TelegramClient proxy that serves one in-memory file and records how it was asked for data:
+     * every requestFileRange call and every cancel (which is how a closed byte source shows up).
+     */
+    private class RecordingTelegram(
+        private val bytes: ByteArray,
+        private val completed: Boolean
+    ) {
+        val rangeRequests = mutableListOf<Pair<Long, Long>>()
+        var cancelCalls = 0
+
+        val client: TelegramClient = Proxy.newProxyInstance(
+            TelegramClient::class.java.classLoader,
+            arrayOf(TelegramClient::class.java),
+            InvocationHandler { _, method, args ->
+                val info = TelegramFileInfo(
+                    fileId = 7,
+                    sizeBytes = bytes.size.toLong(),
+                    localPath = null,
+                    isDownloadingCompleted = completed,
+                    isDownloadingActive = false,
+                    downloadOffset = 0,
+                    downloadedPrefixSize = if (completed) bytes.size.toLong() else 0
+                )
+                when (method.name) {
+                    "resolveFile" -> info
+                    "getFileInfo" -> info
+                    "readFilePart" -> {
+                        val offset = (args[1] as Number).toLong()
+                        val count = (args[2] as Number).toLong()
+                        if (offset >= bytes.size) ByteArray(0)
+                        else bytes.copyOfRange(
+                            offset.toInt(),
+                            minOf(offset + count, bytes.size.toLong()).toInt()
+                        )
+                    }
+                    "requestFileRange" -> {
+                        rangeRequests += (args[1] as Number).toLong() to (args[2] as Number).toLong()
+                        Unit
+                    }
+                    "cancelFileDownload" -> { cancelCalls++; Unit }
+                    "fileUpdates" -> flowOf(info)
+                    else -> throw UnsupportedOperationException(method.name)
+                }
+            }
+        ) as TelegramClient
+    }
+
+    private fun storedZip(entries: List<Pair<String, ByteArray>>): ByteArray {
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { zip ->
+            for ((name, data) in entries) {
+                val entry = ZipEntry(name)
+                entry.method = ZipEntry.STORED
+                entry.size = data.size.toLong()
+                entry.compressedSize = data.size.toLong()
+                val crc = CRC32(); crc.update(data); entry.crc = crc.value
+                zip.putNextEntry(entry)
+                zip.write(data)
+                zip.closeEntry()
+            }
+        }
+        return out.toByteArray()
+    }
+
     private fun driveFile(
         encrypted: Boolean = false,
         chatId: Long? = 100L,
@@ -162,6 +228,14 @@ class RemoteArchiveServiceTest {
             unused<FolderTombstoneDao>()
         )
     )
+
+    private fun ByteArray.indexOf(needle: ByteArray): Int {
+        outer@ for (i in 0..size - needle.size) {
+            for (j in needle.indices) if (this[i + j] != needle[j]) continue@outer
+            return i
+        }
+        return -1
+    }
 
     private fun part() = FilePartEntity(
         fileId = "file-1", partIndex = 0, chatId = 100L, messageId = 200L,
@@ -230,6 +304,55 @@ class RemoteArchiveServiceTest {
         assertEquals("hello.txt", writer.fileName)
         assertEquals("", writer.folderPath)
         assertArrayEquals(content, writer.bytes)
+    }
+
+    @Test
+    fun `archive access never primes a whole file download from offset zero`() = runBlocking {
+        // Not fully downloaded: the old byte-source priming would issue an unbounded
+        // requestFileRange(0, 0) here. Ranged archive reads must never do that.
+        val telegram = RecordingTelegram(
+            storedZip(listOf("a.txt" to "abc".toByteArray())),
+            completed = false
+        )
+        val remote = service(telegram.client)
+        remote.listEntries(driveFile())
+        remote.extractEntry(driveFile(), "a.txt")
+        assertTrue(
+            "unbounded offset-0 range requested: ${telegram.rangeRequests}",
+            telegram.rangeRequests.none { it.first == 0L && it.second == 0L }
+        )
+    }
+
+    @Test
+    fun `duplicate names extract their own bytes by occurrence`() = runBlocking {
+        val zipBytes = storedZip(
+            listOf(
+                "dup.txt" to "first-content".toByteArray(),
+                "dup.txt" to "second-content".toByteArray()
+            )
+        )
+        val writer = FakeDownloadWriter()
+        val remote = service(fakeTelegram(zipBytes), writer = writer)
+        remote.extractEntry(driveFile(), "dup.txt", occurrence = 0)
+        assertArrayEquals("first-content".toByteArray(), writer.bytes)
+        remote.extractEntry(driveFile(), "dup.txt", occurrence = 1)
+        assertArrayEquals("second-content".toByteArray(), writer.bytes)
+    }
+
+    @Test
+    fun `crc corrupted entry never reaches the download writer and closes the source`() {
+        val content = "integrity matters".toByteArray()
+        val zipBytes = storedZip(listOf("data.txt" to content))
+        val at = zipBytes.indexOf(content)
+        assertTrue(at >= 0)
+        zipBytes[at] = (zipBytes[at] + 1).toByte()
+        val telegram = RecordingTelegram(zipBytes, completed = true)
+        val writer = FakeDownloadWriter()
+        expectKind(ArchiveErrorKind.CRC_MISMATCH) {
+            service(telegram.client, writer = writer).extractEntry(driveFile(), "data.txt")
+        }
+        assertEquals(null, writer.fileName)
+        assertTrue("byte source was not closed", telegram.cancelCalls > 0)
     }
 
     @Test

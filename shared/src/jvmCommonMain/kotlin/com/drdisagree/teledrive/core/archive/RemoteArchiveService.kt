@@ -42,13 +42,11 @@ class RemoteArchiveService(
     suspend fun extractEntry(file: DriveFile, entryName: String, occurrence: Int = 0): String {
         checkReadable(file)
         val source = openSource(file)
-        // Some platform writers swallow a failure thrown by the write body (deleting the partial
-        // destination and returning null), so the real extraction failure is captured here and
-        // rethrown after the call instead of being misreported as a save failure.
-        var extractFailure: ArchiveException? = null
-        val savedPath = try {
+        try {
             val reader = ZipArchiveReader(source)
-            val matches = reader.entries().filter { it.name == entryName }
+            // Occurrence counts only non-directory entries with this name; the preview view
+            // model counts the same way, so both sides pick the same entry.
+            val matches = reader.entries().filter { it.name == entryName && !it.isDirectory }
             val entry = matches.getOrNull(occurrence)
                 ?: throw ArchiveException(
                     ArchiveErrorKind.ENTRY_NOT_FOUND,
@@ -56,27 +54,30 @@ class RemoteArchiveService(
                 )
             val fileName = entry.name.substringAfterLast('/').substringAfterLast('\\')
                 .ifBlank { "unnamed" }
-            val folderPath = folderPathResolver.pathOf(file.folderId)
-            downloadWriter.write(
-                fileName = fileName,
-                mimeType = MimeTypes.fromFileName(fileName),
-                folderPath = folderPath
-            ) { output ->
-                try {
-                    kotlinx.coroutines.runBlocking { reader.extract(entry, output) }
-                } catch (failure: ArchiveException) {
-                    extractFailure = failure
-                    throw failure
+            // Extract to a temp file first: size and CRC are verified there, so a corrupt entry
+            // fails before the download writer is ever called and can never leave a bad file in
+            // Downloads. Only a verified entry is copied through the writer.
+            val temp = java.io.File.createTempFile("zip-entry-", ".tmp")
+            try {
+                temp.outputStream().buffered().use { output -> reader.extract(entry, output) }
+                val folderPath = folderPathResolver.pathOf(file.folderId)
+                val savedPath = downloadWriter.write(
+                    fileName = fileName,
+                    mimeType = MimeTypes.fromFileName(fileName),
+                    folderPath = folderPath
+                ) { output ->
+                    temp.inputStream().buffered().use { input -> input.copyTo(output) }
                 }
+                return savedPath ?: throw ArchiveException(
+                    ArchiveErrorKind.SAVE_FAILED,
+                    "The file could not be saved to Downloads."
+                )
+            } finally {
+                temp.delete()
             }
         } finally {
             source.close()
         }
-        extractFailure?.let { throw it }
-        return savedPath ?: throw ArchiveException(
-            ArchiveErrorKind.SAVE_FAILED,
-            "The file could not be saved to Downloads."
-        )
     }
 
     private suspend fun checkReadable(file: DriveFile) {
@@ -109,7 +110,10 @@ class RemoteArchiveService(
                 telegramClient = telegramClient,
                 remoteFileId = file.remoteFileId!!,
                 chatId = file.chatId,
-                messageId = file.messageId
+                messageId = file.messageId,
+                // Never prime a whole-file download from byte 0: ranged reads request the
+                // exact offsets they need.
+                primeFromStart = false
             )
         )
     }
