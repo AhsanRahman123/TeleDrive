@@ -130,8 +130,11 @@ class FolderStateSynchronizer(
 
     /** Never publishes, so applying other devices' changes cannot echo back. */
     suspend fun pull(): Int = mutex.withLock {
-        if (folderDao.pendingPublishCount() > 0) return@withLock 0
         val chatId = storageChatId()
+        // PC-38: only THIS drive's pending folder state blocks its
+        // pull — another drive's unpublished folders are not a reason
+        // to refuse this drive's remote state.
+        if (folderDao.pendingPublishCount(chatId) > 0) return@withLock 0
         var remote: RemoteFolderState? = null
         for (document in findStateDocuments(chatId)) {
             val read = read(document) as? RemoteFolderRead.Ok ?: continue

@@ -242,10 +242,16 @@ class HomeViewModel(
         }
     }
 
-    val pendingSync: StateFlow<PendingSync> = combine(
-        fileDao.observePendingPublishCount(),
-        folderDao.observePendingPublishCount()
-    ) { files, folders -> PendingSync(files, folders > 0) }
+    // PC-38: the banner counts the ACTIVE drive's outbox only. The
+    // counts used to be global, so a fresh empty drive opened with
+    // the old drive's 12,922-row backlog on its banner.
+    val pendingSync: StateFlow<PendingSync> = activeChannel.observe()
+        .flatMapLatest { chatId ->
+            combine(
+                fileDao.observePendingPublishCount(chatId),
+                folderDao.observePendingPublishCount(chatId)
+            ) { files, folders -> PendingSync(files, folders > 0) }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PendingSync())
 
     fun syncNow() = publishScheduler.kick()

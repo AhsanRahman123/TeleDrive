@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.data.repository
 import com.drdisagree.teledrive.core.common.AppError
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.publish.PublishScheduler
 import com.drdisagree.teledrive.core.telegram.StorageChannel
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramException
@@ -29,7 +30,8 @@ class ChannelRepositoryImpl(
     private val settingsRepository: SettingsRepository,
     private val syncRepository: SyncRepository,
     private val channelOwnership: ChannelOwnership,
-    private val exclusionRepository: ExclusionRepository
+    private val exclusionRepository: ExclusionRepository,
+    private val publishScheduler: PublishScheduler
 ) : ChannelRepository {
 
     override fun observeChannels(): Flow<List<DriveChannel>> = combine(
@@ -163,6 +165,12 @@ class ChannelRepositoryImpl(
 
         val known = channelDao.byId(chatId) ?: return AppResult.Failure(AppError.NotFound)
         settingsRepository.update { it.copy(storageChatId = chatId) }
+        // PC-38 belt-and-braces: stop any in-flight publish run at
+        // the switch. The drainer also re-reads the active drive per
+        // batch, but a cancelled run ends the old drive's work
+        // immediately instead of finishing its current batch under
+        // the new drive's banner.
+        publishScheduler.cancel()
         channelDao.touch(chatId, System.currentTimeMillis())
         channelOwnership.claimUnowned(chatId)
         seedDefaultsOnce(chatId)

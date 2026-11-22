@@ -36,7 +36,7 @@ class FolderMergeSyncTest {
     fun `pushing merges in folders created and renamed elsewhere`() = runBlocking {
         folders.upsert(folder("x", "Old", changedAt = recent + 1_000))
         folders.upsert(folder("mine", "Mine", changedAt = recent + 5_000))
-        folders.markPendingPublish()
+        folders.markPendingPublish(TEST_CHAT)
         telegram.publishFolderState(
             RemoteFolderState(
                 folders = listOf(entry("x", "Renamed", recent + 2_000), entry("theirs", "Theirs", recent + 1_500))
@@ -106,7 +106,7 @@ class FolderMergeSyncTest {
         harness.folderState.pull()
 
         assertEquals("Renamed", folders.byId("x")!!.name)
-        assertEquals(0, folders.pendingPublishCount())
+        assertEquals(0, folders.pendingPublishCount(TEST_CHAT))
         assertTrue(telegram.uploads.isEmpty())
         assertEquals(0, harness.scheduler.kicks)
     }
@@ -143,7 +143,7 @@ class FolderMergeSyncTest {
     @Test
     fun `a failed download stops the push before anything is replaced`() = runBlocking {
         folders.upsert(folder("x", "Mine", changedAt = recent + 1_000))
-        folders.markPendingPublish()
+        folders.markPendingPublish(TEST_CHAT)
         telegram.publishFolderState(RemoteFolderState(folders = listOf(entry("y", "Theirs", recent + 1_000))))
         telegram.failDownloads = true
 

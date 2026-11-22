@@ -3,18 +3,24 @@ package com.drdisagree.teledrive.core.publish
 import com.drdisagree.teledrive.core.common.AppError
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.telegram.RemoteDocument
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.data.local.dao.FileDao
 import com.drdisagree.teledrive.data.local.dao.FolderDao
 import com.drdisagree.teledrive.data.local.dao.FolderTombstoneDao
 import com.drdisagree.teledrive.data.local.dao.PendingDeleteDao
+import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.data.local.database.TeleDriveDatabase
 import com.drdisagree.teledrive.data.local.database.inImmediateTransaction
 import com.drdisagree.teledrive.data.local.entity.FileEntity
+import com.drdisagree.teledrive.data.repository.ActiveChannel
 import com.drdisagree.teledrive.data.repository.FileBase
 import com.drdisagree.teledrive.data.repository.FileManifestPublisher
 import com.drdisagree.teledrive.data.repository.FolderStateSynchronizer
+import com.drdisagree.teledrive.data.repository.RemoteMessageResolver
+import com.drdisagree.teledrive.domain.model.BackupState
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
@@ -39,7 +45,11 @@ class PublishOutboxDrainer(
     private val manifestPublisher: FileManifestPublisher,
     private val folderStateSynchronizer: FolderStateSynchronizer,
     private val tombstoneDao: FolderTombstoneDao,
-    private val database: TeleDriveDatabase
+    private val database: TeleDriveDatabase,
+    private val transferDao: TransferDao,
+    private val resolver: RemoteMessageResolver,
+    private val reuploadEnqueuer: ReuploadEnqueuer,
+    private val activeChannel: ActiveChannel
 ) {
 
     /**
@@ -57,10 +67,11 @@ class PublishOutboxDrainer(
     ): Boolean {
         var lastPublished = 0
         var lastTotal = 0
+        val startChatId = activeChannel.id()
         SafeLog.d(
             TAG,
-            "Drain started: ${fileDao.pendingPublishCount()} files and " +
-                "${folderDao.pendingPublishCount()} folders pending"
+            "Drain started: ${fileDao.pendingPublishCount(startChatId)} files and " +
+                "${folderDao.pendingPublishCount(startChatId)} folders pending"
         )
         val drained = drainOutbox(
             isStopped = isStopped,
@@ -100,9 +111,13 @@ class PublishOutboxDrainer(
         // 1,056 on his machine) with Sync now an instant no-op and the
         // loop Idle — indistinguishable from a frozen sync. The rows
         // themselves are untouched (see FileDao).
-        val localOnly = fileDao.pendingLocalOnlyCount()
+        // PC-38: the sweep is scoped to the ACTIVE drive — resolving
+        // another drive's local-only flags from here would silently
+        // change that drive's outbox while the user looks at this one.
+        val sweepChatId = activeChannel.id()
+        val localOnly = fileDao.pendingLocalOnlyCount(sweepChatId)
         if (localOnly > 0) {
-            val resolved = fileDao.clearPendingPublishForLocalOnly()
+            val resolved = fileDao.clearPendingPublishForLocalOnly(sweepChatId)
             SafeLog.d(
                 TAG,
                 "Resolved $resolved local-only pending rows (no channel " +
@@ -121,6 +136,10 @@ class PublishOutboxDrainer(
         // poisoned row cannot block the rows behind it either; the
         // next drain retries them.
         val excludedIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+        // PC-37: mis-bound rows met during this drain share one repair
+        // context — the ladder runs at most once per file, and the
+        // channel scan behind it is built once per chat, not per file.
+        val repairContext = RepairContext()
         val published = AtomicInteger(0)
         // PC-35: rate-limit budget accounting for the whole drain. A
         // file that spends its per-file budget steps aside (see
@@ -131,12 +150,19 @@ class PublishOutboxDrainer(
         val drainRateLimitWaitSeconds = AtomicInteger(0)
         while (true) {
             if (isStopped()) return false
-            val batch = nextBatch(excludedIds)
+            // PC-38: the active drive is re-read for EVERY batch.
+            // A drive switch cancels the run (ChannelRepositoryImpl),
+            // but if a run ever races the switch, it follows the
+            // newly active drive instead of marching on through the
+            // previous drive's backlog under the new drive's banner.
+            val batchChatId = activeChannel.id()
+            val batch = nextBatch(batchChatId, excludedIds)
             if (batch.isEmpty()) break
-            onProgress(published.get(), published.get() + fileDao.pendingPublishCount())
+            onProgress(published.get(), published.get() + fileDao.pendingPublishCount(batchChatId))
             if (!publishBatch(
-                    batch, published, excludedIds, rateLimitDeferred,
-                    drainRateLimitWaitSeconds, isStopped, onProgress, onWaiting, onFailure
+                    batch, batchChatId, published, excludedIds, rateLimitDeferred,
+                    drainRateLimitWaitSeconds, repairContext,
+                    isStopped, onProgress, onWaiting, onFailure
                 )
             ) {
                 return false
@@ -151,22 +177,31 @@ class PublishOutboxDrainer(
             }
         }
 
+        // PC-38: the folder phase is scoped to the active drive too.
+        // The push itself already targets the active chat, but the
+        // snapshot comparison and the flag clear used to be global —
+        // a drain on the new drive could clear the OLD drive's folder
+        // flags without the old channel ever receiving its folder
+        // state, silently swallowing that drive's folder push.
+        val folderChatId = activeChannel.id()
         SafeLog.d(
             TAG,
-            "Folder phase started: ${folderDao.pendingPublishCount()} folders pending"
+            "Folder phase started: ${folderDao.pendingPublishCount(folderChatId)} folders pending"
         )
         repeat(MAX_FOLDER_PUSHES) {
-            if (folderDao.pendingPublishCount() == 0) return true
-            val before = folderSnapshot()
+            if (folderDao.pendingPublishCount(folderChatId) == 0) return true
+            val before = folderSnapshot(folderChatId)
             val pushed = runCatching { folderStateSynchronizer.push() }
                 .onFailure { SafeLog.w(TAG, "Folder state push failed", it) }
                 .isSuccess
             if (!pushed) return false
             database.inImmediateTransaction {
-                if (folderSnapshot() == before) folderDao.clearPendingPublish()
+                if (folderSnapshot(folderChatId) == before) {
+                    folderDao.clearPendingPublish(folderChatId)
+                }
             }
         }
-        return folderDao.pendingPublishCount() == 0
+        return folderDao.pendingPublishCount(folderChatId) == 0
     }
 
     /**
@@ -181,9 +216,9 @@ class PublishOutboxDrainer(
      * size — and an empty result means no fresh publishable rows are
      * left, so the loop still terminates.
      */
-    private suspend fun nextBatch(excludedIds: Set<String>): List<FileEntity> {
-        if (excludedIds.isEmpty()) return fileDao.pendingPublishable(BATCH_SIZE)
-        val window = fileDao.pendingPublishable(BATCH_SIZE + excludedIds.size)
+    private suspend fun nextBatch(chatId: Long?, excludedIds: Set<String>): List<FileEntity> {
+        if (excludedIds.isEmpty()) return fileDao.pendingPublishable(chatId, BATCH_SIZE)
+        val window = fileDao.pendingPublishable(chatId, BATCH_SIZE + excludedIds.size)
         return window.filter { it.id !in excludedIds }.take(BATCH_SIZE)
     }
 
@@ -208,13 +243,21 @@ class PublishOutboxDrainer(
      * through `onFailure`, excludes the row for the rest of this drain, and does
      * NOT stop it — the rows behind it still publish; a transient failure stops
      * the drain with unstarted files still flagged for the next run.
+     *
+     * PC-37: a MisboundRemote rejection (the stored message id is not
+     * the file's own editable message) is intercepted before the
+     * permanent branch and runs the repair ladder once per file per
+     * drain — see [repairMisbound]. A ladder that concludes nothing
+     * falls back to exactly the permanent handling above.
      */
     private suspend fun publishBatch(
         batch: List<FileEntity>,
+        batchChatId: Long?,
         published: AtomicInteger,
         excludedIds: MutableSet<String>,
         rateLimitDeferred: AtomicBoolean,
         drainRateLimitWaitSeconds: AtomicInteger,
+        repairContext: RepairContext,
         isStopped: () -> Boolean,
         onProgress: suspend (published: Int, total: Int) -> Unit,
         onWaiting: suspend (secondsLeft: Int) -> Unit,
@@ -226,7 +269,28 @@ class PublishOutboxDrainer(
 
         suspend fun reportProgress() {
             val done = published.incrementAndGet()
-            progressLock.withLock { onProgress(done, done + fileDao.pendingPublishCount()) }
+            progressLock.withLock {
+                onProgress(done, done + fileDao.pendingPublishCount(batchChatId))
+            }
+        }
+
+        /**
+         * The permanent-rejection handling, shared by genuinely
+         * permanent errors and by a mis-bound row whose repair ladder
+         * concluded nothing this drain (PC-37): the row stays pending
+         * with its baseline intact, the failure is surfaced, the row
+         * is excluded for the rest of this drain, and the rows behind
+         * it still publish.
+         */
+        suspend fun reportPermanentRejection(row: FileEntity, error: AppError) {
+            SafeLog.w(
+                TAG,
+                "Caption publish permanently rejected for " +
+                    "${row.id} (message ${row.messageId}); " +
+                    "keeping it pending for retry: $error"
+            )
+            excludedIds += row.id
+            onFailure(row.id, error)
         }
 
         val jobs = batch.map { entity ->
@@ -235,15 +299,19 @@ class PublishOutboxDrainer(
                     // PC-35: this file's rate-limit budget for the drain.
                     var rateLimitWaits = 0
                     var rateLimitWaitedSeconds = 0
+                    // PC-37: the row as currently bound. A repair-ladder
+                    // adoption replaces it, and the loop's one retry
+                    // publishes against the fresh binding.
+                    var current = entity
                     while (true) {
                         if (aborted.get() || isStopped()) return@withPermit
                         if (!awaitInteractionWindow(isStopped)) {
                             aborted.set(true)
                             return@withPermit
                         }
-                        when (val result = manifestPublisher.publish(entity, onWaiting)) {
+                        when (val result = manifestPublisher.publish(current, onWaiting)) {
                             is AppResult.Success -> {
-                                clearIfUnchanged(entity, accepted = true)
+                                clearIfUnchanged(current, accepted = true)
                                 reportProgress()
                                 return@withPermit
                             }
@@ -270,7 +338,7 @@ class PublishOutboxDrainer(
                                         SafeLog.w(
                                             TAG,
                                             "Rate limit budget spent for ${entity.id} " +
-                                                "(message ${entity.messageId}); leaving it " +
+                                                "(message ${current.messageId}); leaving it " +
                                                 "pending for the next run: $error"
                                         )
                                         rateLimitDeferred.set(true)
@@ -283,7 +351,7 @@ class PublishOutboxDrainer(
                                     SafeLog.w(
                                         TAG,
                                         "Rate limited publishing ${entity.id} " +
-                                            "(message ${entity.messageId}); waiting " +
+                                            "(message ${current.messageId}); waiting " +
                                             "${waitSeconds}s (wait $rateLimitWaits of " +
                                             "$MAX_RATE_LIMIT_WAITS_PER_FILE, " +
                                             "${rateLimitWaitedSeconds}s of the " +
@@ -316,21 +384,78 @@ class PublishOutboxDrainer(
                                     )
                                     excludedIds += entity.id
                                     return@withPermit
-                                } else if (isPermanent(error)) {
+                                } else if (error is AppError.MisboundRemote &&
+                                    entity.id !in repairContext.attemptedIds
+                                ) {
+                                    // PC-37: the stored message id is not
+                                    // this file's own editable message —
+                                    // retrying the same binding can never
+                                    // succeed, so run the repair ladder
+                                    // (probe → re-resolve → re-upload /
+                                    // remote-missing), once per file per
+                                    // drain. An adoption retries the
+                                    // publish once against the fresh
+                                    // binding; every other conclusion has
+                                    // already been surfaced by the ladder.
+                                    repairContext.attemptedIds += entity.id
+                                    when (
+                                        val outcome = repairMisbound(
+                                            current, repairContext, isStopped, onFailure
+                                        )
+                                    ) {
+                                        is RepairOutcome.Adopted -> {
+                                            current = outcome.entity
+                                            continue
+                                        }
+
+                                        RepairOutcome.Handled -> {
+                                            // Concluded for this drain (a
+                                            // re-upload is queued, the row
+                                            // is marked remote-missing, or
+                                            // an upload is already in
+                                            // flight): never refetch it
+                                            // into a later batch.
+                                            excludedIds += entity.id
+                                            return@withPermit
+                                        }
+
+                                        RepairOutcome.Unresolved -> {
+                                            // No repair concluded: fall back
+                                            // to the permanent-rejection
+                                            // handling, reported with the
+                                            // original Telegram error shape.
+                                            reportPermanentRejection(
+                                                current,
+                                                AppError.TelegramError(
+                                                    400, error.telegramMessage
+                                                )
+                                            )
+                                            return@withPermit
+                                        }
+                                    }
+                                } else if (isPermanent(error) ||
+                                    error is AppError.MisboundRemote
+                                ) {
                                     // Never dead-letter into silence: the row
                                     // stays pending with its baseline intact
                                     // and the failure is surfaced, but the
                                     // drain continues — one rejected caption
                                     // must not wedge the backlog behind it
-                                    // (PC-32). The next drain retries it.
-                                    SafeLog.w(
-                                        TAG,
-                                        "Caption publish permanently rejected for " +
-                                            "${entity.id} (message ${entity.messageId}); " +
-                                            "keeping it pending for retry: $error"
+                                    // (PC-32). The next drain retries it. A
+                                    // mis-bound row lands here when its one
+                                    // ladder attempt this drain already ran
+                                    // (including the publish retry after an
+                                    // adoption being refused again).
+                                    reportPermanentRejection(
+                                        current,
+                                        if (error is AppError.MisboundRemote) {
+                                            AppError.TelegramError(
+                                                400, error.telegramMessage
+                                            )
+                                        } else {
+                                            error
+                                        }
                                     )
-                                    excludedIds += entity.id
-                                    onFailure(entity.id, error)
                                     return@withPermit
                                 } else {
                                     onFailure(entity.id, error)
@@ -345,6 +470,270 @@ class PublishOutboxDrainer(
         }
         jobs.awaitAll()
         !aborted.get() && !isStopped()
+    }
+
+    /**
+     * Per-drain repair state (PC-37): the ladder runs at most once per
+     * file per drain, and the channel scan behind it is built once per
+     * chat and shared by every mis-bound file in the drain — one
+     * channel pass, not one per file.
+     */
+    private class RepairContext {
+        val attemptedIds: MutableSet<String> =
+            java.util.Collections.synchronizedSet(mutableSetOf())
+        private val scans = mutableMapOf<Long, RemoteMessageResolver.ChannelIndex>()
+        private val scanMutex = Mutex()
+
+        suspend fun scan(
+            resolver: RemoteMessageResolver,
+            chatId: Long,
+            isStopped: () -> Boolean
+        ): RemoteMessageResolver.ChannelIndex = scanMutex.withLock {
+            scans.getOrPut(chatId) { resolver.scanChannel(chatId, isStopped) }
+        }
+    }
+
+    private sealed interface RepairOutcome {
+        /** The row was re-bound to its real message; retry the publish once with [entity]. */
+        data class Adopted(val entity: FileEntity) : RepairOutcome
+
+        /** The ladder fully handled the row (re-upload queued, remote-missing marked, or an upload already in flight). */
+        data object Handled : RepairOutcome
+
+        /** No repair concluded this drain; the caller applies the permanent-rejection handling. */
+        data object Unresolved : RepairOutcome
+    }
+
+    /**
+     * The mis-binding repair ladder (PC-37), run once per file per
+     * drain from the publish loop's MisboundRemote branch. The stored
+     * message id of a mis-bound row points at nothing
+     * (`MESSAGE_ID_INVALID`) or at a message that is not the file's
+     * own editable post (`Message can't be edited`); retrying the
+     * edit against it can never succeed, so the ladder re-establishes
+     * the binding from evidence, in order:
+     *
+     * (a) probe the stored message — if it resolves and its caption
+     *     names this file, the binding is right and the message
+     *     itself refuses edits: skip to (d);
+     * (b) re-resolve by the td1 caption uuid over one shared channel
+     *     scan (the same matching machinery sync uses, factored into
+     *     [RemoteMessageResolver]);
+     * (c) re-resolve by Telegram unique id — only a caption-less
+     *     document may be adopted this way, since a document whose
+     *     manifest names a file is spoken for;
+     * (d) [repairUnrecoverable]: re-upload from the local copy, or
+     *     mark the row durably remote-missing when there is none.
+     *
+     * A scan MISS is only conclusive over a complete scan: concluding
+     * "gone" from a partial pass could mark a live file
+     * remote-missing, or re-upload a duplicate of a message the scan
+     * never reached.
+     *
+     * Throughout the ladder, the message at the OLD stored id is never
+     * edited or deleted: the consecutive id blocks in the field data
+     * mean it likely belongs to another file, and touching it would
+     * corrupt that file. Rebinding changes only this row's mapping.
+     */
+    private suspend fun repairMisbound(
+        entity: FileEntity,
+        repairContext: RepairContext,
+        isStopped: () -> Boolean,
+        onFailure: suspend (fileId: String, error: AppError) -> Unit
+    ): RepairOutcome {
+        val chatId = entity.chatId ?: return RepairOutcome.Unresolved
+        val messageId = entity.messageId ?: return RepairOutcome.Unresolved
+
+        // (a) Probe.
+        val probed = try {
+            telegramClient.getDocument(chatId, messageId)
+        } catch (e: TelegramException) {
+            SafeLog.w(
+                TAG,
+                "Repair probe failed for ${entity.id} (message $messageId): ${e.message}"
+            )
+            return RepairOutcome.Unresolved
+        }
+        if (probed != null && resolver.manifestOf(probed)?.fileId == entity.id) {
+            SafeLog.w(
+                TAG,
+                "Repair: message $messageId IS ${entity.id}'s own message " +
+                    "but Telegram refuses to edit it"
+            )
+            return repairUnrecoverable(entity, onFailure)
+        }
+
+        // (b) + (c) Re-resolve over the shared scan.
+        val index = repairContext.scan(resolver, chatId, isStopped)
+        val byUuid = index.byUuid[entity.id]
+        if (byUuid != null) {
+            val foundManifest = resolver.manifestOf(byUuid)
+            // Split files: every part message carries the parent uuid,
+            // but only part 0's message is the row's binding. A later
+            // part is not adoptable — and its presence proves nothing
+            // about part 0, so this is a miss, not a hit.
+            val adoptable = foundManifest != null &&
+                !(foundManifest.isPart && foundManifest.partIndex != 0)
+            if (adoptable) {
+                if (byUuid.messageId == messageId) {
+                    // Our manifest sits at the stored id after all (the
+                    // probe raced a caption write): own message, edit
+                    // refused — same conclusion as a probe hit.
+                    return repairUnrecoverable(entity, onFailure)
+                }
+                SafeLog.w(
+                    TAG,
+                    "Repair: found ${entity.id}'s manifest at message " +
+                        "${byUuid.messageId} (stored binding said $messageId); adopting it"
+                )
+                return adopt(entity, byUuid)
+            }
+        }
+        val uniqueId = entity.remoteUniqueId
+        if (uniqueId != null) {
+            val byUnique = index.byUniqueId[uniqueId]
+            if (byUnique != null && resolver.manifestOf(byUnique) == null) {
+                if (byUnique.messageId == messageId) {
+                    // The stored message carries this file's content
+                    // (unique id) but no manifest: it is the file's own
+                    // message in caption-less form, and it refuses the
+                    // edit — re-upload is the repair.
+                    return repairUnrecoverable(entity, onFailure)
+                }
+                SafeLog.w(
+                    TAG,
+                    "Repair: found a caption-less message ${byUnique.messageId} " +
+                        "carrying ${entity.id}'s unique id " +
+                        "(stored binding said $messageId); adopting it"
+                )
+                return adopt(entity, byUnique)
+            }
+        }
+
+        if (!index.complete) {
+            SafeLog.w(
+                TAG,
+                "Repair: channel scan incomplete; deferring repair of " +
+                    "${entity.id} to the next drain"
+            )
+            return RepairOutcome.Unresolved
+        }
+        return repairUnrecoverable(entity, onFailure)
+    }
+
+    /**
+     * Rebinds [entity] to [document] — this row's mapping only. A
+     * different row claiming the found message is detached, never
+     * deleted: its caption does not name that row, so its claim is the
+     * stale one, but the row itself may still heal through its own
+     * ladder (or be a duplicate the sync merge sweep settles).
+     */
+    private suspend fun adopt(entity: FileEntity, document: RemoteDocument): RepairOutcome {
+        database.inImmediateTransaction {
+            val claimants = fileDao.byMessageIds(document.chatId, listOf(document.messageId))
+                .filter { it.id != entity.id }
+            for (claimant in claimants) {
+                SafeLog.w(
+                    TAG,
+                    "Repair adoption conflict: message ${document.messageId} in chat " +
+                        "${document.chatId} is claimed by row ${claimant.id} but its " +
+                        "caption names ${entity.id}; detaching the claimant's " +
+                        "mapping (row kept)"
+                )
+                fileDao.detachRemote(claimant.id)
+            }
+            fileDao.setRemoteMappingLogged(
+                id = entity.id,
+                chatId = document.chatId,
+                messageId = document.messageId,
+                remoteFileId = document.remoteFileId,
+                remoteUniqueId = document.uniqueFileId,
+                state = BackupState.BACKED_UP
+            )
+        }
+        SafeLog.w(
+            TAG,
+            "Repair: file ${entity.id} re-bound to message ${document.messageId} " +
+                "in chat ${document.chatId}"
+        )
+        val fresh = fileDao.byId(entity.id) ?: return RepairOutcome.Unresolved
+        return RepairOutcome.Adopted(fresh)
+    }
+
+    /**
+     * Ladder step (d): the file's Telegram message is gone or not
+     * editable and no reference finds it.
+     *
+     * With a local copy, the repair is a re-upload through the normal
+     * transfer path: a fresh message with the correct td1 caption is
+     * created, the row binds to it on completion, and the row's
+     * pending change — including its trashed state — then publishes
+     * against the new message on the next drain, so the file's content
+     * exists in the channel again and Trash stays restorable. The
+     * stale binding is detached BEFORE enqueueing, because the
+     * transfer executor deletes the message at the row's stored id
+     * after a successful re-upload (its superseded-message cleanup) —
+     * and here that id likely belongs to another file. Detached first,
+     * the executor sees no superseded message and deletes nothing.
+     *
+     * Without a local copy, the Telegram copy was the only copy and it
+     * is gone: the row is marked durably remote-missing (its pending
+     * flag is cleared only together with that mark), taken out of the
+     * retry cycle, and surfaced by name. The row is never deleted and
+     * never counted as saved.
+     */
+    private suspend fun repairUnrecoverable(
+        entity: FileEntity,
+        onFailure: suspend (fileId: String, error: AppError) -> Unit
+    ): RepairOutcome {
+        val localPath = entity.localPath
+        if (localPath != null && File(localPath).exists()) {
+            // An upload already in flight for this file may BE the
+            // repair (or the user's own retry): it captured the row
+            // when it started, so detaching under it could still let
+            // its completion delete the old message. Step aside; the
+            // next drain re-evaluates with the transfer settled.
+            if (transferDao.unfinishedIdsForFiles(listOf(entity.id)).isNotEmpty()) {
+                SafeLog.w(
+                    TAG,
+                    "Repair: an upload is already in flight for ${entity.id}; " +
+                        "leaving its repair to the next drain"
+                )
+                return RepairOutcome.Handled
+            }
+            fileDao.detachRemote(entity.id)
+            return when (val result = reuploadEnqueuer.enqueue(entity.id)) {
+                is AppResult.Success -> {
+                    SafeLog.w(
+                        TAG,
+                        "Repair: re-upload queued for ${entity.id} " +
+                            "('${entity.name}') as transfer ${result.value}; its " +
+                            "pending change publishes against the new message " +
+                            "once the upload lands"
+                    )
+                    RepairOutcome.Handled
+                }
+
+                is AppResult.Failure -> {
+                    SafeLog.w(
+                        TAG,
+                        "Repair: re-upload could not be queued for " +
+                            "${entity.id}: ${result.error}"
+                    )
+                    onFailure(entity.id, result.error)
+                    RepairOutcome.Handled
+                }
+            }
+        }
+        fileDao.markRemoteMissing(entity.id)
+        SafeLog.w(
+            TAG,
+            "Repair: Telegram copy of ${entity.id} ('${entity.name}') is " +
+                "unrecoverable and no local copy exists; marked " +
+                "remote-missing (row kept, out of the publish cycle)"
+        )
+        onFailure(entity.id, AppError.RemoteMissing(entity.name))
+        return RepairOutcome.Handled
     }
 
     /**
@@ -399,8 +788,8 @@ class PublishOutboxDrainer(
         }
     }
 
-    private suspend fun folderSnapshot() = Pair(
-        folderDao.allFoldersAnyOwner().map { it.copy(pendingPublish = false) }.sortedBy { it.id },
+    private suspend fun folderSnapshot(chatId: Long?) = Pair(
+        folderDao.allFolders(chatId).map { it.copy(pendingPublish = false) }.sortedBy { it.id },
         tombstoneDao.all().sortedBy { it.id }
     )
 

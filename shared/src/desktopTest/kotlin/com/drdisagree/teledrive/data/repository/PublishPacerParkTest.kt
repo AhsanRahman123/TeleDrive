@@ -75,7 +75,7 @@ class PublishPacerParkTest {
             assertEquals(
                 "every file stays pending for the next run",
                 3,
-                files.pendingPublishCount()
+                files.pendingPublishCount(TEST_CHAT)
             )
         }
 
@@ -104,7 +104,7 @@ class PublishPacerParkTest {
                 waiting.isNotEmpty()
             )
             assertEquals(2, telegram.editedCaptions.size)
-            assertEquals(0, files.pendingPublishCount())
+            assertEquals(0, files.pendingPublishCount(TEST_CHAT))
         }
 
     @Test
@@ -198,7 +198,7 @@ class PublishPacerParkTest {
         category = FileCategory.IMAGE,
         localPath = null,
         contentHash = null,
-        chatId = null,
+        chatId = TEST_CHAT,
         messageId = null,
         remoteFileId = null,
         remoteUniqueId = null,
@@ -222,6 +222,10 @@ class PublishPacerParkTest {
         ),
         folderStateSynchronizer = harness.folderState,
         tombstoneDao = database.folderTombstoneDao(),
-        database = database
+        database = database,
+        transferDao = database.transferDao(),
+        resolver = harness.resolver,
+        reuploadEnqueuer = harness.reuploadEnqueuer,
+        activeChannel = harness.activeChannel
     )
 }

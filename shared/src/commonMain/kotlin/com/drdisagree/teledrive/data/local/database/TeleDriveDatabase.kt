@@ -51,7 +51,7 @@ import com.drdisagree.teledrive.data.local.entity.TransferEntity
         ThumbnailPolicyEntity::class,
         ThumbnailJobEntity::class
     ],
-    version = 19,
+    version = 20,
     exportSchema = true
 )
 @ConstructedBy(TeleDriveDatabaseConstructor::class)

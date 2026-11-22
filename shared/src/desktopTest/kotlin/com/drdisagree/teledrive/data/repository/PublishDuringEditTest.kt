@@ -44,7 +44,7 @@ class PublishDuringEditTest {
                 createdAt = 1_000, modifiedAt = 1_000, changedAt = 1_000
             )
         )
-        folders.markPendingPublish()
+        folders.markPendingPublish(TEST_CHAT)
         telegram.onFetch = {
             telegram.onFetch = {}
             folders.rename("trips", "Holidays", 9_000)
@@ -52,7 +52,7 @@ class PublishDuringEditTest {
 
         drainer().drain(isStopped = { false })
 
-        assertEquals(0, folders.pendingPublishCount())
+        assertEquals(0, folders.pendingPublishCount(TEST_CHAT))
         assertEquals(
             listOf("Holidays"),
             telegram.uploadedFolderState().folders.map { it.name }
@@ -69,6 +69,10 @@ class PublishDuringEditTest {
         ),
         folderStateSynchronizer = harness.folderState,
         tombstoneDao = database.folderTombstoneDao(),
-        database = database
+        database = database,
+        transferDao = database.transferDao(),
+        resolver = harness.resolver,
+        reuploadEnqueuer = harness.reuploadEnqueuer,
+        activeChannel = harness.activeChannel
     )
 }

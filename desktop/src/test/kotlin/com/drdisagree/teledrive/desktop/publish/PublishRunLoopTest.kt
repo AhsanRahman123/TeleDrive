@@ -254,6 +254,32 @@ class PublishRunLoopTest {
         assertEquals(Instant.ofEpochMilli(42_000L), loop.lastFinishedAt.value)
     }
 
+    // PC-37: a file whose Telegram copy is unrecoverable and which
+    // has no local copy is marked remote-missing by the drainer; the
+    // run's reason must NAME it — a bare failure count would read as
+    // "sync is broken" when the truth is "these files' cloud copies
+    // are gone".
+    @Test
+    fun `remote missing failures name the files in the failed outcome`() {
+        val loop = PublishRunLoop(
+            drain = PublishDrain { _, _, _, onFailure ->
+                onFailure("gone-1", AppError.RemoteMissing("gone-1.jpg"))
+                onFailure("gone-2", AppError.RemoteMissing("gone-2.jpg"))
+                true
+            },
+            scope = scope,
+            clock = { Instant.ofEpochMilli(42_000L) }
+        )
+
+        loop.kick()
+        awaitOutcome(loop, "the remote-missing files record a Failed outcome") {
+            it is PublishRunOutcome.Failed
+        }
+        val outcome = loop.lastOutcome.value as PublishRunOutcome.Failed
+        assertEquals(2, outcome.failedFiles)
+        assertEquals("Telegram copy missing for: gone-1.jpg, gone-2.jpg", outcome.reason)
+    }
+
     @Test
     fun `a cancelled run records a Stopped outcome`() {
         val loop = PublishRunLoop(

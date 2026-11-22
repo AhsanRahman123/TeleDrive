@@ -102,7 +102,11 @@ class Item9SyncFixesTest {
         ),
         folderStateSynchronizer = harness.folderState,
         tombstoneDao = database.folderTombstoneDao(),
-        database = database
+        database = database,
+        transferDao = database.transferDao(),
+        resolver = harness.resolver,
+        reuploadEnqueuer = harness.reuploadEnqueuer,
+        activeChannel = harness.activeChannel
     )
 
     private fun folder(id: String, name: String, createdAt: Long) = FolderEntity(

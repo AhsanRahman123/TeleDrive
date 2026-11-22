@@ -120,6 +120,10 @@ class FieldMergeTest {
         FileManifestPublisher(telegram, harness.codec, harness.folderPaths, database.filePartDao()),
         harness.folderState,
         database.folderTombstoneDao(),
-        database
+        database,
+        database.transferDao(),
+        harness.resolver,
+        harness.reuploadEnqueuer,
+        harness.activeChannel
     )
 }

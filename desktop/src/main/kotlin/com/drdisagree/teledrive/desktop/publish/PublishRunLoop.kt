@@ -123,6 +123,29 @@ internal class PublishRunLoop(
         _lastFinishedAt.value = clock()
     }
 
+    /**
+     * The one-line reason a finished (or retry-waiting) run shows.
+     *
+     * PC-37: files whose Telegram copy turned out unrecoverable are
+     * named — a bare count would leave the user guessing which files
+     * are gone, and the whole point of the remote-missing mark is that
+     * the loss is never silent. Up to three names are spelled out and
+     * the rest counted; any other failure's Telegram message is
+     * appended (or used alone when nothing went missing), preserving
+     * the pre-PC-37 behaviour for ordinary rejections.
+     */
+    private fun failureReason(failures: List<Pair<String, AppError>>): String? {
+        val missing = failures.mapNotNull { it.second as? AppError.RemoteMissing }
+        val otherMessage = failures
+            .firstOrNull { it.second !is AppError.RemoteMissing }
+            ?.second?.let { (it as? AppError.TelegramError)?.message }
+        if (missing.isEmpty()) return otherMessage
+        val names = missing.take(3).joinToString(", ") { it.fileName }
+        val more = if (missing.size > 3) " (+${missing.size - 3} more)" else ""
+        val base = "Telegram copy missing for: $names$more"
+        return if (otherMessage != null) "$base; also: $otherMessage" else base
+    }
+
     private val stopRequested = AtomicBoolean(false)
     private val rerunRequested = AtomicBoolean(false)
     private val loopActive = AtomicBoolean(false)
@@ -337,8 +360,7 @@ internal class PublishRunLoop(
                     }
                     drained -> {
                         if (rerunRequested.get()) continue
-                        val reason =
-                            (failures.first().second as? AppError.TelegramError)?.message
+                        val reason = failureReason(failures)
                         _runState.value = PublishRunState.Failed(
                             failedFiles = failures.size,
                             reason = reason
@@ -353,9 +375,7 @@ internal class PublishRunLoop(
                     }
                     else -> {
                         _runState.value = PublishRunState.WaitingRetry(
-                            reason = drainError?.message
-                                ?: (failures.lastOrNull()?.second as? AppError.TelegramError)
-                                    ?.message
+                            reason = drainError?.message ?: failureReason(failures)
                         )
                         // If a "Sync now" press landed during the run
                         // (it cut a wait short, or simply asked for

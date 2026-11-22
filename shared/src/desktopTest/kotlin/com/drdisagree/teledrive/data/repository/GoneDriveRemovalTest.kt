@@ -61,6 +61,9 @@ class GoneDriveRemovalTest {
             harness.database.folderDao(),
             harness.database.exclusionDao()
         ),
-        exclusionRepository = unused<ExclusionRepository>()
+        exclusionRepository = unused<ExclusionRepository>(),
+        publishScheduler = object : com.drdisagree.teledrive.core.publish.PublishScheduler {
+            override fun kick() {}
+        }
     )
 }

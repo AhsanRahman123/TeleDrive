@@ -9,6 +9,7 @@ import androidx.room.Transaction
 import androidx.room.RawQuery
 import androidx.room.RoomRawQuery
 import androidx.room.Update
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.data.local.entity.AlbumSummary
 import com.drdisagree.teledrive.data.local.entity.FileEntity
 import com.drdisagree.teledrive.data.local.entity.FolderEntity
@@ -59,8 +60,20 @@ interface FileDao {
     @Query("UPDATE files SET pendingPublish = 0 WHERE id = :id")
     suspend fun clearPendingPublish(id: String)
 
-    @Query("SELECT COUNT(*) FROM files WHERE pendingPublish = 1")
-    suspend fun pendingPublishCount(): Int
+    /**
+     * Rows still owed a publish in ONE drive. Remote-missing rows
+     * (PC-37) are out of the publish cycle for good; counting them
+     * would pin the Home banner at "N files left" forever for work
+     * that can never drain. PC-38: the outbox is per-drive state —
+     * an inactive drive's backlog must never leak into the active
+     * drive's banner, drains or sweeps (field: after a fresh drive
+     * was created, Home showed the old drive's 12,922-row backlog).
+     */
+    @Query(
+        "SELECT COUNT(*) FROM files WHERE pendingPublish = 1 AND remoteMissing = 0 " +
+            "AND chatId IS :chatId"
+    )
+    suspend fun pendingPublishCount(chatId: Long?): Int
 
     @Query("UPDATE files SET folderId = :to WHERE folderId = :from")
     suspend fun moveAllBetweenFolders(from: String, to: String)
@@ -72,8 +85,11 @@ interface FileDao {
     @Query("SELECT * FROM files WHERE folderId = :folderId OR preTrashFolderId = :folderId")
     suspend fun rowsReferencingFolder(folderId: String): List<FileEntity>
 
-    @Query("SELECT COUNT(*) FROM files WHERE pendingPublish = 1")
-    fun observePendingPublishCount(): Flow<Int>
+    @Query(
+        "SELECT COUNT(*) FROM files WHERE pendingPublish = 1 AND remoteMissing = 0 " +
+            "AND chatId IS :chatId"
+    )
+    fun observePendingPublishCount(chatId: Long?): Flow<Int>
 
     @Query("SELECT * FROM files WHERE pendingPublish = 1 LIMIT :limit")
     suspend fun pendingPublish(limit: Int): List<FileEntity>
@@ -88,17 +104,24 @@ interface FileDao {
      * the whole backlog behind them while the pending count never moved.
      */
     @Query(
-        "SELECT * FROM files WHERE pendingPublish = 1 " +
-            "AND chatId IS NOT NULL AND messageId IS NOT NULL LIMIT :limit"
+        "SELECT * FROM files WHERE pendingPublish = 1 AND remoteMissing = 0 " +
+            "AND chatId IS :chatId AND messageId IS NOT NULL LIMIT :limit"
     )
-    suspend fun pendingPublishable(limit: Int): List<FileEntity>
+    suspend fun pendingPublishable(chatId: Long?, limit: Int): List<FileEntity>
 
-    /** Pending rows with no channel message — see [clearPendingPublishForLocalOnly]. */
+    /**
+     * Pending rows of [chatId]'s drive with no channel message — see
+     * [clearPendingPublishForLocalOnly]. PC-38 scoping: rows owned by
+     * no drive yet (chatId NULL) are NOT any drive's local-only rows;
+     * sync's ownership claim assigns them to a drive first.
+     */
     @Query(
         "SELECT COUNT(*) FROM files WHERE pendingPublish = 1 " +
-            "AND (chatId IS NULL OR messageId IS NULL)"
+            "AND chatId IS :chatId AND messageId IS NULL " +
+            "AND id NOT IN (SELECT fileId FROM transfers " +
+            "WHERE fileId IS NOT NULL AND state IN ('QUEUED', 'RUNNING', 'PAUSED'))"
     )
-    suspend fun pendingLocalOnlyCount(): Int
+    suspend fun pendingLocalOnlyCount(chatId: Long?): Int
 
     /**
      * Resolves the pending flag of rows that have no channel message.
@@ -115,12 +138,47 @@ interface FileDao {
      * library as local files — and a later change re-marks the flag
      * through the normal update paths; by then an uploaded row is
      * publishable and the drain handles it. Returns the rows resolved.
+     *
+     * PC-37 guard: a row with an upload transfer still in flight is
+     * NOT resolved here. The mis-bound repair ladder detaches a row's
+     * dead binding and queues its re-upload; until that upload lands
+     * the row is shaped exactly like a local-only row, but its pending
+     * flag is the only thing that makes the transfer's caption gap
+     * (the engine's upload manifest carries no trash/favourite state)
+     * get corrected by a publish against the new message — and the
+     * only thing that keeps a concurrent sync reconcile from adopting
+     * that caption over the row's local state. A row whose upload is
+     * queued or running is mid-flight, not local-only residue.
+     *
+     * PC-38: scoped to one drive ([chatId]). Before the scoping this
+     * sweep was global, so a drain on a brand-new empty drive would
+     * silently resolve the OLD drive's local-only flags — the sweep
+     * now only ever touches the active drive's own rows.
      */
     @Query(
         "UPDATE files SET pendingPublish = 0 WHERE pendingPublish = 1 " +
-            "AND (chatId IS NULL OR messageId IS NULL)"
+            "AND chatId IS :chatId AND messageId IS NULL " +
+            "AND id NOT IN (SELECT fileId FROM transfers " +
+            "WHERE fileId IS NOT NULL AND state IN ('QUEUED', 'RUNNING', 'PAUSED'))"
     )
-    suspend fun clearPendingPublishForLocalOnly(): Int
+    suspend fun clearPendingPublishForLocalOnly(chatId: Long?): Int
+
+    /**
+     * PC-37: the repair ladder's terminal mark for a row whose Telegram
+     * copy is unrecoverable and which has no local copy to re-upload.
+     * The pending flag is cleared ONLY together with this durable mark
+     * (never silently): the row stays in the library with its state
+     * intact, is named in the sync outcome, and — via the
+     * `remoteMissing = 0` filters on the publish fetches and counts —
+     * leaves the retry cycle permanently. The stored (dead) mapping is
+     * deliberately kept on the row as the record of what was bound.
+     */
+    @Query("UPDATE files SET remoteMissing = 1, pendingPublish = 0 WHERE id = :id")
+    suspend fun markRemoteMissing(id: String)
+
+    /** Every row carrying the durable remote-missing mark, by name. */
+    @Query("SELECT * FROM files WHERE remoteMissing = 1 ORDER BY name COLLATE NOCASE ASC")
+    suspend fun remoteMissingRows(): List<FileEntity>
 
     @Query("SELECT * FROM files WHERE id = :id")
     suspend fun byId(id: String): FileEntity?
@@ -411,6 +469,35 @@ interface FileDao {
         // sorting puts fresh uploads on top instead of using the source mtime.
         modifiedAt: Long = 0
     )
+
+    /**
+     * [setRemoteMapping] with the write logged (PC-37). The 144
+     * mis-bound rows of the 2026-11-21 meltdown could never be traced
+     * to the write that bound them because no mapping write was ever
+     * logged; every production binding write now leaves exactly one
+     * line carrying the file uuid and the message it binds, so a
+     * future mis-binding is joinable from the log alone.
+     */
+    suspend fun setRemoteMappingLogged(
+        id: String,
+        chatId: Long?,
+        messageId: Long?,
+        remoteFileId: String?,
+        remoteUniqueId: String?,
+        state: BackupState,
+        iconFileId: String? = null,
+        modifiedAt: Long = 0
+    ) {
+        SafeLog.w(
+            "FileDao",
+            "setRemoteMapping: file=$id chatId=$chatId messageId=$messageId " +
+                "remoteUniqueId=$remoteUniqueId"
+        )
+        setRemoteMapping(
+            id, chatId, messageId, remoteFileId, remoteUniqueId, state,
+            iconFileId, modifiedAt
+        )
+    }
 
     @Query(
         """UPDATE files

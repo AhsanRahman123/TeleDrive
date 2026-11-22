@@ -133,6 +133,15 @@ class PartUploader(
                 }
 
                 val part = stored ?: error("Part ${index + 1} did not finish")
+                // PC-37: part-mapping writes are logged like every
+                // other binding write (see FileDao.setRemoteMappingLogged),
+                // so a mis-binding is joinable from the log alone.
+                SafeLog.w(
+                    TAG,
+                    "setRemoteMapping(part): file=${entity.id} part=$index " +
+                        "chatId=${part.chatId} messageId=${part.messageId} " +
+                        "remoteUniqueId=${part.remoteUniqueId}"
+                )
                 filePartDao.upsert(part)
                 done[index] = part
                 uploadedBefore += plainSize

@@ -54,6 +54,15 @@ data class FileEntity(
     val trashedAt: Long? = null,
     val preTrashFolderId: String? = null,
     val pendingPublish: Boolean = false,
+    /**
+     * PC-37: the row's Telegram copy is unrecoverable (its stored
+     * message is gone or not editable, no channel message carries its
+     * manifest, and no local copy exists to re-upload). The row is
+     * kept — with its pending intent recorded by the repair ladder's
+     * surfacing — but excluded from the publish retry cycle so drains
+     * stop re-attempting a binding that can never succeed.
+     */
+    val remoteMissing: Boolean = false,
     val partCount: Int = 0,
     val iconFileId: String? = null,
     val createdAt: Long,

@@ -233,7 +233,7 @@ class LiveSyncTest {
         sync.applyRemoteChanges(TEST_CHAT, setOf(50), emptySet())
 
         assertEquals("Trips", database.folderDao().byId("trips")!!.name)
-        assertEquals(0, database.folderDao().pendingPublishCount())
+        assertEquals(0, database.folderDao().pendingPublishCount(TEST_CHAT))
         assertTrue(telegram.uploads.isEmpty())
     }
 

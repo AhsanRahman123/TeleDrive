@@ -17,6 +17,26 @@ sealed interface AppError {
 
     data class TelegramError(val code: Int, val message: String) : AppError
 
+    /**
+     * The row's stored channel message is not the file's own editable
+     * message: Telegram answered a caption edit with 400
+     * `MESSAGE_ID_INVALID` (the stored id resolves to nothing) or
+     * `Message can't be edited` (it resolves to a message that is not
+     * this file's editable post). Distinct from a generic permanent
+     * rejection (PC-37): the publish drainer runs a repair ladder for
+     * this outcome instead of retrying the same dead binding forever.
+     * [telegramMessage] is Telegram's original error text.
+     */
+    data class MisboundRemote(val telegramMessage: String) : AppError
+
+    /**
+     * The file's Telegram copy is gone (or not editable) and no local
+     * copy exists to re-upload: the row has been durably marked
+     * remote-missing and taken out of the publish retry cycle. Surfaced
+     * by [fileName] in the sync outcome so the loss is never silent.
+     */
+    data class RemoteMissing(val fileName: String) : AppError
+
     data object KeyUnreadable : AppError
 
     data class FileTooLarge(val sizeBytes: Long, val limitBytes: Long) : AppError

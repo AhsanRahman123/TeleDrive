@@ -644,6 +644,18 @@ private fun PendingSyncCard(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // PC-37: a failed run's reason rides under the
+                    // count — for remote-missing files it names them,
+                    // so the card never reports a bare unexplained
+                    // number for a loss the user must know about.
+                    val failedReason = (runState as? PublishRunState.Failed)?.reason
+                    if (!failedReason.isNullOrBlank()) {
+                        Text(
+                            text = failedReason,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
                 if (runActive) {
                     TextButton(onClick = onCancelSync, shapes = ButtonDefaults.shapes()) {
@@ -713,6 +725,18 @@ private fun SyncStatusCard(
                             text = subtitle,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    // PC-37: the sticky failed card carries the run's
+                    // reason too — remote-missing files stay named
+                    // until a later drain completes and replaces the
+                    // outcome.
+                    val stickyReason = (display as? SyncCardDisplay.StickyFailed)?.reason
+                    if (!stickyReason.isNullOrBlank()) {
+                        Text(
+                            text = stickyReason,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
                         )
                     }
                 }

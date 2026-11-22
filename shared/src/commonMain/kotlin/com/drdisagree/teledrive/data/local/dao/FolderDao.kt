@@ -17,14 +17,20 @@ interface FolderDao {
     @Update
     suspend fun update(folder: FolderEntity)
 
-    @Query("UPDATE folders SET pendingPublish = 1")
-    suspend fun markPendingPublish()
+    /**
+     * PC-38: folder pending state is per-drive. The unscoped version
+     * of these three queries re-flagged (and cleared) EVERY drive's
+     * folders on any folder change, and let one drive's folder phase
+     * swallow another drive's pending folder push.
+     */
+    @Query("UPDATE folders SET pendingPublish = 1 WHERE chatId IS :chatId")
+    suspend fun markPendingPublish(chatId: Long?)
 
-    @Query("UPDATE folders SET pendingPublish = 0")
-    suspend fun clearPendingPublish()
+    @Query("UPDATE folders SET pendingPublish = 0 WHERE chatId IS :chatId")
+    suspend fun clearPendingPublish(chatId: Long?)
 
-    @Query("SELECT COUNT(*) FROM folders WHERE pendingPublish = 1")
-    suspend fun pendingPublishCount(): Int
+    @Query("SELECT COUNT(*) FROM folders WHERE pendingPublish = 1 AND chatId IS :chatId")
+    suspend fun pendingPublishCount(chatId: Long?): Int
 
     @Query("UPDATE folders SET parentId = :to, changedAt = :changedAt WHERE parentId = :from")
     suspend fun reparentChildren(from: String, to: String, changedAt: Long)
@@ -35,8 +41,8 @@ interface FolderDao {
     )
     suspend fun retargetTrashedChildren(from: String, to: String, changedAt: Long)
 
-    @Query("SELECT COUNT(*) FROM folders WHERE pendingPublish = 1")
-    fun observePendingPublishCount(): Flow<Int>
+    @Query("SELECT COUNT(*) FROM folders WHERE pendingPublish = 1 AND chatId IS :chatId")
+    fun observePendingPublishCount(chatId: Long?): Flow<Int>
 
     @Query("SELECT * FROM folders")
     fun observeAll(): Flow<List<FolderEntity>>

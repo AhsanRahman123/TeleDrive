@@ -4,6 +4,17 @@ import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(connection: SQLiteConnection) {
+        // PC-37: durable remote-missing mark for rows whose Telegram
+        // copy is unrecoverable. Existing rows default to 0 (present),
+        // so the upgrade preserves every row and binding as-is.
+        connection.execSQL(
+            "ALTER TABLE `files` ADD COLUMN `remoteMissing` INTEGER NOT NULL DEFAULT 0"
+        )
+    }
+}
+
 val MIGRATION_16_17 = object : Migration(16, 17) {
     override fun migrate(connection: SQLiteConnection) {
         connection.execSQL("ALTER TABLE `files` ADD COLUMN `remoteBase` TEXT")

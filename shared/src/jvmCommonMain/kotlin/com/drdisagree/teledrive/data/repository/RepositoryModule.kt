@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.data.repository
 
+import com.drdisagree.teledrive.core.publish.ReuploadEnqueuer
 import com.drdisagree.teledrive.core.telegram.TelegramSession
 import com.drdisagree.teledrive.data.remote.telegram.ManifestCodec
 import com.drdisagree.teledrive.domain.repository.BackupRepository
@@ -22,6 +23,14 @@ import org.koin.dsl.module
 
 val repositoryModule = module {
     singleOf(::ManifestCodec)
+    singleOf(::RemoteMessageResolver)
+    // PC-37: the lookup inside the lambda is deferred until an enqueue
+    // is actually requested — binding the transfer repository eagerly
+    // here would close a construction cycle back into the publish
+    // drainer (see ReuploadEnqueuer).
+    single<ReuploadEnqueuer> {
+        ReuploadEnqueuer { fileId -> get<TransferRepository>().enqueueUpload(fileId) }
+    }
     singleOf(::ActiveChannel)
     singleOf(::ChannelOwnership)
     singleOf(::FolderOwnershipRepair)

@@ -385,7 +385,7 @@ class TransferExecutor(
 
                     is TelegramUploadEvent.Completed -> {
                         val document = event.document
-                        fileDao.setRemoteMapping(
+                        fileDao.setRemoteMappingLogged(
                             id = entity.id,
                             chatId = document.chatId,
                             messageId = document.messageId,
@@ -556,7 +556,7 @@ class TransferExecutor(
                                 fileDao.setContentHash(entity.id, finalHash)
                             }
                             fileDao.setPartCount(entity.id, event.parts.size)
-                            fileDao.setRemoteMapping(
+                            fileDao.setRemoteMappingLogged(
                                 id = entity.id,
                                 chatId = first.chatId,
                                 messageId = first.messageId,

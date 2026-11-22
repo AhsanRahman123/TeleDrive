@@ -56,7 +56,7 @@ class FolderMerger(
                     merged++
                 }
             }
-            folderDao.markPendingPublish()
+            folderDao.markPendingPublish(chatId)
         }
         return merged
     }

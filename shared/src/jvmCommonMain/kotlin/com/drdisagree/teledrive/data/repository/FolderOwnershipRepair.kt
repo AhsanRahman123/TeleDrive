@@ -67,7 +67,10 @@ class FolderOwnershipRepair(
 
     private suspend fun removeEmptied(folderIds: Set<String>) {
         val deletedAt = System.currentTimeMillis()
-        var removed = 0
+        // PC-38: this repair walks every drive's folders, so the
+        // pending mark follows each removed folder's OWN drive —
+        // the old global mark re-flagged all drives' folders.
+        val removedChats = mutableSetOf<Long?>()
         for (start in folderIds) {
             var cursor: String? = start
             var guard = 0
@@ -76,11 +79,11 @@ class FolderOwnershipRepair(
                 if (folderDao.childCount(folder.id) > 0 || fileDao.countInFolder(folder.id) > 0) break
                 tombstoneDao.upsert(listOf(FolderTombstoneEntity(folder.id, folder.chatId, deletedAt)))
                 folderDao.delete(folder.id)
-                removed++
+                removedChats += folder.chatId
                 cursor = folder.parentId ?: folder.preTrashParentId
             }
         }
-        if (removed > 0) folderDao.markPendingPublish()
+        removedChats.forEach { folderDao.markPendingPublish(it) }
     }
 
     private suspend fun repair(): Int {

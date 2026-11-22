@@ -42,7 +42,7 @@ class PublishOutboxDrainerTest {
             val localOnly = (1..150).map { localOnlyFile("local-$it") }
             val publishable = (1..50).map { publishableFile("pub-$it", 1_000L + it) }
             files.upsertAll(localOnly + publishable)
-            assertEquals(200, files.pendingPublishCount())
+            assertEquals(200, files.pendingPublishCount(TEST_CHAT))
 
             val drained = drainer().drain(isStopped = { false })
 
@@ -55,10 +55,10 @@ class PublishOutboxDrainerTest {
             // flag, skip the row — is exactly what stalled the user's
             // count at the local-only floor (4,370 → 1,056) with every
             // drain "succeeding" and Sync now a no-op.
-            assertEquals(0, files.pendingPublishCount())
+            assertEquals(0, files.pendingPublishCount(TEST_CHAT))
             val localRow = files.byId("local-1")!!
             assertFalse(localRow.pendingPublish)
-            assertEquals(null, localRow.chatId)
+            assertEquals(TEST_CHAT, localRow.chatId)
             assertFalse(files.byId("pub-1")!!.pendingPublish)
             assertFalse(files.byId("pub-50")!!.pendingPublish)
         }
@@ -120,10 +120,19 @@ class PublishOutboxDrainerTest {
 
             assertTrue("one rejected caption must not fail the whole drain", drained)
             assertEquals(120, telegram.editedCaptions.size)
-            // The rejected row stays pending (never silently dropped) and
-            // is the only one left; the failure was surfaced by id.
-            assertEquals(1, files.pendingPublishCount())
-            assertTrue(files.byId("poison")!!.pendingPublish)
+            // PC-37: MESSAGE_ID_INVALID is a mis-binding, not a generic
+            // rejection. The ladder proves the binding dead (no probe
+            // hit, no manifest anywhere in the channel) and the row has
+            // no local copy, so it is marked durably remote-missing:
+            // the row is KEPT and surfaced by id, its pending flag is
+            // cleared only together with that mark, and the pending
+            // count reaches zero instead of retrying a dead binding on
+            // every drain forever. (MisboundRepairTest covers the
+            // ladder's other rungs.)
+            assertEquals(0, files.pendingPublishCount(TEST_CHAT))
+            val poisonRow = files.byId("poison")!!
+            assertFalse(poisonRow.pendingPublish)
+            assertTrue(poisonRow.remoteMissing)
             assertEquals(listOf("poison"), failures)
         }
 
@@ -153,7 +162,12 @@ class PublishOutboxDrainerTest {
 
             assertTrue("the drain must complete behind a 600-row poison head", drained)
             assertEquals(10, telegram.editedCaptions.size)
-            assertEquals(600, files.pendingPublishCount())
+            // PC-37: all 600 are mis-bound rows with no local copy —
+            // the ladder marks every one remote-missing in this single
+            // drain (over one shared channel scan), so nothing stays
+            // pending and every one was surfaced.
+            assertEquals(0, files.pendingPublishCount(TEST_CHAT))
+            assertEquals(600, files.remoteMissingRows().size)
             assertEquals(600, failures.size)
             assertFalse(files.byId("good-1")!!.pendingPublish)
         }
@@ -179,11 +193,11 @@ class PublishOutboxDrainerTest {
             assertTrue("some files published before the stop", publishedSoFar >= 10)
             // Lossless: every published row cleared, every other row kept
             // its flag — no partial state in between.
-            assertEquals(250 - publishedSoFar, files.pendingPublishCount())
+            assertEquals(250 - publishedSoFar, files.pendingPublishCount(TEST_CHAT))
 
             // Sync now after a cancel resumes exactly the remainder.
             assertTrue(drainer().drain(isStopped = { false }))
-            assertEquals(0, files.pendingPublishCount())
+            assertEquals(0, files.pendingPublishCount(TEST_CHAT))
             assertEquals(250, telegram.editedCaptions.size)
         }
 
@@ -229,8 +243,8 @@ class PublishOutboxDrainerTest {
             // The 370 local-only rows were resolved (not published, not
             // deleted): the pending count reaches zero — the exact
             // property his machine's count never had.
-            assertEquals(0, files.pendingPublishCount())
-            assertEquals(null, files.byId("bulk-local-1")!!.chatId)
+            assertEquals(0, files.pendingPublishCount(TEST_CHAT))
+            assertEquals(TEST_CHAT, files.byId("bulk-local-1")!!.chatId)
             // The deferred deletes are lossless AND surfaced: rows and
             // pending entries survive for the next drain, and every
             // deferred file was reported instead of vanishing.
@@ -280,7 +294,7 @@ class PublishOutboxDrainerTest {
             // published behind the limited file.
             assertEquals(10, telegram.editedCaptions.size)
             // The limited file stays pending, alone, and was surfaced.
-            assertEquals(1, files.pendingPublishCount())
+            assertEquals(1, files.pendingPublishCount(TEST_CHAT))
             assertTrue(files.byId("flooded")!!.pendingPublish)
             assertEquals(1, failures.size)
             assertEquals("flooded", failures[0].first)
@@ -314,7 +328,7 @@ class PublishOutboxDrainerTest {
             )
 
             assertTrue(drained)
-            assertEquals(0, files.pendingPublishCount())
+            assertEquals(0, files.pendingPublishCount(TEST_CHAT))
             assertEquals(5, telegram.editedCaptions.size)
             // Two limited attempts, then the edit went through.
             assertEquals(3, attempts.get())
@@ -343,7 +357,7 @@ class PublishOutboxDrainerTest {
             // Nothing published, nothing dropped: every file stepped
             // aside after its bounded budget and stays pending, and
             // every one was surfaced.
-            assertEquals(8, files.pendingPublishCount())
+            assertEquals(8, files.pendingPublishCount(TEST_CHAT))
             assertTrue(telegram.editedCaptions.isEmpty())
             assertEquals(8, failures.size)
             assertTrue("bounded in time (was ${elapsedMs}ms)", elapsedMs < 30_000)
@@ -372,7 +386,7 @@ class PublishOutboxDrainerTest {
             assertFalse("the run ends in the waiting state", drained)
             assertEquals(1, attempts.get())
             assertEquals(5, telegram.editedCaptions.size)
-            assertEquals(1, files.pendingPublishCount())
+            assertEquals(1, files.pendingPublishCount(TEST_CHAT))
             assertTrue(files.byId("long-flood")!!.pendingPublish)
         }
 
@@ -385,7 +399,7 @@ class PublishOutboxDrainerTest {
         category = FileCategory.IMAGE,
         localPath = null,
         contentHash = null,
-        chatId = null,
+        chatId = TEST_CHAT,
         messageId = null,
         remoteFileId = null,
         remoteUniqueId = null,
@@ -409,6 +423,10 @@ class PublishOutboxDrainerTest {
         ),
         folderStateSynchronizer = harness.folderState,
         tombstoneDao = database.folderTombstoneDao(),
-        database = database
+        database = database,
+        transferDao = database.transferDao(),
+        resolver = harness.resolver,
+        reuploadEnqueuer = harness.reuploadEnqueuer,
+        activeChannel = harness.activeChannel
     )
 }

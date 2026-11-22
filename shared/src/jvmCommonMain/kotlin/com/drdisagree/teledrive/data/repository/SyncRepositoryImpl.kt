@@ -61,6 +61,7 @@ class SyncRepositoryImpl(
     private val indexSnapshot: IndexSnapshot,
     private val publishScheduler: PublishScheduler,
     private val settingsRepository: SettingsRepository,
+    private val resolver: RemoteMessageResolver,
     private val database: TeleDriveDatabase
 ) : SyncRepository {
 
@@ -136,7 +137,7 @@ class SyncRepositoryImpl(
                     if (!incremental && result is AppResult.Success) {
                         recordFullSyncCompleted(System.currentTimeMillis())
                     }
-                    val pendingNow = fileDao.pendingPublishCount()
+                    val pendingNow = fileDao.pendingPublishCount(activeChannel.id())
                     // Kick once when pending work first appears in this instance, including
                     // work left over from a previous process. Do not re-kick unchanged rows
                     // on every full resync.
@@ -175,13 +176,13 @@ class SyncRepositoryImpl(
 
         var fromSnapshot = 0
         if (!incremental) {
-            if (folderDao.pendingPublishCount() > 0) publishScheduler.kick()
+            if (folderDao.pendingPublishCount(chatId) > 0) publishScheduler.kick()
             runCatching { folderStateSynchronizer.pull() }
                 .onFailure { SafeLog.w(TAG, "Folder state pull failed", it) }
             folderMerger.mergeDuplicates(chatId)
             runCatching { mergeDuplicateMessageRows(chatId) }
                 .onFailure { SafeLog.w(TAG, "Message-row merge failed", it) }
-            if (folderDao.pendingPublishCount() > 0) publishScheduler.kick()
+            if (folderDao.pendingPublishCount(chatId) > 0) publishScheduler.kick()
             if (fileDao.fileCount(chatId) == 0) fromSnapshot = applySnapshot(chatId, quiet)
         }
 
@@ -400,7 +401,7 @@ class SyncRepositoryImpl(
             if (documents.any { it.isFolderState() }) {
                 runCatching { folderStateSynchronizer.pull() }
                     .onFailure { SafeLog.w(TAG, "Folder state pull failed", it) }
-                if (folderDao.pendingPublishCount() > 0) publishScheduler.kick()
+                if (folderDao.pendingPublishCount(chatId) > 0) publishScheduler.kick()
             }
 
             val files = documents.filter {
@@ -415,7 +416,7 @@ class SyncRepositoryImpl(
                 }
                 if (
                     captionRepairsQueued.size > repairsBefore ||
-                    fileDao.pendingPublishCount() > 0
+                    fileDao.pendingPublishCount(chatId) > 0
                 ) {
                     publishScheduler.kick()
                 }
@@ -568,21 +569,47 @@ class SyncRepositoryImpl(
         // A row bound to this exact message IS this document's row — the strongest
         // identity there is, and the only one a caption-less document can be matched
         // by reliably. Matching it first is what lets an adopted orphan settle after
-        // one pass: the unique-id route below squeezes every row sharing a content
+        // one pass: the unique-id route squeezes every row sharing a content
         // id into a single map entry and then refuses any row bound to a different
         // message, so an orphan whose content duplicates its source's could never
         // match the row a previous pass created for it and was re-inserted fresh,
         // with a new random id, on every pass forever.
-        val indexedExisting = known.byMessageId[document.messageId]
-            ?: manifest?.let { known.byId[it.fileId] }
-            ?: known.byUniqueId[document.uniqueFileId]?.takeIf { row ->
-                // A row bound to a different live message is a duplicate upload of the
-                // same content (both messages share a Telegram unique id), not this
-                // document's row. Claiming it deletes the twin's row and rewrites both
-                // rows on every sync, forever. Only adopt a unique-id match when it is
-                // unbound or bound to this very message (a re-registered upload).
-                row.messageId == null || row.messageId == document.messageId
-            }
+        //
+        // The choice itself lives in RemoteMessageResolver.matchRow, shared
+        // with the publish repair ladder (PC-37) so the two can never drift.
+        // PC-37 hardening: when the message-id binding and the td1 caption's
+        // uuid name DIFFERENT rows, the caption wins — the caption was written
+        // by the file's own publisher, while a stored binding can be a stale
+        // adoption — and the disagreement is logged loudly instead of the old
+        // silent route-1 priority, which let a mis-binding entrench itself
+        // forever (every later sync saw the wrong row claiming the message
+        // and left it alone).
+        val match = RemoteMessageResolver.matchRow(
+            document = document,
+            manifest = manifest,
+            byId = known.byId,
+            byUniqueId = known.byUniqueId,
+            byMessageId = known.byMessageId
+        )
+        match.conflict?.let { conflict ->
+            SafeLog.w(
+                TAG,
+                "Binding conflict: message ${document.messageId} in chat " +
+                    "${document.chatId} — caption names file ${conflict.captionRowId} " +
+                    "but row ${conflict.messageRowId} claims the message; " +
+                    "caption uuid wins"
+            )
+            // The claimant's binding is detached, never deleted: left
+            // in place it would still claim this message, and the
+            // duplicate-message merge after the scan would collapse
+            // the two rows by age — possibly deleting the very row
+            // the caption just vindicated. Detached, the claimant
+            // stays in the library unbound; a later scan of its own
+            // real message (or the repair ladder, if it is pending)
+            // can bind it again.
+            fileDao.detachRemote(conflict.messageRowId)
+        }
+        val indexedExisting = match.row
         // existingForPage() is read before the page transaction begins. A user can move a
         // file in that gap. Re-read the current row inside the transaction so pendingPublish
         // and the latest folderId cannot be lost to the older sync snapshot.
@@ -760,6 +787,23 @@ class SyncRepositoryImpl(
                 )
             )
             return ReconcileResult.INSERTED
+        }
+
+        // PC-37: every binding write is logged with the file uuid and
+        // the message it binds. The 144 mis-bound rows of the
+        // 2026-11-21 meltdown could never be traced to the write that
+        // bound them because no mapping write was ever logged; a
+        // binding that is created or moved here now leaves one line.
+        if (entity.messageId != null &&
+            (existing == null || existing.chatId != entity.chatId ||
+                existing.messageId != entity.messageId)
+        ) {
+            SafeLog.w(
+                TAG,
+                "setRemoteMapping: file=${entity.id} chatId=${entity.chatId} " +
+                    "messageId=${entity.messageId} " +
+                    "remoteUniqueId=${entity.remoteUniqueId} (via sync reconcile)"
+            )
         }
 
         return when {

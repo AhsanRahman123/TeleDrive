@@ -71,8 +71,19 @@ class FileManifestPublisher(
             AppResult.Success(Unit)
         } catch (e: TelegramException) {
             AppResult.Failure(
-                if (e.isRateLimit) AppError.RateLimited(e.retryAfterSeconds ?: 0)
-                else AppError.TelegramError(e.code, e.message)
+                when {
+                    e.isRateLimit -> AppError.RateLimited(e.retryAfterSeconds ?: 0)
+                    // PC-37: the two 400s that mean "the stored message
+                    // id is not this file's own editable message" get
+                    // their own outcome so the drainer runs the repair
+                    // ladder instead of treating them as generic
+                    // permanent rejections. Every other error — other
+                    // 400 texts included — keeps its existing mapping.
+                    e.code == 400 && e.message.trim() in MISBOUND_TEXTS ->
+                        AppError.MisboundRemote(e.message)
+
+                    else -> AppError.TelegramError(e.code, e.message)
+                }
             )
         }
     }
@@ -80,5 +91,10 @@ class FileManifestPublisher(
     companion object {
         /** Synthetic code: the file has no channel message to caption-edit yet. */
         const val LOCAL_ONLY_CODE = -1
+
+        /** Telegram's texts for "this id is not the file's editable message" (PC-37). */
+        const val MESSAGE_ID_INVALID_TEXT = "MESSAGE_ID_INVALID"
+        const val MESSAGE_CANT_BE_EDITED_TEXT = "Message can't be edited"
+        val MISBOUND_TEXTS = setOf(MESSAGE_ID_INVALID_TEXT, MESSAGE_CANT_BE_EDITED_TEXT)
     }
 }

@@ -63,7 +63,7 @@ class SplitFileMoveRebuildTest {
             trash.moveFolderToTrash(old.id)
             trash.emptyTrash()
             harness.folderState.push()
-            folders.clearPendingPublish()
+            folders.clearPendingPublish(TEST_CHAT)
 
             harness.newSync().fullResync()
 
@@ -87,7 +87,7 @@ class SplitFileMoveRebuildTest {
             publishMove()
             trash().moveFolderToTrash(folders.allFolders(TEST_CHAT).first { it.name == "Old" }.id)
             harness.folderState.push()
-            folders.clearPendingPublish()
+            folders.clearPendingPublish(TEST_CHAT)
 
             harness.newSync().fullResync()
 

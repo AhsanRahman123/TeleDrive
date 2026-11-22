@@ -101,7 +101,7 @@ class TrashRepositoryImpl(
     }
 
     private suspend fun markFolderStateDirty() {
-        folderDao.markPendingPublish()
+        folderDao.markPendingPublish(activeChannel.id())
         publishScheduler.kick()
     }
 
