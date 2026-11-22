@@ -43,7 +43,9 @@ import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -68,6 +70,7 @@ import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -145,6 +148,7 @@ import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.RenameDialog
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalUrlOpener
+import com.drdisagree.teledrive.presentation.preview.ArchiveEntryDownloadState
 import com.drdisagree.teledrive.presentation.preview.PreviewContent
 import com.drdisagree.teledrive.presentation.preview.PreviewViewModel
 import com.drdisagree.teledrive.resources.Res
@@ -1546,16 +1550,37 @@ private fun PreviewPane(
 
             is PreviewContent.Archive -> {
                 val archiveScrollState = rememberLazyListState()
+                val previewUiState by viewModel.uiState.collectAsState()
+                val entryDownload = previewUiState.archiveEntryDownload
                 Box(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(
                     state = archiveScrollState,
                     modifier = Modifier.fillMaxSize().padding(end = 10.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
                 ) {
-                items(current.entries) { entry ->
+                itemsIndexed(current.entries) { entryIndex, entry ->
+                    val entryBusy = entryDownload != null &&
+                        entryDownload.entryName == entry.name &&
+                        entryDownload.status == ArchiveEntryDownloadState.Status.RUNNING
+                    val anyBusy = entryDownload?.status ==
+                        ArchiveEntryDownloadState.Status.RUNNING
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .then(
+                                if (!entry.isDirectory && !anyBusy) {
+                                    Modifier.clickable {
+                                        viewModel.downloadArchiveEntry(
+                                            file = displayedFile,
+                                            entry = entry,
+                                            entryIndex = entryIndex,
+                                            entries = current.entries
+                                        )
+                                    }
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1581,6 +1606,14 @@ private fun PreviewPane(
                                 text = Formatters.bytes(entry.sizeBytes),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (entryBusy) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .padding(start = 12.dp)
+                                    .size(18.dp),
+                                strokeWidth = 2.dp
                             )
                         }
                     }

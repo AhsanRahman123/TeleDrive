@@ -19,6 +19,9 @@ import com.drdisagree.teledrive.resources.preview_nothing_to_remove
 import com.drdisagree.teledrive.resources.preview_removed_favorites
 import com.drdisagree.teledrive.resources.preview_unarchived
 import com.drdisagree.teledrive.resources.preview_unhidden
+import com.drdisagree.teledrive.resources.preview_zip_entry_local_only
+import com.drdisagree.teledrive.resources.preview_zip_entry_saved
+import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
@@ -36,6 +39,7 @@ import com.drdisagree.teledrive.domain.repository.TrashRepository
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.toUiText
 import com.drdisagree.teledrive.presentation.navigation.Route
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -61,7 +65,8 @@ class PreviewViewModel(
     private val trashRepository: TrashRepository,
     private val transferRepository: TransferRepository,
     private val settingsRepository: SettingsRepository,
-    private val contentResolver: PreviewContentResolver
+    private val contentResolver: PreviewContentResolver,
+    private val remoteArchiveService: RemoteArchiveService
 ) : ViewModel() {
 
     private val route: Route.Preview = savedStateHandle.toRoute()
@@ -235,6 +240,72 @@ class PreviewViewModel(
             when (val result = transferRepository.enqueueDownload(file.id)) {
                 is AppResult.Success -> _messages.tryEmit(UiText.Resource(Res.string.message_download_queued))
                 is AppResult.Failure -> _messages.tryEmit(result.error.toUiText())
+            }
+        }
+    }
+
+    /**
+     * Downloads just one file out of the zip [file] currently shows, from its online copy.
+     * [entryIndex] is the entry's position in the archive listing, so the occurrence among
+     * same-named entries (legal in zip) matches the row the user tapped.
+     */
+    fun downloadArchiveEntry(
+        file: DriveFile,
+        entry: ArchiveEntry,
+        entryIndex: Int,
+        entries: List<ArchiveEntry>
+    ) {
+        if (entry.isDirectory) return
+        if (!file.hasRemoteCopy || file.remoteFileId == null) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_zip_entry_local_only))
+            return
+        }
+        if (_uiState.value.archiveEntryDownload?.status ==
+            ArchiveEntryDownloadState.Status.RUNNING
+        ) {
+            return
+        }
+        val occurrence = entries.take(entryIndex.coerceIn(0, entries.size))
+            .count { it.name == entry.name }
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    archiveEntryDownload = ArchiveEntryDownloadState(
+                        entry.name,
+                        ArchiveEntryDownloadState.Status.RUNNING
+                    )
+                )
+            }
+            try {
+                val savedPath = remoteArchiveService.extractEntry(file, entry.name, occurrence)
+                _uiState.update {
+                    it.copy(
+                        archiveEntryDownload = ArchiveEntryDownloadState(
+                            entry.name,
+                            ArchiveEntryDownloadState.Status.SUCCEEDED
+                        )
+                    )
+                }
+                val savedName = savedPath.substringAfterLast('/')
+                    .substringAfterLast('\\')
+                    .ifBlank { entry.name.substringAfterLast('/') }
+                _messages.tryEmit(UiText.Resource(Res.string.preview_zip_entry_saved, savedName))
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                _uiState.update {
+                    it.copy(
+                        archiveEntryDownload = ArchiveEntryDownloadState(
+                            entry.name,
+                            ArchiveEntryDownloadState.Status.FAILED
+                        )
+                    )
+                }
+                _messages.tryEmit(
+                    UiText.Plain(
+                        failure.message ?: "Could not download that file from the zip."
+                    )
+                )
             }
         }
     }

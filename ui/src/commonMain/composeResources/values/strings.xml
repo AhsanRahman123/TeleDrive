@@ -524,6 +524,13 @@
     <string name="preview_previous">Previous file</string>
     <string name="preview_progress_bytes">%1$s of %2$s</string>
     <string name="preview_read_failed">Could not read file</string>
+    <string name="preview_zip_encrypted">This file's online copy is encrypted, so the zip can't be browsed here. Download it to open it locally.</string>
+    <string name="preview_zip_split">This file was split into multiple parts when it was uploaded, so it isn't a single zip online and can't be browsed here. Download it to open it locally.</string>
+    <string name="preview_zip_not_a_zip">This file doesn't look like a valid zip archive.</string>
+    <string name="preview_zip_corrupt">This zip archive is damaged or incomplete, so its contents can't be listed.</string>
+    <string name="preview_zip_multi_disk">This zip is split across multiple parts, so it can't be browsed as a single file. Download all of its parts and open it locally instead.</string>
+    <string name="preview_zip_entry_saved">Saved %1$s to your downloads folder</string>
+    <string name="preview_zip_entry_local_only">This zip is only on this device, so its files can't be downloaded from inside it here. Upload the zip first, or extract it locally outside the app.</string>
     <string name="preview_remove_favorites">Remove from favorites</string>
     <string name="preview_removed_favorites">Removed from favorites</string>
     <string name="preview_requires_download">This file is %1$s and is not downloaded on this device.</string>
