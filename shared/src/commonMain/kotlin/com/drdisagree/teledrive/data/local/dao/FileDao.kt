@@ -455,7 +455,7 @@ interface FileDao {
            remoteFileId = :remoteFileId, remoteUniqueId = :remoteUniqueId,
            iconFileId = COALESCE(:iconFileId, iconFileId),
            modifiedAt = CASE WHEN :modifiedAt > 0 THEN :modifiedAt ELSE modifiedAt END,
-           backupState = :state WHERE id = :id"""
+           backupState = :state, remoteMissing = 0 WHERE id = :id"""
     )
     suspend fun setRemoteMapping(
         id: String,

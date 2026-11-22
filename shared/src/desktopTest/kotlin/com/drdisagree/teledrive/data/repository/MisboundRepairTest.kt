@@ -264,6 +264,26 @@ class MisboundRepairTest {
         }
 
     @Test
+    fun `a fresh binding write clears the remote missing mark`() = runBlocking {
+        files.upsert(row("revived", messageId = 71))
+        telegram.documents = emptyList()
+        telegram.onEditCaption = { throw TelegramException(400, "MESSAGE_ID_INVALID") }
+        drainer().drain(isStopped = { false })
+        assertTrue(files.byId("revived")!!.remoteMissing)
+
+        // The file later reappears (an unplugged drive reconnects,
+        // the user re-imports it) and its upload lands: the binding
+        // write is positive proof a Telegram copy exists again, so
+        // the mark must clear with it — otherwise the row would stay
+        // excluded from the publish cycle forever, silently.
+        files.setRemoteMapping(
+            "revived", TEST_CHAT, 999, "remote-999", "unique-999",
+            BackupState.BACKED_UP
+        )
+        assertFalse(files.byId("revived")!!.remoteMissing)
+    }
+
+    @Test
     fun `another permanent 400 neither scans the channel nor marks the row`() = runBlocking {
         files.upsert(row("other", messageId = 80))
         telegram.onEditCaption = { messageId ->
