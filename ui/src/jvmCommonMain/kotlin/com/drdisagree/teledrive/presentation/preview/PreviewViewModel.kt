@@ -291,6 +291,207 @@ class PreviewViewModel(
         }
     }
 
+    /** The ZIP viewer's remembered sort (its own pair in preferences, like the gallery's). */
+    val archiveSort: StateFlow<Pair<FileSortField, SortDirection>> =
+        settingsRepository.preferences
+            .map { it.archiveSortField to it.archiveSortDirection }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                FileSortField.NAME to SortDirection.ASCENDING
+            )
+
+    fun setArchiveSort(field: FileSortField, direction: SortDirection) {
+        viewModelScope.launch {
+            settingsRepository.update {
+                it.copy(archiveSortField = field, archiveSortDirection = direction)
+            }
+        }
+    }
+
+    /**
+     * Routes a tap on an archive file row: images open in the image viewer, audio plays,
+     * text reads in place — each after the same verified extraction a download performs —
+     * and everything else (video included, always) downloads. In selection mode the screen
+     * toggles selection instead and never calls this.
+     */
+    fun onArchiveEntryTap(file: DriveFile, entryIndex: Int) {
+        val listing = _uiState.value.archiveListings[file.id]
+        val entry = listing?.getOrNull(entryIndex)
+        if (entry == null || entry.isDirectory) {
+            downloadArchiveEntry(file, entryIndex)
+            return
+        }
+        when (archiveEntryTapAction(entry)) {
+            ArchiveEntryTapAction.PREVIEW_IMAGE,
+            ArchiveEntryTapAction.PLAY_AUDIO,
+            ArchiveEntryTapAction.PREVIEW_TEXT -> previewArchiveEntry(file, entryIndex)
+            ArchiveEntryTapAction.DOWNLOAD -> downloadArchiveEntry(file, entryIndex)
+        }
+    }
+
+    /**
+     * Extracts the entry at [entryIndex] to a verified temp file (never Downloads) and
+     * publishes it as the in-archive preview. Text entries over the preview cap are refused
+     * before any extraction, with a message that points at the normal download instead.
+     */
+    fun previewArchiveEntry(file: DriveFile, entryIndex: Int) {
+        if (_uiState.value.archiveEntryBusyIndex != null) return
+        val listing = _uiState.value.archiveListings[file.id]
+        if (listing == null) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
+            return
+        }
+        val entry = listing.getOrNull(entryIndex) ?: return
+        if (entry.isDirectory) return
+        val action = archiveEntryTapAction(entry)
+        if (action == ArchiveEntryTapAction.DOWNLOAD) {
+            downloadArchiveEntry(file, entryIndex)
+            return
+        }
+        if (action == ArchiveEntryTapAction.PREVIEW_TEXT && !archiveEntryTextPreviewable(entry)) {
+            _messages.tryEmit(
+                UiText.Plain(
+                    "\"${archiveEntryDisplayName(entry)}\" is too large to preview here " +
+                        "(${com.drdisagree.teledrive.presentation.common.Formatters.bytes(entry.sizeBytes)}). " +
+                        "Download it instead."
+                )
+            )
+            return
+        }
+        val occurrence = archiveEntryOccurrence(listing, entryIndex)
+        if (occurrence < 0) return
+        val displayName = archiveEntryDisplayName(entry)
+        viewModelScope.launch {
+            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+            try {
+                val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
+                val preview = when (action) {
+                    ArchiveEntryTapAction.PREVIEW_IMAGE ->
+                        ArchiveEntryPreview.Image(displayName, temp.absolutePath)
+                    ArchiveEntryTapAction.PLAY_AUDIO ->
+                        ArchiveEntryPreview.Audio(displayName, temp.absolutePath)
+                    ArchiveEntryTapAction.PREVIEW_TEXT -> {
+                        // String decoding with the UTF-8 charset replaces malformed input
+                        // instead of failing, so a non-UTF-8 text file still shows sanely.
+                        val text = temp.readBytes().toString(Charsets.UTF_8)
+                        temp.delete()
+                        ArchiveEntryPreview.Text(displayName, text)
+                    }
+                    ArchiveEntryTapAction.DOWNLOAD -> error("unreachable")
+                }
+                _uiState.update { it.copy(archivePreview = preview) }
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: ArchiveException) {
+                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
+            } catch (failure: Exception) {
+                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+            } finally {
+                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+            }
+        }
+    }
+
+    /** Closes the in-archive preview and deletes its temp file (text previews hold no file). */
+    fun dismissArchivePreview() {
+        val preview = _uiState.value.archivePreview
+        _uiState.update { it.copy(archivePreview = null) }
+        when (preview) {
+            is ArchiveEntryPreview.Image -> java.io.File(preview.path).delete()
+            is ArchiveEntryPreview.Audio -> java.io.File(preview.path).delete()
+            else -> Unit
+        }
+    }
+
+    /**
+     * Downloads every entry in a multi-selection — directly selected files plus the full
+     * contents of selected folders — one at a time through the same verified extraction
+     * path as a single download (sequential on purpose: the ranged reads share one
+     * Telegram source discipline and must not be parallelized). A failure is reported
+     * per entry and does NOT stop the rest of the selection; the completion message
+     * reports how many files were saved.
+     */
+    fun downloadArchiveSelection(
+        file: DriveFile,
+        entryIndices: Set<Int>,
+        folderPaths: Set<String>
+    ) {
+        if (_uiState.value.archiveEntryBusyIndex != null) return
+        val listing = _uiState.value.archiveListings[file.id]
+        if (listing == null) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
+            return
+        }
+        val plan = planArchiveSelectionDownloads(listing, entryIndices, folderPaths)
+        if (plan.isEmpty()) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_folder_empty))
+            return
+        }
+        viewModelScope.launch {
+            var saved = 0
+            _uiState.update { it.copy(archiveBatchProgress = ArchiveBatchProgress(0, plan.size)) }
+            try {
+                for (step in plan) {
+                    _uiState.update { it.copy(archiveEntryBusyIndex = step.entryIndex) }
+                    try {
+                        remoteArchiveService.extractEntry(
+                            file = file,
+                            entryName = step.entryName,
+                            occurrence = step.occurrence,
+                            subFolderPath = step.subFolderPath.ifBlank { null }
+                        )
+                        saved++
+                    } catch (failure: CancellationException) {
+                        throw failure
+                    } catch (failure: ArchiveException) {
+                        _messages.tryEmit(
+                            UiText.Resource(
+                                Res.string.preview_archive_entry_failed,
+                                archiveEntryDisplayName(listing[step.entryIndex]),
+                                failure.message ?: "unknown error"
+                            )
+                        )
+                    } catch (failure: Exception) {
+                        _messages.tryEmit(
+                            UiText.Resource(
+                                Res.string.preview_archive_entry_failed,
+                                archiveEntryDisplayName(listing[step.entryIndex]),
+                                "unknown error"
+                            )
+                        )
+                    }
+                    _uiState.update {
+                        it.copy(
+                            archiveBatchProgress = ArchiveBatchProgress(
+                                (it.archiveBatchProgress?.done ?: 0) + 1,
+                                plan.size
+                            )
+                        )
+                    }
+                }
+            } finally {
+                _uiState.update {
+                    it.copy(archiveEntryBusyIndex = null, archiveBatchProgress = null)
+                }
+            }
+            when {
+                saved == 0 -> _messages.tryEmit(
+                    UiText.Resource(Res.string.preview_archive_none_saved)
+                )
+                plan.size == 1 -> _messages.tryEmit(
+                    UiText.Resource(
+                        Res.string.preview_archive_entry_saved,
+                        archiveEntryDisplayName(listing[plan.first().entryIndex])
+                    )
+                )
+                else -> _messages.tryEmit(
+                    UiText.Resource(Res.string.preview_archive_entries_saved, saved)
+                )
+            }
+        }
+    }
+
     fun upload(file: DriveFile) {
         viewModelScope.launch {
             when (val result = transferRepository.enqueueUpload(file.id)) {

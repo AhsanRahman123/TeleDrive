@@ -39,7 +39,55 @@ class RemoteArchiveService(
      * and saves it through the normal download writer, under the entry's file name, in the folder
      * that mirrors the ZIP's library folder. Returns the writer's saved location.
      */
-    suspend fun extractEntry(file: DriveFile, entryName: String, occurrence: Int = 0): String {
+    /**
+     * [subFolderPath], when given, is appended to the ZIP's library folder so a download
+     * that belongs to a folder inside the ZIP recreates that folder structure under
+     * Downloads — the same tree recreation the normal folder download performs.
+     */
+    suspend fun extractEntry(
+        file: DriveFile,
+        entryName: String,
+        occurrence: Int = 0,
+        subFolderPath: String? = null
+    ): String {
+        val temp = extractEntryToTempFile(file, entryName, occurrence)
+        try {
+            val fileName = entryName.substringAfterLast('/').substringAfterLast('\\')
+                .ifBlank { "unnamed" }
+            val libraryPath = folderPathResolver.pathOf(file.folderId)
+            val folderPath = listOf(libraryPath, subFolderPath.orEmpty())
+                .filter { it.isNotBlank() }
+                .joinToString("/")
+            val savedPath = downloadWriter.write(
+                fileName = fileName,
+                mimeType = MimeTypes.fromFileName(fileName),
+                folderPath = folderPath
+            ) { output ->
+                temp.inputStream().buffered().use { input -> input.copyTo(output) }
+            }
+            return savedPath ?: throw ArchiveException(
+                ArchiveErrorKind.SAVE_FAILED,
+                "The file could not be saved to Downloads."
+            )
+        } finally {
+            temp.delete()
+        }
+    }
+
+    /**
+     * Extracts the [occurrence]-th entry named [entryName] to a fresh temp file in the
+     * system temp/cache directory, with the same produced-length and CRC-32 verification
+     * as a download: [ZipArchiveReader.extract] only returns once both checks pass, so a
+     * returned file is always the verified entry bytes. The file keeps the entry's own
+     * name (plus a uniqueness marker) so image loaders and media players see the right
+     * extension. The CALLER owns the returned file and must delete it when done. Nothing
+     * is written to Downloads here — this is the preview/playback path.
+     */
+    suspend fun extractEntryToTempFile(
+        file: DriveFile,
+        entryName: String,
+        occurrence: Int = 0
+    ): java.io.File {
         checkReadable(file)
         val source = openSource(file)
         try {
@@ -54,30 +102,29 @@ class RemoteArchiveService(
                 )
             val fileName = entry.name.substringAfterLast('/').substringAfterLast('\\')
                 .ifBlank { "unnamed" }
-            // Extract to a temp file first: size and CRC are verified there, so a corrupt entry
-            // fails before the download writer is ever called and can never leave a bad file in
-            // Downloads. Only a verified entry is copied through the writer.
-            val temp = java.io.File.createTempFile("zip-entry-", ".tmp")
+            val temp = createEntryTempFile(fileName)
             try {
                 temp.outputStream().buffered().use { output -> reader.extract(entry, output) }
-                val folderPath = folderPathResolver.pathOf(file.folderId)
-                val savedPath = downloadWriter.write(
-                    fileName = fileName,
-                    mimeType = MimeTypes.fromFileName(fileName),
-                    folderPath = folderPath
-                ) { output ->
-                    temp.inputStream().buffered().use { input -> input.copyTo(output) }
-                }
-                return savedPath ?: throw ArchiveException(
-                    ArchiveErrorKind.SAVE_FAILED,
-                    "The file could not be saved to Downloads."
-                )
-            } finally {
+            } catch (failure: Exception) {
                 temp.delete()
+                throw failure
             }
+            return temp
         } finally {
             source.close()
         }
+    }
+
+    private fun createEntryTempFile(fileName: String): java.io.File {
+        val extension = fileName.substringAfterLast('.', "")
+            .takeIf { it.isNotEmpty() && it.length <= MAX_EXTENSION_LENGTH }
+            ?.let { ".$it" } ?: ".tmp"
+        val base = fileName.removeSuffix(extension).ifBlank { "entry" }
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .take(MAX_TEMP_BASE_LENGTH)
+        // createTempFile inserts its random marker between prefix and suffix, so the
+        // result is "<base>-<marker><ext>": unique, and the entry name stays readable.
+        return java.io.File.createTempFile("$TEMP_PREFIX$base-", extension)
     }
 
     private suspend fun checkReadable(file: DriveFile) {
@@ -102,6 +149,12 @@ class RemoteArchiveService(
                 "This ZIP has not been uploaded yet, so there is no online copy to browse."
             )
         }
+    }
+
+    private companion object {
+        const val TEMP_PREFIX = "zip-entry-"
+        const val MAX_EXTENSION_LENGTH = 16
+        const val MAX_TEMP_BASE_LENGTH = 48
     }
 
     private fun openSource(file: DriveFile): MediaByteSource {

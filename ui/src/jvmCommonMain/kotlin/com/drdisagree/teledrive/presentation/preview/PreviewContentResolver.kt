@@ -190,7 +190,8 @@ class PreviewContentResolver(
                 name = entry.name,
                 sizeBytes = entry.sizeBytes,
                 compressedBytes = entry.compressedBytes,
-                isDirectory = entry.isDirectory
+                isDirectory = entry.isDirectory,
+                modifiedAtMillis = entry.modifiedAtMillis
             )
         }
         PreviewContent.Archive(entries, "ZIP", remote = true)
@@ -267,7 +268,10 @@ class PreviewContentResolver(
                         name = header.fileName,
                         sizeBytes = header.uncompressedSize,
                         compressedBytes = header.compressedSize,
-                        isDirectory = header.isDirectory
+                        isDirectory = header.isDirectory,
+                        // zip4j exposes the entry time as Java epoch millis; anything
+                        // non-positive is "no timestamp" for sorting purposes.
+                        modifiedAtMillis = header.lastModifiedTime.coerceAtLeast(0L)
                     )
                 }
                 PreviewContent.Archive(entries, "ZIP")

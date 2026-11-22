@@ -4,7 +4,9 @@ data class ArchiveEntry(
     val name: String,
     val sizeBytes: Long,
     val compressedBytes: Long,
-    val isDirectory: Boolean
+    val isDirectory: Boolean,
+    /** Entry last-modified time as epoch millis, or 0 when the archive carries none. */
+    val modifiedAtMillis: Long = 0L
 )
 
 /**

@@ -48,6 +48,9 @@ data class UserPreferences(
     val sortDirection: SortDirection = SortDirection.ASCENDING,
     val gallerySortField: FileSortField = FileSortField.DATE_MODIFIED,
     val gallerySortDirection: SortDirection = SortDirection.DESCENDING,
+    /** The ZIP viewer's own remembered sort, mirroring the gallery's per-view pair. */
+    val archiveSortField: FileSortField = FileSortField.NAME,
+    val archiveSortDirection: SortDirection = SortDirection.ASCENDING,
 
     val backgroundPlayback: Boolean = false,
     val streamBeforeDownload: Boolean = true,

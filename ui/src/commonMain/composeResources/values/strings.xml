@@ -484,6 +484,7 @@
     <string name="preview_archive_entries_saved">Saved %1$d files to Downloads</string>
     <string name="preview_archive_entry_failed">Could not save %1$s: %2$s</string>
     <string name="preview_archive_none_saved">None of the selected files could be saved</string>
+    <string name="preview_archive_folder_empty">The selected folder is empty — nothing to download</string>
     <string name="preview_archive_download_selected">Download selected</string>
     <string name="preview_archive_entry_saving">Downloading %1$s…</string>
     <string name="preview_archive_local_only">This archive is only on this device, so its files cannot be downloaded one by one. Open it after downloading the whole archive.</string>
