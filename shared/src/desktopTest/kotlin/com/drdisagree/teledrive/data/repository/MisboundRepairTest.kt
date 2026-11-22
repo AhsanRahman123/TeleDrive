@@ -289,8 +289,8 @@ class MisboundRepairTest {
     @Test
     fun `several misbound rows in one drain share a single channel scan`() = runBlocking {
         files.upsert(row("scan-heal", messageId = 50))
-        val localA = File.createTempFile("a", ".jpg").apply { writeText("a") }
-        val localB = File.createTempFile("b", ".jpg").apply { writeText("b") }
+        val localA = File.createTempFile("scan-a", ".jpg").apply { writeText("a") }
+        val localB = File.createTempFile("scan-b", ".jpg").apply { writeText("b") }
         files.upsert(row("scan-a", messageId = 52).copy(localPath = localA.absolutePath))
         files.upsert(row("scan-b", messageId = 53).copy(localPath = localB.absolutePath))
         telegram.documents = listOf(
