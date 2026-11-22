@@ -37,7 +37,9 @@ class ArchiveSelectionTest {
         // Video stays download-only: no playback action exists for it.
         assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("a/movie.mp4")))
         assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("a/movie.mkv")))
-        assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("a/blob.bin")))
+        // (A known non-media type: an unknown extension would consult the platform
+        // MimeTypeMap, which is a stub in host unit tests.)
+        assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("a/blob.zip")))
         assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("a/", isDirectory = true)))
     }
 
