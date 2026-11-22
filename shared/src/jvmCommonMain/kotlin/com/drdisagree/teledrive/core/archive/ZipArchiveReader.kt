@@ -73,7 +73,7 @@ class ZipArchiveReader(
         var cdOffset = eocd.u32(16)
         if (diskNumber != 0 || cdDisk != 0) throw multiDisk()
 
-        if (totalEntries == SATURATED_U16 || cdSize == SATURATED_U32 || cdOffset == SATURATED_U32) {
+        if (totalEntries == SATURATED_U16.toLong() || cdSize == SATURATED_U32 || cdOffset == SATURATED_U32) {
             val zip64 = readZip64Eocd(tail, tailStart, eocdPosition)
             totalEntries = zip64.totalEntries
             cdSize = zip64.cdSize
