@@ -1067,6 +1067,7 @@
     <string name="error_rate_limited">Telegram rate limit. Try again in %1$ds</string>
     <string name="error_sign_in_required">Sign in to Telegram to continue</string>
     <string name="error_telegram">Telegram error: %1$s</string>
+    <string name="error_remote_missing">The Telegram copy of %1$s is missing</string>
     <string name="error_timed_out">The operation timed out</string>
     <string name="error_transfer_incomplete">Transfer did not finish</string>
     <string name="error_unknown">Something went wrong</string>

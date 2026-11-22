@@ -24,6 +24,7 @@ import com.drdisagree.teledrive.resources.error_not_supported
 import com.drdisagree.teledrive.resources.error_backup_folders_unreadable
 import com.drdisagree.teledrive.resources.error_permission_denied
 import com.drdisagree.teledrive.resources.error_rate_limited
+import com.drdisagree.teledrive.resources.error_remote_missing
 import com.drdisagree.teledrive.resources.error_sign_in_required
 import com.drdisagree.teledrive.resources.error_telegram
 import com.drdisagree.teledrive.resources.error_timed_out
@@ -39,6 +40,12 @@ fun AppError.toUiText(): UiText = when (this) {
 
     is AppError.RateLimited -> UiText.Resource(Res.string.error_rate_limited, retryAfterSeconds)
     is AppError.TelegramError -> UiText.Resource(Res.string.error_telegram, message)
+    // PC-37: the mis-binding classification is internal to the
+    // publish repair ladder (the drainer converts it before
+    // surfacing); if it ever reaches a surface, it reads as the
+    // Telegram error it came from. A remote-missing file is named.
+    is AppError.MisboundRemote -> UiText.Resource(Res.string.error_telegram, telegramMessage)
+    is AppError.RemoteMissing -> UiText.Resource(Res.string.error_remote_missing, fileName)
     is AppError.KeyUnreadable -> UiText.Resource(Res.string.error_key_unreadable)
     is AppError.FileTooLarge -> UiText.Resource(
         Res.string.error_file_too_large,
