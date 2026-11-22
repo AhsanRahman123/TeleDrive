@@ -170,3 +170,70 @@ internal fun flattenArchive(
     }
     return out
 }
+
+/**
+ * Number of LazyColumn items rendered before the first archive row: the header card.
+ * The drag-select helper works in LazyColumn list indices, so list index i maps to
+ * rows[i - ARCHIVE_LIST_HEADER_ITEMS]; the trailing hint item maps to no row at all.
+ */
+internal const val ARCHIVE_LIST_HEADER_ITEMS = 1
+
+/** The rendered row at a LazyColumn [listIndex], or null for the header/hint items. */
+internal fun archiveRowAtListIndex(rows: List<ArchiveRowState>, listIndex: Int): ArchiveRowState? =
+    rows.getOrNull(listIndex - ARCHIVE_LIST_HEADER_ITEMS)
+
+/** Whether the row at LazyColumn [listIndex] is currently selected (drag anchor check). */
+internal fun archiveDragAnchorSelected(
+    rows: List<ArchiveRowState>,
+    listIndex: Int,
+    selectedEntries: Set<Int>,
+    selectedFolders: Set<String>
+): Boolean {
+    val row = archiveRowAtListIndex(rows, listIndex) ?: return false
+    return if (row.node.isDirectory) {
+        row.node.path in selectedFolders
+    } else {
+        row.node.entryIndex?.let { it in selectedEntries } == true
+    }
+}
+
+/** A selection after a drag-select range has been painted onto the drag-start snapshot. */
+internal data class ArchiveDragSelection(
+    val entries: Set<Int>,
+    val folders: Set<String>
+)
+
+/**
+ * Paints one drag-select [listRange] (LazyColumn list indices) onto the snapshot taken
+ * when the drag started — the single place where list indices are translated to rows.
+ * Folder rows and file rows go through the exact same translation: a range covering
+ * exactly one row selects exactly that row's identity (listing index for a file, path
+ * for a folder), a range covering N rows selects exactly those N rows, and the header
+ * and hint indices at the ends of the list select nothing.
+ */
+internal fun applyArchiveDragRange(
+    rows: List<ArchiveRowState>,
+    listRange: IntRange,
+    baseEntries: Set<Int>,
+    baseFolders: Set<String>,
+    shouldSelect: Boolean
+): ArchiveDragSelection {
+    val entryIndices = mutableListOf<Int>()
+    val folderPaths = mutableListOf<String>()
+    for (listIndex in listRange) {
+        val row = archiveRowAtListIndex(rows, listIndex) ?: continue
+        if (row.node.isDirectory) {
+            folderPaths += row.node.path
+        } else {
+            row.node.entryIndex?.let { entryIndices += it }
+        }
+    }
+    return ArchiveDragSelection(
+        entries = applyArchiveRangeSelection(baseEntries, entryIndices, shouldSelect),
+        folders = if (shouldSelect) {
+            baseFolders + folderPaths
+        } else {
+            baseFolders - folderPaths.toSet()
+        }
+    )
+}

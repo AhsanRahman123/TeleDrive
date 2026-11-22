@@ -178,6 +178,155 @@ class ArchiveSelectionTest {
         assertEquals(emptySet<Int>(), pruneArchiveSelection(setOf(0), setOf(1)))
     }
 
+    // ---- Drag-select range translation (vc176 defect b) ----
+    //
+    // The drag-select helper works in LazyColumn list indices; the archive list's
+    // item 0 is the header card and its last item is the hint, so list index i maps
+    // to rows[i - 1]. These tests pin that translation: a range covering exactly
+    // one row selects exactly that row, a range covering N rows selects exactly
+    // those N rows, and folder rows behave identically to file rows.
+
+    private fun dragRows(): List<ArchiveRowState> {
+        val listing = listOf(
+            entry("dirA/a.txt", 1),   // 0
+            entry("dirA/b.txt", 2),   // 1
+            entry("dirB/c.txt", 3),   // 2
+            entry("loose.txt", 4),    // 3
+            entry("another.txt", 5)   // 4
+        )
+        // Collapsed rows, folders first then files by name:
+        // [dirA, dirB, another(4), loose(3)] at list indices 1..4.
+        return flattenArchive(buildArchiveTree(listing), expanded = emptySet())
+    }
+
+    @Test
+    fun `single long-press on one folder selects exactly that folder`() {
+        val rows = dragRows()
+        assertEquals(listOf("dirA", "dirB"), rows.take(2).map { it.node.path })
+        // dirB is row position 1 → list index 2. A stationary long-press paints
+        // the single-index range anchor..anchor.
+        val painted = applyArchiveDragRange(rows, 2..2, emptySet(), emptySet(), shouldSelect = true)
+        assertEquals(emptySet<Int>(), painted.entries)
+        assertEquals(setOf("dirB"), painted.folders)
+    }
+
+    @Test
+    fun `single long-press on one file selects exactly that file`() {
+        val rows = dragRows()
+        // loose.txt is row position 3 → list index 4, listing index 3.
+        val painted = applyArchiveDragRange(rows, 4..4, emptySet(), emptySet(), shouldSelect = true)
+        assertEquals(setOf(3), painted.entries)
+        assertEquals(emptySet<String>(), painted.folders)
+    }
+
+    @Test
+    fun `drag across N rows selects exactly those N rows, folders and files alike`() {
+        val rows = dragRows()
+        // List indices 1..3 cover rows dirA, dirB, another.txt — exactly 3 rows.
+        val painted = applyArchiveDragRange(rows, 1..3, emptySet(), emptySet(), shouldSelect = true)
+        assertEquals(setOf("dirA", "dirB"), painted.folders)
+        assertEquals(setOf(4), painted.entries)
+        // The full span covers every row and nothing else.
+        val all = applyArchiveDragRange(rows, 1..4, emptySet(), emptySet(), shouldSelect = true)
+        assertEquals(setOf("dirA", "dirB"), all.folders)
+        assertEquals(setOf(3, 4), all.entries)
+    }
+
+    @Test
+    fun `drag range reaching the header and hint items adds no extra row`() {
+        val rows = dragRows()
+        // List index 0 is the header card and rows.size + 1 is the hint: a range
+        // that runs into either end must still select exactly the rows it covers.
+        val painted = applyArchiveDragRange(
+            rows, 0..(rows.size + 1), emptySet(), emptySet(), shouldSelect = true
+        )
+        assertEquals(setOf("dirA", "dirB"), painted.folders)
+        assertEquals(setOf(3, 4), painted.entries)
+    }
+
+    @Test
+    fun `drag across expanded folder children selects exactly the crossed files`() {
+        val listing = listOf(
+            entry("dirA/a.txt", 1),
+            entry("dirA/b.txt", 2),
+            entry("dirB/c.txt", 3)
+        )
+        val rows = flattenArchive(
+            buildArchiveTree(listing), expanded = setOf("dirA")
+        )
+        // Rows: [dirA, a(0), b(1), dirB] at list indices 1..4.
+        assertEquals(listOf("dirA", "a.txt", "b.txt", "dirB"), rows.map { it.node.name })
+        val painted = applyArchiveDragRange(rows, 2..3, emptySet(), emptySet(), shouldSelect = true)
+        assertEquals(setOf(0, 1), painted.entries)
+        assertEquals(emptySet<String>(), painted.folders)
+        // A single press on the expanded folder row itself still selects only it.
+        val folderPress = applyArchiveDragRange(rows, 1..1, emptySet(), emptySet(), shouldSelect = true)
+        assertEquals(setOf("dirA"), folderPress.folders)
+        assertEquals(emptySet<Int>(), folderPress.entries)
+    }
+
+    @Test
+    fun `deselect drag removes exactly the crossed rows from the snapshot`() {
+        val rows = dragRows()
+        val painted = applyArchiveDragRange(
+            rows,
+            listRange = 1..2,
+            baseEntries = setOf(4),
+            baseFolders = setOf("dirA", "dirB"),
+            shouldSelect = false
+        )
+        assertEquals(emptySet<String>(), painted.folders)
+        assertEquals(setOf(4), painted.entries)
+    }
+
+    @Test
+    fun `anchor selected check reads the pressed row for folders and files alike`() {
+        val rows = dragRows()
+        assertTrue(archiveDragAnchorSelected(rows, 2, emptySet(), setOf("dirB")))
+        assertFalse(archiveDragAnchorSelected(rows, 2, emptySet(), setOf("dirA")))
+        assertTrue(archiveDragAnchorSelected(rows, 4, setOf(3), emptySet()))
+        assertFalse(archiveDragAnchorSelected(rows, 4, setOf(4), emptySet()))
+        // Header and hint indices are never a selected anchor.
+        assertFalse(archiveDragAnchorSelected(rows, 0, setOf(3), setOf("dirB")))
+        assertFalse(archiveDragAnchorSelected(rows, rows.size + 1, setOf(3), setOf("dirB")))
+    }
+
+    // ---- Back-step priority (vc176 defect a) ----
+
+    @Test
+    fun `back step priority is preview, search, selection, folder, exit`() {
+        assertEquals(
+            ArchiveBackStep.CLOSE_PREVIEW,
+            archiveBackStep(hasPreview = true, searchActive = true, selectionActive = true, hasExpandedFolder = true)
+        )
+        assertEquals(
+            ArchiveBackStep.CLEAR_SEARCH,
+            archiveBackStep(hasPreview = false, searchActive = true, selectionActive = true, hasExpandedFolder = true)
+        )
+        assertEquals(
+            ArchiveBackStep.EXIT_SELECTION,
+            archiveBackStep(hasPreview = false, searchActive = false, selectionActive = true, hasExpandedFolder = true)
+        )
+        assertEquals(
+            ArchiveBackStep.COLLAPSE_FOLDER,
+            archiveBackStep(hasPreview = false, searchActive = false, selectionActive = false, hasExpandedFolder = true)
+        )
+        assertEquals(
+            ArchiveBackStep.EXIT_VIEWER,
+            archiveBackStep(hasPreview = false, searchActive = false, selectionActive = false, hasExpandedFolder = false)
+        )
+    }
+
+    @Test
+    fun `back collapses the deepest expanded folder first`() {
+        assertEquals(
+            "a/b/c",
+            deepestExpandedArchiveFolder(setOf("a", "a/b", "a/b/c", "x/y"))
+        )
+        assertEquals("a/b", deepestExpandedArchiveFolder(setOf("a", "a/b")))
+        assertEquals(null, deepestExpandedArchiveFolder(emptySet()))
+    }
+
     // ---- Filter + sort composition: identity survives (items 5 + 6 + 7) ----
 
     @Test

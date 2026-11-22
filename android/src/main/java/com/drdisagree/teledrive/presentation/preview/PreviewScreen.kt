@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.Uri
 import android.content.pm.ActivityInfo
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -22,8 +23,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
@@ -91,6 +93,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -236,6 +239,28 @@ fun PreviewScreen(
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) viewModel.retryLocalCopyRemoval()
     }
+
+    // The archive list (when the current pager page shows one) registers its internal
+    // step-back here: it consumes a back press for search / selection / folder steps
+    // and returns false when it is already at the zip root with nothing active.
+    var archiveBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
+
+    // The ONE step-back for this screen, used by the top-bar back arrow, the in-zip
+    // preview's back arrow and the system back button (BackHandler below) alike, so
+    // they can never drift apart. It walks the viewer's internal state in the
+    // priority order archiveBackStep() encodes: close an open in-zip preview first,
+    // then let the archive list clear its search, exit selection mode, or go up one
+    // in-zip folder level — and only leave the viewer when nothing internal consumed
+    // the press. For non-archive previews no handler is registered and no preview is
+    // open, so this is exactly the old plain onBack().
+    val stepBack: () -> Unit = {
+        if (state.archivePreview != null) {
+            viewModel.dismissArchivePreview()
+        } else if (archiveBackHandler?.invoke() != true) {
+            onBack()
+        }
+    }
+    BackHandler { stepBack() }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
     LaunchedEffect(Unit) {
@@ -420,7 +445,8 @@ fun PreviewScreen(
                     archiveBatchProgress = state.archiveBatchProgress,
                     archiveSortField = archiveSort.first,
                     archiveSortDirection = archiveSort.second,
-                    onArchiveSortChange = viewModel::setArchiveSort
+                    onArchiveSortChange = viewModel::setArchiveSort,
+                    onRegisterArchiveBackStep = { handler -> archiveBackHandler = handler }
                 )
             }
 
@@ -449,7 +475,7 @@ fun PreviewScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = stepBack) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(Res.string.common_back)
@@ -607,7 +633,7 @@ fun PreviewScreen(
                 ArchiveEntryPreviewOverlay(
                     preview = preview,
                     dataSourceFactory = dataSourceFactory,
-                    onDismiss = viewModel::dismissArchivePreview
+                    onDismiss = stepBack
                 )
             }
         }
@@ -707,7 +733,8 @@ private fun PreviewPage(
     archiveBatchProgress: ArchiveBatchProgress?,
     archiveSortField: FileSortField,
     archiveSortDirection: SortDirection,
-    onArchiveSortChange: (FileSortField, SortDirection) -> Unit
+    onArchiveSortChange: (FileSortField, SortDirection) -> Unit,
+    onRegisterArchiveBackStep: ((() -> Boolean)?) -> Unit = {}
 ) {
     // One state for the screen's life: re-creating it on save would leave the gesture writing to a
     // state nothing renders.
@@ -881,7 +908,9 @@ private fun PreviewPage(
             onDownloadSelected = onArchiveDownloadSelected,
             sortField = archiveSortField,
             sortDirection = archiveSortDirection,
-            onSortChange = onArchiveSortChange
+            onSortChange = onArchiveSortChange,
+            registerBackStep = onRegisterArchiveBackStep,
+            isActivePage = isActivePage
         )
         is PreviewContent.RequiresDownload -> EmptyState(
             icon = Icons.Filled.Download,
@@ -1026,7 +1055,9 @@ private fun ArchiveList(
     onDownloadSelected: (Set<Int>, Set<String>) -> Unit = { _, _ -> },
     sortField: FileSortField = FileSortField.NAME,
     sortDirection: SortDirection = SortDirection.ASCENDING,
-    onSortChange: (FileSortField, SortDirection) -> Unit = { _, _ -> }
+    onSortChange: (FileSortField, SortDirection) -> Unit = { _, _ -> },
+    registerBackStep: ((() -> Boolean)?) -> Unit = {},
+    isActivePage: Boolean = true
 ) {
     var query by remember(archive) { mutableStateOf("") }
     var expanded by remember(archive) { mutableStateOf(emptySet<String>()) }
@@ -1072,10 +1103,55 @@ private fun ArchiveList(
     val busy = busyEntryIndex != null
     val listState = rememberLazyListState()
 
+    // This list's internal steps of the screen's shared step-back (see PreviewScreen):
+    // the preview step is handled one level up, so the decision here starts at the
+    // search step. Returns true when a step consumed the press; false at the zip root
+    // with nothing active, letting the press leave the viewer.
+    val handleArchiveBackStep: () -> Boolean = {
+        when (
+            archiveBackStep(
+                hasPreview = false,
+                searchActive = query.isNotBlank(),
+                selectionActive = selectionMode,
+                hasExpandedFolder = expanded.isNotEmpty()
+            )
+        ) {
+            ArchiveBackStep.CLEAR_SEARCH -> {
+                query = ""
+                true
+            }
+            ArchiveBackStep.EXIT_SELECTION -> {
+                selectedEntries = emptySet()
+                selectedFolders = emptySet()
+                true
+            }
+            ArchiveBackStep.COLLAPSE_FOLDER -> {
+                val target = deepestExpandedArchiveFolder(expanded)
+                if (target == null) {
+                    false
+                } else {
+                    expanded = expanded - target
+                    true
+                }
+            }
+            else -> false
+        }
+    }
+    val currentArchiveBackStep by rememberUpdatedState(handleArchiveBackStep)
+    DisposableEffect(isActivePage) {
+        if (isActivePage) {
+            registerBackStep { currentArchiveBackStep() }
+            onDispose { registerBackStep(null) }
+        } else {
+            onDispose { }
+        }
+    }
+
     // The main browser's drag selection, on the shared helper: long-press paints a range
     // from a snapshot taken at drag start (base ± range), with edge auto-scroll.
-    // LazyColumn item 0 is the header card and the last item is the hint, so list index
-    // i maps to rows[i - 1].
+    // LazyColumn item 0 is the header card and the last item is the hint, so the
+    // list-index → row translation lives in applyArchiveDragRange /
+    // archiveDragAnchorSelected (ArchiveNode.kt), shared by both callbacks.
     val dragSelect = rememberDragSelect(
         listState = listState,
         onStart = {
@@ -1083,32 +1159,18 @@ private fun ArchiveList(
             rangeBaseFolders = selectedFolders
         },
         isSelected = { listIndex ->
-            val row = rows.getOrNull(listIndex - 1) ?: return@rememberDragSelect false
-            if (row.node.isDirectory) {
-                row.node.path in selectedFolders
-            } else {
-                row.node.entryIndex?.let { it in selectedEntries } == true
-            }
+            archiveDragAnchorSelected(rows, listIndex, selectedEntries, selectedFolders)
         },
         onRange = { range, shouldSelect ->
-            val baseE = rangeBaseEntries ?: selectedEntries
-            val baseF = rangeBaseFolders ?: selectedFolders
-            val entryIdx = mutableListOf<Int>()
-            val folderPaths = mutableListOf<String>()
-            for (listIndex in range) {
-                val row = rows.getOrNull(listIndex - 1) ?: continue
-                if (row.node.isDirectory) {
-                    folderPaths += row.node.path
-                } else {
-                    row.node.entryIndex?.let { entryIdx += it }
-                }
-            }
-            selectedEntries = applyArchiveRangeSelection(baseE, entryIdx, shouldSelect)
-            selectedFolders = if (shouldSelect) {
-                baseF + folderPaths
-            } else {
-                baseF - folderPaths.toSet()
-            }
+            val painted = applyArchiveDragRange(
+                rows = rows,
+                listRange = range,
+                baseEntries = rangeBaseEntries ?: selectedEntries,
+                baseFolders = rangeBaseFolders ?: selectedFolders,
+                shouldSelect = shouldSelect
+            )
+            selectedEntries = painted.entries
+            selectedFolders = painted.folders
         },
         onEnd = {
             rangeBaseEntries = null
@@ -1414,6 +1476,7 @@ private val ARCHIVE_SORT_FIELDS = listOf(
     FileSortField.TYPE
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ArchiveRow(
     row: ArchiveRowState,
@@ -1454,8 +1517,25 @@ private fun ArchiveRow(
             )
             .then(
                 when {
-                    node.isDirectory -> Modifier.clickable(role = Role.Button) { onToggle() }
-                    canDownload -> Modifier.clickable(role = Role.Button) { onFileClick() }
+                    // combinedClickable with an explicit no-op long-click, like every
+                    // other row under the shared drag-select helper (the main browser's
+                    // FileListItem/FolderRow and the helper's own pointer tests): the
+                    // long-press that starts drag selection is absorbed here as a
+                    // long-click, so it cannot ALSO complete as a click on release.
+                    // A plain clickable has no long-press handling — the press that
+                    // started the drag fired onToggle/onFileClick when the finger
+                    // lifted, toggling a second row's selection on top of the range
+                    // the drag had painted.
+                    node.isDirectory -> Modifier.combinedClickable(
+                        role = Role.Button,
+                        onClick = { onToggle() },
+                        onLongClick = {}
+                    )
+                    canDownload -> Modifier.combinedClickable(
+                        role = Role.Button,
+                        onClick = { onFileClick() },
+                        onLongClick = {}
+                    )
                     else -> Modifier
                 }
             )
