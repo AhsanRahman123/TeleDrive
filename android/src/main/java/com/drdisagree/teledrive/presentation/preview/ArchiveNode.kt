@@ -178,6 +178,15 @@ internal fun flattenArchive(
  */
 internal const val ARCHIVE_LIST_HEADER_ITEMS = 1
 
+/**
+ * The LazyColumn item key for one archive row: files key on their listing index
+ * (unique because file leaves are never merged), folders on their full path
+ * (unique because folders merge by path segment). Pure and stable across sort
+ * and filter transformations, which only reorder/subset the same rows.
+ */
+internal fun archiveRowKey(row: ArchiveRowState): String =
+    row.node.entryIndex?.let { "entry-$it" } ?: row.node.path
+
 /** The rendered row at a LazyColumn [listIndex], or null for the header/hint items. */
 internal fun archiveRowAtListIndex(rows: List<ArchiveRowState>, listIndex: Int): ArchiveRowState? =
     rows.getOrNull(listIndex - ARCHIVE_LIST_HEADER_ITEMS)

@@ -14,10 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -36,6 +33,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -108,7 +106,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -1321,7 +1318,7 @@ private fun ArchiveList(
             }
             items(
                 rows,
-                key = { row -> row.node.entryIndex?.let { "entry-$it" } ?: row.node.path }
+                key = { row -> archiveRowKey(row) }
             ) { row ->
                 val entryIndex = row.node.entryIndex
                 val selected = if (row.node.isDirectory) {
@@ -1375,15 +1372,7 @@ private fun ArchiveList(
                                 expanded + row.node.path
                             }
                         }
-                    },
-                    modifier = Modifier.animateItem(
-                        fadeInSpec = tween(ROW_FADE_MS),
-                        fadeOutSpec = tween(ROW_FADE_MS),
-                        placementSpec = spring(
-                            stiffness = Spring.StiffnessMediumLow,
-                            visibilityThreshold = IntOffset.VisibilityThreshold
-                        )
-                    )
+                    }
                 )
             }
             item {
@@ -1575,6 +1564,9 @@ private fun ArchiveRow(
         Column(
             modifier = Modifier
                 .weight(1f)
+                // Keep the row's height identical with and without the 48.dp
+                // selection checkbox, so flipping selection mode never resizes rows.
+                .defaultMinSize(minHeight = 48.dp)
                 .padding(start = 14.dp)
         ) {
             Text(
@@ -1626,7 +1618,6 @@ private fun ArchiveRow(
     }
 }
 
-private const val ROW_FADE_MS = 180
 private const val CHEVRON_ROTATE_MS = 220
 private val INDENT_STEP = 16.dp
 
