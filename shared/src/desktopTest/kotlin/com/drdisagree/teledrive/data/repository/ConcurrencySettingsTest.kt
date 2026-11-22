@@ -15,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import okio.Path.Companion.toPath
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -35,7 +36,7 @@ class ConcurrencySettingsTest {
     private val dataStore: DataStore<Preferences> by lazy {
         PreferenceDataStoreFactory.createWithPath(
             scope = scope,
-            produceFile = { storeFile }
+            produceFile = { storeFile.absolutePath.toPath() }
         )
     }
 
