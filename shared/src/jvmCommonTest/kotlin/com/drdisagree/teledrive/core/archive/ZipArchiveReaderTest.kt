@@ -243,7 +243,12 @@ class ZipArchiveReaderTest {
             u16(bytes, big.localHeaderOffset.toInt() + 28)
         val bigDataEnd = bigDataStart + bigData.size
 
-        assertFalse("listing touched the large entry's data", source.overlaps(bigDataStart, bigDataEnd))
+        // The tail window (last 65,600 bytes) may legitimately cover the very end of the
+        // large entry, since the central directory follows it; the bulk must stay untouched.
+        assertFalse(
+            "listing touched the large entry's data",
+            source.overlaps(bigDataStart, bigDataEnd - 65_600)
+        )
         assertTrue("listing read ${source.totalRead} bytes", source.totalRead < 200_000)
     }
 
@@ -269,7 +274,10 @@ class ZipArchiveReaderTest {
         reader.extract(small, out)
 
         assertArrayEquals("tiny".toByteArray(), out.toByteArray())
-        assertFalse("extraction touched the large entry's data", source.overlaps(bigDataStart, bigDataEnd))
+        assertFalse(
+            "extraction touched the large entry's data",
+            source.overlaps(bigDataStart, bigDataEnd - 65_600)
+        )
     }
 
     // --- archive surgery helpers --------------------------------------------
