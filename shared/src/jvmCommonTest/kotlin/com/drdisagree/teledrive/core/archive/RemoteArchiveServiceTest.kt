@@ -388,4 +388,96 @@ class RemoteArchiveServiceTest {
             service(fakeTelegram(zipOut.toByteArray())).extractEntry(driveFile(), "absent.txt")
         }
     }
+    // ---- vc175 additions: verified temp extraction, folder-structured saves, timestamps ----
+
+    /** Stored-entry ZIP builder with explicit DOS time/date fields in both headers. */
+    private fun handBuiltStoredZipWithDosTime(
+        name: String,
+        data: ByteArray,
+        dosTime: Int,
+        dosDate: Int
+    ): ByteArray {
+        val out = ByteArrayOutputStream()
+        fun w16(v: Int) { out.write(v and 0xFF); out.write((v shr 8) and 0xFF) }
+        fun w32(v: Long) { for (i in 0 until 4) out.write((v shr (8 * i)).toInt() and 0xFF) }
+        val nameBytes = name.toByteArray(Charsets.UTF_8)
+        val crc = CRC32(); crc.update(data)
+        w32(0x04034b50); w16(20); w16(0x0800); w16(0); w16(dosTime); w16(dosDate)
+        w32(crc.value); w32(data.size.toLong()); w32(data.size.toLong())
+        w16(nameBytes.size); w16(0)
+        out.write(nameBytes); out.write(data)
+        val cdOffset = out.size().toLong()
+        w32(0x02014b50); w16(20); w16(20); w16(0x0800); w16(0); w16(dosTime); w16(dosDate)
+        w32(crc.value); w32(data.size.toLong()); w32(data.size.toLong())
+        w16(nameBytes.size); w16(0); w16(0); w16(0); w16(0); w32(0); w32(0)
+        out.write(nameBytes)
+        val cdSize = out.size().toLong() - cdOffset
+        w32(0x06054b50); w16(0); w16(0); w16(1); w16(1)
+        w32(cdSize); w32(cdOffset); w16(0)
+        return out.toByteArray()
+    }
+
+    @Test
+    fun extractEntryToTempFileReturnsVerifiedBytesKeepingTheEntryName() = runBlocking {
+        val content = "hello archive".toByteArray()
+        val zip = storedZip(listOf("docs/readme.txt" to content))
+        val temp = service(fakeTelegram(zip)).extractEntryToTempFile(driveFile(), "docs/readme.txt")
+        try {
+            assertArrayEquals(content, temp.readBytes())
+            assertTrue(temp.name.startsWith("zip-entry-readme-"))
+            assertTrue(temp.name.endsWith(".txt"))
+        } finally {
+            temp.delete()
+        }
+    }
+
+    @Test
+    fun extractEntryToTempFileVerifiesCrcBeforeHandingTheFileOut() = runBlocking {
+        val zip = storedZip(listOf("song.mp3" to "abcdef".toByteArray()))
+        // Corrupt one stored data byte: the central directory CRC no longer matches.
+        val nameIndex = zip.indexOf("song.mp3".toByteArray())
+        val dataStart = nameIndex + "song.mp3".length
+        zip[dataStart] = (zip[dataStart] + 1).toByte()
+        val writer = FakeDownloadWriter()
+        try {
+            service(fakeTelegram(zip), writer = writer)
+                .extractEntryToTempFile(driveFile(), "song.mp3")
+            fail("expected CRC failure")
+        } catch (expected: ArchiveException) {
+            assertEquals(ArchiveErrorKind.CRC_MISMATCH, expected.kind)
+        }
+        // The download writer is never involved in the preview path.
+        assertEquals(null, writer.bytes)
+    }
+
+    @Test
+    fun extractEntryWithSubFolderPathRecreatesTheInZipFolder() = runBlocking {
+        val content = "x".toByteArray()
+        val zip = storedZip(listOf("dir/sub/file.txt" to content))
+        val writer = FakeDownloadWriter()
+        service(fakeTelegram(zip), writer = writer).extractEntry(
+            driveFile(), "dir/sub/file.txt", subFolderPath = "dir/sub"
+        )
+        // driveFile() has no library folder, so the writer path is exactly the in-zip one.
+        assertEquals("dir/sub", writer.folderPath)
+        assertEquals("file.txt", writer.fileName)
+        assertArrayEquals(content, writer.bytes)
+    }
+
+    @Test
+    fun listEntriesCarriesTheDosTimestampAndZeroWhenAbsent() = runBlocking {
+        // 2024-06-15 12:30:00 in DOS fields.
+        val dosDate = ((2024 - 1980) shl 9) or (6 shl 5) or 15
+        val dosTime = (12 shl 11) or (30 shl 5) or 0
+        val dated = handBuiltStoredZipWithDosTime("dated.txt", "d".toByteArray(), dosTime, dosDate)
+        val entries = service(fakeTelegram(dated)).listEntries(driveFile())
+        assertEquals(1, entries.size)
+        val expected = java.time.LocalDateTime.of(2024, 6, 15, 12, 30, 0)
+            .toEpochSecond(java.time.ZoneOffset.UTC) * 1000L
+        assertEquals(expected, entries[0].modifiedAtMillis)
+
+        val undated = handBuiltStoredZipWithDosTime("plain.txt", "p".toByteArray(), 0, 0)
+        val undatedEntries = service(fakeTelegram(undated)).listEntries(driveFile())
+        assertEquals(0L, undatedEntries[0].modifiedAtMillis)
+    }
 }

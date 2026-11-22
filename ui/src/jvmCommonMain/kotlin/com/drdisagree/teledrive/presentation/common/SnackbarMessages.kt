@@ -71,7 +71,7 @@ fun CollectSnackbarMessages(
     }
 }
 
-internal fun UiText.isTransferMessage(): Boolean {
+fun UiText.isTransferMessage(): Boolean {
     if (this !is UiText.Resource) return false
     return resource == Res.string.files_import_preparing ||
             resource == Res.string.files_import_uploading ||

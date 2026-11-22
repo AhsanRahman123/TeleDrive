@@ -42,6 +42,10 @@ import com.drdisagree.teledrive.presentation.common.openLink
 import com.drdisagree.teledrive.presentation.common.shareLocalFiles
 import com.drdisagree.teledrive.presentation.platform.AndroidUploadPickerDialog
 import com.drdisagree.teledrive.presentation.platform.LocalDisplayRefreshRateController
+import com.drdisagree.teledrive.presentation.platform.LocalTransferBubblePreference
+import com.drdisagree.teledrive.presentation.transfers.AndroidTransferBubbleStore
+import com.drdisagree.teledrive.presentation.transfers.TransferWidgetOverlay
+import androidx.compose.foundation.layout.Box
 import com.drdisagree.teledrive.presentation.theme.TeleDriveTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -211,7 +215,10 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
         )
     }
 
+    val transferBubbleStore = koinInject<AndroidTransferBubbleStore>()
+
     CompositionLocalProvider(
+        LocalTransferBubblePreference provides transferBubbleStore,
         LocalDisplayRefreshRateController provides displayRefreshRateController,
         LocalAppIcon provides appIcon,
         LocalStandardFolders provides standardFolders,
@@ -231,7 +238,12 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
         LocalPlatformScreens provides AndroidPlatformScreens,
         LocalPlatformCapabilities provides capabilities
     ) {
-        content()
+        Box {
+            content()
+            // The floating transfer widget (bubble / bottom strip) floats over the app,
+            // exactly like the Windows overlay floats over its window.
+            TransferWidgetOverlay(transferBubbleStore)
+        }
 
         activeUploadPickerCallback?.let { callback ->
             TeleDriveTheme(

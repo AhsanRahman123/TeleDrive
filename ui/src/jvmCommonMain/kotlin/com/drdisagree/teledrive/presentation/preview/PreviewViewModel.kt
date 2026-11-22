@@ -12,9 +12,13 @@ import com.drdisagree.teledrive.resources.message_moved_to_trash
 import com.drdisagree.teledrive.resources.message_renamed
 import com.drdisagree.teledrive.resources.message_upload_queued
 import com.drdisagree.teledrive.resources.preview_added_favorites
+import com.drdisagree.teledrive.resources.preview_archive_entries_saved
+import com.drdisagree.teledrive.resources.preview_archive_entry_failed
 import com.drdisagree.teledrive.resources.preview_archive_entry_saved
 import com.drdisagree.teledrive.resources.preview_archive_failed
+import com.drdisagree.teledrive.resources.preview_archive_folder_empty
 import com.drdisagree.teledrive.resources.preview_archive_local_only
+import com.drdisagree.teledrive.resources.preview_archive_none_saved
 import com.drdisagree.teledrive.resources.preview_archived
 import com.drdisagree.teledrive.resources.preview_hidden
 import com.drdisagree.teledrive.resources.preview_local_copy_removed
