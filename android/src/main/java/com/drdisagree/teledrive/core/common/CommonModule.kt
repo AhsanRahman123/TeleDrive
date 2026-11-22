@@ -6,5 +6,7 @@ import org.koin.dsl.module
 
 val commonModule = module {
     singleOf(::AppNotifications)
-    singleOf(::AndroidTransferBubbleStore)
+    // Explicit factory: the store's CoroutineScope parameter has a default and is not
+    // a Koin binding, so constructor DSL (singleOf) could not construct it.
+    single { AndroidTransferBubbleStore(get()) }
 }

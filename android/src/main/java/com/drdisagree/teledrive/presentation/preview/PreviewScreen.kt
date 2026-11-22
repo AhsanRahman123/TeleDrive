@@ -147,6 +147,7 @@ import com.drdisagree.teledrive.presentation.components.iconFor
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
+import com.drdisagree.teledrive.resources.common_cancel
 import com.drdisagree.teledrive.resources.common_collapse
 import com.drdisagree.teledrive.resources.common_download
 import com.drdisagree.teledrive.resources.files_copy_here
@@ -423,14 +424,6 @@ fun PreviewScreen(
                 )
             }
 
-            state.archivePreview?.let { preview ->
-                ArchiveEntryPreviewOverlay(
-                    preview = preview,
-                    dataSourceFactory = dataSourceFactory,
-                    onDismiss = viewModel::dismissArchivePreview
-                )
-            }
-
             AnimatedVisibility(
                 visible = chromeShown,
                 enter = slideInVertically { height -> -height } + fadeIn(),
@@ -608,6 +601,13 @@ fun PreviewScreen(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
                     )
+                )
+            }
+            state.archivePreview?.let { preview ->
+                ArchiveEntryPreviewOverlay(
+                    preview = preview,
+                    dataSourceFactory = dataSourceFactory,
+                    onDismiss = viewModel::dismissArchivePreview
                 )
             }
         }
@@ -950,7 +950,7 @@ private fun ArchiveEntryPreviewOverlay(
     ) {
         when (preview) {
             is ArchiveEntryPreview.Image -> ZoomableImage(
-                model = preview.path,
+                model = File(preview.path),
                 contentDescription = preview.name,
                 modifier = Modifier.fillMaxSize()
             )
