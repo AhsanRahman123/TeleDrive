@@ -99,6 +99,28 @@ class ArchiveDownloadTrackerTest {
     }
 
     @Test
+    fun `complete on a paused row leaves it paused with no local path`() = runBlocking {
+        val id = tracker.begin("song.mp3", 777L)!!
+        dao.setState(id, TransferState.PAUSED, System.currentTimeMillis())
+        tracker.complete(id, "/Downloads/TeleDrive/song.mp3")
+
+        val row = dao.byId(id)!!
+        assertEquals(TransferState.PAUSED, row.state)
+        assertNull(row.localPath)
+    }
+
+    @Test
+    fun `fail on a cancelled row leaves it cancelled with no error message`() = runBlocking {
+        val id = tracker.begin("doc.pdf", 10L)!!
+        dao.setState(id, TransferState.CANCELLED, System.currentTimeMillis())
+        tracker.fail(id, "CRC mismatch")
+
+        val row = dao.byId(id)!!
+        assertEquals(TransferState.CANCELLED, row.state)
+        assertNull(row.errorMessage)
+    }
+
+    @Test
     fun `ownerStopped cancels a still running row`() = runBlocking {
         val id = tracker.begin("a.txt", 10L)!!
         tracker.ownerStopped(id)

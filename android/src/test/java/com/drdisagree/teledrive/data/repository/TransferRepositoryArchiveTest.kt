@@ -265,6 +265,19 @@ class TransferRepositoryArchiveTest {
     }
 
     @Test
+    fun `setPriority on a running archive record leaves priority and state unchanged`() =
+        runBlocking {
+            insert("arc", TransferType.ARCHIVE_DOWNLOAD, TransferState.RUNNING)
+            val before = dao.byId("arc")!!
+
+            repository.setPriority("arc", 99)
+
+            val row = dao.byId("arc")!!
+            assertEquals(before.priority, row.priority)
+            assertEquals(TransferState.RUNNING, row.state)
+        }
+
+    @Test
     fun `archive records appear in the Transfers sections the view model observes`() =
         runBlocking {
             val tracker = ArchiveDownloadTracker(dao, jobs)

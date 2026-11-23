@@ -480,8 +480,14 @@ class TransferRepositoryImpl(
         // The row is written first so the extraction's owner sees PAUSED, not RUNNING.
         val now = System.currentTimeMillis()
         archiveExtractionJobs.activeIds().forEach { archiveId ->
-            transferDao.setState(archiveId, TransferState.PAUSED, now)
-            archiveExtractionJobs.cancel(archiveId)
+            when (transferDao.byId(archiveId)?.state) {
+                TransferState.RUNNING -> {
+                    transferDao.setState(archiveId, TransferState.PAUSED, now)
+                    archiveExtractionJobs.cancel(archiveId)
+                }
+                TransferState.PAUSED -> archiveExtractionJobs.cancel(archiveId)
+                else -> Unit // Terminal or absent: nothing to write or stop.
+            }
         }
     }
 
@@ -512,6 +518,7 @@ class TransferRepositoryImpl(
 
     override suspend fun setPriority(id: String, priority: Int) = workerControlLock.withLock {
         val transfer = transferDao.byId(id) ?: return@withLock
+        if (transfer.type.isReportOnly) return@withLock
         if (transfer.state.isTerminal) return@withLock
 
         if (transfer.type.isIncoming && priority - transfer.priority in -1..1 && priority != transfer.priority) {

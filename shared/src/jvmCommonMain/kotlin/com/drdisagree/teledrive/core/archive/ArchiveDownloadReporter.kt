@@ -147,8 +147,13 @@ class ArchiveDownloadTracker(
     override suspend fun complete(recordId: String?, localPath: String) {
         if (recordId == null) return
         try {
-            transferDao.setLocalPath(recordId, localPath)
-            transferDao.setCompleted(recordId, System.currentTimeMillis())
+            val row = transferDao.byId(recordId)
+            if (row != null && row.state == TransferState.RUNNING) {
+                transferDao.setLocalPath(recordId, localPath)
+                transferDao.setCompleted(recordId, System.currentTimeMillis())
+            }
+            // Any other state was written by the transfer repository first
+            // (pause/cancel from Transfers) and is left untouched.
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Exception) {
@@ -162,12 +167,17 @@ class ArchiveDownloadTracker(
     override suspend fun fail(recordId: String?, message: String?) {
         if (recordId == null) return
         try {
-            transferDao.setFailed(
-                recordId,
-                TransferState.FAILED,
-                message,
-                System.currentTimeMillis()
-            )
+            val row = transferDao.byId(recordId)
+            if (row != null && row.state == TransferState.RUNNING) {
+                transferDao.setFailed(
+                    recordId,
+                    TransferState.FAILED,
+                    message,
+                    System.currentTimeMillis()
+                )
+            }
+            // Any other state was written by the transfer repository first
+            // (pause/cancel from Transfers) and is left untouched.
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Exception) {
