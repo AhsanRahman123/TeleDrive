@@ -50,6 +50,19 @@ class DragSelectVariantProbeTest {
         rule.onNodeWithTag(listTag).performTouchInput {
             down(center)
             advanceEventTime(1_000)
+            moveBy(Offset.Zero)
+        }
+        rule.waitForIdle()
+    }
+
+    private fun pressAndReleaseViaSemantics(listTag: String, rowTag: String) {
+        val listBounds = rule.onNodeWithTag(listTag).fetchSemanticsNode().boundsInRoot
+        val rowBounds = rule.onNodeWithTag(rowTag).fetchSemanticsNode().boundsInRoot
+        val center = rowBounds.center - listBounds.topLeft
+        rule.onNodeWithTag(listTag).performTouchInput {
+            down(center)
+            advanceEventTime(1_000)
+            up()
         }
         rule.waitForIdle()
     }
@@ -95,9 +108,8 @@ class DragSelectVariantProbeTest {
                 }
             }
         }
-        pressRowViaSemantics("v0-grid", "v0-row-0")
-        assertEquals("v0 grid control", setOf(0), selected)
-        release("v0-grid")
+        pressAndReleaseViaSemantics("v0-grid", "v0-row-0")
+        assertEquals("v0 grid control (single-call hold+release)", setOf(0), selected)
     }
 
     @Test
