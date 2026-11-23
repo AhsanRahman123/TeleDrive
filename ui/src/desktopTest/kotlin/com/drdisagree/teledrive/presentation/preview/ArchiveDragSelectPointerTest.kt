@@ -151,6 +151,7 @@ class ArchiveDragSelectPointerTest {
                     Box(
                         Modifier
                             .fillMaxWidth()
+                            .testTag("archive-row-$listIndex")
                             // ArchiveRow: 12.dp vertical padding around 48.dp content.
                             .height(72.dp)
                             .onGloballyPositioned { itemCoordsByListIndex[listIndex] = it }
@@ -292,6 +293,37 @@ class ArchiveDragSelectPointerTest {
         assertTrue(
             "grid visibleItemsInfo offsets disagree with drawn positions: $mismatches",
             mismatches.isEmpty()
+        )
+    }
+
+
+    @Test
+    fun `diagnostic - press row via its own semantics node`() {
+        val entries = flatEntries(7)
+        val rows = rowsFor(entries)
+        setArchiveContent(rows)
+        val listBounds = rule.onNodeWithTag(ARCHIVE_LIST_TAG).fetchSemanticsNode().boundsInRoot
+        val dump = StringBuilder()
+        rows.forEachIndexed { rowIndex, _ ->
+            val listIndex = rowIndex + ARCHIVE_LIST_HEADER_ITEMS
+            val b = rule.onNodeWithTag("archive-row-$listIndex").fetchSemanticsNode().boundsInRoot
+            dump.append("row$rowIndex list#$listIndex bounds=$b myCenter=${drawnCenter(listIndex)}; ")
+        }
+        // Press displayed row 0 through its OWN node at its own centre: no coordinate
+        // math of mine is involved in aiming.
+        resetSelection()
+        rule.onNodeWithTag("archive-row-1").performTouchInput {
+            down(Offset(center.x, center.y))
+        }
+        rule.waitForIdle()
+        val afterRow0 = selectedEntries
+        rule.onNodeWithTag("archive-row-1").performTouchInput { up() }
+        rule.waitForIdle()
+        assertEquals(
+            "semantics-aimed long-press on displayed row 0; listBounds=$listBounds; $dump; " +
+                "layoutInfo=${layoutInfoSummary()}",
+            setOf(rows[0].node.entryIndex),
+            afterRow0
         )
     }
 
