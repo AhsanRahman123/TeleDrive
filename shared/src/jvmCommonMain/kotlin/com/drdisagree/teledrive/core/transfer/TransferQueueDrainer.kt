@@ -90,7 +90,10 @@ class TransferQueueDrainer(
         }
         if (backupsHeld) scheduleResume()
         if (interrupted) {
-            withContext(NonCancellable) { transferDao.requeueRunning() }
+            withContext(NonCancellable) {
+                transferDao.requeueRunning()
+                transferDao.failInterruptedArchiveDownloads(System.currentTimeMillis())
+            }
             return TransferDrainResult.INTERRUPTED
         }
         return TransferDrainResult.COMPLETED
@@ -133,7 +136,8 @@ class TransferQueueDrainer(
         skip: Set<String> = emptySet()
     ): TransferEntity? {
         val types = TransferType.entries.filter { type ->
-            includeBackups || type != TransferType.BACKUP
+            type != TransferType.ARCHIVE_DOWNLOAD &&
+                (includeBackups || type != TransferType.BACKUP)
         }
         if (types.isEmpty()) return null
         return transferDao.nextQueuedOf(types, skip.size + 1).firstOrNull { it.id !in skip }

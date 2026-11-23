@@ -962,6 +962,7 @@ private fun TransferRow(
                                     TransferType.DOWNLOAD -> stringResource(Res.string.transfer_type_download)
                                     TransferType.BACKUP -> stringResource(Res.string.transfer_type_backup)
                                     TransferType.RESTORE -> stringResource(Res.string.transfer_type_restore)
+                                    TransferType.ARCHIVE_DOWNLOAD -> stringResource(Res.string.transfer_type_download)
                                 }
                             )
                             append(" · ")

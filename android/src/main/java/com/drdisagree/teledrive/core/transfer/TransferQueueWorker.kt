@@ -57,7 +57,8 @@ class TransferQueueWorker(
                                         TransferType.BACKUP -> R.string.notification_upload_failed
 
                                         TransferType.DOWNLOAD,
-                                        TransferType.RESTORE -> R.string.notification_download_failed
+                                        TransferType.RESTORE,
+                                        TransferType.ARCHIVE_DOWNLOAD -> R.string.notification_download_failed
                                     }
                                 ),
                                 message = transfer.displayName
