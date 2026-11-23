@@ -47,7 +47,25 @@ class DragSelectVariantProbeTest {
         val listBounds = rule.onNodeWithTag(listTag).fetchSemanticsNode().boundsInRoot
         val rowBounds = rule.onNodeWithTag(rowTag).fetchSemanticsNode().boundsInRoot
         val center = rowBounds.center - listBounds.topLeft
-        rule.onNodeWithTag(listTag).performTouchInput { down(center) }
+        rule.onNodeWithTag(listTag).performTouchInput {
+            down(center)
+            advanceEventTime(1_000)
+        }
+        rule.waitForIdle()
+    }
+
+    private fun pressRowViaMainClock(listTag: String, rowTag: String) {
+        val listBounds = rule.onNodeWithTag(listTag).fetchSemanticsNode().boundsInRoot
+        val rowBounds = rule.onNodeWithTag(rowTag).fetchSemanticsNode().boundsInRoot
+        val center = rowBounds.center - listBounds.topLeft
+        rule.mainClock.autoAdvance = false
+        try {
+            rule.onNodeWithTag(listTag).performTouchInput { down(center) }
+            rule.mainClock.advanceBy(1_000)
+            rule.waitForIdle()
+        } finally {
+            rule.mainClock.autoAdvance = true
+        }
         rule.waitForIdle()
     }
 
@@ -94,6 +112,46 @@ class DragSelectVariantProbeTest {
         pressRowViaSemantics("v0-grid", "v0-row-0")
         assertEquals("v0 grid control", setOf(0), selected)
         release("v0-grid")
+    }
+
+    @Test
+    fun `v0b grid no padding - mainClock pattern`() {
+        var selected by mutableStateOf(emptySet<Int>())
+        var rangeBase by mutableStateOf(emptySet<Int>())
+        rule.setContent {
+            val gridState = rememberLazyGridState()
+            val dragSelect = rememberDragSelect(
+                gridState = gridState,
+                onStart = { rangeBase = selected },
+                isSelected = { it in selected },
+                onRange = { range, shouldSelect ->
+                    selected = if (shouldSelect) rangeBase + range else rangeBase - range.toSet()
+                },
+                onEnd = {},
+                resolveNearestVisibleItem = true
+            )
+            LazyVerticalGrid(
+                state = gridState,
+                columns = GridCells.Fixed(1),
+                modifier = Modifier
+                    .size(width = 180.dp, height = 360.dp)
+                    .testTag("v0b-grid")
+                    .then(dragSelect)
+            ) {
+                items((0 until 5).toList()) { index ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .testTag("v0b-row-$index")
+                            .combinedClickable(onClick = {}, onLongClick = {})
+                    )
+                }
+            }
+        }
+        pressRowViaMainClock("v0b-grid", "v0b-row-0")
+        assertEquals("v0b grid control (mainClock)", setOf(0), selected)
+        release("v0b-grid")
     }
 
     @Test
