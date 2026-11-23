@@ -367,15 +367,22 @@ private fun gridItemAt(
     resolveNearest: Boolean
 ): LazyGridItemInfo? {
     val visibleItems = gridState.layoutInfo.visibleItemsInfo
+    // Item offsets are measured from the start of the grid's CONTENT: they exclude
+    // the before-content padding, while pointer positions are measured from the
+    // container's edge and include it. Hit-test in the items' space — comparing the
+    // two directly lands every hit beforeContentPadding too low (on the archive
+    // list, ~100.dp against a 76.dp row stride: exactly one row too low, and past
+    // the last row entirely). Proven by ArchiveDragSelectPointerTest.
+    val point = Offset(offset.x, offset.y - gridState.layoutInfo.beforeContentPadding)
     return visibleItems.fastFirstOrNull { item ->
-        offset.x >= item.offset.x &&
-                offset.x <= item.offset.x + item.size.width &&
-                offset.y >= item.offset.y &&
-                offset.y <= item.offset.y + item.size.height
+        point.x >= item.offset.x &&
+                point.x <= item.offset.x + item.size.width &&
+                point.y >= item.offset.y &&
+                point.y <= item.offset.y + item.size.height
     } ?: if (resolveNearest) {
         visibleItems.minByOrNull { item ->
             distanceToItemSquared(
-                point = offset,
+                point = point,
                 left = item.offset.x.toFloat(),
                 top = item.offset.y.toFloat(),
                 right = (item.offset.x + item.size.width).toFloat(),
@@ -408,11 +415,13 @@ private fun gridEndIndexAt(
         .fastFirstOrNull { it.index == anchorIndex }
     val centerX = candidate.offset.x + candidate.size.width / 2
     val centerY = candidate.offset.y + candidate.size.height / 2
+    // Center-crossing compares in the items' coordinate space (see gridItemAt).
+    val pointY = offset.y - gridState.layoutInfo.beforeContentPadding
     val crossed = when {
-        anchorItem != null && candidate.offset.y > anchorItem.offset.y -> offset.y >= centerY
-        anchorItem != null && candidate.offset.y < anchorItem.offset.y -> offset.y <= centerY
-        anchorItem == null && candidate.index > anchorIndex -> offset.y >= centerY
-        anchorItem == null && candidate.index < anchorIndex -> offset.y <= centerY
+        anchorItem != null && candidate.offset.y > anchorItem.offset.y -> pointY >= centerY
+        anchorItem != null && candidate.offset.y < anchorItem.offset.y -> pointY <= centerY
+        anchorItem == null && candidate.index > anchorIndex -> pointY >= centerY
+        anchorItem == null && candidate.index < anchorIndex -> pointY <= centerY
         candidate.index > anchorIndex -> offset.x >= centerX
         else -> offset.x <= centerX
     }
@@ -430,11 +439,18 @@ private fun listItemAt(
     resolveNearest: Boolean
 ): LazyListItemInfo? {
     val visibleItems = listState.layoutInfo.visibleItemsInfo
+    // Item offsets are measured from the start of the list's CONTENT: they exclude
+    // the before-content padding, while pointer positions are measured from the
+    // container's edge and include it. Hit-test in the items' space — comparing the
+    // two directly lands every hit beforeContentPadding too low (on the archive
+    // list, ~100.dp against a 76.dp row stride: exactly one row too low, and past
+    // the last row entirely). Proven by ArchiveDragSelectPointerTest.
+    val y = offset.y - listState.layoutInfo.beforeContentPadding
     return visibleItems.fastFirstOrNull { item ->
-        offset.y >= item.offset && offset.y <= item.offset + item.size
+        y >= item.offset && y <= item.offset + item.size
     } ?: if (resolveNearest) {
         visibleItems.minByOrNull { item ->
-            distanceToInterval(offset.y, item.offset, item.offset + item.size)
+            distanceToInterval(y, item.offset, item.offset + item.size)
         }
     } else {
         null
@@ -451,11 +467,13 @@ private fun listEndIndexAt(
     val candidate = listItemAt(listState, offset, resolveNearest) ?: return null
     if (anchorIndex < 0 || candidate.index == anchorIndex) return candidate.index
     val centerY = candidate.offset + candidate.size / 2
+    // Center-crossing compares in the items' coordinate space (see listItemAt).
+    val y = offset.y - listState.layoutInfo.beforeContentPadding
     return when {
         candidate.index > anchorIndex ->
-            if (offset.y >= centerY) candidate.index else candidate.index - 1
+            if (y >= centerY) candidate.index else candidate.index - 1
 
-        offset.y <= centerY -> candidate.index
+        y <= centerY -> candidate.index
         else -> candidate.index + 1
     }
 }
