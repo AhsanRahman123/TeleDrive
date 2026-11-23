@@ -161,27 +161,40 @@ class RemoteArchiveService(
         }
     }
 
-    /** Counts the bytes the extractor produces and reports the running total after each write. */
+    /**
+     * Counts the bytes the extractor produces and reports the running total after each write.
+     * Extends OutputStream directly with an explicit delegate: FilterOutputStream's
+     * write(byte[], off, len) loops through write(int) on some platforms, which would
+     * count those bytes twice.
+     */
     private class CountingOutputStream(
-        delegate: java.io.OutputStream,
+        private val delegate: java.io.OutputStream,
         private val onProgress: (transferredBytes: Long) -> Unit
-    ) : java.io.FilterOutputStream(delegate) {
+    ) : java.io.OutputStream() {
         private var total = 0L
 
         override fun write(b: Int) {
-            super.write(b)
+            delegate.write(b)
             total += 1
             onProgress(total)
         }
 
         override fun write(b: ByteArray, off: Int, len: Int) {
-            super.write(b, off, len)
+            delegate.write(b, off, len)
             total += len
             onProgress(total)
         }
 
         override fun write(b: ByteArray) {
             write(b, 0, b.size)
+        }
+
+        override fun flush() {
+            delegate.flush()
+        }
+
+        override fun close() {
+            delegate.close()
         }
     }
 
