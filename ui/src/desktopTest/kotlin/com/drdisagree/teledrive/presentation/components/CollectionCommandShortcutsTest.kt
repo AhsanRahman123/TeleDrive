@@ -11,6 +11,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
@@ -59,7 +60,14 @@ class CollectionCommandShortcutsTest {
                         .size(100.dp)
                         .testTag("shortcut-child")
                         .onKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.isCtrlPressed) {
+                            // Count consumed SHORTCUT keys only: the bare Ctrl press
+                            // itself is not a shortcut, and current compose versions
+                            // report isCtrlPressed=true for the modifier's own
+                            // KeyDown (older ones did not), which would count the
+                            // modifier press as a leaked shortcut.
+                            if (event.type == KeyEventType.KeyDown && event.isCtrlPressed &&
+                                event.key != Key.CtrlLeft && event.key != Key.CtrlRight
+                            ) {
                                 childConsumedShortcutCount++
                                 true
                             } else {
