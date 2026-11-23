@@ -50,7 +50,7 @@ class DragSelectVariantProbeTest {
         rule.onNodeWithTag(listTag).performTouchInput {
             down(center)
             advanceEventTime(1_000)
-            moveBy(Offset.Zero)
+            up()
         }
         rule.waitForIdle()
     }
@@ -148,7 +148,6 @@ class DragSelectVariantProbeTest {
         }
         pressRowViaSemantics("v1-list", "v1-row-0")
         assertEquals("v1 list plain", setOf(0), selected)
-        release("v1-list")
     }
 
     @Test
@@ -188,7 +187,6 @@ class DragSelectVariantProbeTest {
         }
         pressRowViaSemantics("v2-list", "v2-row-0")
         assertEquals("v2 list + top padding 100", setOf(0), selected)
-        release("v2-list")
     }
 
     @Test
@@ -233,7 +231,6 @@ class DragSelectVariantProbeTest {
         }
         pressRowViaSemantics("v3-list", "v3-row-0")
         assertEquals("v3 list + padding + header", setOf(0), selected)
-        release("v3-list")
     }
 
     @Test
@@ -274,6 +271,5 @@ class DragSelectVariantProbeTest {
         }
         pressRowViaSemantics("v4-grid", "v4-row-0")
         assertEquals("v4 grid + top padding 100", setOf(0), selected)
-        release("v4-grid")
     }
 }
