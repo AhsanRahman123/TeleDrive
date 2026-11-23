@@ -33,7 +33,6 @@ import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -502,7 +501,6 @@ class ArchiveDragSelectPointerTest {
                 pickerSelected
             )
         }
-        assertTrue("picker test composed all rows", true)
     }
 
     private companion object {
