@@ -509,6 +509,7 @@ class ArchiveDownloadSafetyTest {
             telegramClient = unused(),
             transferDao = transfers,
             fileDao = unused(),
+            fileRepository = unused(),
             backupDao = unused(),
             manifestCodec = codec,
             folderPathResolver = FolderPathResolver(
@@ -545,7 +546,7 @@ class ArchiveDownloadSafetyTest {
             backupSessionTracker = NoOpBackupSessionTracker(),
             settingsRepository = settings,
             networkMonitor = FakeNetworkMonitor(NetworkStatus.UNMETERED),
-            powerMonitor = FakePowerMonitor(charging = true),
+            powerMonitor = FakePowerMonitor(true),
             backupResumeScheduler = resume
         )
     }
