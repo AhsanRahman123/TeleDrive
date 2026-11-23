@@ -643,7 +643,7 @@ class DragSelectPointerTest {
         // endpoint, so the selection must remain the anchor alone. (Regression
         // test: a hold-and-lift must not add the row under the anchor.)
         rule.onNodeWithTag("touch-liftoff-grid").performTouchInput {
-            updatePointerTo(Offset(90f, 100f))
+            updatePointerTo(0, Offset(90f, 100f))
             up()
         }
         rule.waitForIdle()

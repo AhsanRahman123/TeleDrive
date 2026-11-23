@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,7 +37,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 
@@ -133,7 +133,7 @@ class ArchiveDragSelectPointerTest {
                     .then(dragSelect),
                 // previewContentPadding(): systemBars + top = PreviewTopBarHeight (64.dp)
                 // + 8.dp; on a typical phone the top inset totals ~100.dp.
-                contentPadding = PaddingValues(horizontal = 16.dp, top = 100.dp, bottom = 16.dp),
+                contentPadding = PaddingValues(start = 16.dp, top = 100.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 item {
@@ -177,15 +177,15 @@ class ArchiveDragSelectPointerTest {
 
     private fun drawnCenter(listIndex: Int): Offset {
         val coords = itemCoordsByListIndex[listIndex]
-            ?: fail("list item $listIndex is not composed; composed=${itemCoordsByListIndex.keys.sorted()}")
-        val list = listCoords ?: fail("list coordinates not captured")
+            ?: throw AssertionError("list item $listIndex is not composed; composed=${itemCoordsByListIndex.keys.sorted()}")
+        val list = listCoords ?: throw AssertionError("list coordinates not captured")
         return coords.positionInRoot() - list.positionInRoot() +
             Offset(coords.size.width / 2f, coords.size.height / 2f)
     }
 
     private fun scrollToListIndex(listIndex: Int) {
-        val state = listStateRef ?: fail("no list state")
-        val scope = scrollScopeRef ?: fail("no scope")
+        val state = listStateRef ?: throw AssertionError("no list state")
+        val scope = scrollScopeRef ?: throw AssertionError("no scope")
         rule.runOnIdle { scope.launch { state.scrollToItem(listIndex) } }
         rule.waitForIdle()
     }
@@ -260,7 +260,7 @@ class ArchiveDragSelectPointerTest {
                 modifier = Modifier
                     .size(width = 360.dp, height = 700.dp)
                     .onGloballyPositioned { gridListCoords = it },
-                contentPadding = PaddingValues(horizontal = 16.dp, top = 100.dp, bottom = 16.dp),
+                contentPadding = PaddingValues(start = 16.dp, top = 100.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 items(7) { index ->
@@ -442,8 +442,8 @@ class ArchiveDragSelectPointerTest {
         (0 until 5).forEach { index ->
             rule.runOnIdle { pickerSelected = emptySet(); pickerBase = emptySet() }
             rule.waitForIdle()
-            val coords = pickerCoords[index] ?: fail("picker row $index not composed")
-            val list = pickerListCoords ?: fail("picker list coordinates not captured")
+            val coords = pickerCoords[index] ?: throw AssertionError("picker row $index not composed")
+            val list = pickerListCoords ?: throw AssertionError("picker list coordinates not captured")
             val center = coords.positionInRoot() - list.positionInRoot() +
                 Offset(coords.size.width / 2f, coords.size.height / 2f)
             rule.onNodeWithTag(PICKER_LIST_TAG).performTouchInput { down(center) }
