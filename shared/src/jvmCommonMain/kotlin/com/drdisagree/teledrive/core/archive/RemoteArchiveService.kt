@@ -48,9 +48,12 @@ class RemoteArchiveService(
         file: DriveFile,
         entryName: String,
         occurrence: Int = 0,
-        subFolderPath: String? = null
+        subFolderPath: String? = null,
+        onProgress: ((transferredBytes: Long) -> Unit)? = null
     ): String {
-        val temp = extractEntryToTempFile(file, entryName, occurrence)
+        // Progress covers the extraction (network) phase only: the temp -> Downloads
+        // copy below is a local file copy and is deliberately unreported.
+        val temp = extractEntryToTempFile(file, entryName, occurrence, onProgress)
         try {
             val fileName = entryName.substringAfterLast('/').substringAfterLast('\\')
                 .ifBlank { "unnamed" }
@@ -86,7 +89,8 @@ class RemoteArchiveService(
     suspend fun extractEntryToTempFile(
         file: DriveFile,
         entryName: String,
-        occurrence: Int = 0
+        occurrence: Int = 0,
+        onProgress: ((transferredBytes: Long) -> Unit)? = null
     ): java.io.File {
         checkReadable(file)
         val source = openSource(file)
@@ -104,7 +108,13 @@ class RemoteArchiveService(
                 .ifBlank { "unnamed" }
             val temp = createEntryTempFile(fileName)
             try {
-                temp.outputStream().buffered().use { output -> reader.extract(entry, output) }
+                temp.outputStream().buffered().use { output ->
+                    if (onProgress == null) {
+                        reader.extract(entry, output)
+                    } else {
+                        reader.extract(entry, CountingOutputStream(output, onProgress))
+                    }
+                }
             } catch (failure: Exception) {
                 temp.delete()
                 throw failure
@@ -148,6 +158,30 @@ class RemoteArchiveService(
                 ArchiveErrorKind.NO_REMOTE_COPY,
                 "This ZIP has not been uploaded yet, so there is no online copy to browse."
             )
+        }
+    }
+
+    /** Counts the bytes the extractor produces and reports the running total after each write. */
+    private class CountingOutputStream(
+        delegate: java.io.OutputStream,
+        private val onProgress: (transferredBytes: Long) -> Unit
+    ) : java.io.FilterOutputStream(delegate) {
+        private var total = 0L
+
+        override fun write(b: Int) {
+            super.write(b)
+            total += 1
+            onProgress(total)
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            super.write(b, off, len)
+            total += len
+            onProgress(total)
+        }
+
+        override fun write(b: ByteArray) {
+            write(b, 0, b.size)
         }
     }
 

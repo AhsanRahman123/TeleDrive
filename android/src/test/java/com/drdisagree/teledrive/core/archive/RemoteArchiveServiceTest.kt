@@ -490,4 +490,56 @@ class RemoteArchiveServiceTest {
         val undatedEntries = service(fakeTelegram(undated)).listEntries(driveFile())
         assertEquals(0L, undatedEntries[0].modifiedAtMillis)
     }
+    // ---- vc179 additions: extraction progress reporting ----
+
+    /** Deflated ZIP (the ZipOutputStream default), so extraction emits in many chunks. */
+    private fun deflatedZip(name: String, content: ByteArray): ByteArray {
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { zip ->
+            zip.putNextEntry(ZipEntry(name))
+            zip.write(content)
+            zip.closeEntry()
+        }
+        return out.toByteArray()
+    }
+
+    private fun assertProgressReportsFullExtraction(values: List<Long>, sizeBytes: Long) {
+        assertTrue("no progress reported", values.isNotEmpty())
+        assertTrue(
+            "progress not strictly increasing: $values",
+            values.zipWithNext().all { (a, b) -> b > a }
+        )
+        assertEquals(sizeBytes, values.last())
+    }
+
+    @Test
+    fun extractEntryToTempFileReportsProgressUpToTheEntrySize() = runBlocking {
+        // Highly compressible but large: the inflater emits it in many output chunks,
+        // so progress must arrive as several strictly increasing values.
+        val content = ByteArray(200_000) { 'a'.code.toByte() }
+        val zip = deflatedZip("dir/big.txt", content)
+        val progress = mutableListOf<Long>()
+        val temp = service(fakeTelegram(zip)).extractEntryToTempFile(
+            driveFile(), "dir/big.txt", onProgress = { progress += it }
+        )
+        try {
+            assertArrayEquals(content, temp.readBytes())
+        } finally {
+            temp.delete()
+        }
+        assertProgressReportsFullExtraction(progress, content.size.toLong())
+    }
+
+    @Test
+    fun extractEntryReportsProgressUpToTheEntrySize() = runBlocking {
+        val content = ByteArray(200_000) { 'b'.code.toByte() }
+        val zip = deflatedZip("big.txt", content)
+        val writer = FakeDownloadWriter()
+        val progress = mutableListOf<Long>()
+        service(fakeTelegram(zip), writer = writer).extractEntry(
+            driveFile(), "big.txt", onProgress = { progress += it }
+        )
+        assertArrayEquals(content, writer.bytes)
+        assertProgressReportsFullExtraction(progress, content.size.toLong())
+    }
 }

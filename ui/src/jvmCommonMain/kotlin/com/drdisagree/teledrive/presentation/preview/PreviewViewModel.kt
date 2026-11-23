@@ -27,6 +27,7 @@ import com.drdisagree.teledrive.resources.preview_removed_favorites
 import com.drdisagree.teledrive.resources.preview_unarchived
 import com.drdisagree.teledrive.resources.preview_unhidden
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
+import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
 import com.drdisagree.teledrive.core.archive.ArchiveException
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.common.AppResult
@@ -47,6 +48,10 @@ import com.drdisagree.teledrive.presentation.common.toUiText
 import com.drdisagree.teledrive.presentation.navigation.Route
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,7 +78,8 @@ class PreviewViewModel(
     private val transferRepository: TransferRepository,
     private val settingsRepository: SettingsRepository,
     private val contentResolver: PreviewContentResolver,
-    private val remoteArchiveService: RemoteArchiveService
+    private val remoteArchiveService: RemoteArchiveService,
+    private val archiveDownloadReporter: ArchiveDownloadReporter
 ) : ViewModel() {
 
     private val route: Route.Preview = savedStateHandle.toRoute()
@@ -276,18 +282,33 @@ class PreviewViewModel(
             .ifBlank { entry.name }
         viewModelScope.launch {
             _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+            // Report-only Transfers history record: written before extraction starts,
+            // completed/failed/stopped alongside the extraction's own outcome.
+            val recordId = archiveDownloadReporter.begin(displayName, entry.sizeBytes)
+            currentCoroutineContext()[Job]?.let { job ->
+                archiveDownloadReporter.attach(recordId, job)
+            }
             try {
-                remoteArchiveService.extractEntry(file, entry.name, occurrence)
+                val savedPath = remoteArchiveService.extractEntry(
+                    file,
+                    entry.name,
+                    occurrence,
+                    onProgress = { done -> archiveDownloadReporter.progress(recordId, done) }
+                )
+                archiveDownloadReporter.complete(recordId, savedPath)
                 _messages.tryEmit(
                     UiText.Resource(Res.string.preview_archive_entry_saved, displayName)
                 )
             } catch (failure: CancellationException) {
                 // The finally block clears the busy state, so a cancelled download cannot wedge
                 // later ones; cancellation itself must keep propagating.
+                archiveDownloadReporter.ownerStopped(recordId)
                 throw failure
             } catch (failure: ArchiveException) {
+                archiveDownloadReporter.fail(recordId, failure.message)
                 _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
             } catch (failure: Exception) {
+                archiveDownloadReporter.fail(recordId, null)
                 _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
             } finally {
                 _uiState.update { it.copy(archiveEntryBusyIndex = null) }
@@ -438,17 +459,42 @@ class PreviewViewModel(
             try {
                 for (step in plan) {
                     _uiState.update { it.copy(archiveEntryBusyIndex = step.entryIndex) }
+                    val stepEntry = listing[step.entryIndex]
+                    val recordId = archiveDownloadReporter.begin(
+                        archiveEntryDisplayName(stepEntry),
+                        stepEntry.sizeBytes
+                    )
                     try {
-                        remoteArchiveService.extractEntry(
-                            file = file,
-                            entryName = step.entryName,
-                            occurrence = step.occurrence,
-                            subFolderPath = step.subFolderPath.ifBlank { null }
-                        )
+                        // The extraction runs as a CHILD job registered under this step's
+                        // record, so a stop from Transfers cancels only this step's job
+                        // while this batch coroutine stays alive to continue with the rest.
+                        val stepJob = async {
+                            remoteArchiveService.extractEntry(
+                                file = file,
+                                entryName = step.entryName,
+                                occurrence = step.occurrence,
+                                subFolderPath = step.subFolderPath.ifBlank { null },
+                                onProgress = { done ->
+                                    archiveDownloadReporter.progress(recordId, done)
+                                }
+                            )
+                        }
+                        archiveDownloadReporter.attach(recordId, stepJob)
+                        val savedPath = stepJob.await()
+                        archiveDownloadReporter.complete(recordId, savedPath)
                         saved++
                     } catch (failure: CancellationException) {
-                        throw failure
+                        archiveDownloadReporter.ownerStopped(recordId)
+                        if (currentCoroutineContext().isActive) {
+                            // Per-record stop from Transfers: the repository already wrote
+                            // CANCELLED or PAUSED for this record. No failure message, not
+                            // counted as saved — the batch continues with the next step.
+                        } else {
+                            // Real teardown of the batch itself: keep propagating.
+                            throw failure
+                        }
                     } catch (failure: ArchiveException) {
+                        archiveDownloadReporter.fail(recordId, failure.message)
                         _messages.tryEmit(
                             UiText.Resource(
                                 Res.string.preview_archive_entry_failed,
@@ -457,6 +503,7 @@ class PreviewViewModel(
                             )
                         )
                     } catch (failure: Exception) {
+                        archiveDownloadReporter.fail(recordId, null)
                         _messages.tryEmit(
                             UiText.Resource(
                                 Res.string.preview_archive_entry_failed,

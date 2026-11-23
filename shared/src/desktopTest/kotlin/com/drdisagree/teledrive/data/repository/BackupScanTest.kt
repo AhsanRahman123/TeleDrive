@@ -87,7 +87,8 @@ class BackupScanTest {
         backupSessionTracker = CountingBackupSessionTracker(
             database.transferDao(),
             database.backupDao()
-        )
+        ),
+        archiveExtractionJobs = com.drdisagree.teledrive.core.archive.ArchiveExtractionJobs()
     )
 
     private val paths = object : AppStoragePaths by unused() {
