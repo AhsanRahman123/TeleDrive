@@ -507,7 +507,7 @@ class DragSelectPointerTest {
         }
         rule.waitForIdle()
         val sequence = paintHistory.fold(listOf<Set<Int>>()) { acc, value ->
-            if (acc.lastOrNull() == value) acc else acc + value
+            if (acc.lastOrNull() == value) acc else acc + listOf(value)
         }
         assertEquals(setOf(0), sequence.first())
         assertEquals(setOf(0, 1, 2, 3), selected)
@@ -575,7 +575,7 @@ class DragSelectPointerTest {
         }
         rule.waitForIdle()
         val sequence = paintHistory.fold(listOf<Set<Int>>()) { acc, value ->
-            if (acc.lastOrNull() == value) acc else acc + value
+            if (acc.lastOrNull() == value) acc else acc + listOf(value)
         }
         assertEquals(listOf(setOf(0), setOf(0, 1)), sequence)
         assertEquals(setOf(0, 1), selected)
@@ -705,7 +705,7 @@ class DragSelectPointerTest {
         }
         rule.waitForIdle()
         val sequence = paintHistory.fold(listOf<Set<Int>>()) { acc, value ->
-            if (acc.lastOrNull() == value) acc else acc + value
+            if (acc.lastOrNull() == value) acc else acc + listOf(value)
         }
         assertEquals(setOf(1, 2, 3), sequence.first())
         assertEquals(setOf(3), selected)
