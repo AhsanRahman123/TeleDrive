@@ -4,7 +4,7 @@ import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.SortDirection
 
-internal class ArchiveNode(
+class ArchiveNode(
     val path: String,
     val name: String,
     val isDirectory: Boolean,
@@ -18,7 +18,7 @@ internal class ArchiveNode(
 )
 
 /** An archive entry paired with its index in the full listing. */
-internal data class IndexedArchiveEntry(val entryIndex: Int, val entry: ArchiveEntry)
+data class IndexedArchiveEntry(val entryIndex: Int, val entry: ArchiveEntry)
 
 private const val SEPARATOR = "/"
 
@@ -28,10 +28,10 @@ private const val SEPARATOR = "/"
  * NEVER merged: every listing entry becomes its own leaf carrying its listing index, so two
  * entries with the same name render as two rows and each tap can download its own entry.
  */
-internal fun buildArchiveTree(entries: List<ArchiveEntry>): ArchiveNode =
+fun buildArchiveTree(entries: List<ArchiveEntry>): ArchiveNode =
     buildArchiveTreeIndexed(entries.mapIndexed { index, entry -> IndexedArchiveEntry(index, entry) })
 
-internal fun buildArchiveTreeIndexed(indexed: List<IndexedArchiveEntry>): ArchiveNode {
+fun buildArchiveTreeIndexed(indexed: List<IndexedArchiveEntry>): ArchiveNode {
     val root = ArchiveNode(path = "", name = "", isDirectory = true)
     indexed.forEach { (entryIndex, entry) ->
         val segments = entry.name.split(SEPARATOR).filter { it.isNotEmpty() }
@@ -79,13 +79,13 @@ private fun aggregateSizes(node: ArchiveNode): Pair<Long, Long> {
     return size to packed
 }
 
-internal fun countFolders(node: ArchiveNode): Int =
+fun countFolders(node: ArchiveNode): Int =
     node.children.sumOf { child ->
         if (child.isDirectory) 1 + countFolders(child) else 0
     }
 
 /** Every folder path in the tree (used to render a filtered tree fully expanded). */
-internal fun allFolderPaths(node: ArchiveNode, out: MutableSet<String> = mutableSetOf()): Set<String> {
+fun allFolderPaths(node: ArchiveNode, out: MutableSet<String> = mutableSetOf()): Set<String> {
     node.children.forEach { child ->
         if (child.isDirectory) {
             out += child.path
@@ -105,7 +105,7 @@ internal fun allFolderPaths(node: ArchiveNode, out: MutableSet<String> = mutable
  * directions, so they never masquerade as 1980 files at the front of an ascending sort.
  * The sort is stable, so equal keys keep listing order.
  */
-internal fun archiveNodeComparator(
+fun archiveNodeComparator(
     field: FileSortField,
     direction: SortDirection
 ): Comparator<ArchiveNode> {
@@ -149,7 +149,7 @@ internal fun archiveNodeComparator(
 private fun archiveNodeTypeKey(node: ArchiveNode): String =
     if (node.isDirectory) "" else MimeTypes.fromFileName(node.name)
 
-internal fun flattenArchive(
+fun flattenArchive(
     root: ArchiveNode,
     expanded: Set<String>,
     sortField: FileSortField = FileSortField.NAME,
@@ -176,7 +176,7 @@ internal fun flattenArchive(
  * The drag-select helper works in LazyColumn list indices, so list index i maps to
  * rows[i - ARCHIVE_LIST_HEADER_ITEMS]; the trailing hint item maps to no row at all.
  */
-internal const val ARCHIVE_LIST_HEADER_ITEMS = 1
+const val ARCHIVE_LIST_HEADER_ITEMS = 1
 
 /**
  * The LazyColumn item key for one archive row: files key on their listing index
@@ -184,15 +184,15 @@ internal const val ARCHIVE_LIST_HEADER_ITEMS = 1
  * (unique because folders merge by path segment). Pure and stable across sort
  * and filter transformations, which only reorder/subset the same rows.
  */
-internal fun archiveRowKey(row: ArchiveRowState): String =
+fun archiveRowKey(row: ArchiveRowState): String =
     row.node.entryIndex?.let { "entry-$it" } ?: row.node.path
 
 /** The rendered row at a LazyColumn [listIndex], or null for the header/hint items. */
-internal fun archiveRowAtListIndex(rows: List<ArchiveRowState>, listIndex: Int): ArchiveRowState? =
+fun archiveRowAtListIndex(rows: List<ArchiveRowState>, listIndex: Int): ArchiveRowState? =
     rows.getOrNull(listIndex - ARCHIVE_LIST_HEADER_ITEMS)
 
 /** Whether the row at LazyColumn [listIndex] is currently selected (drag anchor check). */
-internal fun archiveDragAnchorSelected(
+fun archiveDragAnchorSelected(
     rows: List<ArchiveRowState>,
     listIndex: Int,
     selectedEntries: Set<Int>,
@@ -207,7 +207,7 @@ internal fun archiveDragAnchorSelected(
 }
 
 /** A selection after a drag-select range has been painted onto the drag-start snapshot. */
-internal data class ArchiveDragSelection(
+data class ArchiveDragSelection(
     val entries: Set<Int>,
     val folders: Set<String>
 )
@@ -220,7 +220,7 @@ internal data class ArchiveDragSelection(
  * for a folder), a range covering N rows selects exactly those N rows, and the header
  * and hint indices at the ends of the list select nothing.
  */
-internal fun applyArchiveDragRange(
+fun applyArchiveDragRange(
     rows: List<ArchiveRowState>,
     listRange: IntRange,
     baseEntries: Set<Int>,
