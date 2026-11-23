@@ -1,28 +1,25 @@
 package com.drdisagree.teledrive.core.transfer
 
-import androidx.room.Room
-import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.dispatchers.DispatcherProvider
 import com.drdisagree.teledrive.core.network.NetworkMonitor
 import com.drdisagree.teledrive.core.network.NetworkStatus
 import com.drdisagree.teledrive.core.power.PowerMonitor
-import com.drdisagree.teledrive.data.local.database.TeleDriveDatabase
+import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
 import com.drdisagree.teledrive.data.remote.telegram.ManifestCodec
 import com.drdisagree.teledrive.data.repository.ActiveChannel
 import com.drdisagree.teledrive.data.repository.FolderPathResolver
+import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
 import com.drdisagree.teledrive.domain.model.UserPreferences
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
-import java.io.File
 import java.lang.reflect.Proxy
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -37,11 +34,16 @@ import org.junit.Test
  *     while ordinary RUNNING rows are requeued as before.
  *  3. The executor explicitly refuses ARCHIVE_DOWNLOAD without touching any dependency.
  *
- * Android-CI copy pattern (see RemoteArchiveServiceTest): the shared host tests in
- * desktopTest do not run under `testDebugUnitTest`, so the fakes/helpers from
- * BackupHoldDrainTest are duplicated locally here. The database is a REAL Room
- * [TeleDriveDatabase] on a temp file via BundledSQLiteDriver — the shared module
- * exposes `androidx.sqlite:sqlite-bundled` as `api`, so it is on this classpath.
+ * DAO choice — faithful in-memory fake, NOT a real Room database: on the Android
+ * target `Room.databaseBuilder` requires an `android.content.Context`, which host
+ * unit tests cannot supply (stub android.jar, no Robolectric on this classpath);
+ * the no-Context KMP builder used by desktopTest's BackupHoldDrainTest does not
+ * exist for Android (CI proved it: "No value passed for parameter 'context'").
+ * [FakeTransferDao] therefore replicates the exact SQL semantics of every
+ * TransferDao statement these tests exercise (filters, ordering, state writes).
+ * The helpers/fakes from BackupHoldDrainTest are duplicated locally for the same
+ * reason RemoteArchiveServiceTest duplicates its suite: desktopTest code is not
+ * visible to `testDebugUnitTest`.
  */
 private inline fun <reified T : Any> unused(): T = Proxy.newProxyInstance(
     T::class.java.classLoader,
@@ -87,22 +89,249 @@ private class RecordingBackupResumeScheduler : BackupResumeScheduler {
     }
 }
 
+/** In-memory [TransferDao] replicating the SQL semantics of the real DAO. */
+private class FakeTransferDao : TransferDao {
+    private val rows = LinkedHashMap<String, TransferEntity>()
+
+    private fun queueOrder(list: List<TransferEntity>) =
+        list.sortedWith(compareByDescending<TransferEntity> { it.priority }.thenBy { it.createdAt })
+
+    override suspend fun upsert(transfer: TransferEntity) {
+        rows[transfer.id] = transfer
+    }
+
+    override suspend fun upsertAll(transfers: List<TransferEntity>) =
+        transfers.forEach { rows[it.id] = it }
+
+    override suspend fun unfinishedFileIds(fileIds: List<String>): List<String> =
+        rows.values.filter {
+            it.fileId in fileIds && it.state in setOf(TransferState.QUEUED, TransferState.RUNNING, TransferState.PAUSED)
+        }.mapNotNull { it.fileId }
+
+    override suspend fun adoptIntoSession(fileIds: List<String>, sessionId: String) {
+        rows.values.filter {
+            it.fileId in fileIds && it.state in setOf(TransferState.QUEUED, TransferState.RUNNING)
+        }.forEach { rows[it.id] = it.copy(backupSessionId = sessionId) }
+    }
+
+    override suspend fun update(transfer: TransferEntity) {
+        rows[transfer.id] = transfer
+    }
+
+    override suspend fun byId(id: String): TransferEntity? = rows[id]
+
+    override fun observeById(id: String): Flow<TransferEntity?> = flowOf(rows[id])
+
+    override fun observeActive(limit: Int): Flow<List<TransferEntity>> = flowOf(
+        queueOrder(rows.values.filter { it.state in setOf(TransferState.QUEUED, TransferState.RUNNING) }).take(limit)
+    )
+
+    override fun observePaused(limit: Int): Flow<List<TransferEntity>> =
+        flowOf(rows.values.filter { it.state == TransferState.PAUSED }.sortedBy { it.createdAt }.take(limit))
+
+    override fun observeFailed(limit: Int): Flow<List<TransferEntity>> =
+        flowOf(rows.values.filter { it.state == TransferState.FAILED }.sortedByDescending { it.updatedAt }.take(limit))
+
+    override fun observeCompleted(limit: Int): Flow<List<TransferEntity>> = flowOf(
+        rows.values.filter { it.state == TransferState.COMPLETED }
+            .sortedByDescending { it.completedAt ?: it.updatedAt }.take(limit)
+    )
+
+    override fun observeCountByState(state: TransferState): Flow<Int> =
+        flowOf(rows.values.count { it.state == state })
+
+    override fun observeActiveForFile(fileId: String): Flow<TransferEntity?> = flowOf(
+        rows.values.filter {
+            it.fileId == fileId && it.state in setOf(TransferState.QUEUED, TransferState.RUNNING)
+        }.minByOrNull { it.createdAt }
+    )
+
+    override suspend fun unfinishedIdsForFiles(fileIds: List<String>): List<String> =
+        rows.values.filter {
+            it.fileId in fileIds &&
+                it.state in setOf(TransferState.QUEUED, TransferState.RUNNING, TransferState.PAUSED)
+        }.map { it.id }
+
+    override suspend fun nextQueued(limit: Int): List<TransferEntity> =
+        queueOrder(rows.values.filter { it.state == TransferState.QUEUED }).take(limit)
+
+    override suspend fun nextQueuedExcept(type: TransferType, limit: Int): List<TransferEntity> =
+        queueOrder(rows.values.filter { it.state == TransferState.QUEUED && it.type != type }).take(limit)
+
+    override suspend fun nextQueuedOf(types: List<TransferType>, limit: Int): List<TransferEntity> =
+        queueOrder(rows.values.filter { it.state == TransferState.QUEUED && it.type in types }).take(limit)
+
+    override suspend fun runningIncomingTransfers(): List<TransferEntity> = queueOrder(
+        rows.values.filter {
+            it.type in setOf(TransferType.DOWNLOAD, TransferType.RESTORE) && it.state == TransferState.RUNNING
+        }
+    )
+
+    override suspend fun runningTransferCount(): Int =
+        rows.values.count { it.state == TransferState.RUNNING }
+
+    override suspend fun incomingQueueOrder(): List<TransferEntity> = queueOrder(
+        rows.values.filter {
+            it.type in setOf(TransferType.DOWNLOAD, TransferType.RESTORE) &&
+                it.state in setOf(TransferState.QUEUED, TransferState.RUNNING, TransferState.PAUSED)
+        }
+    )
+
+    override suspend fun activeIncomingTransfersForPause(): List<TransferEntity> =
+        rows.values.filter {
+            it.type in setOf(TransferType.DOWNLOAD, TransferType.RESTORE) &&
+                it.state in setOf(TransferState.QUEUED, TransferState.RUNNING)
+        }
+
+    override suspend fun hasQueued(type: TransferType): Boolean =
+        rows.values.any { it.state == TransferState.QUEUED && it.type == type }
+
+    override fun observeActiveCount(): Flow<Int> =
+        flowOf(rows.values.count { it.state in setOf(TransferState.QUEUED, TransferState.RUNNING) })
+
+    override fun observeActiveDownloads(): Flow<List<TransferEntity>> = flowOf(
+        rows.values.filter {
+            it.type == TransferType.DOWNLOAD && it.fileId != null &&
+                it.state in setOf(TransferState.QUEUED, TransferState.RUNNING)
+        }
+    )
+
+    override suspend fun setLocalPath(id: String, localPath: String?) {
+        rows[id]?.let { rows[id] = it.copy(localPath = localPath) }
+    }
+
+    override suspend fun setPriority(id: String, priority: Int, updatedAt: Long) {
+        rows[id]?.let { rows[id] = it.copy(priority = priority, updatedAt = updatedAt) }
+    }
+
+    override suspend fun setStage(id: String, stage: TransferStage?, updatedAt: Long) {
+        rows[id]?.let { rows[id] = it.copy(stage = stage, updatedAt = updatedAt) }
+    }
+
+    override suspend fun updateProgress(id: String, transferred: Long, speed: Long, updatedAt: Long) {
+        rows[id]?.takeIf { it.state == TransferState.RUNNING }?.let {
+            rows[id] = it.copy(transferredBytes = transferred, speedBytesPerSecond = speed, updatedAt = updatedAt)
+        }
+    }
+
+    override suspend fun updateTransferredBytes(id: String, transferred: Long, updatedAt: Long) {
+        rows[id]?.takeIf { it.state == TransferState.RUNNING }?.let {
+            rows[id] = it.copy(transferredBytes = transferred, updatedAt = updatedAt)
+        }
+    }
+
+    override suspend fun setState(id: String, state: TransferState, updatedAt: Long) {
+        rows[id]?.let {
+            val speed = if (state in setOf(
+                    TransferState.QUEUED, TransferState.RUNNING, TransferState.PAUSED,
+                    TransferState.CANCELLED, TransferState.FAILED
+                )
+            ) 0 else it.speedBytesPerSecond
+            rows[id] = it.copy(state = state, speedBytesPerSecond = speed, updatedAt = updatedAt)
+        }
+    }
+
+    override suspend fun setFailed(id: String, state: TransferState, error: String?, updatedAt: Long) {
+        rows[id]?.let {
+            rows[id] = it.copy(state = state, errorMessage = error, speedBytesPerSecond = 0, updatedAt = updatedAt)
+        }
+    }
+
+    override suspend fun setCompleted(id: String, completedAt: Long, completed: TransferState) {
+        rows[id]?.let {
+            rows[id] = it.copy(
+                state = completed, transferredBytes = it.sizeBytes,
+                speedBytesPerSecond = 0, completedAt = completedAt, updatedAt = completedAt
+            )
+        }
+    }
+
+    override suspend fun requeueRunning() {
+        rows.values.filter {
+            it.state == TransferState.RUNNING && it.type != TransferType.ARCHIVE_DOWNLOAD
+        }.forEach {
+            rows[it.id] = it.copy(state = TransferState.QUEUED, telegramFileId = null, speedBytesPerSecond = 0)
+        }
+    }
+
+    override suspend fun failInterruptedArchiveDownloads(updatedAt: Long): Int {
+        val targets = rows.values.filter {
+            it.state == TransferState.RUNNING && it.type == TransferType.ARCHIVE_DOWNLOAD
+        }
+        targets.forEach {
+            rows[it.id] = it.copy(
+                state = TransferState.FAILED,
+                errorMessage = "Interrupted — the app stopped while this file was being extracted from its ZIP.",
+                speedBytesPerSecond = 0,
+                updatedAt = updatedAt
+            )
+        }
+        return targets.size
+    }
+
+    override suspend fun deleteByIds(ids: List<String>) {
+        ids.forEach { rows.remove(it) }
+    }
+
+    override suspend fun clearFinished() {
+        rows.values.filter {
+            it.state in setOf(TransferState.COMPLETED, TransferState.CANCELLED)
+        }.map { it.id }.forEach { rows.remove(it) }
+    }
+
+    override suspend fun pauseAll(now: Long): Int {
+        val targets = rows.values.filter {
+            it.state in setOf(TransferState.QUEUED, TransferState.RUNNING) &&
+                it.type != TransferType.ARCHIVE_DOWNLOAD
+        }
+        targets.forEach {
+            rows[it.id] = it.copy(state = TransferState.PAUSED, speedBytesPerSecond = 0, updatedAt = now)
+        }
+        return targets.size
+    }
+
+    override suspend fun resumeAll(now: Long): Int {
+        val targets = rows.values.filter {
+            it.state == TransferState.PAUSED && it.type != TransferType.ARCHIVE_DOWNLOAD
+        }
+        targets.forEach {
+            rows[it.id] = it.copy(state = TransferState.QUEUED, speedBytesPerSecond = 0, updatedAt = now)
+        }
+        return targets.size
+    }
+
+    override suspend fun cancelAll(now: Long): Int {
+        val targets = rows.values.filter {
+            it.state in setOf(
+                TransferState.QUEUED, TransferState.RUNNING, TransferState.PAUSED, TransferState.FAILED
+            ) && it.type != TransferType.ARCHIVE_DOWNLOAD
+        }
+        targets.forEach {
+            rows[it.id] = it.copy(state = TransferState.CANCELLED, speedBytesPerSecond = 0, updatedAt = now)
+        }
+        return targets.size
+    }
+
+    override suspend fun cancelAllArchiveDownloads(updatedAt: Long): Int {
+        val targets = rows.values.filter {
+            it.type == TransferType.ARCHIVE_DOWNLOAD && it.state in setOf(
+                TransferState.QUEUED, TransferState.RUNNING, TransferState.PAUSED, TransferState.FAILED
+            )
+        }
+        targets.forEach {
+            rows[it.id] = it.copy(state = TransferState.CANCELLED, speedBytesPerSecond = 0, updatedAt = updatedAt)
+        }
+        return targets.size
+    }
+
+    override suspend fun bySession(sessionId: String): List<TransferEntity> =
+        rows.values.filter { it.backupSessionId == sessionId }
+}
+
 class ArchiveDownloadSafetyTest {
 
-    private val dbFile = File.createTempFile("teledrive-archive-safety", ".db")
-    private val database: TeleDriveDatabase =
-        Room.databaseBuilder<TeleDriveDatabase>(name = dbFile.absolutePath)
-            .setDriver(BundledSQLiteDriver())
-            .setQueryCoroutineContext(Dispatchers.IO)
-            .build()
-    private val transfers = database.transferDao()
+    private val transfers = FakeTransferDao()
     private val resume = RecordingBackupResumeScheduler()
-
-    @After
-    fun tearDown() {
-        database.close()
-        dbFile.delete()
-    }
 
     // ---- Clause 1a: archive-only queue is never claimed ---------------------
 
@@ -246,7 +475,7 @@ class ArchiveDownloadSafetyTest {
         assertFalse(TransferType.BACKUP.isIncoming)
     }
 
-    // ---- Harness (mirrors BackupHoldDrainTest) --------------------------------
+    // ---- Harness (mirrors BackupHoldDrainTest, with the fake DAO above) -------
 
     private fun row(id: String, type: TransferType, state: TransferState) = TransferEntity(
         id = id,
@@ -279,13 +508,13 @@ class ArchiveDownloadSafetyTest {
             storagePaths = unused(),
             telegramClient = unused(),
             transferDao = transfers,
-            fileDao = database.fileDao(),
-            backupDao = database.backupDao(),
+            fileDao = unused(),
+            backupDao = unused(),
             manifestCodec = codec,
             folderPathResolver = FolderPathResolver(
-                database.folderDao(),
+                unused(),
                 ActiveChannel(settings),
-                database.folderTombstoneDao()
+                unused()
             ),
             thumbnailStore = unused(),
             streamCrypto = StreamCrypto(),
@@ -293,14 +522,14 @@ class ArchiveDownloadSafetyTest {
             downloadWriter = unused(),
             fileImporter = unused(),
             settingsRepository = settings,
-            filePartDao = database.filePartDao(),
+            filePartDao = unused(),
             partUploader = PartUploader(
-                unused(), unused(), database.filePartDao(), codec, StreamCrypto(), unused(),
+                unused(), unused(), unused(), codec, StreamCrypto(), unused(),
                 unused(), unused<DispatcherProvider>(),
                 ApkIconUploader(unused(), unused(), StreamCrypto(), unused(), unused())
             ),
             partDownloader = PartDownloader(
-                unused(), database.filePartDao(), StreamCrypto(), unused(), unused()
+                unused(), unused(), StreamCrypto(), unused(), unused()
             ),
             apkIconUploader = ApkIconUploader(unused(), unused(), StreamCrypto(), unused(), unused()),
             localCopyDeleter = unused()
@@ -311,7 +540,7 @@ class ArchiveDownloadSafetyTest {
         val settings = FakeSettings(UserPreferences(transferRetryCount = 0))
         return TransferQueueDrainer(
             transferDao = transfers,
-            fileDao = database.fileDao(),
+            fileDao = unused(),
             transferExecutor = executor(),
             backupSessionTracker = NoOpBackupSessionTracker(),
             settingsRepository = settings,
