@@ -40,8 +40,8 @@ import org.junit.Test
  *
  * - remote (the shared [com.drdisagree.teledrive.core.archive.ZipArchiveReader] DOS
  *   conversion, which already returns 0 for an all-zero DOS pair), and
- * - local (zip4j's `header.lastModifiedTime`, whose conversion of a dateless entry
- *   does NOT return 0 — see the raw-value probe printed by the local test).
+ * - local (zip4j's `header.lastModifiedTime` — see the raw-value probes printed by
+ *   the local test for what zip4j yields per entry shape).
  *
  * The fix normalizes at ArchiveEntry construction: a ZIP entry cannot predate the
  * DOS epoch (1980-01-01), so any value below that floor becomes 0 (unknown), which
@@ -125,17 +125,27 @@ class DesktopArchiveDateTest {
 
     @Test
     fun `local listing path - dateless entry is normalized to unknown`() = runBlocking {
-        val zipBytes = datelessZip()
+        val zipBytes = localHandBuiltZip(
+            listOf(
+                Triple("nodate.txt", "a".toByteArray(), 0 to 0),
+                Triple("dated.txt", "b".toByteArray(), datedDos),
+                Triple("extradated.txt", "c".toByteArray(), 0 to 0)
+            ),
+            extras = mapOf("extradated.txt" to extendedTimestampExtra(datedMillis / 1000))
+        )
         val zipOnDisk = File.createTempFile("dateless", ".zip").also {
             it.writeBytes(zipBytes)
             it.deleteOnExit()
         }
-        // Probe: what zip4j itself yields for the dateless entry (the defect's source
-        // value), printed so the CI test output records the mechanism.
-        val rawDateless = ZipFile(zipOnDisk.absolutePath).fileHeaders
-            .first { it.fileName == "nodate.txt" }.lastModifiedTime
+        // Probes: what zip4j itself yields per entry shape, printed so the CI test
+        // output records the mechanism behind the field defect.
+        val headers = ZipFile(zipOnDisk.absolutePath).fileHeaders
+        val rawDateless = headers.first { it.fileName == "nodate.txt" }.lastModifiedTime
+        val rawDosDated = headers.first { it.fileName == "dated.txt" }.lastModifiedTime
+        val rawExtraDated = headers.first { it.fileName == "extradated.txt" }.lastModifiedTime
         println("ZIP4J-RAW dateless lastModifiedTime = $rawDateless")
-        System.out.println("ZIP4J-RAW dateless lastModifiedTime = $rawDateless")
+        println("ZIP4J-RAW dos-dated lastModifiedTime = $rawDosDated")
+        println("ZIP4J-RAW extra-dated lastModifiedTime = $rawExtraDated")
 
         val resolver = resolver()
         val content = resolver.resolve(zipFile(localPath = zipOnDisk.absolutePath, size = zipBytes.size))
@@ -146,10 +156,17 @@ class DesktopArchiveDateTest {
             0L,
             dateless.modifiedAtMillis
         )
+        // Whatever zip4j yields for a DOS-only dated entry, the listing must carry its
+        // normalized form — never a sub-1980 value.
         val dated = content.entries.first { it.name == "dated.txt" }
+        assertEquals(normalizeArchiveEntryModifiedAt(rawDosDated), dated.modifiedAtMillis)
+        // A real post-1980 date carried in the extended-timestamp extra field (the
+        // shape modern writers produce) must survive into the listing.
+        val extraDated = content.entries.first { it.name == "extradated.txt" }
         assertTrue(
-            "dated entry must keep a real post-1980 date, was ${dated.modifiedAtMillis}",
-            dated.modifiedAtMillis >= ARCHIVE_ENTRY_DOS_EPOCH_FLOOR_MILLIS
+            "extra-field dated entry must keep a real post-1980 date, raw was $rawExtraDated, " +
+                "listed as ${extraDated.modifiedAtMillis}",
+            extraDated.modifiedAtMillis >= ARCHIVE_ENTRY_DOS_EPOCH_FLOOR_MILLIS
         )
     }
 
@@ -298,9 +315,27 @@ private fun localFakeTelegram(bytes: ByteArray): com.drdisagree.teledrive.core.t
     }
 }
 
-/** Hand-built STORED zip with verbatim DOS date/time fields (see desktop test support). */
+/** Extended-timestamp extra field (0x5455) carrying [unixSeconds] as the mtime. */
+private fun extendedTimestampExtra(unixSeconds: Long): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    fun w16(v: Int) {
+        out.write(v and 0xFF)
+        out.write((v shr 8) and 0xFF)
+    }
+    fun w32(v: Long) {
+        for (i in 0 until 4) out.write((v shr (8 * i)).toInt() and 0xFF)
+    }
+    w16(0x5455)
+    w16(5)
+    out.write(1) // flags: modification time present
+    w32(unixSeconds)
+    return out.toByteArray()
+}
+
+/** Hand-built STORED zip with verbatim DOS date/time fields and optional extra fields. */
 private fun localHandBuiltZip(
-    entries: List<Triple<String, ByteArray, Pair<Int, Int>>>
+    entries: List<Triple<String, ByteArray, Pair<Int, Int>>>,
+    extras: Map<String, ByteArray> = emptyMap()
 ): ByteArray {
     val out = java.io.ByteArrayOutputStream()
     fun w16(v: Int) {
@@ -316,11 +351,13 @@ private fun localHandBuiltZip(
         val size: Long,
         val offset: Long,
         val dosTime: Int,
-        val dosDate: Int
+        val dosDate: Int,
+        val extra: ByteArray
     )
     val records = mutableListOf<Rec>()
     for ((name, data, dos) in entries) {
         val nameBytes = name.toByteArray(Charsets.UTF_8)
+        val extra = extras[name] ?: ByteArray(0)
         val crc = java.util.zip.CRC32().apply { update(data) }.value
         val offset = out.size().toLong()
         w32(0x04034b50L)
@@ -333,10 +370,11 @@ private fun localHandBuiltZip(
         w32(data.size.toLong())
         w32(data.size.toLong())
         w16(nameBytes.size)
-        w16(0)
+        w16(extra.size)
         out.write(nameBytes)
+        out.write(extra)
         out.write(data)
-        records += Rec(nameBytes, crc, data.size.toLong(), offset, dos.first, dos.second)
+        records += Rec(nameBytes, crc, data.size.toLong(), offset, dos.first, dos.second, extra)
     }
     val cdStart = out.size().toLong()
     for (rec in records) {
@@ -351,13 +389,14 @@ private fun localHandBuiltZip(
         w32(rec.size)
         w32(rec.size)
         w16(rec.name.size)
-        w16(0)
+        w16(rec.extra.size)
         w16(0)
         w16(0)
         w16(0)
         w32(0L)
         w32(rec.offset)
         out.write(rec.name)
+        out.write(rec.extra)
     }
     val cdSize = out.size().toLong() - cdStart
     w32(0x06054b50L)
