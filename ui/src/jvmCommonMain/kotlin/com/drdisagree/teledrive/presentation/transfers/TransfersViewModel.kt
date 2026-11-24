@@ -1,9 +1,15 @@
 package com.drdisagree.teledrive.presentation.transfers
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * The Transfers screen's ViewModel — a thin lifecycle wrapper over the
@@ -22,15 +28,48 @@ class TransfersViewModel(
     constructor(
         transferRepository: TransferRepository,
         settingsRepository: SettingsRepository
-    ) : this(TransfersStore(transferRepository, settingsRepository))
+    ) : this(TransfersStore(transferRepository, settingsRepository)) {
+        directSettingsRepository = settingsRepository
+    }
+
+    /**
+     * Set only by the two-repository constructor. On that path the sort pair keeps
+     * the pre-store (Android-lineage) behaviour exactly — a viewModelScope-backed
+     * flow over the caller's repository — as this class's contract promises; the
+     * Koin/store path uses the store's own sort pair instead.
+     */
+    private var directSettingsRepository: SettingsRepository? = null
 
     val uploadConcurrency: StateFlow<Int> = store.uploadConcurrency
 
     val downloadConcurrency: StateFlow<Int> = store.downloadConcurrency
 
-    val sortOrder: StateFlow<String> = store.sortOrder
+    val sortOrder: StateFlow<String> by lazy {
+        val repository = directSettingsRepository
+        if (repository == null) {
+            store.sortOrder
+        } else {
+            repository.preferences
+                .map { it.transfersSortOrder }
+                .distinctUntilChanged()
+                .stateIn(
+                    viewModelScope,
+                    SharingStarted.WhileSubscribed(5_000),
+                    "PRIORITY"
+                )
+        }
+    }
 
-    fun setSortOrder(value: String) = store.setSortOrder(value)
+    fun setSortOrder(value: String) {
+        val repository = directSettingsRepository
+        if (repository == null) {
+            store.setSortOrder(value)
+        } else {
+            viewModelScope.launch {
+                repository.update { it.copy(transfersSortOrder = value) }
+            }
+        }
+    }
 
     fun setUploadConcurrency(value: Int) = store.setUploadConcurrency(value)
 
