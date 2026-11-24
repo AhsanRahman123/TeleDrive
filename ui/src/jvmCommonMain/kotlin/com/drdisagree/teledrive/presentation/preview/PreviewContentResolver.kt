@@ -24,9 +24,6 @@ import com.drdisagree.teledrive.resources.preview_zip_encrypted
 import com.drdisagree.teledrive.resources.preview_zip_multi_disk
 import com.drdisagree.teledrive.resources.preview_zip_not_a_zip
 import com.drdisagree.teledrive.resources.preview_zip_split
-import com.drdisagree.teledrive.core.archive.RemoteArchiveRefusalException
-import com.drdisagree.teledrive.core.archive.RemoteArchiveService
-import com.drdisagree.teledrive.core.archive.ZipArchiveException
 import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.crypto.CryptoKeys
@@ -219,7 +216,7 @@ class PreviewContentResolver(
                 sizeBytes = entry.sizeBytes,
                 compressedBytes = entry.compressedBytes,
                 isDirectory = entry.isDirectory,
-                modifiedAtMillis = entry.modifiedAtMillis
+                modifiedAtMillis = normalizeArchiveEntryModifiedAt(entry.modifiedAtMillis)
             )
         }
         PreviewContent.Archive(entries, "ZIP", remote = true)
@@ -297,9 +294,14 @@ class PreviewContentResolver(
                         sizeBytes = header.uncompressedSize,
                         compressedBytes = header.compressedSize,
                         isDirectory = header.isDirectory,
-                        // zip4j exposes the entry time as Java epoch millis; anything
-                        // non-positive is "no timestamp" for sorting purposes.
-                        modifiedAtMillis = header.lastModifiedTime.coerceAtLeast(0L)
+                        // zip4j's conversion of a dateless entry yields a small
+                        // positive garbage value (January 1970) rather than 0, so the
+                        // raw value is normalized against the DOS-epoch floor: a ZIP
+                        // entry cannot predate 1980, and anything below that is
+                        // "no timestamp" for display and sorting purposes.
+                        modifiedAtMillis = normalizeArchiveEntryModifiedAt(
+                            header.lastModifiedTime
+                        )
                     )
                 }
                 PreviewContent.Archive(entries, "ZIP")
