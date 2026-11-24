@@ -38,7 +38,12 @@ class TransfersSortWriteDiagnosticTest {
             scope = scope,
             produceFile = { file.absolutePath.toPath() }
         )
-        return SettingsRepositoryImpl(store, CredentialCipher(ByteArray(32) { 7 })) to scope
+        return SettingsRepositoryImpl(store, IdentityCipher) to scope
+    }
+
+    private object IdentityCipher : CredentialCipher {
+        override fun encrypt(plaintext: ByteArray): ByteArray = plaintext
+        override fun decrypt(ciphertext: ByteArray): ByteArray = ciphertext
     }
 
     @Suppress("UNCHECKED_CAST")
