@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -187,8 +188,17 @@ class DesktopArchiveSelectionTest {
     fun `drag across rows selects exactly the crossed rows and ticks count and height agree`() {
         setPane()
         val heightBefore = rowHeight("archive-entry-2")
-        // Collapsed rows: [docs folder, pic.png, song.mp3]. Drag pic -> song.
-        longPress("archive-entry-2", "archive-entry-3")
+        // Collapsed rows: [docs folder, pic.png, song.mp3]. Mouse-drag pic -> song
+        // (the desktop drag-select gesture: press and paint, no long-press).
+        val start = drawnCenter("archive-entry-2")
+        val end = drawnCenter("archive-entry-3")
+        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG).performMouseInput {
+            press(start)
+            moveBy(Offset(0f, (end.y - start.y) / 2))
+            moveBy(Offset(0f, (end.y - start.y) / 2 + 12f))
+            release()
+        }
+        rule.waitForIdle()
         assertEquals(
             "drag pic->song: ticked checkboxes (texts: " +
                 rule.onAllNodesWithText("selected", substring = true)
@@ -258,10 +268,14 @@ class DesktopArchiveSelectionTest {
         rule.onNodeWithText("pic.png").performClick()
         rule.onNodeWithText("2 selected").assertIsDisplayed()
         assertEquals("after click-off", 2, selectedCheckboxCount())
-        // Move the collection focus onto pic the way a keyboard user does: focus the
-        // first row, arrow down to pic, then Space toggles it back on.
-        rule.onNodeWithTag("archive-folder-docs").requestFocus()
-        rule.onNodeWithTag("archive-folder-docs")
+        // Move the collection focus onto pic the way a keyboard user does: the list
+        // is a labeled tab stop, so focus the container, arrow INTO the list (first
+        // row), arrow down to pic, then Space toggles it back on.
+        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG).requestFocus()
+        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG)
+            .performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG)
             .performKeyInput { pressKey(Key.DirectionDown) }
         rule.waitForIdle()
         rule.onNodeWithTag("archive-entry-2").assertIsFocused()
