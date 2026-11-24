@@ -1962,6 +1962,7 @@ internal fun DesktopArchivePane(
             archiveDragAnchorSelected(rows, listIndex, selection.entries, selection.folders)
         },
         onRange = { range, shouldSelect ->
+            println("DRAGPAINT range=$range shouldSelect=$shouldSelect rows=${rows.size}")
             val painted = applyArchiveDragRange(
                 rows = rows,
                 listRange = range,
