@@ -22,7 +22,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
-import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
@@ -188,16 +187,19 @@ class DesktopArchiveSelectionTest {
     fun `drag across rows selects exactly the crossed rows and ticks count and height agree`() {
         setPane()
         val heightBefore = rowHeight("archive-entry-2")
-        // Collapsed rows: [docs folder, pic.png, song.mp3]. Mouse-drag pic -> song
-        // (the desktop drag-select gesture: press and paint, no long-press).
+        // Collapsed rows: [docs folder, pic.png, song.mp3]. Long-press pic and
+        // slide to song (the shared drag-select gesture), holding at the end so
+        // the per-frame paint loop applies the final range before release.
         val start = drawnCenter("archive-entry-2")
         val end = drawnCenter("archive-entry-3")
-        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG).performMouseInput {
-            moveTo(start)
-            press()
+        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG).performTouchInput {
+            down(start)
+            advanceEventTime(LONG_PRESS_ADVANCE_MS)
             moveBy(Offset(0f, (end.y - start.y) / 2))
+            advanceEventTime(50)
             moveBy(Offset(0f, (end.y - start.y) / 2 + 12f))
-            release()
+            advanceEventTime(600)
+            up()
         }
         rule.waitForIdle()
         assertEquals(
