@@ -193,7 +193,8 @@ class DesktopArchiveSelectionTest {
         val start = drawnCenter("archive-entry-2")
         val end = drawnCenter("archive-entry-3")
         rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG).performMouseInput {
-            press(start)
+            moveTo(start)
+            press()
             moveBy(Offset(0f, (end.y - start.y) / 2))
             moveBy(Offset(0f, (end.y - start.y) / 2 + 12f))
             release()
