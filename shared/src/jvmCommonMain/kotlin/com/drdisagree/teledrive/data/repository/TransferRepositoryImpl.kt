@@ -47,7 +47,7 @@ class TransferRepositoryImpl(
     private val validateUpload: ValidateUploadUseCase,
     private val storageInspector: StorageInspector,
     private val backupSessionTracker: BackupSessionTracker,
-    private val storagePaths: AppStoragePaths
+    private val storagePaths: AppStoragePaths,
     private val archiveExtractionJobs: ArchiveExtractionJobs
 ) : TransferRepository {
 
