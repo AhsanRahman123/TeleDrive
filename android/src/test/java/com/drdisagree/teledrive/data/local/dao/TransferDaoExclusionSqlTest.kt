@@ -68,10 +68,32 @@ class TransferDaoExclusionSqlTest {
         )
         val text = normalized(drainerFile)
 
+        // Merged mechanism (1.6.21): the PC lineage's lane model replaced the
+        // vc179 type filter. Claims are claim-proof by construction instead —
+        // nextClaimable resolves the claimable types through laneTypes(...) and
+        // queries nextQueuedOf with exactly those types, and laneTypes never
+        // lists ARCHIVE_DOWNLOAD for either lane.
         assertTrue(
-            "Expected TransferQueueDrainer.kt's nextClaimable filter to contain " +
-                "\"type != TransferType.ARCHIVE_DOWNLOAD\"",
-            text.contains("type != TransferType.ARCHIVE_DOWNLOAD")
+            "Expected nextClaimable to resolve its types through laneTypes(...)",
+            text.contains("val types = laneTypes(lane, includeBackups)")
+        )
+        assertTrue(
+            "Expected nextClaimable to query with exactly the lane types",
+            text.contains("transferDao.nextQueuedOf(types,")
+        )
+        val laneTypesBody = text.substringAfter("private fun laneTypes(")
+            .substringBefore("private fun laneOf(")
+        assertTrue(
+            "laneTypes must never list ARCHIVE_DOWNLOAD (found: $laneTypesBody)",
+            !laneTypesBody.contains("ARCHIVE_DOWNLOAD")
+        )
+        assertTrue(
+            "Expected the DOWNLOAD lane to claim exactly DOWNLOAD and RESTORE",
+            laneTypesBody.contains("listOf(TransferType.DOWNLOAD, TransferType.RESTORE)")
+        )
+        assertTrue(
+            "Expected the UPLOAD lane to claim exactly UPLOAD and BACKUP",
+            laneTypesBody.contains("listOf(TransferType.UPLOAD, TransferType.BACKUP)")
         )
     }
 }
