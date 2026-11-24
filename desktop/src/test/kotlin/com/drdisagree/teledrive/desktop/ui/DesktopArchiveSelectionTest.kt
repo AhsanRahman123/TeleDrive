@@ -177,6 +177,13 @@ class DesktopArchiveSelectionTest {
         val heightBefore = rowHeight("archive-entry-2")
         // Collapsed rows: [docs folder, pic.png, song.mp3]. Drag pic -> song.
         longPress("archive-entry-2", "archive-entry-3")
+        assertEquals(
+            "drag pic->song: ticked checkboxes (texts: " +
+                rule.onAllNodesWithText("selected", substring = true)
+                    .fetchSemanticsNodes().size + " count-nodes)",
+            2,
+            selectedCheckboxCount()
+        )
         rule.onNodeWithText("2 selected").assertIsDisplayed()
         assertEquals(2, selectedCheckboxCount())
         assertEquals(
@@ -238,9 +245,11 @@ class DesktopArchiveSelectionTest {
         // Clicking pic focuses its row and toggles it off (selection-mode click).
         rule.onNodeWithText("pic.png").performClick()
         rule.onNodeWithText("2 selected").assertIsDisplayed()
+        assertEquals("after click-off", 2, selectedCheckboxCount())
         // Space on the focused row toggles it back on.
         rule.onNodeWithTag("archive-entry-2").performKeyInput { pressKey(Key.Spacebar) }
         rule.waitForIdle()
+        assertEquals("after space toggle", 3, selectedCheckboxCount())
         rule.onNodeWithText("3 selected").assertIsDisplayed()
         assertEquals(3, selectedCheckboxCount())
     }

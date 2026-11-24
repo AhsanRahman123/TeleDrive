@@ -349,7 +349,17 @@ class DesktopArchivePaneTest {
 
         // Audio entry: extracted to a temp file for the desktop player path.
         rule.onNodeWithText("song.mp3").performClick()
-        rule.waitUntil(10_000) { viewModel.uiState.value.archivePreview is ArchiveEntryPreview.Audio }
+        val audioDeadline = System.currentTimeMillis() + 10_000
+        while (viewModel.uiState.value.archivePreview !is ArchiveEntryPreview.Audio &&
+            System.currentTimeMillis() < audioDeadline
+        ) {
+            Thread.sleep(50)
+        }
+        assertTrue(
+            "audio preview never arrived: preview=${viewModel.uiState.value.archivePreview}, " +
+                "busy=${viewModel.uiState.value.archiveEntryBusyIndex}, messages=$messages",
+            viewModel.uiState.value.archivePreview is ArchiveEntryPreview.Audio
+        )
         val audioPreview = viewModel.uiState.value.archivePreview as ArchiveEntryPreview.Audio
         assertEquals("song.mp3", audioPreview.name)
         assertArrayEquals(audioBytes, File(audioPreview.path).readBytes())
