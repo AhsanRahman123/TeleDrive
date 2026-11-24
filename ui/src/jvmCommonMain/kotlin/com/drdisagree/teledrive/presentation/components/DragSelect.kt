@@ -298,7 +298,6 @@ private fun dragSelect(
                         additionalTouches.forEach { it.consume() }
                     }
                     val change = event.changes.fastFirstOrNull { it.id == down.id } ?: break
-                    println("DRAGLOOP pos=${change.position} pressed=${change.pressed} downPos=${down.position}")
                     val released = !change.pressed
                     // The release position is painted only for callers that opt in via
                     // processReleasePosition (picker list, Storage Explorer, Trash).
@@ -466,7 +465,6 @@ private fun listEndIndexAt(
     resolveNearest: Boolean
 ): Int? {
     val candidate = listItemAt(listState, offset, resolveNearest) ?: return null
-    println("DRAGEND offsetY=${offset.y} bcp=${listState.layoutInfo.beforeContentPadding} cand=${candidate.index} anchor=$anchorIndex")
     if (anchorIndex < 0 || candidate.index == anchorIndex) return candidate.index
     val centerY = candidate.offset + candidate.size / 2
     // Center-crossing compares in the items' coordinate space (see listItemAt).
