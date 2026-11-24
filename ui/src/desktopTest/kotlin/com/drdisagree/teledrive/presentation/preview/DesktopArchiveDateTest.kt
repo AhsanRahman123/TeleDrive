@@ -1,4 +1,4 @@
-package com.drdisagree.teledrive.desktop.ui
+package com.drdisagree.teledrive.presentation.preview
 
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
@@ -20,10 +20,6 @@ import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.UserPreferences
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
-import com.drdisagree.teledrive.presentation.preview.ARCHIVE_ENTRY_DOS_EPOCH_FLOOR_MILLIS
-import com.drdisagree.teledrive.presentation.preview.PreviewContent
-import com.drdisagree.teledrive.presentation.preview.PreviewContentResolver
-import com.drdisagree.teledrive.presentation.preview.normalizeArchiveEntryModifiedAt
 import java.io.File
 import java.io.OutputStream
 import java.time.LocalDateTime
@@ -63,7 +59,7 @@ class DesktopArchiveDateTest {
     private fun dosDate(year: Int, month: Int, day: Int): Int =
         ((year - 1980) shl 9) or (month shl 5) or day
 
-    private fun datelessZip(): ByteArray = handBuiltZipWithDosTimes(
+    private fun datelessZip(): ByteArray = localHandBuiltZip(
         listOf(
             Triple("nodate.txt", "a".toByteArray(), 0 to 0),
             Triple("dated.txt", "b".toByteArray(), datedDos)
@@ -89,8 +85,8 @@ class DesktopArchiveDateTest {
         runBlocking {
             val zipBytes = datelessZip()
             val service = RemoteArchiveService(
-                archiveFakeTelegram(zipBytes),
-                archiveTestProxy<FilePartDao> { method, _ ->
+                localFakeTelegram(zipBytes),
+                localProxy<FilePartDao> { method, _ ->
                     when (method) {
                         "partsOf" -> emptyList()
                         "countOf" -> 0
@@ -115,9 +111,9 @@ class DesktopArchiveDateTest {
                     override fun freeBytes(folderPath: String?): Long? = null
                 },
                 FolderPathResolver(
-                    archiveTestProxy<FolderDao> { m, _ -> throw UnsupportedOperationException(m) },
+                    localProxy<FolderDao> { m, _ -> throw UnsupportedOperationException(m) },
                     ActiveChannel(FakeSettings()),
-                    archiveTestProxy<FolderTombstoneDao> { m, _ ->
+                    localProxy<FolderTombstoneDao> { m, _ ->
                         throw UnsupportedOperationException(m)
                     }
                 )
@@ -183,23 +179,23 @@ class DesktopArchiveDateTest {
                 override val externalCacheDir: File? = null
                 override val externalStorageRoot: File? = null
             },
-            telegramClient = archiveFakeTelegram(ByteArray(0)),
+            telegramClient = localFakeTelegram(ByteArray(0)),
             streamCrypto = StreamCrypto(),
-            wrappedKeyRepository = archiveTestProxy<WrappedKeyRepository> { m, _ ->
+            wrappedKeyRepository = localProxy<WrappedKeyRepository> { m, _ ->
                 throw UnsupportedOperationException(m)
             },
-            cacheDao = archiveTestProxy<CacheDao> { m, _ -> throw UnsupportedOperationException(m) },
-            filePartDao = archiveTestProxy<FilePartDao> { m, _ ->
+            cacheDao = localProxy<CacheDao> { m, _ -> throw UnsupportedOperationException(m) },
+            filePartDao = localProxy<FilePartDao> { m, _ ->
                 throw UnsupportedOperationException(m)
             },
             settingsRepository = settings,
-            thumbnailStore = archiveTestProxy<ThumbnailStore> { m, _ ->
+            thumbnailStore = localProxy<ThumbnailStore> { m, _ ->
                 throw UnsupportedOperationException(m)
             },
             dispatchers = DefaultDispatcherProvider(),
             remoteArchiveService = RemoteArchiveService(
-                archiveFakeTelegram(ByteArray(0)),
-                archiveTestProxy<FilePartDao> { m, _ -> throw UnsupportedOperationException(m) },
+                localFakeTelegram(ByteArray(0)),
+                localProxy<FilePartDao> { m, _ -> throw UnsupportedOperationException(m) },
                 object : DownloadWriter {
                     override fun write(
                         fileName: String,
@@ -218,9 +214,9 @@ class DesktopArchiveDateTest {
                     override fun freeBytes(folderPath: String?): Long? = null
                 },
                 FolderPathResolver(
-                    archiveTestProxy<FolderDao> { m, _ -> throw UnsupportedOperationException(m) },
+                    localProxy<FolderDao> { m, _ -> throw UnsupportedOperationException(m) },
                     ActiveChannel(settings),
-                    archiveTestProxy<FolderTombstoneDao> { m, _ ->
+                    localProxy<FolderTombstoneDao> { m, _ ->
                         throw UnsupportedOperationException(m)
                     }
                 )
@@ -254,4 +250,123 @@ class DesktopArchiveDateTest {
         modifiedAt = 0L,
         addedAt = 0L
     )
+}
+
+/** Local proxy helper (the desktop module's test support is not visible here). */
+private inline fun <reified T : Any> localProxy(
+    crossinline handler: (method: String, args: Array<out Any?>?) -> Any?
+): T {
+    val invocation = java.lang.reflect.InvocationHandler { _, method, args ->
+        handler(method.name, args)
+    }
+    return java.lang.reflect.Proxy.newProxyInstance(
+        T::class.java.classLoader,
+        arrayOf(T::class.java),
+        invocation
+    ) as T
+}
+
+private fun localFakeTelegram(bytes: ByteArray): com.drdisagree.teledrive.core.telegram.TelegramClient {
+    val info = com.drdisagree.teledrive.core.telegram.TelegramFileInfo(
+        fileId = 7,
+        sizeBytes = bytes.size.toLong(),
+        localPath = null,
+        isDownloadingCompleted = true,
+        isDownloadingActive = false,
+        downloadOffset = 0,
+        downloadedPrefixSize = bytes.size.toLong()
+    )
+    return localProxy { method, args ->
+        when (method) {
+            "resolveFile", "getFileInfo" -> info
+            "readFilePart" -> {
+                val offset = (args!![1] as Number).toLong()
+                val count = (args[2] as Number).toLong()
+                if (offset >= bytes.size) {
+                    ByteArray(0)
+                } else {
+                    bytes.copyOfRange(
+                        offset.toInt(),
+                        minOf(offset + count, bytes.size.toLong()).toInt()
+                    )
+                }
+            }
+            "requestFileRange", "cancelFileDownload" -> Unit
+            "fileUpdates" -> kotlinx.coroutines.flow.flowOf(info)
+            else -> throw UnsupportedOperationException(method)
+        }
+    }
+}
+
+/** Hand-built STORED zip with verbatim DOS date/time fields (see desktop test support). */
+private fun localHandBuiltZip(
+    entries: List<Triple<String, ByteArray, Pair<Int, Int>>>
+): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    fun w16(v: Int) {
+        out.write(v and 0xFF)
+        out.write((v shr 8) and 0xFF)
+    }
+    fun w32(v: Long) {
+        for (i in 0 until 4) out.write((v shr (8 * i)).toInt() and 0xFF)
+    }
+    data class Rec(
+        val name: ByteArray,
+        val crc: Long,
+        val size: Long,
+        val offset: Long,
+        val dosTime: Int,
+        val dosDate: Int
+    )
+    val records = mutableListOf<Rec>()
+    for ((name, data, dos) in entries) {
+        val nameBytes = name.toByteArray(Charsets.UTF_8)
+        val crc = java.util.zip.CRC32().apply { update(data) }.value
+        val offset = out.size().toLong()
+        w32(0x04034b50L)
+        w16(20)
+        w16(0x0800)
+        w16(0)
+        w16(dos.first)
+        w16(dos.second)
+        w32(crc)
+        w32(data.size.toLong())
+        w32(data.size.toLong())
+        w16(nameBytes.size)
+        w16(0)
+        out.write(nameBytes)
+        out.write(data)
+        records += Rec(nameBytes, crc, data.size.toLong(), offset, dos.first, dos.second)
+    }
+    val cdStart = out.size().toLong()
+    for (rec in records) {
+        w32(0x02014b50L)
+        w16(20)
+        w16(20)
+        w16(0x0800)
+        w16(0)
+        w16(rec.dosTime)
+        w16(rec.dosDate)
+        w32(rec.crc)
+        w32(rec.size)
+        w32(rec.size)
+        w16(rec.name.size)
+        w16(0)
+        w16(0)
+        w16(0)
+        w16(0)
+        w32(0L)
+        w32(rec.offset)
+        out.write(rec.name)
+    }
+    val cdSize = out.size().toLong() - cdStart
+    w32(0x06054b50L)
+    w16(0)
+    w16(0)
+    w16(records.size)
+    w16(records.size)
+    w32(cdSize)
+    w32(cdStart)
+    w16(0)
+    return out.toByteArray()
 }
