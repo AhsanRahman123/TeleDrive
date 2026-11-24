@@ -188,19 +188,23 @@ class DesktopArchiveSelectionTest {
         setPane()
         val heightBefore = rowHeight("archive-entry-2")
         // Collapsed rows: [docs folder, pic.png, song.mp3]. Long-press pic and
-        // slide to song (the shared drag-select gesture), holding at the end so
-        // the per-frame paint loop applies the final range before release.
+        // slide to song (the shared drag-select gesture). The phases are separate
+        // injection calls with idle syncs between them: the desktop test runtime's
+        // event pipeline coalesces moves dispatched inside a single call, so a
+        // one-call drag reaches the gesture as a press and a release only.
         val start = drawnCenter("archive-entry-2")
         val end = drawnCenter("archive-entry-3")
-        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG).performTouchInput {
+        val listNode = rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG)
+        listNode.performTouchInput {
             down(start)
             advanceEventTime(LONG_PRESS_ADVANCE_MS)
-            moveBy(Offset(0f, (end.y - start.y) / 2))
-            advanceEventTime(50)
-            moveBy(Offset(0f, (end.y - start.y) / 2 + 12f))
-            advanceEventTime(600)
-            up()
         }
+        rule.waitForIdle()
+        listNode.performTouchInput { moveBy(Offset(0f, (end.y - start.y) / 2)) }
+        rule.waitForIdle()
+        listNode.performTouchInput { moveBy(Offset(0f, (end.y - start.y) / 2 + 12f)) }
+        rule.waitForIdle()
+        listNode.performTouchInput { up() }
         rule.waitForIdle()
         assertEquals(
             "drag pic->song: ticked checkboxes (texts: " +
