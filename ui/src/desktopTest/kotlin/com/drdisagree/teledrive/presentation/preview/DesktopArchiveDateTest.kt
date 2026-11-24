@@ -88,7 +88,7 @@ class DesktopArchiveDateTest {
                 localFakeTelegram(zipBytes),
                 localProxy<FilePartDao> { method, _ ->
                     when (method) {
-                        "partsOf" -> emptyList()
+                        "partsOf" -> emptyList<com.drdisagree.teledrive.data.local.entity.FilePartEntity>()
                         "countOf" -> 0
                         else -> throw UnsupportedOperationException(method)
                     }
