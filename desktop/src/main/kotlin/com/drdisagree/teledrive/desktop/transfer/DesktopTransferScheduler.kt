@@ -100,7 +100,8 @@ class DesktopTransferScheduler(
                     TransferType.UPLOAD, TransferType.BACKUP ->
                         Res.string.notification_upload_failed
 
-                    TransferType.DOWNLOAD, TransferType.RESTORE ->
+                    TransferType.DOWNLOAD, TransferType.RESTORE,
+                    TransferType.ARCHIVE_DOWNLOAD ->
                         Res.string.notification_download_failed
                 }
             ),

@@ -7,7 +7,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
-import com.drdisagree.teledrive.core.archive.NoOpArchiveDownloadReporter
+import com.drdisagree.teledrive.core.archive.ArchiveDownloadTracker
 import com.drdisagree.teledrive.core.crypto.CredentialCipher
 import com.drdisagree.teledrive.core.crypto.FileWrappedKeyRepository
 import com.drdisagree.teledrive.core.crypto.KeyBackupCodec
@@ -118,8 +118,9 @@ val desktopModule = module {
         sharedUiModule
     )
 
-    // Desktop stays unwired this round BY DESIGN: in-ZIP downloads on PC write no
-    // Transfers history, so PreviewViewModel resolves the no-op reporter.
+    // 1.6.21 (report 49 §7 adoption): in-ZIP downloads on PC write report-only
+    // ARCHIVE_DOWNLOAD records into Transfers history via the shared tracker,
+    // exactly as on Android (vc179).
     single<ArchiveDownloadReporter> { get<ArchiveDownloadTracker>() }
     singleOf(::DesktopStoragePaths) bind AppStoragePaths::class
     single<CredentialCipher> {

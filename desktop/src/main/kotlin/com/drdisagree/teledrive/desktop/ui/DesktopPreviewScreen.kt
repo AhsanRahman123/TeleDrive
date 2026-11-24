@@ -146,6 +146,7 @@ import com.drdisagree.teledrive.desktop.resources.preview_stream
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileSortField
+import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.LinkedText
