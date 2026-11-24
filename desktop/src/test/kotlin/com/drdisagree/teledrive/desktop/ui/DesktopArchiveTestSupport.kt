@@ -1,6 +1,10 @@
 package com.drdisagree.teledrive.desktop.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import com.drdisagree.teledrive.core.telegram.TelegramClient
+import com.drdisagree.teledrive.desktop.DesktopPlatformCapabilities
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.core.telegram.TelegramFileInfo
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.InvocationHandler
@@ -9,6 +13,19 @@ import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.flow.flowOf
+
+/**
+ * The platform locals the archive pane's shared components read (the app provides
+ * them at its root via DesktopPlatformProviders). Tests composing the pane directly
+ * must provide the capabilities local or composition fails.
+ */
+@Composable
+fun ArchiveTestProviders(content: @Composable () -> Unit) {
+    CompositionLocalProvider(
+        LocalPlatformCapabilities provides DesktopPlatformCapabilities(),
+        content = content
+    )
+}
 
 /** A dynamic proxy for an interface, throwing on any method the handler does not serve. */
 inline fun <reified T : Any> archiveTestProxy(

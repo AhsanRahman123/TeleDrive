@@ -99,6 +99,7 @@ class DesktopArchiveSelectionTest {
     ) {
         rule.setContent {
             MaterialTheme {
+              ArchiveTestProviders {
                 DesktopArchivePane(
                     file = zipFile(fileId),
                     archive = PreviewContent.Archive(listing, "ZIP", remote = true),
@@ -123,6 +124,7 @@ class DesktopArchiveSelectionTest {
                     snackbarHostState = remember { SnackbarHostState() },
                     modifier = modifier.testTag("pane$tagSuffix")
                 )
+              }
             }
         }
         rule.waitForIdle()
@@ -264,6 +266,7 @@ class DesktopArchiveSelectionTest {
     fun `selection is keyed per zip and does not leak between panes`() {
         rule.setContent {
             MaterialTheme {
+              ArchiveTestProviders {
                 Column {
                     Box(Modifier.height(340.dp)) {
                         DesktopArchivePane(
@@ -312,6 +315,7 @@ class DesktopArchiveSelectionTest {
                         )
                     }
                 }
+              }
             }
         }
         rule.waitForIdle()

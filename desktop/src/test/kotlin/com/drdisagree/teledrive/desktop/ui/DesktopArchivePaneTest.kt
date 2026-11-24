@@ -308,6 +308,7 @@ class DesktopArchivePaneTest {
             val vmState by viewModel.uiState.collectAsState()
             val sort by viewModel.archiveSort.collectAsState()
             MaterialTheme {
+              ArchiveTestProviders {
                 DesktopArchivePane(
                     file = file,
                     archive = PreviewContent.Archive(listing, "ZIP", remote = true),
@@ -331,6 +332,7 @@ class DesktopArchivePaneTest {
                     onBackgroundPlaybackChange = {},
                     snackbarHostState = remember { SnackbarHostState() }
                 )
+              }
             }
         }
         rule.waitForIdle()
