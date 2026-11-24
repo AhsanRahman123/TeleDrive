@@ -120,6 +120,7 @@ class TransferRepositoryArchiveTest {
         validateUpload = ValidateUploadUseCase(),
         storageInspector = StorageInspector(unused<AppStoragePaths>()),
         backupSessionTracker = sessionTracker,
+        storagePaths = unused<AppStoragePaths>(),
         archiveExtractionJobs = jobs
     )
 

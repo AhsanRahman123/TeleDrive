@@ -69,7 +69,8 @@ class Round6TransferFixesTest {
             database.transferDao(),
             database.backupDao()
         ),
-        storagePaths = paths
+        storagePaths = paths,
+        archiveExtractionJobs = com.drdisagree.teledrive.core.archive.ArchiveExtractionJobs()
     )
 
     /** A real local file + its still-local row, as a folder import creates them. */

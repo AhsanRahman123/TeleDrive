@@ -88,7 +88,7 @@ class BackupScanTest {
             database.transferDao(),
             database.backupDao()
         ),
-        storagePaths = paths
+        storagePaths = paths,
         archiveExtractionJobs = com.drdisagree.teledrive.core.archive.ArchiveExtractionJobs()
     )
 

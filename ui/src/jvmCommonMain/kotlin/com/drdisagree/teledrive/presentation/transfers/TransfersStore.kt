@@ -56,6 +56,16 @@ class TransfersStore(
         .distinctUntilChanged()
         .stateIn(scope, SharingStarted.WhileSubscribed(5_000), 2)
 
+    /** The Transfers sort memory, kept in preferences (DataStore) like the concurrency. */
+    val sortOrder: StateFlow<String> = settingsRepository.preferences
+        .map { it.transfersSortOrder }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), "PRIORITY")
+
+    fun setSortOrder(value: String) = launch {
+        settingsRepository.update { it.copy(transfersSortOrder = value) }
+    }
+
     fun setUploadConcurrency(value: Int) = launch {
         settingsRepository.update { it.copy(uploadConcurrency = value.coerceIn(1, 6)) }
         transferRepository.wakeWorker()
