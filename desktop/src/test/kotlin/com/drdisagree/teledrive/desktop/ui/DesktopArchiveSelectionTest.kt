@@ -12,6 +12,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -23,6 +24,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.model.BackupState
 import com.drdisagree.teledrive.domain.model.DriveFile
@@ -152,7 +154,17 @@ class DesktopArchiveSelectionTest {
         rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG).performTouchInput {
             down(start)
             advanceEventTime(LONG_PRESS_ADVANCE_MS)
-            if (end != null) moveBy(Offset(0f, end.y - start.y))
+            if (end != null) {
+                // Step the drag through the crossed rows, as a real finger does, with a
+                // small overshoot past the target centre so the centre-crossing hit
+                // test settles on the target row.
+                val total = (end.y - start.y) + 12f
+                val steps = 6
+                repeat(steps) { step ->
+                    moveBy(Offset(0f, total / steps))
+                    advanceEventTime(16)
+                }
+            }
             up()
         }
         rule.waitForIdle()
@@ -242,11 +254,17 @@ class DesktopArchiveSelectionTest {
         rule.runOnIdle { WindowSelectAllRegistry.dispatchSelectAll(false) }
         rule.waitForIdle()
         rule.onNodeWithText("3 selected").assertIsDisplayed()
-        // Clicking pic focuses its row and toggles it off (selection-mode click).
+        // Clicking pic toggles it off (selection-mode click).
         rule.onNodeWithText("pic.png").performClick()
         rule.onNodeWithText("2 selected").assertIsDisplayed()
         assertEquals("after click-off", 2, selectedCheckboxCount())
-        // Space on the focused row toggles it back on.
+        // Move the collection focus onto pic the way a keyboard user does: focus the
+        // first row, arrow down to pic, then Space toggles it back on.
+        rule.onNodeWithTag("archive-folder-docs").requestFocus()
+        rule.onNodeWithTag("archive-folder-docs")
+            .performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNodeWithTag("archive-entry-2").assertIsFocused()
         rule.onNodeWithTag("archive-entry-2").performKeyInput { pressKey(Key.Spacebar) }
         rule.waitForIdle()
         assertEquals("after space toggle", 3, selectedCheckboxCount())

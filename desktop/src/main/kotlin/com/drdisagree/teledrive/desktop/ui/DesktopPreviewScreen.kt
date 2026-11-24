@@ -2010,7 +2010,7 @@ internal fun DesktopArchivePane(
                         .fillMaxSize()
                         .padding(end = 10.dp)
                         .keyboardCollection(keyboard, rows.size, shortcuts, label = "ZIP contents")
-                        .then(if (archive.remote) dragSelect else Modifier)
+                        .then(dragSelect)
                         .testTag(ARCHIVE_LIST_TEST_TAG),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
