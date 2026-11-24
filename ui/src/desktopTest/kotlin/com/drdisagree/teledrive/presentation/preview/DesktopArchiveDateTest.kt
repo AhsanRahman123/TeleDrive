@@ -156,18 +156,39 @@ class DesktopArchiveDateTest {
             0L,
             dateless.modifiedAtMillis
         )
-        // Whatever zip4j yields for a DOS-only dated entry, the listing must carry its
-        // normalized form — never a sub-1980 value.
-        val dated = content.entries.first { it.name == "dated.txt" }
-        assertEquals(normalizeArchiveEntryModifiedAt(rawDosDated), dated.modifiedAtMillis)
-        // A real post-1980 date carried in the extended-timestamp extra field (the
-        // shape modern writers produce) must survive into the listing.
-        val extraDated = content.entries.first { it.name == "extradated.txt" }
-        assertTrue(
-            "extra-field dated entry must keep a real post-1980 date, raw was $rawExtraDated, " +
-                "listed as ${extraDated.modifiedAtMillis}",
-            extraDated.modifiedAtMillis >= ARCHIVE_ENTRY_DOS_EPOCH_FLOOR_MILLIS
+        // zip4j yields the packed DOS dword for a DOS-dated entry (proven by the probe:
+        // it equals (dosDate shl 16) or dosTime exactly, i.e. January 1970 read as
+        // millis — the field defect). The listing must decode it back to the real date.
+        val packed = (datedDos.second shl 16) or datedDos.first
+        assertEquals(
+            "probe: zip4j raw for the DOS-dated entry is the packed DOS dword",
+            packed.toLong(),
+            rawDosDated
         )
+        val dated = content.entries.first { it.name == "dated.txt" }
+        assertEquals(datedMillis, dated.modifiedAtMillis)
+        // For an entry whose DOS date is zero, zip4j yields 0 even when an
+        // extended-timestamp extra field is present (probe), so the entry is unknown —
+        // hidden, never a garbage date.
+        assertEquals(0L, rawExtraDated)
+        val extraDated = content.entries.first { it.name == "extradated.txt" }
+        assertEquals(0L, extraDated.modifiedAtMillis)
+    }
+
+    @Test
+    fun `zip4j interpretation - packed DOS dword decodes, real millis pass through`() {
+        assertEquals(0L, archiveEntryModifiedAtFromZip4j(0L))
+        assertEquals(0L, archiveEntryModifiedAtFromZip4j(-5L))
+        val packed = ((datedDos.second shl 16) or datedDos.first).toLong()
+        assertEquals(datedMillis, archiveEntryModifiedAtFromZip4j(packed))
+        assertEquals(datedMillis, archiveEntryModifiedAtFromZip4j(datedMillis))
+        assertEquals(
+            ARCHIVE_ENTRY_DOS_EPOCH_FLOOR_MILLIS,
+            archiveEntryModifiedAtFromZip4j(ARCHIVE_ENTRY_DOS_EPOCH_FLOOR_MILLIS)
+        )
+        // A packed pair with an out-of-range month is unknown, not a garbage date.
+        val badMonth = ((dosDate(2024, 13, 1) shl 16) or dosTime(1, 2, 4)).toLong()
+        assertEquals(0L, archiveEntryModifiedAtFromZip4j(badMonth))
     }
 
     private class FakeSettings : SettingsRepository {

@@ -294,12 +294,11 @@ class PreviewContentResolver(
                         sizeBytes = header.uncompressedSize,
                         compressedBytes = header.compressedSize,
                         isDirectory = header.isDirectory,
-                        // zip4j's conversion of a dateless entry yields a small
-                        // positive garbage value (January 1970) rather than 0, so the
-                        // raw value is normalized against the DOS-epoch floor: a ZIP
-                        // entry cannot predate 1980, and anything below that is
-                        // "no timestamp" for display and sorting purposes.
-                        modifiedAtMillis = normalizeArchiveEntryModifiedAt(
+                        // zip4j yields 0 for a dateless entry but the packed DOS
+                        // dword itself as "millis" for a DOS-dated one (January 1970
+                        // when read as a date — the field defect). Decode it back to
+                        // the real date; see archiveEntryModifiedAtFromZip4j.
+                        modifiedAtMillis = archiveEntryModifiedAtFromZip4j(
                             header.lastModifiedTime
                         )
                     )
