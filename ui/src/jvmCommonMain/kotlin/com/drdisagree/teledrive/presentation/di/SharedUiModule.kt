@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.di
 
+import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.presentation.AppViewModel
 import com.drdisagree.teledrive.presentation.channels.ChannelsViewModel
 import com.drdisagree.teledrive.presentation.collection.CollectionViewModel
@@ -25,6 +26,7 @@ import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
 val sharedUiModule = module {
+    singleOf(::RemoteArchiveService)
     singleOf(::PreviewContentResolver)
     singleOf(::FileClipboard)
     // One transfers state holder for the whole app (round 6, PC-26):

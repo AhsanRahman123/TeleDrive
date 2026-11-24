@@ -83,7 +83,12 @@ class TransferQueueDrainer(
         }
         if (backupsHeld.get()) scheduleResume()
         if (interrupted.get()) {
-            withContext(NonCancellable) { transferDao.requeueRunning() }
+            withContext(NonCancellable) {
+                transferDao.requeueRunning()
+                // Report-only archive rows are excluded from requeueRunning;
+                // an interrupted drain fails them instead (vc179 clause 2).
+                transferDao.failInterruptedArchiveDownloads(System.currentTimeMillis())
+            }
             return TransferDrainResult.INTERRUPTED
         }
         return TransferDrainResult.COMPLETED
@@ -194,6 +199,10 @@ class TransferQueueDrainer(
     private fun laneOf(type: TransferType): Lane = when (type) {
         TransferType.UPLOAD, TransferType.BACKUP -> Lane.UPLOAD
         TransferType.DOWNLOAD, TransferType.RESTORE -> Lane.DOWNLOAD
+        // Report-only rows are never claimed (laneTypes never lists them),
+        // so this arm is unreachable for executing transfers; it exists only
+        // to keep the when exhaustive over the vc179 type.
+        TransferType.ARCHIVE_DOWNLOAD -> Lane.DOWNLOAD
     }
 
     private suspend fun nextClaimable(

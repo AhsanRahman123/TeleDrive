@@ -12,6 +12,13 @@ import com.drdisagree.teledrive.resources.message_moved_to_trash
 import com.drdisagree.teledrive.resources.message_renamed
 import com.drdisagree.teledrive.resources.message_upload_queued
 import com.drdisagree.teledrive.resources.preview_added_favorites
+import com.drdisagree.teledrive.resources.preview_archive_entries_saved
+import com.drdisagree.teledrive.resources.preview_archive_entry_failed
+import com.drdisagree.teledrive.resources.preview_archive_entry_saved
+import com.drdisagree.teledrive.resources.preview_archive_failed
+import com.drdisagree.teledrive.resources.preview_archive_folder_empty
+import com.drdisagree.teledrive.resources.preview_archive_local_only
+import com.drdisagree.teledrive.resources.preview_archive_none_saved
 import com.drdisagree.teledrive.resources.preview_archived
 import com.drdisagree.teledrive.resources.preview_hidden
 import com.drdisagree.teledrive.resources.preview_local_copy_removed
@@ -19,15 +26,10 @@ import com.drdisagree.teledrive.resources.preview_nothing_to_remove
 import com.drdisagree.teledrive.resources.preview_removed_favorites
 import com.drdisagree.teledrive.resources.preview_unarchived
 import com.drdisagree.teledrive.resources.preview_unhidden
-import com.drdisagree.teledrive.resources.preview_zip_entries_saved
-import com.drdisagree.teledrive.resources.preview_zip_entry_failed
-import com.drdisagree.teledrive.resources.preview_zip_entry_local_only
-import com.drdisagree.teledrive.resources.preview_zip_entry_saved
-import com.drdisagree.teledrive.resources.preview_zip_folder_empty
-import com.drdisagree.teledrive.resources.preview_zip_none_saved
-import com.drdisagree.teledrive.resources.preview_zip_too_large_preview
-import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
+import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
+import com.drdisagree.teledrive.core.archive.ArchiveException
+import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.DriveFile
@@ -46,6 +48,10 @@ import com.drdisagree.teledrive.presentation.common.toUiText
 import com.drdisagree.teledrive.presentation.navigation.Route
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,6 +65,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -71,7 +78,8 @@ class PreviewViewModel(
     private val transferRepository: TransferRepository,
     private val settingsRepository: SettingsRepository,
     private val contentResolver: PreviewContentResolver,
-    private val remoteArchiveService: RemoteArchiveService
+    private val remoteArchiveService: RemoteArchiveService,
+    private val archiveDownloadReporter: ArchiveDownloadReporter
 ) : ViewModel() {
 
     private val route: Route.Preview = savedStateHandle.toRoute()
@@ -224,6 +232,13 @@ class PreviewViewModel(
                         contentResolver.resolve(latest)
                     }
                 }
+                .onEach { content ->
+                    if (content is PreviewContent.Archive && content.remote) {
+                        _uiState.update {
+                            it.copy(archiveListings = it.archiveListings + (file.id to content.entries))
+                        }
+                    }
+                }
                 .stateIn(
                     viewModelScope,
                     SharingStarted.WhileSubscribed(5_000),
@@ -250,72 +265,59 @@ class PreviewViewModel(
     }
 
     /**
-     * Downloads just one file out of the zip [file] currently shows, from its online copy.
-     * [entryIndex] is the entry's position in the archive listing, so the occurrence among
-     * same-named entries (legal in zip) matches the row the user tapped.
+     * Downloads just the entry at [entryIndex] in the stored listing out of a remotely listed
+     * ZIP, saved to Downloads like a normal download. Identity is the listing index, never the
+     * entry value, so duplicate names each download their own bytes. A listing that came from a
+     * local-only copy has no remote source to extract from, so it gets a clear message instead
+     * of a failure.
      */
-    fun downloadArchiveEntry(
-        file: DriveFile,
-        entry: ArchiveEntry,
-        entryIndex: Int,
-        entries: List<ArchiveEntry>
-    ) {
+    fun downloadArchiveEntry(file: DriveFile, entryIndex: Int) {
+        if (_uiState.value.archiveEntryBusyIndex != null) return
+        val listing = _uiState.value.archiveListings[file.id]
+        if (listing == null) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
+            return
+        }
+        val entry = listing.getOrNull(entryIndex) ?: return
         if (entry.isDirectory) return
-        if (!file.hasRemoteCopy || file.remoteFileId == null) {
-            _messages.tryEmit(UiText.Resource(Res.string.preview_zip_entry_local_only))
-            return
-        }
-        if (_uiState.value.archiveEntryDownload?.status ==
-            ArchiveEntryDownloadState.Status.RUNNING
-        ) {
-            return
-        }
-        // Count only non-directory predecessors, exactly as RemoteArchiveService indexes
-        // its matches (it filters directories out before applying the occurrence).
-        val occurrence = entries.take(entryIndex.coerceIn(0, entries.size))
-            .count { it.name == entry.name && !it.isDirectory }
+        // Occurrence counts only non-directory entries with this name before this index -
+        // the same rule RemoteArchiveService uses to pick the entry, so both sides agree.
+        val occurrence = archiveEntryOccurrence(listing, entryIndex)
+        if (occurrence < 0) return
+        val displayName = entry.name.substringAfterLast('/').substringAfterLast('\\')
+            .ifBlank { entry.name }
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    archiveEntryDownload = ArchiveEntryDownloadState(
-                        entry.name,
-                        ArchiveEntryDownloadState.Status.RUNNING
-                    )
-                )
+            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+            // Report-only Transfers history record: written before extraction starts,
+            // completed/failed/stopped alongside the extraction's own outcome.
+            val recordId = archiveDownloadReporter.begin(displayName, entry.sizeBytes)
+            currentCoroutineContext()[Job]?.let { job ->
+                archiveDownloadReporter.attach(recordId, job)
             }
             try {
-                val savedPath = remoteArchiveService.extractEntry(file, entry.name, occurrence)
-                _uiState.update {
-                    it.copy(
-                        archiveEntryDownload = ArchiveEntryDownloadState(
-                            entry.name,
-                            ArchiveEntryDownloadState.Status.SUCCEEDED
-                        )
-                    )
-                }
-                val savedName = savedPath.substringAfterLast('/')
-                    .substringAfterLast('\\')
-                    .ifBlank { entry.name.substringAfterLast('/') }
-                _messages.tryEmit(UiText.Resource(Res.string.preview_zip_entry_saved, savedName))
-            } catch (failure: CancellationException) {
-                // Reset before rethrowing, or the state stays RUNNING and blocks every
-                // further entry download for this ViewModel's life.
-                _uiState.update { it.copy(archiveEntryDownload = null) }
-                throw failure
-            } catch (failure: Exception) {
-                _uiState.update {
-                    it.copy(
-                        archiveEntryDownload = ArchiveEntryDownloadState(
-                            entry.name,
-                            ArchiveEntryDownloadState.Status.FAILED
-                        )
-                    )
-                }
-                _messages.tryEmit(
-                    UiText.Plain(
-                        failure.message ?: "Could not download that file from the zip."
-                    )
+                val savedPath = remoteArchiveService.extractEntry(
+                    file,
+                    entry.name,
+                    occurrence,
+                    onProgress = { done -> archiveDownloadReporter.progress(recordId, done) }
                 )
+                archiveDownloadReporter.complete(recordId, savedPath)
+                _messages.tryEmit(
+                    UiText.Resource(Res.string.preview_archive_entry_saved, displayName)
+                )
+            } catch (failure: CancellationException) {
+                // The finally block clears the busy state, so a cancelled download cannot wedge
+                // later ones; cancellation itself must keep propagating.
+                archiveDownloadReporter.ownerStopped(recordId)
+                throw failure
+            } catch (failure: ArchiveException) {
+                archiveDownloadReporter.fail(recordId, failure.message)
+                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
+            } catch (failure: Exception) {
+                archiveDownloadReporter.fail(recordId, null)
+                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+            } finally {
+                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
             }
         }
     }
@@ -338,79 +340,61 @@ class PreviewViewModel(
         }
     }
 
-    private fun archiveBusy(): Boolean =
-        _uiState.value.archiveEntryDownload?.status ==
-            ArchiveEntryDownloadState.Status.RUNNING ||
-            _uiState.value.archiveBatchProgress != null
-
     /**
-     * Routes a tap on an archive file row: images open in the desktop image viewer, audio
-     * extracts and plays in the desktop player, text reads in place — each after the same
-     * verified extraction a download performs — and everything else (video included,
-     * always) downloads. In selection mode the screen toggles selection instead and never
-     * calls this.
+     * Routes a tap on an archive file row: images open in the image viewer, audio plays,
+     * text reads in place — each after the same verified extraction a download performs —
+     * and everything else (video included, always) downloads. In selection mode the screen
+     * toggles selection instead and never calls this.
      */
-    fun onArchiveEntryTap(
-        file: DriveFile,
-        entry: ArchiveEntry,
-        entryIndex: Int,
-        entries: List<ArchiveEntry>
-    ) {
-        if (entry.isDirectory) return
+    fun onArchiveEntryTap(file: DriveFile, entryIndex: Int) {
+        val listing = _uiState.value.archiveListings[file.id]
+        val entry = listing?.getOrNull(entryIndex)
+        if (entry == null || entry.isDirectory) {
+            downloadArchiveEntry(file, entryIndex)
+            return
+        }
         when (archiveEntryTapAction(entry)) {
             ArchiveEntryTapAction.PREVIEW_IMAGE,
             ArchiveEntryTapAction.PLAY_AUDIO,
-            ArchiveEntryTapAction.PREVIEW_TEXT ->
-                previewArchiveEntry(file, entry, entryIndex, entries)
-            ArchiveEntryTapAction.DOWNLOAD ->
-                downloadArchiveEntry(file, entry, entryIndex, entries)
+            ArchiveEntryTapAction.PREVIEW_TEXT -> previewArchiveEntry(file, entryIndex)
+            ArchiveEntryTapAction.DOWNLOAD -> downloadArchiveEntry(file, entryIndex)
         }
     }
 
     /**
      * Extracts the entry at [entryIndex] to a verified temp file (never Downloads) and
      * publishes it as the in-archive preview. Text entries over the preview cap are refused
-     * before any extraction, with a plain message; the entry keeps its download action.
+     * before any extraction, with a message that points at the normal download instead.
      */
-    fun previewArchiveEntry(
-        file: DriveFile,
-        entry: ArchiveEntry,
-        entryIndex: Int,
-        entries: List<ArchiveEntry>
-    ) {
-        if (entry.isDirectory) return
-        if (!file.hasRemoteCopy || file.remoteFileId == null) {
-            _messages.tryEmit(UiText.Resource(Res.string.preview_zip_entry_local_only))
+    fun previewArchiveEntry(file: DriveFile, entryIndex: Int) {
+        if (_uiState.value.archiveEntryBusyIndex != null) return
+        val listing = _uiState.value.archiveListings[file.id]
+        if (listing == null) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
             return
         }
-        if (archiveBusy()) return
+        val entry = listing.getOrNull(entryIndex) ?: return
+        if (entry.isDirectory) return
         val action = archiveEntryTapAction(entry)
         if (action == ArchiveEntryTapAction.DOWNLOAD) {
-            downloadArchiveEntry(file, entry, entryIndex, entries)
+            downloadArchiveEntry(file, entryIndex)
             return
         }
         if (action == ArchiveEntryTapAction.PREVIEW_TEXT && !archiveEntryTextPreviewable(entry)) {
             _messages.tryEmit(
-                UiText.Resource(
-                    Res.string.preview_zip_too_large_preview,
-                    archiveEntryDisplayName(entry),
-                    com.drdisagree.teledrive.presentation.common.Formatters.bytes(entry.sizeBytes)
+                UiText.Plain(
+                    "\"${archiveEntryDisplayName(entry)}\" is too large to preview here " +
+                        "(${com.drdisagree.teledrive.presentation.common.Formatters.bytes(entry.sizeBytes)}). " +
+                        "Download it instead."
                 )
             )
             return
         }
-        val occurrence = entries.take(entryIndex.coerceIn(0, entries.size))
-            .count { it.name == entry.name && !it.isDirectory }
+        val occurrence = archiveEntryOccurrence(listing, entryIndex)
+        if (occurrence < 0) return
         val displayName = archiveEntryDisplayName(entry)
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    archiveEntryDownload = ArchiveEntryDownloadState(
-                        entry.name,
-                        ArchiveEntryDownloadState.Status.RUNNING
-                    )
-                )
-            }
+            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
             try {
                 val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
                 val preview = when (action) {
@@ -419,32 +403,23 @@ class PreviewViewModel(
                     ArchiveEntryTapAction.PLAY_AUDIO ->
                         ArchiveEntryPreview.Audio(displayName, temp.absolutePath)
                     ArchiveEntryTapAction.PREVIEW_TEXT -> {
-                        // UTF-8 decoding with replacement: a non-UTF-8 file shows
-                        // replacement characters rather than failing.
+                        // String decoding with the UTF-8 charset replaces malformed input
+                        // instead of failing, so a non-UTF-8 text file still shows sanely.
                         val text = temp.readBytes().toString(Charsets.UTF_8)
                         temp.delete()
                         ArchiveEntryPreview.Text(displayName, text)
                     }
                     ArchiveEntryTapAction.DOWNLOAD -> error("unreachable")
                 }
-                _uiState.update {
-                    it.copy(archiveEntryDownload = null, archivePreview = preview)
-                }
+                _uiState.update { it.copy(archivePreview = preview) }
             } catch (failure: CancellationException) {
-                _uiState.update { it.copy(archiveEntryDownload = null) }
                 throw failure
+            } catch (failure: ArchiveException) {
+                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
             } catch (failure: Exception) {
-                _uiState.update {
-                    it.copy(
-                        archiveEntryDownload = ArchiveEntryDownloadState(
-                            entry.name,
-                            ArchiveEntryDownloadState.Status.FAILED
-                        )
-                    )
-                }
-                _messages.tryEmit(
-                    UiText.Plain(failure.message ?: "Could not open that file from the zip.")
-                )
+                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+            } finally {
+                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
             }
         }
     }
@@ -463,27 +438,25 @@ class PreviewViewModel(
     /**
      * Downloads every entry in a multi-selection — directly selected files plus the full
      * contents of selected folders — one at a time through the same verified extraction
-     * path as a single download (sequential on purpose). A failure is reported per entry
-     * and does NOT stop the rest of the selection; the completion message reports how
-     * many files were saved. Progress reports through this viewer's own state only —
-     * no transfer rows are created (report 45 §9 stop rule).
+     * path as a single download (sequential on purpose: the ranged reads share one
+     * Telegram source discipline and must not be parallelized). A failure is reported
+     * per entry and does NOT stop the rest of the selection; the completion message
+     * reports how many files were saved.
      */
     fun downloadArchiveSelection(
         file: DriveFile,
-        entries: List<ArchiveEntry>,
         entryIndices: Set<Int>,
         folderPaths: Set<String>
     ) {
-        if (!file.hasRemoteCopy || file.remoteFileId == null) {
-            _messages.tryEmit(UiText.Resource(Res.string.preview_zip_entry_local_only))
+        if (_uiState.value.archiveEntryBusyIndex != null) return
+        val listing = _uiState.value.archiveListings[file.id]
+        if (listing == null) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
             return
         }
-        if (archiveBusy()) return
-        val plan = planArchiveSelectionDownloads(entries, entryIndices, folderPaths)
+        val plan = planArchiveSelectionDownloads(listing, entryIndices, folderPaths)
         if (plan.isEmpty()) {
-            if (folderPaths.isNotEmpty()) {
-                _messages.tryEmit(UiText.Resource(Res.string.preview_zip_folder_empty))
-            }
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_folder_empty))
             return
         }
         viewModelScope.launch {
@@ -491,31 +464,57 @@ class PreviewViewModel(
             _uiState.update { it.copy(archiveBatchProgress = ArchiveBatchProgress(0, plan.size)) }
             try {
                 for (step in plan) {
-                    val stepEntry = entries[step.entryIndex]
-                    _uiState.update {
-                        it.copy(
-                            archiveEntryDownload = ArchiveEntryDownloadState(
-                                stepEntry.name,
-                                ArchiveEntryDownloadState.Status.RUNNING
-                            )
-                        )
-                    }
+                    _uiState.update { it.copy(archiveEntryBusyIndex = step.entryIndex) }
+                    val stepEntry = listing[step.entryIndex]
+                    val recordId = archiveDownloadReporter.begin(
+                        archiveEntryDisplayName(stepEntry),
+                        stepEntry.sizeBytes
+                    )
                     try {
-                        remoteArchiveService.extractEntry(
-                            file = file,
-                            entryName = step.entryName,
-                            occurrence = step.occurrence,
-                            subFolderPath = step.subFolderPath.ifBlank { null }
-                        )
+                        // The extraction runs as a CHILD job registered under this step's
+                        // record, so a stop from Transfers cancels only this step's job
+                        // while this batch coroutine stays alive to continue with the rest.
+                        val stepJob = async {
+                            remoteArchiveService.extractEntry(
+                                file = file,
+                                entryName = step.entryName,
+                                occurrence = step.occurrence,
+                                subFolderPath = step.subFolderPath.ifBlank { null },
+                                onProgress = { done ->
+                                    archiveDownloadReporter.progress(recordId, done)
+                                }
+                            )
+                        }
+                        archiveDownloadReporter.attach(recordId, stepJob)
+                        val savedPath = stepJob.await()
+                        archiveDownloadReporter.complete(recordId, savedPath)
                         saved++
                     } catch (failure: CancellationException) {
-                        throw failure
-                    } catch (failure: Exception) {
+                        archiveDownloadReporter.ownerStopped(recordId)
+                        if (currentCoroutineContext().isActive) {
+                            // Per-record stop from Transfers: the repository already wrote
+                            // CANCELLED or PAUSED for this record. No failure message, not
+                            // counted as saved — the batch continues with the next step.
+                        } else {
+                            // Real teardown of the batch itself: keep propagating.
+                            throw failure
+                        }
+                    } catch (failure: ArchiveException) {
+                        archiveDownloadReporter.fail(recordId, failure.message)
                         _messages.tryEmit(
                             UiText.Resource(
-                                Res.string.preview_zip_entry_failed,
-                                archiveEntryDisplayName(stepEntry),
+                                Res.string.preview_archive_entry_failed,
+                                archiveEntryDisplayName(listing[step.entryIndex]),
                                 failure.message ?: "unknown error"
+                            )
+                        )
+                    } catch (failure: Exception) {
+                        archiveDownloadReporter.fail(recordId, null)
+                        _messages.tryEmit(
+                            UiText.Resource(
+                                Res.string.preview_archive_entry_failed,
+                                archiveEntryDisplayName(listing[step.entryIndex]),
+                                "unknown error"
                             )
                         )
                     }
@@ -530,21 +529,21 @@ class PreviewViewModel(
                 }
             } finally {
                 _uiState.update {
-                    it.copy(archiveEntryDownload = null, archiveBatchProgress = null)
+                    it.copy(archiveEntryBusyIndex = null, archiveBatchProgress = null)
                 }
             }
             when {
                 saved == 0 -> _messages.tryEmit(
-                    UiText.Resource(Res.string.preview_zip_none_saved)
+                    UiText.Resource(Res.string.preview_archive_none_saved)
                 )
                 plan.size == 1 -> _messages.tryEmit(
                     UiText.Resource(
-                        Res.string.preview_zip_entry_saved,
-                        archiveEntryDisplayName(entries[plan.first().entryIndex])
+                        Res.string.preview_archive_entry_saved,
+                        archiveEntryDisplayName(listing[plan.first().entryIndex])
                     )
                 )
                 else -> _messages.tryEmit(
-                    UiText.Resource(Res.string.preview_zip_entries_saved, saved)
+                    UiText.Resource(Res.string.preview_archive_entries_saved, saved)
                 )
             }
         }

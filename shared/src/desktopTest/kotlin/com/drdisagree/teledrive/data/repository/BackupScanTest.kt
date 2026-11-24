@@ -89,6 +89,7 @@ class BackupScanTest {
             database.backupDao()
         ),
         storagePaths = paths
+        archiveExtractionJobs = com.drdisagree.teledrive.core.archive.ArchiveExtractionJobs()
     )
 
     private val paths = object : AppStoragePaths by unused() {

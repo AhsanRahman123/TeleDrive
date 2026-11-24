@@ -193,6 +193,8 @@ class SettingsRepositoryImpl(
                 ?: defaults.downloadConcurrency,
             transferRetryCount = this[PreferenceKeys.TRANSFER_RETRY_COUNT]
                 ?: defaults.transferRetryCount,
+            transfersSortOrder = this[PreferenceKeys.TRANSFERS_SORT_ORDER]
+                ?: defaults.transfersSortOrder,
             allowMeteredTransfers = this[PreferenceKeys.ALLOW_METERED_TRANSFERS]
                 ?: defaults.allowMeteredTransfers,
             debugLogging = this[PreferenceKeys.DEBUG_LOGGING] ?: defaults.debugLogging
@@ -264,6 +266,7 @@ class SettingsRepositoryImpl(
         this[PreferenceKeys.UPLOAD_CONCURRENCY] = prefs.uploadConcurrency
         this[PreferenceKeys.DOWNLOAD_CONCURRENCY] = prefs.downloadConcurrency
         this[PreferenceKeys.TRANSFER_RETRY_COUNT] = prefs.transferRetryCount
+        this[PreferenceKeys.TRANSFERS_SORT_ORDER] = prefs.transfersSortOrder
         this[PreferenceKeys.ALLOW_METERED_TRANSFERS] = prefs.allowMeteredTransfers
         this[PreferenceKeys.DEBUG_LOGGING] = prefs.debugLogging
     }

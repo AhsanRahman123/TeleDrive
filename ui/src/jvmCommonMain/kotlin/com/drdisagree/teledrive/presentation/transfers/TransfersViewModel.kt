@@ -27,6 +27,29 @@ class TransfersViewModel(
     val uploadConcurrency: StateFlow<Int> = store.uploadConcurrency
 
     val downloadConcurrency: StateFlow<Int> = store.downloadConcurrency
+    val sortOrder: StateFlow<String> = settingsRepository.preferences
+        .map { it.transfersSortOrder }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "PRIORITY")
+
+    fun setSortOrder(value: String) = launch {
+        settingsRepository.update { it.copy(transfersSortOrder = value) }
+    }
+
+    private val rows = combine(
+        transferRepository.observeSection(TransferSection.ACTIVE, SECTION_LIMIT),
+        transferRepository.observeSection(TransferSection.PAUSED, SECTION_LIMIT),
+        transferRepository.observeSection(TransferSection.FAILED, SECTION_LIMIT),
+        transferRepository.observeSection(TransferSection.COMPLETED, SECTION_LIMIT)
+    ) { active, paused, failed, completed ->
+        val seen = mutableSetOf<String>()
+        listOf(
+            active.sortedWith(TRANSFER_ORDER).filterUnseen(seen),
+            paused.sortedWith(TRANSFER_ORDER).filterUnseen(seen),
+            failed.sortedWith(TRANSFER_ORDER).filterUnseen(seen),
+            completed.sortedWith(FINISHED_ORDER).filterUnseen(seen)
+        )
+    }
 
     fun setUploadConcurrency(value: Int) = store.setUploadConcurrency(value)
 

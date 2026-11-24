@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
+import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
+import com.drdisagree.teledrive.core.archive.NoOpArchiveDownloadReporter
 import com.drdisagree.teledrive.core.crypto.CredentialCipher
 import com.drdisagree.teledrive.core.crypto.FileWrappedKeyRepository
 import com.drdisagree.teledrive.core.crypto.KeyBackupCodec
@@ -116,6 +118,9 @@ val desktopModule = module {
         sharedUiModule
     )
 
+    // Desktop stays unwired this round BY DESIGN: in-ZIP downloads on PC write no
+    // Transfers history, so PreviewViewModel resolves the no-op reporter.
+    single<ArchiveDownloadReporter> { NoOpArchiveDownloadReporter }
     singleOf(::DesktopStoragePaths) bind AppStoragePaths::class
     single<CredentialCipher> {
         val os = System.getProperty("os.name").orEmpty().lowercase()

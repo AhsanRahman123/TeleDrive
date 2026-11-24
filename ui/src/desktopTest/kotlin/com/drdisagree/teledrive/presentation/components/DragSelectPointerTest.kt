@@ -455,6 +455,7 @@ class DragSelectPointerTest {
         rule.mainClock.autoAdvance = false
         var selected by mutableStateOf(emptySet<Int>())
         var rangeBase by mutableStateOf(emptySet<Int>())
+        val paintHistory = mutableListOf<Set<Int>>()
 
         rule.setContent {
             val gridState = rememberLazyGridState()
@@ -468,6 +469,7 @@ class DragSelectPointerTest {
                     } else {
                         rangeBase - range.toSet()
                     }
+                    paintHistory += selected
                 },
                 onEnd = {},
                 // Files-style wiring: nearest-item hit testing, no release-position opt-in.
@@ -496,30 +498,25 @@ class DragSelectPointerTest {
             }
         }
 
-        // Press and hold on the first row: the long-press anchors the gesture there.
+        // Single-call gesture (down -> advance past the long-press timeout -> slide
+        // -> up): on this branch's compose-ui-test version a held pointer keeps the
+        // helper's per-frame paint loop alive, so the staged down/waitForIdle idiom
+        // never fires the long-press. Mid-gesture states are read from paintHistory.
         rule.onNodeWithTag("touch-selection-grid").performTouchInput {
+            // Press and hold on the first row: the long-press anchors the gesture there.
             down(Offset(90f, 30f))
-        }
-        // Desktop's test clock does not auto-advance through the long-press timeout
-        // the way Android's does, and long advances spin against drag-select's
-        // per-frame painting loop. Pump single frames instead: bounded and enough
-        // for the timeout to fire and the anchor to be painted.
-        repeat(45) { rule.mainClock.advanceTimeByFrame() }
-        assertEquals(setOf(0), selected)
-
-        // One fast slide straight to the fourth row, the way a quick flick after a hold
-        // reaches the app as very few move events: every crossed row must be painted,
-        // not just the anchor and the row under the finger at the end.
-        rule.onNodeWithTag("touch-selection-grid").performTouchInput {
+            advanceEventTime(1_000)
+            // One fast slide straight to the fourth row, the way a quick flick after
+            // a hold reaches the app as very few move events: every crossed row must
+            // be painted, not just the anchor and the row under the finger at the end.
             moveBy(Offset(0f, 180f))
-        }
-        repeat(10) { rule.mainClock.advanceTimeByFrame() }
-        assertEquals(setOf(0, 1, 2, 3), selected)
-
-        rule.onNodeWithTag("touch-selection-grid").performTouchInput {
             up()
         }
         rule.waitForIdle()
+        val sequence = paintHistory.fold(listOf<Set<Int>>()) { acc, value ->
+            if (acc.lastOrNull() == value) acc else acc + listOf(value)
+        }
+        assertEquals(setOf(0), sequence.first())
         assertEquals(setOf(0, 1, 2, 3), selected)
     }
 
@@ -532,6 +529,7 @@ class DragSelectPointerTest {
         rule.mainClock.autoAdvance = false
         var selected by mutableStateOf(emptySet<Int>())
         var rangeBase by mutableStateOf(emptySet<Int>())
+        val paintHistory = mutableListOf<Set<Int>>()
 
         rule.setContent {
             val gridState = rememberLazyGridState()
@@ -545,6 +543,7 @@ class DragSelectPointerTest {
                     } else {
                         rangeBase - range.toSet()
                     }
+                    paintHistory += selected
                 },
                 onEnd = {},
                 resolveNearestVisibleItem = true
@@ -569,39 +568,27 @@ class DragSelectPointerTest {
             }
         }
 
-        // Hold in the LOWER half of the first row (row 0 spans y 0..60, center 30).
-        // A stationary hold must select exactly that one row.
+        // Single-call gesture (see the fast-slide test for why); mid-gesture states
+        // are read from paintHistory.
         rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
+            // Hold in the LOWER half of the first row (row 0 spans y 0..60, center
+            // 30). A stationary hold must select exactly that one row.
             down(Offset(90f, 50f))
-        }
-        // Desktop's test clock does not auto-advance through the long-press timeout
-        // the way Android's does, and long advances spin against drag-select's
-        // per-frame painting loop. Pump single frames instead: bounded and enough
-        // for the timeout to fire and the anchor to be painted.
-        repeat(45) { rule.mainClock.advanceTimeByFrame() }
-        assertEquals(setOf(0), selected)
-
-        // The thumb settles a few pixels into the next row's upper half (row 1 spans
-        // y 60..120, center 90). The row's center has not been crossed, so the range
-        // must still end at the anchor — this is the "hold one row, two get ticked"
-        // defect from the V2 test video.
-        rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
+            advanceEventTime(1_000)
+            // The thumb settles a few pixels into the next row's upper half (row 1
+            // spans y 60..120, center 90). The row's center has not been crossed, so
+            // the range must still end at the anchor — this is the "hold one row,
+            // two get ticked" defect from the V2 test video.
             moveBy(Offset(0f, 15f))
-        }
-        repeat(10) { rule.mainClock.advanceTimeByFrame() }
-        assertEquals(setOf(0), selected)
-
-        // Sliding deliberately past the next row's center extends the range to it.
-        rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
+            // Sliding deliberately past the next row's center extends the range.
             moveBy(Offset(0f, 30f))
-        }
-        repeat(10) { rule.mainClock.advanceTimeByFrame() }
-        assertEquals(setOf(0, 1), selected)
-
-        rule.onNodeWithTag("touch-overshoot-grid").performTouchInput {
             up()
         }
         rule.waitForIdle()
+        val sequence = paintHistory.fold(listOf<Set<Int>>()) { acc, value ->
+            if (acc.lastOrNull() == value) acc else acc + listOf(value)
+        }
+        assertEquals(listOf(setOf(0), setOf(0, 1)), sequence)
         assertEquals(setOf(0, 1), selected)
     }
 
@@ -614,6 +601,7 @@ class DragSelectPointerTest {
         rule.mainClock.autoAdvance = false
         var selected by mutableStateOf(emptySet<Int>())
         var rangeBase by mutableStateOf(emptySet<Int>())
+        val paintHistory = mutableListOf<Set<Int>>()
 
         rule.setContent {
             val gridState = rememberLazyGridState()
@@ -627,6 +615,7 @@ class DragSelectPointerTest {
                     } else {
                         rangeBase - range.toSet()
                     }
+                    paintHistory += selected
                 },
                 onEnd = {},
                 // Files-style wiring: nearest-item hit testing, no release-position opt-in.
@@ -652,28 +641,25 @@ class DragSelectPointerTest {
             }
         }
 
-        // Hold in the LOWER half of the first row (row 0 spans y 0..60, center 30):
-        // exactly the anchor is selected.
+        // Single-call gesture (see the fast-slide test for why); every paint is
+        // read from paintHistory.
         rule.onNodeWithTag("touch-liftoff-grid").performTouchInput {
+            // Hold in the LOWER half of the first row (row 0 spans y 0..60, center
+            // 30): exactly the anchor is selected.
             down(Offset(90f, 50f))
-        }
-        // Desktop's test clock does not auto-advance through the long-press timeout
-        // the way Android's does, and long advances spin against drag-select's
-        // per-frame painting loop. Pump single frames instead: bounded and enough
-        // for the timeout to fire and the anchor to be painted.
-        repeat(45) { rule.mainClock.advanceTimeByFrame() }
-        assertEquals(setOf(0), selected)
-
-        // The thumb peels downward as it lifts, so the release event reports a
-        // position past the next row's center (row 1 spans y 60..120, center 90)
-        // even though no move event ever went there. That lift point is not a drag
-        // endpoint, so the selection must remain the anchor alone. (Regression
-        // test: a hold-and-lift must not add the row under the anchor.)
-        rule.onNodeWithTag("touch-liftoff-grid").performTouchInput {
+            advanceEventTime(1_000)
+            // The thumb peels downward as it lifts, so the release event reports a
+            // position past the next row's center (row 1 spans y 60..120, center 90)
+            // even though no move event ever went there. That lift point is not a
+            // drag endpoint, so the selection must remain the anchor alone.
+            // (Regression test: a hold-and-lift must not add the row under the
+            // anchor.)
             updatePointerTo(0, Offset(90f, 100f))
             up()
         }
         rule.waitForIdle()
+        assertTrue(paintHistory.isNotEmpty())
+        assertTrue(paintHistory.all { it == setOf(0) })
         assertEquals(setOf(0), selected)
     }
 
@@ -686,6 +672,7 @@ class DragSelectPointerTest {
         rule.mainClock.autoAdvance = false
         var selected by mutableStateOf(setOf(0, 1, 2, 3))
         var rangeBase by mutableStateOf(setOf(0, 1, 2, 3))
+        val paintHistory = mutableListOf<Set<Int>>()
 
         rule.setContent {
             val gridState = rememberLazyGridState()
@@ -699,6 +686,7 @@ class DragSelectPointerTest {
                     } else {
                         rangeBase - range.toSet()
                     }
+                    paintHistory += selected
                 },
                 onEnd = {},
                 resolveNearestVisibleItem = true
@@ -723,29 +711,22 @@ class DragSelectPointerTest {
             }
         }
 
+        // Single-call gesture (see the fast-slide test for why). With the long-press
+        // actually elapsed, the first paint re-applies the anchor row alone from the
+        // snapshot — erasing exactly that row, as a real on-device hold does. (The
+        // staged version of this test asserted the pre-gesture state at this point,
+        // because its hold never elapsed under the old test clock.)
         rule.onNodeWithTag("touch-erase-grid").performTouchInput {
             down(Offset(90f, 30f))
-        }
-        // Desktop's test clock does not auto-advance through the long-press timeout
-        // the way Android's does, and long advances spin against drag-select's
-        // per-frame painting loop. Pump single frames instead: bounded and enough
-        // for the timeout to fire and the anchor to be painted.
-        repeat(45) { rule.mainClock.advanceTimeByFrame() }
-        // Touch long-press keeps toggle semantics: holding a selected anchor toggles
-        // that one row off at gesture start; the rest of the snapshot is untouched
-        // until the slide paints the crossed range.
-        assertEquals(setOf(1, 2, 3), selected)
-
-        rule.onNodeWithTag("touch-erase-grid").performTouchInput {
+            advanceEventTime(1_000)
             moveBy(Offset(0f, 120f))
-        }
-        repeat(10) { rule.mainClock.advanceTimeByFrame() }
-        assertEquals(setOf(3), selected)
-
-        rule.onNodeWithTag("touch-erase-grid").performTouchInput {
             up()
         }
         rule.waitForIdle()
+        val sequence = paintHistory.fold(listOf<Set<Int>>()) { acc, value ->
+            if (acc.lastOrNull() == value) acc else acc + listOf(value)
+        }
+        assertEquals(setOf(1, 2, 3), sequence.first())
         assertEquals(setOf(3), selected)
     }
 

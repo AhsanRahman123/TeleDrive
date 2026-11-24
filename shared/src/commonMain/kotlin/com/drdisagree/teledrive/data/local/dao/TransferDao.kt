@@ -206,8 +206,13 @@ interface TransferDao {
         completed: TransferState = TransferState.COMPLETED
     )
 
-    @Query("UPDATE transfers SET state = 'QUEUED', telegramFileId = NULL, speedBytesPerSecond = 0 WHERE state = 'RUNNING'")
+    @Query("UPDATE transfers SET state = 'QUEUED', telegramFileId = NULL, speedBytesPerSecond = 0 WHERE state = 'RUNNING' AND type != 'ARCHIVE_DOWNLOAD'")
     suspend fun requeueRunning()
+
+    @Query(
+        """UPDATE transfers SET state = 'FAILED', errorMessage = 'Interrupted — the app stopped while this file was being extracted from its ZIP.', speedBytesPerSecond = 0, updatedAt = :updatedAt WHERE state = 'RUNNING' AND type = 'ARCHIVE_DOWNLOAD'"""
+    )
+    suspend fun failInterruptedArchiveDownloads(updatedAt: Long): Int
 
     @Query("DELETE FROM transfers WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)
@@ -217,21 +222,26 @@ interface TransferDao {
 
     @Query(
         """UPDATE transfers SET state = 'PAUSED', speedBytesPerSecond = 0, updatedAt = :now
-           WHERE state IN ('QUEUED', 'RUNNING')"""
+           WHERE state IN ('QUEUED', 'RUNNING') AND type != 'ARCHIVE_DOWNLOAD'"""
     )
     suspend fun pauseAll(now: Long): Int
 
     @Query(
         """UPDATE transfers SET state = 'QUEUED', speedBytesPerSecond = 0, updatedAt = :now
-           WHERE state = 'PAUSED'"""
+           WHERE state = 'PAUSED' AND type != 'ARCHIVE_DOWNLOAD'"""
     )
     suspend fun resumeAll(now: Long): Int
 
     @Query(
         """UPDATE transfers SET state = 'CANCELLED', speedBytesPerSecond = 0, updatedAt = :now
-           WHERE state IN ('QUEUED', 'RUNNING', 'PAUSED', 'FAILED')"""
+           WHERE state IN ('QUEUED', 'RUNNING', 'PAUSED', 'FAILED') AND type != 'ARCHIVE_DOWNLOAD'"""
     )
     suspend fun cancelAll(now: Long): Int
+
+    @Query(
+        """UPDATE transfers SET state = 'CANCELLED', speedBytesPerSecond = 0, updatedAt = :updatedAt WHERE type = 'ARCHIVE_DOWNLOAD' AND state IN ('QUEUED', 'RUNNING', 'PAUSED', 'FAILED')"""
+    )
+    suspend fun cancelAllArchiveDownloads(updatedAt: Long): Int
 
     @Query("SELECT * FROM transfers WHERE backupSessionId = :sessionId")
     suspend fun bySession(sessionId: String): List<TransferEntity>

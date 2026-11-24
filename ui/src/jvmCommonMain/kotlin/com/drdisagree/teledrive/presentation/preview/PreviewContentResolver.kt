@@ -5,8 +5,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import com.drdisagree.teledrive.resources.Res
+import com.drdisagree.teledrive.resources.preview_archive_corrupt
+import com.drdisagree.teledrive.resources.preview_archive_encrypted
 import com.drdisagree.teledrive.resources.preview_archive_failed
+import com.drdisagree.teledrive.resources.preview_archive_multi_disk
+import com.drdisagree.teledrive.resources.preview_archive_not_zip
+import com.drdisagree.teledrive.resources.preview_archive_split
 import com.drdisagree.teledrive.resources.preview_fetch_failed
+import com.drdisagree.teledrive.core.archive.ArchiveErrorKind
+import com.drdisagree.teledrive.core.archive.ArchiveException
+import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.resources.preview_no_copy_available
 import com.drdisagree.teledrive.resources.preview_no_preview_for_type
 import com.drdisagree.teledrive.resources.preview_only_zip
@@ -68,21 +76,33 @@ class PreviewContentResolver(
         emit(PreviewContent.Loading)
         val localPath = file.localPath?.takeIf { File(it).exists() }
         if (localPath != null) {
-            emit(fromLocal(file, localPath))
-            return@flow
-        }
-
-        // Zips are browsed against the online copy with ranged reads; they never fall through
-        // to the whole-file paths below (auto-fetch excludes archives, and a silent whole
-        // download just to list a zip is exactly what must not happen).
-        if (isZip(file)) {
-            emit(remoteZipContent(file))
+            val content = fromLocal(file, localPath)
+            // A ZIP with BOTH copies keeps its (identical) local listing, but is marked
+            // remote: entry extraction re-lists the online copy and picks by name +
+            // occurrence in the same central-directory order, so its rows are tappable.
+            // A local-ONLY zip stays remote = false with the existing local-only message.
+            emit(
+                if (content is PreviewContent.Archive && content.format == "ZIP" &&
+                    file.hasRemoteCopy
+                ) {
+                    content.copy(remote = true)
+                } else {
+                    content
+                }
+            )
             return@flow
         }
 
         val remoteFileId = file.remoteFileId
         if (!file.hasRemoteCopy || remoteFileId == null) {
             emit(PreviewContent.Failed(Res.string.preview_no_copy_available))
+            return@flow
+        }
+
+        // A ZIP with no local copy is browsed straight from its online copy with ranged reads;
+        // the whole archive is never downloaded just to list it.
+        if (isZipFile(file)) {
+            emit(remoteArchive(file))
             return@flow
         }
 
@@ -182,53 +202,49 @@ class PreviewContentResolver(
         }
         .flowOn(dispatchers.io)
 
-    private fun isZip(file: DriveFile): Boolean =
-        file.mimeType == "application/zip" || file.extension.equals("zip", ignoreCase = true)
-
-    /**
-     * Lists a remote zip's contents via [RemoteArchiveService]. Gate failures and reader
-     * failures become clear message states — never a crash and never a silent download prompt.
-     */
-    private suspend fun remoteZipContent(file: DriveFile): PreviewContent {
-        if (file.isEncrypted) return PreviewContent.Failed(Res.string.preview_zip_encrypted)
-        if (filePartDao.partsOf(file.id).isNotEmpty()) {
-            return PreviewContent.Failed(Res.string.preview_zip_split)
-        }
-        if (!file.hasRemoteCopy || file.remoteFileId == null) {
-            return PreviewContent.Failed(Res.string.preview_no_copy_available)
-        }
-        return try {
-            val entries = remoteArchiveService.listEntries(file).map { entry ->
-                ArchiveEntry(
-                    name = entry.name,
-                    sizeBytes = entry.sizeBytes,
-                    compressedBytes = entry.compressedBytes,
-                    isDirectory = entry.isDirectory,
-                    modifiedAtMillis = entry.modifiedAtMillis
-                )
-            }
-            PreviewContent.Archive(entries, "ZIP")
-        } catch (failure: ZipArchiveException) {
-            SafeLog.w(TAG, "Remote zip listing failed", failure)
-            PreviewContent.Failed(
-                when (failure) {
-                    is ZipArchiveException.NotAZip -> Res.string.preview_zip_not_a_zip
-                    is ZipArchiveException.MultiDisk -> Res.string.preview_zip_multi_disk
-                    is ZipArchiveException.Corrupt -> Res.string.preview_zip_corrupt
-                    else -> Res.string.preview_archive_failed
-                }
-            )
-        } catch (failure: RemoteArchiveRefusalException) {
-            SafeLog.w(TAG, "Remote zip listing refused", failure)
-            PreviewContent.Failed(Res.string.preview_archive_failed)
-        }
-    }
-
     private fun captureVideoFrame(file: DriveFile, parts: List<MediaPart>) {
         if (!file.isEncrypted || file.category != FileCategory.VIDEO) return
         scope.launch {
             runCatching { thumbnailStore.storeFromStream(file.id, parts, encrypted = true) }
         }
+    }
+
+    private fun isZipFile(file: DriveFile): Boolean =
+        file.mimeType == "application/zip" || file.extension.equals("zip", ignoreCase = true)
+
+    private suspend fun remoteArchive(file: DriveFile): PreviewContent = try {
+        val entries = remoteArchiveService.listEntries(file).map { entry ->
+            ArchiveEntry(
+                name = entry.name,
+                sizeBytes = entry.sizeBytes,
+                compressedBytes = entry.compressedBytes,
+                isDirectory = entry.isDirectory,
+                modifiedAtMillis = entry.modifiedAtMillis
+            )
+        }
+        PreviewContent.Archive(entries, "ZIP", remote = true)
+    } catch (failure: ArchiveException) {
+        when (failure.kind) {
+            ArchiveErrorKind.ENCRYPTED_FILE ->
+                PreviewContent.Failed(Res.string.preview_archive_encrypted)
+            ArchiveErrorKind.SPLIT_FILE ->
+                PreviewContent.Failed(Res.string.preview_archive_split)
+            ArchiveErrorKind.NO_REMOTE_COPY ->
+                PreviewContent.Failed(Res.string.preview_no_copy_available)
+            ArchiveErrorKind.NOT_A_ZIP ->
+                PreviewContent.Failed(Res.string.preview_archive_not_zip)
+            ArchiveErrorKind.MULTI_DISK ->
+                PreviewContent.Failed(Res.string.preview_archive_multi_disk)
+            ArchiveErrorKind.CORRUPT ->
+                PreviewContent.Failed(Res.string.preview_archive_corrupt)
+            else -> PreviewContent.Failed(
+                Res.string.preview_archive_failed,
+                messageText = failure.message
+            )
+        }
+    } catch (failure: Exception) {
+        SafeLog.w(TAG, "Could not list remote ZIP", failure)
+        PreviewContent.Failed(Res.string.preview_archive_failed)
     }
 
     private fun fromLocal(file: DriveFile, path: String): PreviewContent = when {
@@ -281,6 +297,8 @@ class PreviewContentResolver(
                         sizeBytes = header.uncompressedSize,
                         compressedBytes = header.compressedSize,
                         isDirectory = header.isDirectory,
+                        // zip4j exposes the entry time as Java epoch millis; anything
+                        // non-positive is "no timestamp" for sorting purposes.
                         modifiedAtMillis = header.lastModifiedTime.coerceAtLeast(0L)
                     )
                 }

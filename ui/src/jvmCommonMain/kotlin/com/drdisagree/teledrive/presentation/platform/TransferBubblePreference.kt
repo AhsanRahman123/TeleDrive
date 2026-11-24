@@ -15,14 +15,13 @@ enum class TransferWidgetColor { APP_ACCENT, ORANGE, BLUE, GREEN, PURPLE, GRAPHI
 /**
  * Master switch and appearance for the floating transfer widget.
  *
- * The widget itself is a desktop-only overlay (an in-app chat-head or
+ * The widget itself is a platform overlay (an in-app chat-head or
  * bottom strip with live transfer progress and controls). This hook
  * exists so the shared Settings screen can offer its controls without
- * knowing about the desktop store behind it. Desktop provides an
- * implementation backed by its java.util.prefs store family; other
- * platforms do not provide one (the local stays null) and never render
- * the rows — Android behaviour is unchanged, exactly like
- * [TransfersSortPreference].
+ * knowing about the platform store behind it. Desktop provides an
+ * implementation backed by its java.util.prefs store family; Android
+ * provides one backed by its DataStore settings store. A platform that
+ * provides none (the local stays null) never renders the rows.
  */
 interface TransferBubblePreference {
     fun isEnabled(): Boolean

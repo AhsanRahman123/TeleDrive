@@ -8,22 +8,21 @@ import android.content.Intent
 import android.net.Uri
 import android.content.pm.ActivityInfo
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
@@ -34,11 +33,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -48,6 +52,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
@@ -55,17 +62,22 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -79,6 +91,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,7 +106,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -109,6 +121,8 @@ import com.drdisagree.teledrive.core.media.PipController
 import com.drdisagree.teledrive.core.media.TelegramDataSourceFactory
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
+import com.drdisagree.teledrive.domain.model.FileSortField
+import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
@@ -125,14 +139,23 @@ import com.drdisagree.teledrive.presentation.components.EmptyState
 import com.drdisagree.teledrive.presentation.components.ErrorState
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.LoadingState
+import com.drdisagree.teledrive.presentation.components.SelectionCheckbox
+import com.drdisagree.teledrive.presentation.components.SortMenu
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.RenameDialog
 import com.drdisagree.teledrive.presentation.components.iconFor
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
+import com.drdisagree.teledrive.resources.common_cancel
 import com.drdisagree.teledrive.resources.common_collapse
 import com.drdisagree.teledrive.resources.common_download
 import com.drdisagree.teledrive.resources.files_copy_here
+import com.drdisagree.teledrive.resources.files_search
+import com.drdisagree.teledrive.resources.files_sort
+import com.drdisagree.teledrive.resources.picker_selected_count
+import com.drdisagree.teledrive.resources.preview_archive_download_selected
+import com.drdisagree.teledrive.resources.preview_archive_entry_saving
 import com.drdisagree.teledrive.resources.files_copy_to
 import com.drdisagree.teledrive.resources.files_move_here
 import com.drdisagree.teledrive.resources.files_move_to
@@ -156,6 +179,7 @@ import com.drdisagree.teledrive.resources.preview_archive_packed_summary_saved
 import com.drdisagree.teledrive.resources.preview_chevron
 import com.drdisagree.teledrive.resources.preview_confirm_trash_file_message
 import com.drdisagree.teledrive.resources.preview_download_view
+import com.drdisagree.teledrive.resources.preview_archive_remote_hint
 import com.drdisagree.teledrive.resources.preview_extraction_supported_yet_download
 import com.drdisagree.teledrive.resources.preview_file_info
 import com.drdisagree.teledrive.resources.preview_move_to_trash
@@ -194,6 +218,7 @@ fun PreviewScreen(
     val preferredSubtitleLanguage by
     viewModel.preferredSubtitleLanguage.collectAsStateWithLifecycle()
     val storedTextScale by viewModel.textScale.collectAsStateWithLifecycle()
+    val archiveSort by viewModel.archiveSort.collectAsStateWithLifecycle()
     val previewBackgroundMode by viewModel.previewBackgroundMode.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
@@ -211,6 +236,28 @@ fun PreviewScreen(
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) viewModel.retryLocalCopyRemoval()
     }
+
+    // The archive list (when the current pager page shows one) registers its internal
+    // step-back here: it consumes a back press for search / selection / folder steps
+    // and returns false when it is already at the zip root with nothing active.
+    var archiveBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
+
+    // The ONE step-back for this screen, used by the top-bar back arrow, the in-zip
+    // preview's back arrow and the system back button (BackHandler below) alike, so
+    // they can never drift apart. It walks the viewer's internal state in the
+    // priority order archiveBackStep() encodes: close an open in-zip preview first,
+    // then let the archive list clear its search, exit selection mode, or go up one
+    // in-zip folder level — and only leave the viewer when nothing internal consumed
+    // the press. For non-archive previews no handler is registered and no preview is
+    // open, so this is exactly the old plain onBack().
+    val stepBack: () -> Unit = {
+        if (state.archivePreview != null) {
+            viewModel.dismissArchivePreview()
+        } else if (archiveBackHandler?.invoke() != true) {
+            onBack()
+        }
+    }
+    BackHandler { stepBack() }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
     LaunchedEffect(Unit) {
@@ -296,7 +343,16 @@ fun PreviewScreen(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = {
+            // The preview draws edge to edge and this scaffold takes no window insets, so
+            // without this padding the snackbar sits under the system navigation bar and
+            // its lower half (and its action) is cut off. Respect the navigation-bar inset
+            // so the whole message is visible.
+            SnackbarHost(
+                snackbarHostState,
+                modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
+            )
+        }
     ) { _ ->
         Box(modifier = Modifier.fillMaxSize()) {
             HorizontalPager(
@@ -376,7 +432,18 @@ fun PreviewScreen(
                     onPreferredSubtitleLanguage = viewModel::setPreferredSubtitleLanguage,
                     onToggleChrome = { chromeVisible = !chromeVisible },
                     onChromeRequested = { visible -> chromeVisible = visible },
-                    playerSession = playerSession
+                    playerSession = playerSession,
+                    onArchiveEntryDownload = { entryIndex -> viewModel.downloadArchiveEntry(file, entryIndex) },
+                    onArchiveEntryTap = { entryIndex -> viewModel.onArchiveEntryTap(file, entryIndex) },
+                    onArchiveDownloadSelected = { entries, folders ->
+                        viewModel.downloadArchiveSelection(file, entries, folders)
+                    },
+                    archiveEntryBusyIndex = state.archiveEntryBusyIndex,
+                    archiveBatchProgress = state.archiveBatchProgress,
+                    archiveSortField = archiveSort.first,
+                    archiveSortDirection = archiveSort.second,
+                    onArchiveSortChange = viewModel::setArchiveSort,
+                    onRegisterArchiveBackStep = { handler -> archiveBackHandler = handler }
                 )
             }
 
@@ -405,7 +472,7 @@ fun PreviewScreen(
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = stepBack) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = stringResource(Res.string.common_back)
@@ -559,6 +626,13 @@ fun PreviewScreen(
                     )
                 )
             }
+            state.archivePreview?.let { preview ->
+                ArchiveEntryPreviewOverlay(
+                    preview = preview,
+                    dataSourceFactory = dataSourceFactory,
+                    onDismiss = stepBack
+                )
+            }
         }
     }
 
@@ -648,7 +722,16 @@ private fun PreviewPage(
     loadLinkMetadata: suspend (String) -> LinkMetadata?,
     playerSession: PlayerSession,
     storedTextScale: Float,
-    onTextScaleChange: (Float) -> Unit
+    onTextScaleChange: (Float) -> Unit,
+    onArchiveEntryDownload: (Int) -> Unit,
+    onArchiveEntryTap: (Int) -> Unit,
+    onArchiveDownloadSelected: (Set<Int>, Set<String>) -> Unit,
+    archiveEntryBusyIndex: Int?,
+    archiveBatchProgress: ArchiveBatchProgress?,
+    archiveSortField: FileSortField,
+    archiveSortDirection: SortDirection,
+    onArchiveSortChange: (FileSortField, SortDirection) -> Unit,
+    onRegisterArchiveBackStep: ((() -> Boolean)?) -> Unit = {}
 ) {
     // One state for the screen's life: re-creating it on save would leave the gesture writing to a
     // state nothing renders.
@@ -813,7 +896,19 @@ private fun PreviewPage(
             }
         }
 
-        is PreviewContent.Archive -> ArchiveList(content)
+        is PreviewContent.Archive -> ArchiveList(
+            archive = content,
+            busyEntryIndex = archiveEntryBusyIndex,
+            batchProgress = archiveBatchProgress,
+            onEntryTap = onArchiveEntryTap,
+            onEntryDownload = onArchiveEntryDownload,
+            onDownloadSelected = onArchiveDownloadSelected,
+            sortField = archiveSortField,
+            sortDirection = archiveSortDirection,
+            onSortChange = onArchiveSortChange,
+            registerBackStep = onRegisterArchiveBackStep,
+            isActivePage = isActivePage
+        )
         is PreviewContent.RequiresDownload -> EmptyState(
             icon = Icons.Filled.Download,
             title = stringResource(Res.string.preview_download_view),
@@ -856,7 +951,85 @@ private fun PreviewPage(
             )
         }
 
-        is PreviewContent.Failed -> ErrorState(message = stringResource(content.messageRes))
+        is PreviewContent.Failed -> ErrorState(
+            message = content.messageText ?: stringResource(content.messageRes)
+        )
+    }
+}
+
+/**
+ * An archive entry opened in place: the verified temp extraction shown with the app's own
+ * image viewer / audio player / text view. Read-only; closing deletes the temp file.
+ */
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+private fun ArchiveEntryPreviewOverlay(
+    preview: ArchiveEntryPreview,
+    dataSourceFactory: TelegramDataSourceFactory,
+    onDismiss: () -> Unit
+) {
+    val overlaySession = remember(preview) { PlayerSession() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        when (preview) {
+            is ArchiveEntryPreview.Image -> ZoomableImage(
+                model = File(preview.path),
+                contentDescription = preview.name,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            is ArchiveEntryPreview.Audio -> MediaPlayer(
+                content = PreviewContent.LocalMedia(preview.path, isAudio = true),
+                title = preview.name,
+                fileId = "archive-entry-${preview.name}",
+                dataSourceFactory = dataSourceFactory,
+                isActivePage = true,
+                session = overlaySession
+            )
+
+            is ArchiveEntryPreview.Text -> Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(previewContentPadding())
+            ) {
+                Text(
+                    text = preview.text,
+                    style = MaterialTheme.typography.bodySmall
+                        .copy(fontFamily = FontFamily.Monospace)
+                        .copy(color = MaterialTheme.colorScheme.onSurface)
+                )
+            }
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(Res.string.common_back)
+                    )
+                }
+                Text(
+                    text = preview.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }
 
@@ -870,123 +1043,441 @@ private fun previewContentPadding(): PaddingValues =
         .add(horizontal = 16.dp, top = PreviewTopBarHeight + 8.dp, bottom = 16.dp)
 
 @Composable
-private fun ArchiveList(archive: PreviewContent.Archive) {
-    val root = remember(archive) { buildArchiveTree(archive.entries) }
+private fun ArchiveList(
+    archive: PreviewContent.Archive,
+    busyEntryIndex: Int? = null,
+    batchProgress: ArchiveBatchProgress? = null,
+    onEntryTap: (Int) -> Unit = {},
+    onEntryDownload: (Int) -> Unit = {},
+    onDownloadSelected: (Set<Int>, Set<String>) -> Unit = { _, _ -> },
+    sortField: FileSortField = FileSortField.NAME,
+    sortDirection: SortDirection = SortDirection.ASCENDING,
+    onSortChange: (FileSortField, SortDirection) -> Unit = { _, _ -> },
+    registerBackStep: ((() -> Boolean)?) -> Unit = {},
+    isActivePage: Boolean = true
+) {
+    var query by remember(archive) { mutableStateOf("") }
     var expanded by remember(archive) { mutableStateOf(emptySet<String>()) }
-    val rows = remember(root, expanded) { flattenArchive(root, expanded) }
+    var selectedEntries by remember(archive) { mutableStateOf(emptySet<Int>()) }
+    var selectedFolders by remember(archive) { mutableStateOf(emptySet<String>()) }
+    var rangeBaseEntries by remember(archive) { mutableStateOf<Set<Int>?>(null) }
+    var rangeBaseFolders by remember(archive) { mutableStateOf<Set<String>?>(null) }
+    var showSortMenu by remember(archive) { mutableStateOf(false) }
+
+    val filtering = query.isNotBlank()
+    // Filtering is purely local over the loaded listing; indices always refer to the
+    // FULL listing, so a row's identity survives filtering and re-sorting.
+    val visibleIndices = remember(archive, query) {
+        if (filtering) archiveFilterIndices(archive.entries, query) else archive.entries.indices.toSet()
+    }
+    val root = remember(archive, visibleIndices) {
+        buildArchiveTreeIndexed(
+            archive.entries.mapIndexedNotNull { index, entry ->
+                if (index in visibleIndices) IndexedArchiveEntry(index, entry) else null
+            }
+        )
+    }
+    // Mirrors SearchViewModel: when the results change, the selection is pruned to what
+    // still matches — a selection cannot outlive the result set it was made from.
+    LaunchedEffect(query) {
+        if (filtering) {
+            selectedEntries = pruneArchiveSelection(selectedEntries, visibleIndices)
+            selectedFolders = selectedFolders intersect allFolderPaths(root)
+        }
+    }
+    val effectiveExpanded = if (filtering) allFolderPaths(root) else expanded
+    val rows = remember(root, effectiveExpanded, sortField, sortDirection) {
+        flattenArchive(root, effectiveExpanded, sortField, sortDirection)
+    }
     val files = remember(archive) { archive.entries.filterNot { it.isDirectory } }
-    val folderCount = remember(root) { countFolders(root) }
+    val folderCount = remember(archive) { countFolders(buildArchiveTree(archive.entries)) }
     val originalBytes = remember(files) { files.sumOf { it.sizeBytes } }
     val storedBytes = remember(files) { files.sumOf { it.compressedBytes } }
     val saved = remember(originalBytes, storedBytes) {
         if (originalBytes <= 0) 0 else (100 - storedBytes * 100 / originalBytes).toInt()
     }
+    val selectionMode = selectedEntries.isNotEmpty() || selectedFolders.isNotEmpty()
+    val busy = busyEntryIndex != null
+    val listState = rememberLazyListState()
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = previewContentPadding(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        item {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = stringResource(
-                            Res.string.preview_archive_format_title,
-                            archive.format
-                        ),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = buildString {
-                            append(
-                                pluralStringResource(
-                                    Res.plurals.file_count,
-                                    files.size,
-                                    files.size
-                                )
-                            )
-                            if (folderCount > 0) {
-                                append(", ")
-                                append(
-                                    pluralStringResource(
-                                        Res.plurals.folder_count,
-                                        folderCount,
-                                        folderCount
-                                    )
-                                )
-                            }
-                        },
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                    Text(
-                        text = if (saved > 0) {
-                            stringResource(
-                                Res.string.preview_archive_packed_summary_saved,
-                                Formatters.bytes(storedBytes),
-                                Formatters.bytes(originalBytes),
-                                saved
-                            )
-                        } else {
-                            stringResource(
-                                Res.string.preview_archive_packed_summary,
-                                Formatters.bytes(storedBytes),
-                                Formatters.bytes(originalBytes)
-                            )
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
+    // This list's internal steps of the screen's shared step-back (see PreviewScreen):
+    // the preview step is handled one level up, so the decision here starts at the
+    // search step. Returns true when a step consumed the press; false at the zip root
+    // with nothing active, letting the press leave the viewer.
+    val handleArchiveBackStep: () -> Boolean = {
+        when (
+            archiveBackStep(
+                hasPreview = false,
+                searchActive = query.isNotBlank(),
+                selectionActive = selectionMode,
+                hasExpandedFolder = expanded.isNotEmpty()
+            )
+        ) {
+            ArchiveBackStep.CLEAR_SEARCH -> {
+                query = ""
+                true
+            }
+            ArchiveBackStep.EXIT_SELECTION -> {
+                selectedEntries = emptySet()
+                selectedFolders = emptySet()
+                true
+            }
+            ArchiveBackStep.COLLAPSE_FOLDER -> {
+                val target = deepestExpandedArchiveFolder(expanded)
+                if (target == null) {
+                    false
+                } else {
+                    expanded = expanded - target
+                    true
                 }
             }
+            else -> false
         }
-        items(rows, key = { it.node.path }) { row ->
-            ArchiveRow(
-                row = row,
-                onToggle = {
-                    expanded = if (row.node.path in expanded) {
-                        expanded - row.node.path
-                    } else {
-                        expanded + row.node.path
+    }
+    val currentArchiveBackStep by rememberUpdatedState(handleArchiveBackStep)
+    DisposableEffect(isActivePage) {
+        if (isActivePage) {
+            registerBackStep { currentArchiveBackStep() }
+            onDispose { registerBackStep(null) }
+        } else {
+            onDispose { }
+        }
+    }
+
+    // The main browser's drag selection, on the shared helper: long-press paints a range
+    // from a snapshot taken at drag start (base ± range), with edge auto-scroll.
+    // LazyColumn item 0 is the header card and the last item is the hint, so the
+    // list-index → row translation lives in applyArchiveDragRange /
+    // archiveDragAnchorSelected (ArchiveNode.kt), shared by both callbacks.
+    val dragSelect = rememberDragSelect(
+        listState = listState,
+        onStart = {
+            rangeBaseEntries = selectedEntries
+            rangeBaseFolders = selectedFolders
+        },
+        isSelected = { listIndex ->
+            archiveDragAnchorSelected(rows, listIndex, selectedEntries, selectedFolders)
+        },
+        onRange = { range, shouldSelect ->
+            val painted = applyArchiveDragRange(
+                rows = rows,
+                listRange = range,
+                baseEntries = rangeBaseEntries ?: selectedEntries,
+                baseFolders = rangeBaseFolders ?: selectedFolders,
+                shouldSelect = shouldSelect
+            )
+            selectedEntries = painted.entries
+            selectedFolders = painted.folders
+        },
+        onEnd = {
+            rangeBaseEntries = null
+            rangeBaseFolders = null
+        },
+        resolveNearestVisibleItem = true
+    )
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().then(if (archive.remote) dragSelect else Modifier),
+            contentPadding = previewContentPadding(),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = stringResource(
+                                    Res.string.preview_archive_format_title,
+                                    archive.format
+                                ),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Box {
+                                IconButton(onClick = { showSortMenu = true }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.Sort,
+                                        contentDescription = stringResource(Res.string.files_sort)
+                                    )
+                                }
+                                SortMenu(
+                                    expanded = showSortMenu,
+                                    current = sortField,
+                                    direction = sortDirection,
+                                    onDismiss = { showSortMenu = false },
+                                    onSelect = { field, direction ->
+                                        showSortMenu = false
+                                        onSortChange(field, direction)
+                                    },
+                                    fields = ARCHIVE_SORT_FIELDS
+                                )
+                            }
+                        }
+                        Text(
+                            text = buildString {
+                                append(
+                                    pluralStringResource(
+                                        Res.plurals.file_count,
+                                        files.size,
+                                        files.size
+                                    )
+                                )
+                                if (folderCount > 0) {
+                                    append(", ")
+                                    append(
+                                        pluralStringResource(
+                                            Res.plurals.folder_count,
+                                            folderCount,
+                                            folderCount
+                                        )
+                                    )
+                                }
+                            },
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        Text(
+                            text = if (saved > 0) {
+                                stringResource(
+                                    Res.string.preview_archive_packed_summary_saved,
+                                    Formatters.bytes(storedBytes),
+                                    Formatters.bytes(originalBytes),
+                                    saved
+                                )
+                            } else {
+                                stringResource(
+                                    Res.string.preview_archive_packed_summary,
+                                    Formatters.bytes(storedBytes),
+                                    Formatters.bytes(originalBytes)
+                                )
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        OutlinedTextField(
+                            value = query,
+                            onValueChange = { query = it },
+                            singleLine = true,
+                            placeholder = { Text(stringResource(Res.string.files_search)) },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Search, contentDescription = null)
+                            },
+                            trailingIcon = if (filtering) {
+                                {
+                                    IconButton(onClick = { query = "" }) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = stringResource(Res.string.common_cancel)
+                                        )
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp)
+                        )
+                        if (batchProgress != null) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    if (batchProgress.total > 0) {
+                                        batchProgress.done.toFloat() / batchProgress.total
+                                    } else {
+                                        0f
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp)
+                            )
+                            Text(
+                                text = stringResource(
+                                    Res.string.preview_archive_entry_saving,
+                                    "${batchProgress.done}/${batchProgress.total}"
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                     }
-                },
-                modifier = Modifier.animateItem(
-                    fadeInSpec = tween(ROW_FADE_MS),
-                    fadeOutSpec = tween(ROW_FADE_MS),
-                    placementSpec = spring(
-                        stiffness = Spring.StiffnessMediumLow,
-                        visibilityThreshold = IntOffset.VisibilityThreshold
-                    )
+                }
+            }
+            items(
+                rows,
+                key = { row -> archiveRowKey(row) }
+            ) { row ->
+                val entryIndex = row.node.entryIndex
+                val selected = if (row.node.isDirectory) {
+                    row.node.path in selectedFolders
+                } else {
+                    entryIndex != null && entryIndex in selectedEntries
+                }
+                ArchiveRow(
+                    row = row,
+                    canDownload = archive.remote && !row.node.isDirectory,
+                    isBusy = busyEntryIndex != null && busyEntryIndex == entryIndex,
+                    selectionMode = selectionMode,
+                    selected = selected,
+                    onFileClick = {
+                        if (busy) return@ArchiveRow
+                        if (selectionMode) {
+                            entryIndex?.let {
+                                selectedEntries = toggleArchiveSelection(selectedEntries, it)
+                            }
+                        } else {
+                            entryIndex?.let(onEntryTap)
+                        }
+                    },
+                    onDownloadClick = {
+                        if (!busy) entryIndex?.let(onEntryDownload)
+                    },
+                    onToggleSelection = {
+                        if (row.node.isDirectory) {
+                            selectedFolders = if (row.node.path in selectedFolders) {
+                                selectedFolders - row.node.path
+                            } else {
+                                selectedFolders + row.node.path
+                            }
+                        } else {
+                            entryIndex?.let {
+                                selectedEntries = toggleArchiveSelection(selectedEntries, it)
+                            }
+                        }
+                    },
+                    onToggle = {
+                        if (selectionMode) {
+                            selectedFolders = if (row.node.path in selectedFolders) {
+                                selectedFolders - row.node.path
+                            } else {
+                                selectedFolders + row.node.path
+                            }
+                        } else {
+                            expanded = if (row.node.path in expanded) {
+                                expanded - row.node.path
+                            } else {
+                                expanded + row.node.path
+                            }
+                        }
+                    }
                 )
-            )
+            }
+            item {
+                Text(
+                    text = stringResource(
+                        if (archive.remote) {
+                            Res.string.preview_archive_remote_hint
+                        } else {
+                            Res.string.preview_extraction_supported_yet_download
+                        }
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 96.dp)
+                )
+            }
         }
-        item {
-            Text(
-                text = stringResource(Res.string.preview_extraction_supported_yet_download),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 16.dp)
-            )
+
+        // The touch selection action bar, mirroring the main browser's: a floating
+        // surface above the system navigation bar. The zip viewer is read-only, so
+        // Download selected is its only action.
+        if (selectionMode) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 8.dp),
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 4.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            selectedEntries = emptySet()
+                            selectedFolders = emptySet()
+                        }
+                    ) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = stringResource(Res.string.common_cancel)
+                        )
+                    }
+                    Text(
+                        text = stringResource(
+                            Res.string.picker_selected_count,
+                            selectedEntries.size + selectedFolders.size
+                        ),
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Button(
+                        enabled = !busy,
+                        onClick = {
+                            val entries = selectedEntries
+                            val folders = selectedFolders
+                            selectedEntries = emptySet()
+                            selectedFolders = emptySet()
+                            onDownloadSelected(entries, folders)
+                        }
+                    ) {
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = stringResource(Res.string.preview_archive_download_selected),
+                            modifier = Modifier.padding(start = 6.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
+/** The main browser's sort keys that archive entries carry metadata for. */
+private val ARCHIVE_SORT_FIELDS = listOf(
+    FileSortField.NAME,
+    FileSortField.SIZE,
+    FileSortField.DATE_MODIFIED,
+    FileSortField.TYPE
+)
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ArchiveRow(
     row: ArchiveRowState,
     onToggle: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    canDownload: Boolean = false,
+    isBusy: Boolean = false,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onFileClick: () -> Unit = {},
+    onDownloadClick: () -> Unit = {},
+    onToggleSelection: () -> Unit = {}
 ) {
     val node = row.node
     val icon = if (node.isDirectory) {
@@ -1006,16 +1497,46 @@ private fun ArchiveRow(
             .fillMaxWidth()
             .padding(start = INDENT_STEP * row.depth)
             .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .then(
-                if (node.isDirectory) {
-                    Modifier.clickable(role = Role.Button) { onToggle() }
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.secondaryContainer
                 } else {
-                    Modifier
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                }
+            )
+            .then(
+                when {
+                    // combinedClickable with an explicit no-op long-click, like every
+                    // other row under the shared drag-select helper (the main browser's
+                    // FileListItem/FolderRow and the helper's own pointer tests): the
+                    // long-press that starts drag selection is absorbed here as a
+                    // long-click, so it cannot ALSO complete as a click on release.
+                    // A plain clickable has no long-press handling — the press that
+                    // started the drag fired onToggle/onFileClick when the finger
+                    // lifted, toggling a second row's selection on top of the range
+                    // the drag had painted.
+                    node.isDirectory -> Modifier.combinedClickable(
+                        role = Role.Button,
+                        onClick = { onToggle() },
+                        onLongClick = {}
+                    )
+                    canDownload -> Modifier.combinedClickable(
+                        role = Role.Button,
+                        onClick = { onFileClick() },
+                        onLongClick = {}
+                    )
+                    else -> Modifier
                 }
             )
             .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
+        if (selectionMode || selected) {
+            SelectionCheckbox(
+                checked = selected,
+                onClick = onToggleSelection,
+                modifier = Modifier.padding(end = 4.dp)
+            )
+        }
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -1043,6 +1564,9 @@ private fun ArchiveRow(
         Column(
             modifier = Modifier
                 .weight(1f)
+                // Keep the row's height identical with and without the 48.dp
+                // selection checkbox, so flipping selection mode never resizes rows.
+                .defaultMinSize(minHeight = 48.dp)
                 .padding(start = 14.dp)
         ) {
             Text(
@@ -1074,81 +1598,26 @@ private fun ArchiveRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.rotate(chevronRotation)
             )
+        } else if (isBusy) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
         } else {
             Text(
                 text = Formatters.bytes(node.compressedBytes),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (canDownload && !selectionMode) {
+                IconButton(onClick = onDownloadClick) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = stringResource(Res.string.common_download)
+                    )
+                }
+            }
         }
     }
 }
 
-/**
- * ZIP stores flat paths, so folders without their own entry are created from the paths below them.
- */
-private fun buildArchiveTree(entries: List<ArchiveEntry>): ArchiveNode {
-    val root = ArchiveNode(path = "", name = "", isDirectory = true)
-    for (entry in entries) {
-        val segments = entry.name.split(SEPARATOR).filter { it.isNotEmpty() }
-        if (segments.isEmpty()) continue
-        var current = root
-        segments.forEachIndexed { index, segment ->
-            val leaf = index == segments.lastIndex && !entry.isDirectory
-            val path = if (current.path.isEmpty()) segment else current.path + SEPARATOR + segment
-            val child = current.children.getOrPut(segment) {
-                ArchiveNode(path = path, name = segment, isDirectory = !leaf)
-            }
-            if (leaf) {
-                child.sizeBytes = entry.sizeBytes
-                child.compressedBytes = entry.compressedBytes
-            }
-            current = child
-        }
-    }
-    aggregateSizes(root)
-    return root
-}
-
-private fun aggregateSizes(node: ArchiveNode): Pair<Long, Long> {
-    if (!node.isDirectory) return node.sizeBytes to node.compressedBytes
-    var size = 0L
-    var packed = 0L
-    node.children.values.forEach { child ->
-        val (childSize, childPacked) = aggregateSizes(child)
-        size += childSize
-        packed += childPacked
-    }
-    node.sizeBytes = size
-    node.compressedBytes = packed
-    return size to packed
-}
-
-private fun countFolders(node: ArchiveNode): Int =
-    node.children.values.sumOf { child ->
-        if (child.isDirectory) 1 + countFolders(child) else 0
-    }
-
-private fun flattenArchive(
-    root: ArchiveNode,
-    expanded: Set<String>,
-    depth: Int = 0,
-    out: MutableList<ArchiveRowState> = mutableListOf()
-): List<ArchiveRowState> {
-    val sorted = root.children.values.sortedWith(
-        compareByDescending<ArchiveNode> { it.isDirectory }
-            .thenBy { it.name.lowercase() }
-    )
-    for (child in sorted) {
-        val isOpen = child.isDirectory && child.path in expanded
-        out.add(ArchiveRowState(child, depth, isOpen))
-        if (isOpen) flattenArchive(child, expanded, depth + 1, out)
-    }
-    return out
-}
-
-private const val SEPARATOR = "/"
-private const val ROW_FADE_MS = 180
 private const val CHEVRON_ROTATE_MS = 220
 private val INDENT_STEP = 16.dp
 

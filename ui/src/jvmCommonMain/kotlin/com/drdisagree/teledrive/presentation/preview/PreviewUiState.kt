@@ -7,20 +7,15 @@ data class PreviewUiState(
     val initialIndex: Int = 0,
     val ready: Boolean = false,
     val closed: Boolean = false,
-    val archiveEntryDownload: ArchiveEntryDownloadState? = null,
+    /** Listing index of the entry currently being extracted from a remote ZIP, if any. */
+    val archiveEntryBusyIndex: Int? = null,
+    /** Latest remote-ZIP listing per file id, so an entry tap can resolve duplicate-name occurrence. */
+    val archiveListings: Map<String, List<ArchiveEntry>> = emptyMap(),
     /** An extracted archive entry being viewed/played/read in place, if any. */
     val archivePreview: ArchiveEntryPreview? = null,
     /** Progress of a multi-entry archive download: finished steps out of the plan total. */
     val archiveBatchProgress: ArchiveBatchProgress? = null
 )
-
-/** Progress of a single-file download out of a remote zip, keyed by entry name for the row UI. */
-data class ArchiveEntryDownloadState(
-    val entryName: String,
-    val status: Status
-) {
-    enum class Status { RUNNING, SUCCEEDED, FAILED }
-}
 
 /** An archive entry extracted to a verified temp file (or read from one) for in-place viewing. */
 sealed interface ArchiveEntryPreview {

@@ -38,7 +38,6 @@ import com.drdisagree.teledrive.presentation.platform.LocalPlatformScreens
 import com.drdisagree.teledrive.presentation.platform.LocalSystemScreens
 import com.drdisagree.teledrive.presentation.platform.LocalTelegramLinkOpener
 import com.drdisagree.teledrive.presentation.platform.LocalTransferBubblePreference
-import com.drdisagree.teledrive.presentation.platform.LocalTransfersSortPreference
 import com.drdisagree.teledrive.presentation.platform.LocalUrlOpener
 import com.drdisagree.teledrive.presentation.platform.MultiFilePicker
 import com.drdisagree.teledrive.presentation.platform.PermissionRequester
@@ -211,7 +210,6 @@ fun ProvideDesktopPlatformActions(content: @Composable () -> Unit) {
         LocalFileRevealer provides fileRevealer,
         LocalFileOpener provides fileOpener,
         LocalPlatformCapabilities provides capabilities,
-        LocalTransfersSortPreference provides DesktopTransfersSortPreference,
         LocalTransferBubblePreference provides DesktopTransferBubbleStore,
         content = content
     )

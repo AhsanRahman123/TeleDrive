@@ -171,6 +171,7 @@ class TransferExecutor(
         when (transfer.type) {
             TransferType.UPLOAD, TransferType.BACKUP -> executeUpload(transfer)
             TransferType.DOWNLOAD, TransferType.RESTORE -> executeDownload(transfer)
+            TransferType.ARCHIVE_DOWNLOAD -> TransferOutcome.Failed("Archive downloads are handled by the archive viewer and are never run by the transfer queue.")
         }
     } catch (_: KeyUnavailableException) {
         TransferOutcome.Failed(messages.keyMissing)

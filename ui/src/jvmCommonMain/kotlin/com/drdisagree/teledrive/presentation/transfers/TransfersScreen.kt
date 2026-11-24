@@ -100,8 +100,6 @@ import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollecti
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
 import com.drdisagree.teledrive.presentation.platform.LocalFileOpener
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
-import com.drdisagree.teledrive.presentation.platform.LocalTransfersSortPreference
-import com.drdisagree.teledrive.presentation.platform.sanitizeTransfersSortOrder
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
@@ -170,14 +168,7 @@ fun TransfersScreen(
     // select-all-TEXT; the window-level registration asks this first.
     val transfersTextFocus = remember { TextInputFocusTracker() }
     var typeFilter by remember { mutableStateOf("ALL") }
-    // The sort choice persists across restarts where the platform provides
-    // a store (desktop, PC-6); elsewhere it stays the in-memory default.
-    val transfersSortPreference = LocalTransfersSortPreference.current
-    var sortOrder by remember {
-        mutableStateOf(
-            sanitizeTransfersSortOrder(transfersSortPreference?.loadSortOrder())
-        )
-    }
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
     var showFilterMenu by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
@@ -512,7 +503,7 @@ fun TransfersScreen(
                                     val moved = reordered.removeAt(fromIndex)
                                     reordered.add(toIndex, moved)
                                     // Manual order becomes the active sort order after a drop.
-                                    sortOrder = "PRIORITY"
+                                    viewModel.setSortOrder("PRIORITY")
                                     viewModel.reorderDownloads(reordered)
                                 }
                                 draggedTransferId = null
@@ -649,8 +640,7 @@ fun TransfersScreen(
                                     DropdownMenuItem(
                                         text = { Text(label) },
                                         onClick = {
-                                            sortOrder = value
-                                            transfersSortPreference?.saveSortOrder(value)
+                                            viewModel.setSortOrder(value)
                                             showSortMenu = false
                                         }
                                     )
@@ -1020,6 +1010,7 @@ private fun TransferRow(
                                     TransferType.DOWNLOAD -> stringResource(Res.string.transfer_type_download)
                                     TransferType.BACKUP -> stringResource(Res.string.transfer_type_backup)
                                     TransferType.RESTORE -> stringResource(Res.string.transfer_type_restore)
+                                    TransferType.ARCHIVE_DOWNLOAD -> stringResource(Res.string.transfer_type_download)
                                 }
                             )
                             append(" · ")

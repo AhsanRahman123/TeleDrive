@@ -6,445 +6,469 @@ import java.nio.charset.Charset
 import java.util.zip.CRC32
 import java.util.zip.Inflater
 
+/** One central-directory record of a ZIP archive. Sizes and offsets are the true (ZIP64-resolved) values. */
+data class ZipEntryInfo(
+    val name: String,
+    val isDirectory: Boolean,
+    val sizeBytes: Long,
+    val compressedBytes: Long,
+    val method: Int,
+    val crc32: Long,
+    val localHeaderOffset: Long,
+    val isEncrypted: Boolean,
+    /**
+     * The entry's last-modified time from the central directory's DOS date/time fields,
+     * as epoch milliseconds (UTC interpretation of the timezone-less DOS value), or 0 when
+     * the archive carries no valid timestamp for this entry.
+     */
+    val modifiedAtMillis: Long = 0L
+)
+
 /**
- * Reads a zip archive through ranged reads only.
- *
- * Range discipline (the whole point of this class): [entries] reads only the file tail
- * (at most [TAIL_WINDOW] bytes), the ZIP64 records when present, and the central directory
- * range. [extract] reads only the chosen entry's local header and its compressed data range.
- * No code path ever reads the whole underlying file for a normal archive, so this works
- * against a remote copy in Telegram with no local copy of the zip present.
+ * Converts a ZIP DOS date/time pair to epoch milliseconds, reading the DOS value as UTC
+ * (DOS timestamps carry no timezone; a fixed interpretation keeps ordering stable across
+ * devices). Returns 0 for the all-zero "no timestamp" value and for out-of-range fields,
+ * so callers can treat 0 as "unknown" and place such entries stably instead of showing a
+ * garbage 1980 date.
  */
-class ZipArchiveReader(private val source: MediaByteSource) {
+internal fun dosDateTimeToEpochMillis(dosTime: Int, dosDate: Int): Long {
+    if (dosDate == 0) return 0L
+    val day = dosDate and 0x1F
+    val month = (dosDate shr 5) and 0x0F
+    val year = ((dosDate shr 9) and 0x7F) + 1980
+    val second = (dosTime and 0x1F) * 2
+    val minute = (dosTime shr 5) and 0x3F
+    val hour = (dosTime shr 11) and 0x1F
+    if (month !in 1..12 || day !in 1..31 || minute > 59 || hour > 23 || second > 59) return 0L
+    return runCatching {
+        java.time.LocalDateTime.of(year, month, day, hour, minute, second)
+            .toEpochSecond(java.time.ZoneOffset.UTC) * 1000L
+    }.getOrDefault(0L)
+}
+
+enum class ArchiveErrorKind {
+    NOT_A_ZIP,
+    CORRUPT,
+    MULTI_DISK,
+    ENCRYPTED_ENTRY,
+    UNSUPPORTED_METHOD,
+    CRC_MISMATCH,
+    ENTRY_NOT_FOUND,
+    ENCRYPTED_FILE,
+    SPLIT_FILE,
+    NO_REMOTE_COPY,
+    SAVE_FAILED
+}
+
+/** A failure the UI can show to the user verbatim; [message] is deliberately plain and specific. */
+class ArchiveException(
+    val kind: ArchiveErrorKind,
+    message: String,
+    cause: Throwable? = null
+) : Exception(message, cause)
+
+/**
+ * Reads a ZIP archive through ranged reads only.
+ *
+ * Listing touches just the file tail (the End Of Central Directory) and the central directory
+ * itself; extraction touches just one entry's local header and its compressed range. No code path
+ * here ever reads the whole archive, which is what makes browsing a multi-gigabyte remote ZIP in
+ * Telegram cheap. There is intentionally no whole-file fallback.
+ */
+class ZipArchiveReader(
+    private val source: MediaByteSource
+) {
 
     suspend fun entries(): List<ZipEntryInfo> {
         val fileSize = source.size()
-        if (fileSize < EOCD_MIN_LENGTH) throw ZipArchiveException.NotAZip()
-
-        val tailLength = minOf(fileSize, TAIL_WINDOW.toLong()).toInt()
-        val tailStart = fileSize - tailLength
-        val tail = readExact(tailStart, tailLength, missingIsNotAZip = true)
-
-        val eocdIndex = findEocd(tail) ?: throw ZipArchiveException.NotAZip()
-        val eocdAbsolute = tailStart + eocdIndex
-
-        var entryCount = u16(tail, eocdIndex + 10).toLong()
-        var cdSize = u32(tail, eocdIndex + 12)
-        var cdOffset = u32(tail, eocdIndex + 16)
-        val diskNumber = u16(tail, eocdIndex + 4)
-        val cdStartDisk = u16(tail, eocdIndex + 6)
-        val entriesThisDisk = u16(tail, eocdIndex + 8)
-        if (diskNumber != 0 || cdStartDisk != 0) throw ZipArchiveException.MultiDisk()
-        if (entriesThisDisk != 0xFFFF && entriesThisDisk.toLong() != entryCount) {
-            throw ZipArchiveException.MultiDisk()
+        if (fileSize < EOCD_MIN_SIZE) {
+            throw ArchiveException(ArchiveErrorKind.NOT_A_ZIP, "This file is not a ZIP archive.")
         }
 
-        val zip64Saturated = entryCount == 0xFFFFL || cdSize == SATURATED_32 || cdOffset == SATURATED_32
-        if (zip64Saturated) {
-            val zip64 = readZip64Eocd(eocdAbsolute, fileSize)
-            entryCount = zip64.entryCount
+        val tailSize = minOf(fileSize, TAIL_WINDOW_BYTES)
+        val tailStart = fileSize - tailSize
+        val tail = readExactly(tailStart, tailSize.toInt())
+        val eocdIndex = findEocd(tail)
+            ?: throw ArchiveException(ArchiveErrorKind.NOT_A_ZIP, "This file is not a ZIP archive.")
+        val eocdPosition = tailStart + eocdIndex
+        val eocd = LeReader(tail, eocdIndex)
+
+        val diskNumber = eocd.u16(4)
+        val cdDisk = eocd.u16(6)
+        val entriesThisDisk = eocd.u16(8)
+        var totalEntries = eocd.u16(10).toLong()
+        var cdSize = eocd.u32(12)
+        var cdOffset = eocd.u32(16)
+        if (diskNumber != 0 || cdDisk != 0) throw multiDisk()
+
+        if (totalEntries == SATURATED_U16.toLong() || cdSize == SATURATED_U32 || cdOffset == SATURATED_U32) {
+            val zip64 = readZip64Eocd(tail, tailStart, eocdPosition)
+            totalEntries = zip64.totalEntries
             cdSize = zip64.cdSize
             cdOffset = zip64.cdOffset
+        } else if (entriesThisDisk.toLong() != totalEntries) {
+            throw multiDisk()
         }
 
-        if (entryCount < 0 || entryCount > MAX_ENTRIES) {
-            throw ZipArchiveException.Corrupt("it claims $entryCount entries")
+        if (totalEntries > MAX_ENTRIES) {
+            throw ArchiveException(
+                ArchiveErrorKind.CORRUPT,
+                "This ZIP archive has too many entries to open here ($totalEntries)."
+            )
         }
-        if (cdOffset < 0 || cdSize < 0 || cdOffset + cdSize > fileSize) {
-            throw ZipArchiveException.Corrupt("its central directory lies outside the file")
-        }
-        if (cdSize < entryCount * CENTRAL_HEADER_MIN_LENGTH) {
-            throw ZipArchiveException.Corrupt("its central directory is too small for its entries")
+        if (cdOffset < 0 || cdSize < 0 || cdSize > MAX_CD_BYTES || cdOffset > fileSize - cdSize) {
+            throw corrupt("The ZIP central directory points outside the file.")
         }
 
-        return readCentralDirectory(cdOffset, cdSize, entryCount.toInt())
+        val directory = readExactly(cdOffset, cdSize.toInt())
+        return parseCentralDirectory(directory, totalEntries.toInt())
     }
 
     suspend fun extract(entry: ZipEntryInfo, out: OutputStream) {
-        if (entry.isEncrypted) throw ZipArchiveException.EncryptedEntry(entry.name)
-        if (entry.method != METHOD_STORED && entry.method != METHOD_DEFLATED) {
-            throw ZipArchiveException.UnsupportedMethod(entry.name, entry.method)
+        if (entry.isEncrypted) {
+            throw ArchiveException(
+                ArchiveErrorKind.ENCRYPTED_ENTRY,
+                "\"${entry.name}\" is password-protected, so it cannot be extracted here."
+            )
         }
-        if (entry.compressedBytes < 0 || entry.sizeBytes < 0 || entry.localHeaderOffset < 0) {
-            throw ZipArchiveException.Corrupt("entry \"${entry.name}\" has invalid sizes")
+        if (entry.method != METHOD_STORED && entry.method != METHOD_DEFLATE) {
+            throw ArchiveException(
+                ArchiveErrorKind.UNSUPPORTED_METHOD,
+                "\"${entry.name}\" uses an unsupported compression method (${entry.method}), so it cannot be extracted here."
+            )
         }
-
-        val header = readExact(entry.localHeaderOffset, LOCAL_HEADER_LENGTH)
-        if (u32(header, 0) != LOCAL_HEADER_SIG) {
-            throw ZipArchiveException.Corrupt("entry \"${entry.name}\" has no local header")
+        if (entry.isDirectory) {
+            throw corrupt("\"${entry.name}\" is a folder, not a file.")
         }
-        val nameLength = u16(header, 26)
-        val extraLength = u16(header, 28)
-        var position = entry.localHeaderOffset + LOCAL_HEADER_LENGTH + nameLength + extraLength
+        val fileSize = source.size()
+        if (entry.localHeaderOffset < 0 || entry.localHeaderOffset + LOCAL_HEADER_SIZE > fileSize) {
+            throw corrupt("The local header of \"${entry.name}\" is outside the file.")
+        }
+        val header = LeReader(readExactly(entry.localHeaderOffset, LOCAL_HEADER_SIZE), 0)
+        if (header.u32(0) != LOCAL_HEADER_SIG) {
+            throw corrupt("The local header of \"${entry.name}\" is damaged.")
+        }
+        val dataStart = entry.localHeaderOffset + LOCAL_HEADER_SIZE + header.u16(26) + header.u16(28)
+        if (dataStart + entry.compressedBytes > fileSize) {
+            throw corrupt("\"${entry.name}\" extends past the end of the archive.")
+        }
 
         val crc = CRC32()
         var produced = 0L
-        var remaining = entry.compressedBytes
+        val inflater = if (entry.method == METHOD_DEFLATE) Inflater(true) else null
+        try {
+            var position = dataStart
+            var remaining = entry.compressedBytes
+            val outBuffer = ByteArray(OUTPUT_BUFFER_SIZE)
 
-        fun accountFor(bytes: ByteArray, offset: Int, length: Int) {
-            produced += length
-            if (produced > entry.sizeBytes) {
-                throw ZipArchiveException.Corrupt(
-                    "entry \"${entry.name}\" expands past its recorded size"
-                )
-            }
-            crc.update(bytes, offset, length)
-            out.write(bytes, offset, length)
-        }
-
-        if (entry.method == METHOD_STORED) {
-            while (remaining > 0) {
-                val chunk = readChunk(position, remaining)
-                accountFor(chunk, 0, chunk.size)
-                position += chunk.size
-                remaining -= chunk.size
-            }
-        } else {
-            val inflater = Inflater(true)
-            try {
-                val plain = ByteArray(PLAIN_BUFFER_SIZE)
-                // Exit as soon as the deflate stream finishes, whatever `remaining` says:
-                // a finished inflater with unconsumed input returns 0 from inflate()
-                // forever, so keying the loop on `remaining > 0` as well would busy-spin.
-                while (!inflater.finished()) {
-                    if (inflater.needsInput()) {
-                        if (remaining <= 0) {
-                            throw ZipArchiveException.Corrupt(
-                                "entry \"${entry.name}\" ends before its data is complete"
-                            )
-                        }
-                        val chunk = readChunk(position, remaining)
-                        position += chunk.size
-                        remaining -= chunk.size
-                        inflater.setInput(chunk)
-                    }
-                    val count = try {
-                        inflater.inflate(plain)
-                    } catch (failure: Exception) {
-                        throw ZipArchiveException.Corrupt(
-                            "entry \"${entry.name}\" has damaged compressed data"
-                        )
-                    }
-                    if (count > 0) {
-                        accountFor(plain, 0, count)
-                    } else if (!inflater.finished() && !inflater.needsInput()) {
-                        // No progress and not waiting for more input (e.g. a dictionary
-                        // request or a stream state inflate() can never advance): refuse
-                        // instead of spinning.
-                        throw ZipArchiveException.Corrupt(
-                            "entry \"${entry.name}\" has damaged compressed data"
-                        )
-                    }
-                    // count == 0 with needsInput() loops back to feed the next chunk (or
-                    // fail above when none is left); count == 0 with finished() exits.
+            fun emit(count: Int) {
+                out.write(outBuffer, 0, count)
+                crc.update(outBuffer, 0, count)
+                produced += count
+                if (produced > entry.sizeBytes) {
+                    throw corrupt("\"${entry.name}\" expands beyond its recorded size.")
                 }
-                if (remaining > 0 || inflater.remaining > 0) {
-                    // The stream ended before the central directory's compressed size was
-                    // consumed: the recorded size overstates the real deflate stream.
-                    throw ZipArchiveException.Corrupt(
-                        "entry \"${entry.name}\" has damaged compressed data"
+            }
+
+            // Bounded decoding: every loop below either consumes input, produces output, reaches
+            // the end of the deflate stream, or throws. A corrupt stream can never spin it.
+            while (remaining > 0) {
+                if (inflater != null && inflater.finished()) {
+                    // The deflate stream ended before the recorded compressed size was consumed:
+                    // the central directory and the data disagree, so the entry is corrupt.
+                    throw corrupt(
+                        "The compressed data of \"${entry.name}\" ended before its recorded size was used."
                     )
                 }
-            } finally {
-                inflater.end()
+                val want = minOf(CHUNK_BYTES.toLong(), remaining).toInt()
+                val chunk = source.read(position, want)
+                if (chunk.isEmpty()) {
+                    throw corrupt("The archive ended unexpectedly while reading \"${entry.name}\".")
+                }
+                val consumed = minOf(chunk.size.toLong(), remaining).toInt()
+                position += consumed
+                remaining -= consumed
+                if (inflater == null) {
+                    out.write(chunk, 0, consumed)
+                    crc.update(chunk, 0, consumed)
+                    produced += consumed
+                } else {
+                    inflater.setInput(chunk, 0, consumed)
+                    // An inflate() that produces nothing is NOT by itself corruption: when a
+                    // chunk ends mid-symbol or mid-block-header, the inflater simply needs the
+                    // next chunk. That case breaks to the outer loop, which either feeds the
+                    // next chunk (input remains) or, after the loop, reports a truncated entry
+                    // (no input remains and the stream never finished). Only a no-progress
+                    // inflate that neither needs input nor finished is genuine damage.
+                    while (!inflater.finished()) {
+                        val count = inflater.inflate(outBuffer)
+                        when {
+                            count > 0 -> emit(count)
+                            inflater.needsDictionary() -> throw corrupt(
+                                "\"${entry.name}\" needs a preset dictionary and cannot be extracted."
+                            )
+                            inflater.finished() -> break
+                            inflater.needsInput() -> break
+                            else -> throw corrupt(
+                                "The compressed data of \"${entry.name}\" is damaged and cannot be extracted."
+                            )
+                        }
+                    }
+                }
+                if (produced > entry.sizeBytes) {
+                    throw corrupt("\"${entry.name}\" expands beyond its recorded size.")
+                }
             }
+            if (inflater != null) {
+                // Drain anything the inflater still holds after the last input chunk. Each pass
+                // must produce, finish, or run out of input - otherwise it is a typed error.
+                while (!inflater.finished() && !inflater.needsInput()) {
+                    val count = inflater.inflate(outBuffer)
+                    when {
+                        count > 0 -> emit(count)
+                        inflater.finished() -> break
+                        else -> throw corrupt(
+                            "The compressed data of \"${entry.name}\" is truncated or damaged."
+                        )
+                    }
+                }
+                if (!inflater.finished()) {
+                    throw corrupt("The compressed data of \"${entry.name}\" is truncated or damaged.")
+                }
+            }
+        } catch (failure: ArchiveException) {
+            throw failure
+        } catch (failure: Exception) {
+            throw ArchiveException(
+                ArchiveErrorKind.CORRUPT,
+                "The compressed data of \"${entry.name}\" is damaged and cannot be extracted.",
+                failure
+            )
+        } finally {
+            inflater?.end()
         }
 
         if (produced != entry.sizeBytes) {
-            throw ZipArchiveException.Corrupt(
-                "entry \"${entry.name}\" produced $produced of ${entry.sizeBytes} bytes"
+            throw corrupt(
+                "\"${entry.name}\" produced $produced bytes but the archive records ${entry.sizeBytes}."
             )
         }
-        if (crc.value != entry.crc32) throw ZipArchiveException.CrcMismatch(entry.name)
+        if (crc.value != entry.crc32) {
+            throw ArchiveException(
+                ArchiveErrorKind.CRC_MISMATCH,
+                "\"${entry.name}\" failed its integrity check (CRC mismatch), so the saved copy would be damaged. Nothing was saved."
+            )
+        }
+        out.flush()
     }
 
-    // --- central directory -------------------------------------------------
-
-    private data class Zip64Eocd(val entryCount: Long, val cdSize: Long, val cdOffset: Long)
-
-    private suspend fun readZip64Eocd(eocdAbsolute: Long, fileSize: Long): Zip64Eocd {
-        if (eocdAbsolute < ZIP64_LOCATOR_LENGTH) {
-            throw ZipArchiveException.Corrupt("its ZIP64 locator is missing")
-        }
-        val locator = readExact(eocdAbsolute - ZIP64_LOCATOR_LENGTH, ZIP64_LOCATOR_LENGTH)
-        if (u32(locator, 0) != ZIP64_LOCATOR_SIG) {
-            throw ZipArchiveException.Corrupt("its ZIP64 locator is missing")
-        }
-        if (u32(locator, 4) != 0L) throw ZipArchiveException.MultiDisk()
-        if (u32(locator, 16) > 1L) throw ZipArchiveException.MultiDisk()
-        val recordOffset = u64(locator, 8)
-        if (recordOffset < 0 || recordOffset + ZIP64_EOCD_MIN_LENGTH > fileSize) {
-            throw ZipArchiveException.Corrupt("its ZIP64 record lies outside the file")
-        }
-        val record = readExact(recordOffset, ZIP64_EOCD_MIN_LENGTH)
-        if (u32(record, 0) != ZIP64_EOCD_SIG) {
-            throw ZipArchiveException.Corrupt("its ZIP64 record is missing")
-        }
-        if (u32(record, 16) != 0L || u32(record, 20) != 0L) throw ZipArchiveException.MultiDisk()
-        val entriesThisDisk = u64(record, 24)
-        val totalEntries = u64(record, 32)
-        if (entriesThisDisk != totalEntries) throw ZipArchiveException.MultiDisk()
-        return Zip64Eocd(
-            entryCount = totalEntries,
-            cdSize = u64(record, 40),
-            cdOffset = u64(record, 48)
-        )
-    }
-
-    private suspend fun readCentralDirectory(
-        cdOffset: Long,
-        cdSize: Long,
-        expectedCount: Int
-    ): List<ZipEntryInfo> {
-        val reader = SequentialReader(source, cdOffset, cdOffset + cdSize)
-        val entries = ArrayList<ZipEntryInfo>(expectedCount)
-        repeat(expectedCount) {
-            val fixed = reader.readBytes(CENTRAL_HEADER_MIN_LENGTH)
-            if (u32(fixed, 0) != CENTRAL_HEADER_SIG) {
-                throw ZipArchiveException.Corrupt("a central directory record is damaged")
+    private fun parseCentralDirectory(directory: ByteArray, expected: Int): List<ZipEntryInfo> {
+        val entries = ArrayList<ZipEntryInfo>(expected)
+        var offset = 0
+        while (entries.size < expected) {
+            if (offset + CENTRAL_HEADER_SIZE > directory.size) {
+                throw corrupt("The ZIP central directory is truncated.")
             }
-            val flags = u16(fixed, 8)
-            val method = u16(fixed, 10)
-            val modifiedAtMillis = dosDateTimeToEpochMillis(u16(fixed, 12), u16(fixed, 14))
-            val crc = u32(fixed, 16)
-            var compressed = u32(fixed, 20)
-            var uncompressed = u32(fixed, 24)
-            val nameLength = u16(fixed, 28)
-            val extraLength = u16(fixed, 30)
-            val commentLength = u16(fixed, 32)
-            val diskStart = u16(fixed, 34)
-            var localHeaderOffset = u32(fixed, 42)
-            if (diskStart != 0 && diskStart != 0xFFFF) throw ZipArchiveException.MultiDisk()
+            val header = LeReader(directory, offset)
+            if (header.u32(0) != CENTRAL_HEADER_SIG) {
+                throw corrupt("The ZIP central directory is damaged.")
+            }
+            val flags = header.u16(8)
+            val method = header.u16(10)
+            val modifiedAtMillis = dosDateTimeToEpochMillis(header.u16(12), header.u16(14))
+            val crc = header.u32(16)
+            var compressed = header.u32(20)
+            var size = header.u32(24)
+            val nameLength = header.u16(28)
+            val extraLength = header.u16(30)
+            val commentLength = header.u16(32)
+            val diskStart = header.u16(34)
+            var localOffset = header.u32(42)
+            if (diskStart != 0) throw multiDisk()
 
-            val nameBytes = reader.readBytes(nameLength)
-            val extra = reader.readBytes(extraLength)
-            reader.skip(commentLength)
+            val nameStart = offset + CENTRAL_HEADER_SIZE
+            val extraStart = nameStart + nameLength
+            val recordEnd = extraStart + extraLength + commentLength
+            if (recordEnd > directory.size) {
+                throw corrupt("The ZIP central directory is truncated.")
+            }
+            val nameBytes = directory.copyOfRange(nameStart, extraStart)
 
-            // ZIP64 extra field: values appear, in order, for each saturated field.
-            var extraCursor = 0
-            var zip64DiskStart = -1L
-            while (extraCursor + 4 <= extra.size) {
-                val fieldId = u16(extra, extraCursor)
-                val fieldSize = u16(extra, extraCursor + 2)
-                val valueStart = extraCursor + 4
-                if (valueStart + fieldSize > extra.size) {
-                    throw ZipArchiveException.Corrupt("an extra field is damaged")
-                }
+            // ZIP64 extra field 0x0001 carries the saturated values in a fixed order:
+            // uncompressed size, compressed size, local header offset, disk number.
+            var cursor = extraStart
+            val extraEnd = extraStart + extraLength
+            while (cursor + 4 <= extraEnd) {
+                val fieldId = LeReader(directory, cursor).u16(0)
+                val fieldSize = LeReader(directory, cursor).u16(2)
+                val valueStart = cursor + 4
+                if (valueStart + fieldSize > extraEnd) throw corrupt("A ZIP64 extra field is truncated.")
                 if (fieldId == EXTRA_ZIP64) {
-                    var p = valueStart
-                    val end = valueStart + fieldSize
-                    fun next64(): Long {
-                        if (p + 8 > end) {
-                            throw ZipArchiveException.Corrupt("a ZIP64 extra field is damaged")
-                        }
-                        val value = u64(extra, p)
-                        p += 8
-                        return value
+                    var value = valueStart
+                    val valueEnd = valueStart + fieldSize
+                    if (size == SATURATED_U32) {
+                        if (value + 8 > valueEnd) throw corrupt("A ZIP64 extra field is truncated.")
+                        size = LeReader(directory, value).u64(0); value += 8
                     }
-                    if (uncompressed == SATURATED_32) uncompressed = next64()
-                    if (compressed == SATURATED_32) compressed = next64()
-                    if (localHeaderOffset == SATURATED_32) localHeaderOffset = next64()
-                    if (diskStart == 0xFFFF) {
-                        if (p + 4 > end) {
-                            throw ZipArchiveException.Corrupt("a ZIP64 extra field is damaged")
-                        }
-                        zip64DiskStart = u32(extra, p)
+                    if (compressed == SATURATED_U32) {
+                        if (value + 8 > valueEnd) throw corrupt("A ZIP64 extra field is truncated.")
+                        compressed = LeReader(directory, value).u64(0); value += 8
+                    }
+                    if (localOffset == SATURATED_U32) {
+                        if (value + 8 > valueEnd) throw corrupt("A ZIP64 extra field is truncated.")
+                        localOffset = LeReader(directory, value).u64(0); value += 8
+                    }
+                    if (diskStart == SATURATED_U16) {
+                        if (value + 4 > valueEnd) throw corrupt("A ZIP64 extra field is truncated.")
+                        if (LeReader(directory, value).u32(0) != 0L) throw multiDisk()
                     }
                 }
-                extraCursor = valueStart + fieldSize
+                cursor = valueStart + fieldSize
             }
-            if (diskStart == 0xFFFF) {
-                // Missing field first: zip64DiskStart stays -1 when the saturated disk
-                // start has no ZIP64 value, and -1 != 0 would otherwise misclassify it
-                // as MultiDisk before the Corrupt branch could ever run.
-                if (zip64DiskStart < 0) {
-                    throw ZipArchiveException.Corrupt("an entry is missing its ZIP64 disk number")
-                }
-                if (zip64DiskStart != 0L) throw ZipArchiveException.MultiDisk()
-            }
-            val charset = if (flags and FLAG_UTF8 != 0) Charsets.UTF_8 else CP437
+
+            val charset: Charset = if (flags and FLAG_UTF8 != 0) Charsets.UTF_8 else ibm437
             val name = String(nameBytes, charset)
             entries += ZipEntryInfo(
                 name = name,
                 isDirectory = name.endsWith('/') || name.endsWith('\\'),
-                sizeBytes = uncompressed,
+                sizeBytes = size,
                 compressedBytes = compressed,
                 method = method,
                 crc32 = crc,
-                localHeaderOffset = localHeaderOffset,
+                localHeaderOffset = localOffset,
                 isEncrypted = flags and FLAG_ENCRYPTED != 0,
                 modifiedAtMillis = modifiedAtMillis
             )
+            offset = recordEnd
         }
         return entries
     }
 
-    // --- low-level reading ---------------------------------------------------
-
-    /** Reads one chunk of at most [CHUNK_SIZE] bytes; never returns empty while bytes remain. */
-    private suspend fun readChunk(position: Long, remaining: Long): ByteArray {
-        val wanted = minOf(remaining, CHUNK_SIZE.toLong()).toInt()
-        val builder = ByteCollector(wanted)
-        var filled = 0
-        while (filled < wanted) {
-            val piece = source.read(position + filled, wanted - filled)
-            if (piece.isEmpty()) {
-                throw ZipArchiveException.Corrupt("the file ends earlier than the archive records")
-            }
-            builder.append(piece)
-            filled += piece.size
+    private suspend fun readZip64Eocd(tail: ByteArray, tailStart: Long, eocdPosition: Long): Zip64Eocd {
+        val locatorPosition = eocdPosition - ZIP64_LOCATOR_SIZE
+        if (locatorPosition < 0) throw corrupt("The ZIP64 end record is missing.")
+        val locatorBytes = if (locatorPosition >= tailStart) {
+            tail.copyOfRange((locatorPosition - tailStart).toInt(), (locatorPosition - tailStart).toInt() + ZIP64_LOCATOR_SIZE)
+        } else {
+            readExactly(locatorPosition, ZIP64_LOCATOR_SIZE)
         }
-        return builder.toByteArray()
+        val locator = LeReader(locatorBytes, 0)
+        if (locator.u32(0) != ZIP64_LOCATOR_SIG) throw corrupt("The ZIP64 end record is missing.")
+        if (locator.u32(4) != 0L) throw multiDisk()
+        if (locator.u32(16) > 1) throw multiDisk()
+        val zip64Offset = locator.u64(8)
+
+        val record = LeReader(readExactly(zip64Offset, ZIP64_EOCD_MIN_SIZE), 0)
+        if (record.u32(0) != ZIP64_EOCD_SIG) throw corrupt("The ZIP64 end record is damaged.")
+        if (record.u32(16) != 0L || record.u32(20) != 0L) throw multiDisk()
+        val entriesThisDisk = record.u64(24)
+        val totalEntries = record.u64(32)
+        if (entriesThisDisk != totalEntries) throw multiDisk()
+        return Zip64Eocd(totalEntries, record.u64(40), record.u64(48))
     }
 
-    /** Reads exactly [count] bytes at [position], looping over short reads. */
-    private suspend fun readExact(position: Long, count: Int, missingIsNotAZip: Boolean = false): ByteArray {
-        val builder = ByteCollector(count)
+    private fun findEocd(tail: ByteArray): Int? {
+        var index = tail.size - EOCD_MIN_SIZE
+        while (index >= 0) {
+            if (tail[index] == 0x50.toByte() && tail[index + 1] == 0x4B.toByte() &&
+                tail[index + 2] == 0x05.toByte() && tail[index + 3] == 0x06.toByte()
+            ) {
+                val commentLength = LeReader(tail, index).u16(20)
+                if (index + EOCD_MIN_SIZE + commentLength == tail.size) return index
+            }
+            index--
+        }
+        return null
+    }
+
+    /** MediaByteSource may answer with short reads; loop until the range is whole or the data runs out. */
+    private suspend fun readExactly(position: Long, count: Int): ByteArray {
+        if (count <= 0) return ByteArray(0)
+        val result = ByteArray(count)
         var filled = 0
         while (filled < count) {
             val piece = source.read(position + filled, count - filled)
-            if (piece.isEmpty()) {
-                if (missingIsNotAZip) throw ZipArchiveException.NotAZip()
-                throw ZipArchiveException.Corrupt("the file ends earlier than the archive records")
-            }
-            builder.append(piece)
-            filled += piece.size
+            if (piece.isEmpty()) throw corrupt("The archive is truncated.")
+            val copied = minOf(piece.size, count - filled)
+            piece.copyInto(result, filled, 0, copied)
+            filled += copied
         }
-        return builder.toByteArray()
+        return result
     }
 
-    /** Sequential reader over one byte range, refilling in [CHUNK_SIZE] blocks. */
-    private class SequentialReader(
-        private val source: MediaByteSource,
-        start: Long,
-        private val end: Long
-    ) {
-        private var buffer = ByteArray(0)
-        private var bufferPosition = start
-        private var cursor = start
+    private data class Zip64Eocd(val totalEntries: Long, val cdSize: Long, val cdOffset: Long)
 
-        suspend fun readBytes(count: Int): ByteArray {
-            val out = ByteArray(count)
-            var filled = 0
-            while (filled < count) {
-                if (cursor >= end) {
-                    throw ZipArchiveException.Corrupt("the central directory is truncated")
-                }
-                if (cursor < bufferPosition || cursor >= bufferPosition + buffer.size) refill()
-                val available = (bufferPosition + buffer.size - cursor).toInt()
-                val take = minOf(available, count - filled)
-                buffer.copyInto(out, filled, (cursor - bufferPosition).toInt(), (cursor - bufferPosition).toInt() + take)
-                filled += take
-                cursor += take
+    /** Bounds-checked little-endian reads over one fetched range; any overrun is corruption, not a crash. */
+    private class LeReader(private val bytes: ByteArray, private val base: Int) {
+        private fun at(offset: Int, width: Int): Int {
+            val index = base + offset
+            if (index < 0 || index + width > bytes.size) {
+                throw ArchiveException(ArchiveErrorKind.CORRUPT, "The ZIP archive is truncated or damaged.")
             }
-            return out
+            return index
         }
 
-        suspend fun skip(count: Int) {
-            if (count < 0 || cursor + count > end) {
-                throw ZipArchiveException.Corrupt("the central directory is truncated")
-            }
-            cursor += count
+        fun u16(offset: Int): Int {
+            val i = at(offset, 2)
+            return (bytes[i].toInt() and 0xFF) or ((bytes[i + 1].toInt() and 0xFF) shl 8)
         }
 
-        private suspend fun refill() {
-            val wanted = minOf(CHUNK_SIZE.toLong(), end - cursor).toInt()
-            val builder = ByteCollector(wanted)
-            var filled = 0
-            while (filled < wanted) {
-                val piece = source.read(cursor + filled, wanted - filled)
-                if (piece.isEmpty()) {
-                    throw ZipArchiveException.Corrupt("the central directory is truncated")
-                }
-                builder.append(piece)
-                filled += piece.size
-            }
-            buffer = builder.toByteArray()
-            bufferPosition = cursor
-        }
-    }
-
-    /** Small growable accumulator so short source reads don't force quadratic copying. */
-    private class ByteCollector(expected: Int) {
-        private var bytes = ByteArray(maxOf(expected, 1))
-        private var size = 0
-
-        fun append(piece: ByteArray) {
-            if (size + piece.size > bytes.size) {
-                bytes = bytes.copyOf(maxOf(bytes.size * 2, size + piece.size))
-            }
-            piece.copyInto(bytes, size)
-            size += piece.size
+        fun u32(offset: Int): Long {
+            val i = at(offset, 4)
+            return (bytes[i].toLong() and 0xFF) or
+                ((bytes[i + 1].toLong() and 0xFF) shl 8) or
+                ((bytes[i + 2].toLong() and 0xFF) shl 16) or
+                ((bytes[i + 3].toLong() and 0xFF) shl 24)
         }
 
-        fun toByteArray(): ByteArray = bytes.copyOf(size)
-    }
-
-    companion object {
-        private const val EOCD_SIG = 0x06054b50L
-        private const val ZIP64_EOCD_SIG = 0x06064b50L
-        private const val ZIP64_LOCATOR_SIG = 0x07064b50L
-        private const val CENTRAL_HEADER_SIG = 0x02014b50L
-        private const val LOCAL_HEADER_SIG = 0x04034b50L
-
-        private const val EOCD_MIN_LENGTH = 22
-        private const val CENTRAL_HEADER_MIN_LENGTH = 46
-        private const val LOCAL_HEADER_LENGTH = 30
-        private const val ZIP64_LOCATOR_LENGTH = 20
-        private const val ZIP64_EOCD_MIN_LENGTH = 56
-
-        /** 22-byte EOCD + 65,535-byte maximum comment + slack, per the task's tail bound. */
-        private const val TAIL_WINDOW = 65_600
-        private const val MAX_ENTRIES = 200_000
-        private const val CHUNK_SIZE = 512 * 1024
-        private const val PLAIN_BUFFER_SIZE = 64 * 1024
-
-        private const val SATURATED_32 = 0xFFFFFFFFL
-        private const val EXTRA_ZIP64 = 0x0001
-        private const val FLAG_ENCRYPTED = 0x0001
-        private const val FLAG_UTF8 = 0x0800
-
-        private const val METHOD_STORED = 0
-        private const val METHOD_DEFLATED = 8
-
-        /**
-         * CP437 lives in the `jdk.charsets` module, which a packaged runtime can lack;
-         * resolve it lazily and fall back to ISO-8859-1 (a standard charset, always
-         * present) for non-UTF-8 names rather than failing the whole listing.
-         */
-        private val CP437: Charset by lazy {
-            runCatching { Charset.forName("IBM437") }.getOrElse { Charsets.ISO_8859_1 }
-        }
-
-        internal fun u16(bytes: ByteArray, offset: Int): Int =
-            (bytes[offset].toInt() and 0xFF) or ((bytes[offset + 1].toInt() and 0xFF) shl 8)
-
-        internal fun u32(bytes: ByteArray, offset: Int): Long =
-            (bytes[offset].toLong() and 0xFF) or
-                ((bytes[offset + 1].toLong() and 0xFF) shl 8) or
-                ((bytes[offset + 2].toLong() and 0xFF) shl 16) or
-                ((bytes[offset + 3].toLong() and 0xFF) shl 24)
-
-        internal fun u64(bytes: ByteArray, offset: Int): Long {
+        fun u64(offset: Int): Long {
+            val i = at(offset, 8)
             var value = 0L
-            for (i in 7 downTo 0) {
-                value = (value shl 8) or (bytes[offset + i].toLong() and 0xFF)
+            for (shift in 0 until 8) {
+                value = value or ((bytes[i + shift].toLong() and 0xFF) shl (shift * 8))
             }
             return value
         }
+    }
 
-        /** Finds the EOCD record whose comment length lands exactly on the end of the tail. */
-        internal fun findEocd(tail: ByteArray): Int? {
-            var index = tail.size - EOCD_MIN_LENGTH
-            while (index >= 0) {
-                if (u32(tail, index) == EOCD_SIG &&
-                    index + EOCD_MIN_LENGTH + u16(tail, index + 20) == tail.size
-                ) {
-                    return index
-                }
-                index--
-            }
-            return null
+    companion object {
+        private const val LOCAL_HEADER_SIG = 0x04034b50L
+        private const val CENTRAL_HEADER_SIG = 0x02014b50L
+        private const val ZIP64_EOCD_SIG = 0x06064b50L
+        private const val ZIP64_LOCATOR_SIG = 0x07064b50L
+        private const val LOCAL_HEADER_SIZE = 30
+        private const val CENTRAL_HEADER_SIZE = 46
+        private const val EOCD_MIN_SIZE = 22
+        private const val ZIP64_LOCATOR_SIZE = 20
+        private const val ZIP64_EOCD_MIN_SIZE = 56
+        private const val TAIL_WINDOW_BYTES = 65_600L
+        private const val MAX_ENTRIES = 200_000
+        // 200,000 entries at ~160 bytes of central-directory record each is ≲32 MB, so
+        // 64 MB leaves generous headroom while keeping the in-memory cap proportionate.
+        private const val MAX_CD_BYTES = 64L * 1024 * 1024
+        private const val CHUNK_BYTES = 512 * 1024
+        private const val OUTPUT_BUFFER_SIZE = 64 * 1024
+        private const val METHOD_STORED = 0
+        private const val METHOD_DEFLATE = 8
+        private const val FLAG_ENCRYPTED = 0x0001
+        private const val FLAG_UTF8 = 0x0800
+        private const val EXTRA_ZIP64 = 0x0001
+        private const val SATURATED_U16 = 0xFFFF
+        private const val SATURATED_U32 = 0xFFFF_FFFFL
+
+        /**
+         * Resolved lazily and defensively: a platform without IBM437 must not fail a whole
+         * listing over name decoding - ISO-8859-1 is the fallback for non-UTF-8 names.
+         */
+        private val ibm437: Charset by lazy {
+            runCatching { Charset.forName("IBM437") }.getOrElse { Charsets.ISO_8859_1 }
         }
+
+        private fun corrupt(message: String) = ArchiveException(ArchiveErrorKind.CORRUPT, message)
+        private fun multiDisk() = ArchiveException(
+            ArchiveErrorKind.MULTI_DISK,
+            "This is a multi-disk (split) ZIP set, which cannot be opened from a single file. " +
+                "Join the parts into one ZIP first, or download the whole archive."
+        )
     }
 }

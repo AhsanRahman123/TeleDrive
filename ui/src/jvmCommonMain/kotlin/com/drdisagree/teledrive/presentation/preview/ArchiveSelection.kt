@@ -249,3 +249,35 @@ fun sortArchiveIndices(
 
 private fun archiveTypeKey(entry: ArchiveEntry): String =
     if (entry.isDirectory) "" else MimeTypes.fromFileName(entry.name)
+/** One step of the ZIP viewer's back navigation, in the order back must consume them. */
+enum class ArchiveBackStep { CLOSE_PREVIEW, CLEAR_SEARCH, EXIT_SELECTION, COLLAPSE_FOLDER, EXIT_VIEWER }
+
+/**
+ * The ZIP viewer's back priority, shared by the on-screen back arrow and the system
+ * back button so the two can never drift apart: close an open in-zip preview first,
+ * then clear an active search, then exit selection mode, then go up one in-zip folder
+ * level (collapse the deepest expanded folder), and only leave the viewer when none
+ * of those apply.
+ */
+fun archiveBackStep(
+    hasPreview: Boolean,
+    searchActive: Boolean,
+    selectionActive: Boolean,
+    hasExpandedFolder: Boolean
+): ArchiveBackStep = when {
+    hasPreview -> ArchiveBackStep.CLOSE_PREVIEW
+    searchActive -> ArchiveBackStep.CLEAR_SEARCH
+    selectionActive -> ArchiveBackStep.EXIT_SELECTION
+    hasExpandedFolder -> ArchiveBackStep.COLLAPSE_FOLDER
+    else -> ArchiveBackStep.EXIT_VIEWER
+}
+
+/**
+ * The folder one back step collapses: the deepest expanded folder (most path
+ * segments). Ties break on the path itself so the choice is deterministic for a
+ * given expansion set. Null when nothing is expanded (the viewer is at the zip root).
+ */
+fun deepestExpandedArchiveFolder(expanded: Collection<String>): String? =
+    expanded.maxWithOrNull(
+        compareBy<String> { path -> path.count { it == '/' } }.thenBy { it }
+    )

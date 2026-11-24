@@ -56,6 +56,18 @@ import com.drdisagree.teledrive.resources.settings_delete_after_upload_summary
 import com.drdisagree.teledrive.resources.settings_auto_remove_managed_copies
 import com.drdisagree.teledrive.resources.settings_auto_remove_managed_copies_summary
 import com.drdisagree.teledrive.resources.Res
+import com.drdisagree.teledrive.resources.settings_widget_color_graphite
+import com.drdisagree.teledrive.resources.settings_widget_color_purple
+import com.drdisagree.teledrive.resources.settings_widget_color_green
+import com.drdisagree.teledrive.resources.settings_widget_color_blue
+import com.drdisagree.teledrive.resources.settings_widget_color_orange
+import com.drdisagree.teledrive.resources.settings_widget_color_app_accent
+import com.drdisagree.teledrive.resources.settings_transfer_widget_color
+import com.drdisagree.teledrive.resources.settings_transfer_widget_style_strip
+import com.drdisagree.teledrive.resources.settings_transfer_widget_style_bubble
+import com.drdisagree.teledrive.resources.settings_transfer_widget_style
+import com.drdisagree.teledrive.resources.settings_show_transfer_bubble_subtitle
+import com.drdisagree.teledrive.resources.settings_show_transfer_bubble
 import com.drdisagree.teledrive.resources.language_english
 import com.drdisagree.teledrive.resources.language_indonesian
 import com.drdisagree.teledrive.resources.language_italian
@@ -1097,10 +1109,9 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
         )
     }
 
-    // Desktop-only transfer widget appearance (the platform hook is null
-    // elsewhere; the dialogs can only be opened from rows that render
-    // when it exists). Choices apply live — the overlay collects the
-    // desktop store's flows, so no restart is needed.
+    // Transfer widget appearance (the platform hook is null on platforms without the
+    // widget; the dialogs can only be opened from rows that render when it exists).
+    // Choices apply live — the overlay collects the store's flows, so no restart is needed.
     if (showWidgetStyleDialog && transferBubblePreference != null) {
         ChoiceDialog(
             title = stringResource(Res.string.settings_transfer_widget_style),
@@ -1184,8 +1195,8 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                 onClick = { showDisplayRefreshRateDialog = true }
             )
         }
-        // Desktop-only: the floating transfer widget's master switch. The
-        // platform hook is null elsewhere, so the row never renders there.
+        // The floating transfer widget's master switch. The platform hook is null on
+        // platforms without the widget, so the row never renders there.
         add(visible = transferBubblePreference != null) {
             var bubbleEnabled by remember {
                 mutableStateOf(transferBubblePreference!!.isEnabled())
@@ -1200,8 +1211,8 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                 }
             )
         }
-        // Desktop-only: which shell the transfer widget uses (round 6) —
-        // the floating bubble or the bottom strip. Applies live.
+        // Which shell the transfer widget uses — the floating bubble or the bottom
+        // strip. Applies live.
         add(visible = transferBubblePreference != null) {
             SettingsClickRow(
                 title = stringResource(Res.string.settings_transfer_widget_style),
@@ -1214,8 +1225,7 @@ private fun AppearanceSection(state: SettingsUiState, viewModel: SettingsViewMod
                 onClick = { showWidgetStyleDialog = true }
             )
         }
-        // Desktop-only: the transfer widget's colour preset (round 6),
-        // applied to both shells' rings, bars and accents. Applies live.
+        // The transfer widget's colour preset, applied to both shells. Applies live.
         add(visible = transferBubblePreference != null) {
             SettingsClickRow(
                 title = stringResource(Res.string.settings_transfer_widget_color),

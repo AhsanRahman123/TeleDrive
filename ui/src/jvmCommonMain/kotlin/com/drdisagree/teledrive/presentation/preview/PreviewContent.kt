@@ -27,7 +27,12 @@ sealed interface PreviewContent {
 
     data class PlainText(val text: String, val truncated: Boolean) : PreviewContent
 
-    data class Archive(val entries: List<ArchiveEntry>, val format: String) : PreviewContent
+    /** [remote] means the listing came from the online copy: entries can be downloaded one by one. */
+    data class Archive(
+        val entries: List<ArchiveEntry>,
+        val format: String,
+        val remote: Boolean = false
+    ) : PreviewContent
 
     data class RequiresDownload(val sizeBytes: Long) : PreviewContent
 
@@ -37,5 +42,9 @@ sealed interface PreviewContent {
         val localPath: String? = null
     ) : PreviewContent
 
-    data class Failed(val messageRes: StringResource) : PreviewContent
+    /** [messageText], when set, is a specific plain-language failure that wins over [messageRes]. */
+    data class Failed(
+        val messageRes: StringResource,
+        val messageText: String? = null
+    ) : PreviewContent
 }

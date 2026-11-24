@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.data.repository
 
+import com.drdisagree.teledrive.core.archive.ArchiveExtractionJobs
 import com.drdisagree.teledrive.core.common.AppError
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.common.SafeLog
@@ -47,6 +48,7 @@ class TransferRepositoryImpl(
     private val storageInspector: StorageInspector,
     private val backupSessionTracker: BackupSessionTracker,
     private val storagePaths: AppStoragePaths
+    private val archiveExtractionJobs: ArchiveExtractionJobs
 ) : TransferRepository {
 
     private val enqueueLock = Mutex()
@@ -407,6 +409,17 @@ class TransferRepositoryImpl(
 
     override suspend fun pause(id: String) = workerControlLock.withLock {
         val transfer = transferDao.byId(id) ?: return@withLock
+        if (transfer.type.isReportOnly) {
+            // Report-only rows own no native download, session or scheduler work: pausing
+            // only flips the row and stops the in-flight extraction job, if any.
+            if (transfer.state == TransferState.QUEUED || transfer.state == TransferState.RUNNING) {
+                transferDao.setState(id, TransferState.PAUSED, System.currentTimeMillis())
+                if (transfer.state == TransferState.RUNNING) {
+                    archiveExtractionJobs.cancel(id)
+                }
+            }
+            return@withLock
+        }
         if (transfer.state == TransferState.QUEUED || transfer.state == TransferState.RUNNING) {
             transferDao.setState(id, TransferState.PAUSED, System.currentTimeMillis())
             pauseNativeDownloadIfPresent(transfer)
@@ -416,6 +429,21 @@ class TransferRepositoryImpl(
 
     override suspend fun resume(id: String) = workerControlLock.withLock {
         val transfer = transferDao.byId(id) ?: return@withLock
+        if (transfer.type.isReportOnly) {
+            // A report-only row can never be re-queued (the drainer would refuse it and
+            // its extraction context is gone), so resuming a paused one ends it as FAILED
+            // with the reason. FAILED archive rows are a no-op here.
+            if (transfer.state == TransferState.PAUSED) {
+                transferDao.setFailed(
+                    id,
+                    TransferState.FAILED,
+                    "A paused archive download can't be resumed. " +
+                        "Download the file again from its ZIP.",
+                    System.currentTimeMillis()
+                )
+            }
+            return@withLock
+        }
         if (transfer.state == TransferState.PAUSED || transfer.state == TransferState.FAILED) {
             transferDao.setState(id, TransferState.QUEUED, System.currentTimeMillis())
             val prefs = settingsRepository.preferences.first()
@@ -426,6 +454,18 @@ class TransferRepositoryImpl(
 
     override suspend fun cancel(id: String) {
         val transfer = transferDao.byId(id) ?: return
+        if (transfer.type.isReportOnly) {
+            // Terminal report-only rows are removed from history like any other record;
+            // live ones are cancelled and their extraction job stopped. There is no
+            // fileId/backup-state/session tail for these records.
+            if (transfer.state.isTerminal) {
+                transferDao.deleteByIds(listOf(id))
+            } else {
+                transferDao.setState(id, TransferState.CANCELLED, System.currentTimeMillis())
+                archiveExtractionJobs.cancel(id)
+            }
+            return
+        }
         if (transfer.state.isTerminal) {
             transferDao.deleteByIds(listOf(id))
         } else {
@@ -458,6 +498,20 @@ class TransferRepositoryImpl(
         // Pause TDLib's persistent queue before joining the drain.
         transferScheduler.pause()
         backupSessionTracker.refreshActive()
+        // Report-only archive rows are excluded from dao.pauseAll (they are not the
+        // drainer's to pause): pause each live extraction's row, then stop its job.
+        // The row is written first so the extraction's owner sees PAUSED, not RUNNING.
+        val now = System.currentTimeMillis()
+        archiveExtractionJobs.activeIds().forEach { archiveId ->
+            when (transferDao.byId(archiveId)?.state) {
+                TransferState.RUNNING -> {
+                    transferDao.setState(archiveId, TransferState.PAUSED, now)
+                    archiveExtractionJobs.cancel(archiveId)
+                }
+                TransferState.PAUSED -> archiveExtractionJobs.cancel(archiveId)
+                else -> Unit // Terminal or absent: nothing to write or stop.
+            }
+        }
     }
 
     override suspend fun resumeAll() = workerControlLock.withLock {
@@ -473,8 +527,13 @@ class TransferRepositoryImpl(
             // Serialize cancellation against upload inserts. Any import batch holding an older
             // generation is rejected if it tries to enqueue after this block completes.
             uploadBatchGeneration.advance()
-            transferDao.cancelAll(System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            // Report-only archive rows have their own bulk cancel (cancelAll excludes them).
+            transferDao.cancelAll(now) + transferDao.cancelAllArchiveDownloads(now)
         }
+        // The archive rows are already CANCELLED, so their owners see a terminal state
+        // and will not overwrite it; just stop the extraction jobs.
+        archiveExtractionJobs.activeIds().forEach { archiveExtractionJobs.cancel(it) }
         SafeLog.d(TAG, "Cancel-all invoked: $cancelled transfers cancelled")
         sweepAllStagingArtifacts()
         syncFileStates()
@@ -483,6 +542,7 @@ class TransferRepositoryImpl(
 
     override suspend fun setPriority(id: String, priority: Int) = workerControlLock.withLock {
         val transfer = transferDao.byId(id) ?: return@withLock
+        if (transfer.type.isReportOnly) return@withLock
         if (transfer.state.isTerminal) return@withLock
 
         if (transfer.type.isIncoming && priority - transfer.priority in -1..1 && priority != transfer.priority) {
@@ -608,6 +668,9 @@ class TransferRepositoryImpl(
 
     override suspend fun retry(id: String) = workerControlLock.withLock {
         val transfer = transferDao.byId(id) ?: return@withLock
+        // Report-only rows can never be re-queued; retrying one is a no-op (the user
+        // downloads the file again from its ZIP instead).
+        if (transfer.type.isReportOnly) return@withLock
         if (transfer.state == TransferState.FAILED || transfer.state == TransferState.CANCELLED) {
             transferDao.upsert(
                 transfer.copy(
@@ -629,6 +692,9 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun recoverOrphanedTransfers() {
+        // Interrupted archive extractions fail (they can never be re-run by the queue);
+        // this must happen before requeueRunning, which excludes them by type anyway.
+        transferDao.failInterruptedArchiveDownloads(System.currentTimeMillis())
         transferDao.requeueRunning()
         sweepOrphanedStagingArtifacts()
         syncFileStates()
