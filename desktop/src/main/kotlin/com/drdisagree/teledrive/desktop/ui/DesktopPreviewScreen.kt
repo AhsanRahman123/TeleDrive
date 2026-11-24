@@ -1986,6 +1986,18 @@ internal fun DesktopArchivePane(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .onPreviewKeyEvent { event ->
+                        // Escape clears the selection, as in Files; it is handled at
+                        // the pane boundary so it works wherever focus sits in the list.
+                        if (event.type == KeyEventType.KeyDown &&
+                            event.key == Key.Escape && selection.isActive
+                        ) {
+                            selection.clear()
+                            true
+                        } else {
+                            false
+                        }
+                    }
                     .collectionCommandShortcuts(
                         focusRequester = commandFocusRequester,
                         onSelectAll = { toggleSelectAll() }
