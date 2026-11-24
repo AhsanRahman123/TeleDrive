@@ -4,7 +4,9 @@ import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
 import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
+import com.drdisagree.teledrive.domain.model.TransferRemainingWork
 import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.domain.model.TransferWorkTotals
 import java.lang.reflect.Proxy
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -138,6 +140,26 @@ class FakeTransferDao : TransferDao {
 
     override fun observeActiveCount(): Flow<Int> =
         version.map { snapshot().count { it.state in setOf(TransferState.QUEUED, TransferState.RUNNING) } }
+
+    override fun observeCompletedTotals(types: List<TransferType>): Flow<TransferWorkTotals> =
+        version.map {
+            val done = snapshot().filter {
+                it.state == TransferState.COMPLETED && it.type in types
+            }
+            TransferWorkTotals(done.size.toLong(), done.sumOf { it.sizeBytes })
+        }
+
+    override fun observeRemainingWork(types: List<TransferType>): Flow<TransferRemainingWork> =
+        version.map {
+            val left = snapshot().filter {
+                it.state in setOf(TransferState.QUEUED, TransferState.RUNNING) && it.type in types
+            }
+            TransferRemainingWork(
+                left.size.toLong(),
+                left.sumOf { it.sizeBytes - it.transferredBytes },
+                left.count { it.state == TransferState.RUNNING }.toLong()
+            )
+        }
 
     override fun observeActiveDownloads(): Flow<List<TransferEntity>> = version.map {
         snapshot().filter {

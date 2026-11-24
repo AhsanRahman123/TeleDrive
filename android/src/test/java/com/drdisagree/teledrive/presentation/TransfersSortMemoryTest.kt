@@ -5,6 +5,8 @@ import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.core.crypto.CredentialCipher
 import com.drdisagree.teledrive.data.repository.SettingsRepositoryImpl
 import com.drdisagree.teledrive.domain.model.TransferSection
+import com.drdisagree.teledrive.domain.model.TransferRemainingWork
+import com.drdisagree.teledrive.domain.model.TransferWorkTotals
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.domain.repository.TransferRepository
@@ -137,6 +139,12 @@ class TransfersSortMemoryTest {
         override fun observeActiveForFile(fileId: String): Flow<TransferTask?> = flowOf(null)
 
         override fun observeActiveDownloads(): Flow<List<TransferTask>> = flowOf(emptyList())
+
+        override fun observeCompletedTotals(incoming: Boolean): Flow<TransferWorkTotals> =
+            flowOf(TransferWorkTotals(0, 0))
+
+        override fun observeRemainingWork(incoming: Boolean): Flow<TransferRemainingWork> =
+            flowOf(TransferRemainingWork(0, 0, 0))
 
         override suspend fun enqueueUpload(fileId: String, priority: Int): AppResult<String> =
             AppResult.Success(fileId)

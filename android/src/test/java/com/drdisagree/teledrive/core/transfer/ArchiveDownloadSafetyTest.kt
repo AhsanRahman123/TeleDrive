@@ -13,6 +13,8 @@ import com.drdisagree.teledrive.data.repository.FolderPathResolver
 import com.drdisagree.teledrive.domain.model.TransferStage
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.domain.model.TransferRemainingWork
+import com.drdisagree.teledrive.domain.model.TransferWorkTotals
 import com.drdisagree.teledrive.domain.model.UserPreferences
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import java.lang.reflect.Proxy
@@ -188,6 +190,26 @@ private class FakeTransferDao : TransferDao {
 
     override fun observeActiveCount(): Flow<Int> =
         flowOf(rows.values.count { it.state in setOf(TransferState.QUEUED, TransferState.RUNNING) })
+
+    override fun observeCompletedTotals(types: List<TransferType>): Flow<TransferWorkTotals> {
+        val done = rows.values.filter {
+            it.state == TransferState.COMPLETED && it.type in types
+        }
+        return flowOf(TransferWorkTotals(done.size.toLong(), done.sumOf { it.sizeBytes }))
+    }
+
+    override fun observeRemainingWork(types: List<TransferType>): Flow<TransferRemainingWork> {
+        val left = rows.values.filter {
+            it.state in setOf(TransferState.QUEUED, TransferState.RUNNING) && it.type in types
+        }
+        return flowOf(
+            TransferRemainingWork(
+                left.size.toLong(),
+                left.sumOf { it.sizeBytes - it.transferredBytes },
+                left.count { it.state == TransferState.RUNNING }.toLong()
+            )
+        )
+    }
 
     override fun observeActiveDownloads(): Flow<List<TransferEntity>> = flowOf(
         rows.values.filter {
