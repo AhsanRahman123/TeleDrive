@@ -120,7 +120,7 @@ val desktopModule = module {
 
     // Desktop stays unwired this round BY DESIGN: in-ZIP downloads on PC write no
     // Transfers history, so PreviewViewModel resolves the no-op reporter.
-    single<ArchiveDownloadReporter> { NoOpArchiveDownloadReporter }
+    single<ArchiveDownloadReporter> { get<ArchiveDownloadTracker>() }
     singleOf(::DesktopStoragePaths) bind AppStoragePaths::class
     single<CredentialCipher> {
         val os = System.getProperty("os.name").orEmpty().lowercase()
