@@ -431,13 +431,14 @@ class ZipArchiveReaderTest {
             ZipArchiveReader(failing).extract(entry, ByteArrayOutputStream())
             fail("expected ArchiveException")
         } catch (failure: ArchiveException) {
+            val message = failure.message.orEmpty()
             assertTrue(
-                "message must name the telegram error, was: ${failure.message}",
-                failure.message!!.contains("400") && failure.message.contains("telegram boom xyz")
+                "message must name the telegram error, was: $message",
+                message.contains("400") && message.contains("telegram boom xyz")
             )
             assertFalse(
-                "a telegram failure must not present as a damaged archive: ${failure.message}",
-                failure.message.contains("is damaged and cannot be extracted")
+                "a telegram failure must not present as a damaged archive: $message",
+                message.contains("is damaged and cannot be extracted")
             )
         }
     }

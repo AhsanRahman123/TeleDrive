@@ -593,13 +593,14 @@ class RemoteArchiveServiceTest {
             fail("expected ArchiveException")
         } catch (failure: ArchiveException) {
             assertEquals(ArchiveErrorKind.REMOTE_FAILED, failure.kind)
+            val message = failure.message.orEmpty()
             assertTrue(
-                "message must carry stage + code + detail, was: ${failure.message}",
-                failure.message!!.contains("list") &&
-                    failure.message.contains("500") &&
-                    failure.message.contains("boom network detail")
+                "message must carry stage + code + detail, was: $message",
+                message.contains("list") &&
+                    message.contains("500") &&
+                    message.contains("boom network detail")
             )
-            assertFalse(failure.message.contains("unknown error"))
+            assertFalse(message.contains("unknown error"))
         }
     }
 }
