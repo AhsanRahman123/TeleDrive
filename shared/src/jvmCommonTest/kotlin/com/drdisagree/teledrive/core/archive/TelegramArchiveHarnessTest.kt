@@ -3,10 +3,7 @@ package com.drdisagree.teledrive.core.archive
 import com.drdisagree.teledrive.core.files.DownloadWriter
 import com.drdisagree.teledrive.core.files.PartialDownload
 import com.drdisagree.teledrive.core.media.BufferedMediaByteSource
-import com.drdisagree.teledrive.core.media.FakeCancelVariant
 import com.drdisagree.teledrive.core.media.FakeGrowth
-import com.drdisagree.teledrive.core.media.FakeRangeVariant
-import com.drdisagree.teledrive.core.media.FakeReadVariant
 import com.drdisagree.teledrive.core.media.FakeTdLibTelegramClient
 import com.drdisagree.teledrive.core.media.TelegramMediaByteSource
 import com.drdisagree.teledrive.core.telegram.TelegramException
@@ -30,25 +27,22 @@ import kotlin.random.Random
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 /**
- * Report-51 harness: drives the REAL [TelegramMediaByteSource] + [BufferedMediaByteSource] +
+ * Report-52 harness: drives the REAL [TelegramMediaByteSource] + [BufferedMediaByteSource] +
  * [RemoteArchiveService] + [ZipArchiveReader] through the exact field sequence —
- * listEntries (session closed with CancelDownloadFile) then, in a FRESH session,
- * extractEntryToTempFile / extractEntry (re-list + local header + data) — against a fake
- * TelegramClient that emulates TDLib download-window semantics (see
- * [FakeTdLibTelegramClient]) instead of pretending the file is already downloaded.
- *
- * The field pattern being chased (1.6.21): listing works everywhere on desktop, every
- * extraction out of a ZIP fails fast with the generic "Could not open archive", one
- * extraction hung at 0%. Android, with the same Kotlin layers over official TDLib, works.
+ * listEntries (session closed) then, in a FRESH session, extractEntryToTempFile /
+ * extractEntry (re-list + local header + data) — against [FakeTdLibTelegramClient], which
+ * models the TDLight / upstream TDLib source semantics from
+ * `52-tdlight-source-findings.md` (persistent part bitmask, single re-targetable window,
+ * all-or-nothing ReadFilePart gate). The same upstream gate is what Android's official
+ * TDLib implements, so these tests are the Android regression argument too.
  */
 class TelegramArchiveHarnessTest {
-
-    // ----- service fakes (same shapes as RemoteArchiveServiceTest, harness-local) -----
 
     private class HarnessFilePartDao : FilePartDao {
         override suspend fun partsOf(fileId: String): List<FilePartEntity> = emptyList()
@@ -124,13 +118,9 @@ class TelegramArchiveHarnessTest {
             )
         )
 
-    // ----- a multi-MB zip: stored at the start, deflate in the middle, stored at the end -----
-
     private val startData = Random(11).nextBytes(200_000)
     private val middleData = ByteArray(300_000) { (it % 251).toByte() }
     private val endData = Random(23).nextBytes(150_000)
-    // Random (incompressible) filler so the DEFLATE entry stays large on disk too:
-    // the archive must be genuinely multi-MB for the middle/end offsets to exist.
     private val fillerData = Random(37).nextBytes(1_800_000)
 
     private val zipBytes: ByteArray = buildZip(
@@ -162,9 +152,9 @@ class TelegramArchiveHarnessTest {
     }
 
     /**
-     * The exact field sequence: list in one session (the service closes the source, which
-     * cancels the Telegram download), then extract in a fresh session — preview path
-     * (temp file) for one entry and download path (writer) for another.
+     * The exact field sequence on ONE fileId: list in one session (the service closes the
+     * source), then extract in fresh sessions — preview path (temp file) for one entry and
+     * download path (writer) for another.
      */
     private fun runFieldSequence(
         fake: FakeTdLibTelegramClient,
@@ -182,7 +172,6 @@ class TelegramArchiveHarnessTest {
             listOf("a-start.bin", "b-filler.bin", "c-middle.txt", "d-end.bin"),
             listing.filter { !it.isDirectory }.map { it.name }
         )
-        assertTrue("listing session must have been closed via cancel", fake.cancelCalls >= 1)
 
         val temp = service.extractEntryToTempFile(file, previewEntry)
         try {
@@ -196,68 +185,54 @@ class TelegramArchiveHarnessTest {
     }
 
     @Test
-    fun `field sequence - V1 documented semantics, R1 restart, C1 prefix kept, instant growth`() {
+    fun `field sequence - source semantics, instant growth`() {
         val fake = FakeTdLibTelegramClient(zipBytes)
         runFieldSequence(fake, "c-middle.txt", middleData, "a-start.bin", startData)
     }
 
     @Test
-    fun `field sequence - V1, R1, C2 prefix discarded, delayed growth`() {
-        val fake = FakeTdLibTelegramClient(
-            zipBytes,
-            cancelVariant = FakeCancelVariant.C2_PREFIX_DISCARDED,
-            growth = FakeGrowth.DELAYED
-        )
+    fun `field sequence - source semantics, delayed growth`() {
+        val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.DELAYED)
         runFieldSequence(fake, "d-end.bin", endData, "c-middle.txt", middleData)
     }
 
     @Test
-    fun `field sequence - V3 empty reads on uncovered ranges`() {
+    fun `field sequence - source semantics, delayed growth, small steps`() {
         val fake = FakeTdLibTelegramClient(
             zipBytes,
-            readVariant = FakeReadVariant.V3_EMPTY,
-            growth = FakeGrowth.DELAYED
+            growth = FakeGrowth.DELAYED,
+            growthStepBytes = 32 * 1024
         )
         runFieldSequence(fake, "a-start.bin", startData, "d-end.bin", endData)
     }
 
     @Test
-    fun `field sequence - V2 covered-subrange reads must not corrupt or fail extraction`() {
-        // V2 is the prime desktop suspect: a ReadFilePart that hands back whatever part of
-        // the download window it has — short, and misaligned when the request starts before
-        // the window — instead of erroring like documented TDLib. The old byte source
-        // accepted ANY non-empty result as the requested bytes, so a read for a local
-        // header at the start of the file could silently receive central-directory bytes.
-        val fake = FakeTdLibTelegramClient(
-            zipBytes,
-            readVariant = FakeReadVariant.V2_COVERED_SUBRANGE,
-            growth = FakeGrowth.DELAYED
-        )
-        runFieldSequence(fake, "c-middle.txt", middleData, "d-end.bin", endData)
-    }
-
-    @Test
-    fun `byte source - V2 misaligned read for an uncovered position returns the requested bytes`() =
+    fun `byte source - bytes from an earlier window stay readable after re-target without a new DownloadFile`() =
         runBlocking {
-            val fake = FakeTdLibTelegramClient(
-                zipBytes,
-                readVariant = FakeReadVariant.V2_COVERED_SUBRANGE,
-                growth = FakeGrowth.INSTANT
-            )
-            val source = BufferedMediaByteSource(
-                TelegramMediaByteSource(fake.client, "remote-1", 100L, 200L, primeFromStart = false)
+            val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+            val source = TelegramMediaByteSource(
+                fake.client, "remote-1", 100L, 200L, primeFromStart = false
             )
             try {
-                // Prime the window at the tail (like a listing), then jump to the start.
+                // Window 1: the tail (like a listing).
                 val tailStart = zipBytes.size - 1_000L
                 assertArrayEquals(
                     zipBytes.copyOfRange(tailStart.toInt(), zipBytes.size),
                     source.read(tailStart, 1_000)
                 )
+                // Window 2: re-target to the start of the file.
                 assertArrayEquals(zipBytes.copyOfRange(0, 4_096), source.read(0, 4_096))
+                val requestsAfterRetarget = fake.rangeRequests
+                // The tail bytes persist in the partial file and ReadFilePart's gate is
+                // keyed to the read offset, not the current window: re-reading the tail
+                // must succeed WITHOUT another DownloadFile.
                 assertArrayEquals(
-                    zipBytes.copyOfRange(1_000_000, 1_004_096),
-                    source.read(1_000_000, 4_096)
+                    zipBytes.copyOfRange(tailStart.toInt(), zipBytes.size),
+                    source.read(tailStart, 1_000)
+                )
+                assertEquals(
+                    "earlier-window bytes must be readable without a new DownloadFile",
+                    requestsAfterRetarget, fake.rangeRequests
                 )
             } finally {
                 source.close()
@@ -265,34 +240,21 @@ class TelegramArchiveHarnessTest {
         }
 
     @Test
-    fun `byte source - R2 range request ignored while a window is active still reaches a position behind the window`() =
-        runBlocking {
-            val fake = FakeTdLibTelegramClient(
-                zipBytes,
-                rangeVariant = FakeRangeVariant.R2_IGNORED_WHILE_ACTIVE,
-                growth = FakeGrowth.DELAYED,
-                growthStepBytes = 32 * 1024
-            )
-            val source = TelegramMediaByteSource(
-                fake.client, "remote-1", 100L, 200L, primeFromStart = false
-            )
-            try {
-                // Start a window in the middle; it is still active (not at EOF) when covered.
-                assertArrayEquals(
-                    zipBytes.copyOfRange(1_000_000, 1_000_100),
-                    source.read(1_000_000, 100)
-                )
-                // Jump behind the active window: the re-target request is ignored (R2), so
-                // the only routes to coverage are the window finishing and a re-request.
-                assertArrayEquals(zipBytes.copyOfRange(0, 100), source.read(0, 100))
-                assertTrue("R2 must have ignored at least one request", fake.ignoredRangeRequests >= 1)
-            } finally {
-                source.close()
-            }
-        }
+    fun `byte source - range-only close does not cancel the download`() = runBlocking {
+        val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+        val source = TelegramMediaByteSource(
+            fake.client, "remote-1", 100L, 200L, primeFromStart = false
+        )
+        source.read(0, 100)
+        source.close()
+        assertEquals(
+            "range-only sources must not cancel on close (re-targeting is the designed path)",
+            0, fake.cancelCalls
+        )
+    }
 
     @Test
-    fun `byte source - a stalled window fails with a typed TelegramException, not a timeout cancellation`() =
+    fun `byte source - a stalled window fails with a typed 408 carrying the last observed state`() =
         runBlocking {
             val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.STALLED)
             val source = TelegramMediaByteSource(
@@ -303,8 +265,96 @@ class TelegramArchiveHarnessTest {
                 fail("a stalled download window must fail, not return bytes or hang")
             } catch (expected: TelegramException) {
                 assertEquals(408, expected.code)
+                assertTrue(
+                    "408 message must carry the last observed state, was: ${expected.message}",
+                    expected.message.contains("downloadOffset") &&
+                        expected.message.contains("downloadedPrefixSize") &&
+                        expected.message.contains("isDownloadingActive")
+                )
             } finally {
                 source.close()
             }
         }
+
+    // ----- fake-level pins of the source semantics themselves -----
+
+    @Test
+    fun `fake - ReadFilePart gate is all-or-nothing with the exact 400 message`() = runBlocking {
+        val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+        // Nothing downloaded yet: exact source error.
+        try {
+            fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 0, 100)
+            fail("uncovered read must throw")
+        } catch (expected: TelegramException) {
+            assertEquals(400, expected.code)
+            assertEquals(
+                "There is not enough downloaded bytes in the file to read",
+                expected.message
+            )
+        }
+        // count=0 probe never fails on coverage and returns the contiguous prefix (empty).
+        assertEquals(0, fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 0, 0).size)
+        // Download only the first 100 bytes (part-aligned expansion fetches whole parts).
+        fake.client.requestFileRange(FakeTdLibTelegramClient.FILE_ID, 0, 100)
+        val probe = fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 0, 0)
+        assertTrue("part-aligned overshoot expected, probe=${probe.size}", probe.size >= 100)
+        // A read extending past the ready parts still fails whole, never short.
+        try {
+            fake.client.readFilePart(
+                FakeTdLibTelegramClient.FILE_ID, 0, zipBytes.size.toLong()
+            )
+            fail("partially covered read must throw, not short-read")
+        } catch (expected: TelegramException) {
+            assertEquals(400, expected.code)
+        }
+    }
+
+    @Test
+    fun `fake - limited window terminates inactive and uncompleted with prefix at least the limit`() =
+        runBlocking {
+            val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+            fake.client.requestFileRange(FakeTdLibTelegramClient.FILE_ID, 1_000_000, 1_000)
+            val info = fake.client.getFileInfo(FakeTdLibTelegramClient.FILE_ID)
+            assertFalse(info.isDownloadingActive)
+            assertFalse("a limit>0 download never completes the file", info.isDownloadingCompleted)
+            assertEquals(1_000_000L, info.downloadOffset)
+            assertTrue(
+                "prefix must reach at least the limit (part overshoot allowed): ${info.downloadedPrefixSize}",
+                info.downloadedPrefixSize >= 1_000
+            )
+            // Re-target re-bases the reported prefix instantly, even though the earlier
+            // window's bytes are still in the partial file.
+            fake.client.requestFileRange(FakeTdLibTelegramClient.FILE_ID, 0, 100)
+            val rebased = fake.client.getFileInfo(FakeTdLibTelegramClient.FILE_ID)
+            assertEquals(0L, rebased.downloadOffset)
+            assertTrue(rebased.downloadedPrefixSize < 1_000_000L)
+            // ...and the earlier window's bytes are still readable via the gate.
+            assertArrayEquals(
+                zipBytes.copyOfRange(1_000_000, 1_001_000),
+                fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 1_000_000, 1_000)
+            )
+        }
+
+    @Test
+    fun `fake - offset plus limit past EOF wraps and fetches the file start`() = runBlocking {
+        val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+        val tailStart = zipBytes.size - 500L
+        fake.client.requestFileRange(
+            FakeTdLibTelegramClient.FILE_ID, tailStart, 2_000
+        )
+        // The wrapped part of the window fetched the beginning of the file.
+        assertArrayEquals(
+            zipBytes.copyOfRange(0, 1_000),
+            fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 0, 1_000)
+        )
+    }
+
+    @Test
+    fun `fake - limit zero completes the whole file`() = runBlocking {
+        val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+        fake.client.requestFileRange(FakeTdLibTelegramClient.FILE_ID, 0, 0)
+        val info = fake.client.getFileInfo(FakeTdLibTelegramClient.FILE_ID)
+        assertTrue(info.isDownloadingCompleted)
+        assertFalse(info.isDownloadingActive)
+    }
 }
