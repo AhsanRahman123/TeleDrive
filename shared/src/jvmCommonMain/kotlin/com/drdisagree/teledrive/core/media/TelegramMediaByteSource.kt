@@ -7,6 +7,7 @@ import com.drdisagree.teledrive.core.telegram.TelegramFileInfo
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.runBlocking
@@ -144,7 +145,9 @@ class TelegramMediaByteSource(
                 } catch (ignored: NoSuchElementException) {
                     // The update flow completed without a covering update (some
                     // clients expose a finite flow): fall through to the next
-                    // getFileInfo recheck instead of failing the read.
+                    // getFileInfo recheck instead of failing the read. The delay
+                    // keeps a finite flow from turning the wait into a busy spin.
+                    delay(RECHECK_INTERVAL_MS.milliseconds)
                 }
             }
         }

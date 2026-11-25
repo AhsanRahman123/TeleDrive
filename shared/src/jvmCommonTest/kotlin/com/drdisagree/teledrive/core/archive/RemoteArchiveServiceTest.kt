@@ -117,19 +117,26 @@ class RemoteArchiveServiceTest {
     ) {
         val rangeRequests = mutableListOf<Pair<Long, Long>>()
         var cancelCalls = 0
+        private var windowOffset = 0L
+        private var windowPrefix = 0L
 
         val client: TelegramClient = Proxy.newProxyInstance(
             TelegramClient::class.java.classLoader,
             arrayOf(TelegramClient::class.java),
             InvocationHandler { _, method, args ->
+                // Model a real TDLib window (report 51): a range request moves the
+                // window to the requested offset and covers it (instant growth);
+                // before any request, nothing is covered. The pre-1.6.22 fake
+                // reported "nothing downloaded" forever while serving every read,
+                // which no real client does.
                 val info = TelegramFileInfo(
                     fileId = 7,
                     sizeBytes = bytes.size.toLong(),
                     localPath = null,
                     isDownloadingCompleted = completed,
                     isDownloadingActive = false,
-                    downloadOffset = 0,
-                    downloadedPrefixSize = if (completed) bytes.size.toLong() else 0
+                    downloadOffset = if (completed) 0 else windowOffset,
+                    downloadedPrefixSize = if (completed) bytes.size.toLong() else windowPrefix
                 )
                 when (method.name) {
                     "resolveFile" -> info
@@ -144,7 +151,15 @@ class RemoteArchiveServiceTest {
                         )
                     }
                     "requestFileRange" -> {
-                        rangeRequests += (args[1] as Number).toLong() to (args[2] as Number).toLong()
+                        val off = (args[1] as Number).toLong()
+                        val lim = (args[2] as Number).toLong()
+                        rangeRequests += off to lim
+                        windowOffset = off
+                        windowPrefix = if (lim > 0) {
+                            minOf(lim, bytes.size.toLong() - off)
+                        } else {
+                            bytes.size.toLong() - off
+                        }
                         Unit
                     }
                     "cancelFileDownload" -> { cancelCalls++; Unit }
