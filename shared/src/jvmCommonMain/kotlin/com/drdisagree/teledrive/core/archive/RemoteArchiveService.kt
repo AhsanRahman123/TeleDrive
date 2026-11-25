@@ -12,6 +12,22 @@ import com.drdisagree.teledrive.data.repository.FolderPathResolver
 import com.drdisagree.teledrive.domain.model.DriveFile
 
 /**
+ * Bounded, credential-free detail for a failure: exception class + TelegramException
+ * code + message (+ cause detail). Used by [RemoteArchiveService.describe] for SafeLog
+ * and by the preview UI, so an archive failure reaching the user always names its cause
+ * instead of a bare "unknown error" (1.6.23, report 52).
+ */
+fun archiveFailureDetail(failure: Throwable): String {
+    fun one(error: Throwable): String {
+        val code = (error as? com.drdisagree.teledrive.core.telegram.TelegramException)?.code
+        return "${error::class.simpleName}" + (code?.let { " code=$it" } ?: "") +
+            " msg=${error.message?.take(300)}"
+    }
+    val cause = failure.cause
+    return one(failure) + if (cause != null && cause !== failure) " cause=${one(cause)}" else ""
+}
+
+/**
  * Browses and extracts single files from a ZIP that exists only as a remote Telegram copy.
  *
  * Everything goes through ranged reads ([TelegramMediaByteSource]); the whole ZIP is never
@@ -26,7 +42,12 @@ class RemoteArchiveService(
 ) {
 
     suspend fun listEntries(file: DriveFile): List<ZipEntryInfo> {
-        checkReadable(file)
+        try {
+            checkReadable(file)
+        } catch (failure: Exception) {
+            warnLog("stage=checkReadable failed file=${file.name}: ${describe(failure)}", failure)
+            throw wrapFailure("checkReadable", failure)
+        }
         val source = openSource(file)
         try {
             val entries = ZipArchiveReader(source).entries()
@@ -34,7 +55,7 @@ class RemoteArchiveService(
             return entries
         } catch (failure: Exception) {
             warnLog("stage=list failed file=${file.name}: ${describe(failure)}", failure)
-            throw failure
+            throw wrapFailure("list", failure)
         } finally {
             source.close()
         }
@@ -67,12 +88,17 @@ class RemoteArchiveService(
             val folderPath = listOf(libraryPath, subFolderPath.orEmpty())
                 .filter { it.isNotBlank() }
                 .joinToString("/")
-            val savedPath = downloadWriter.write(
-                fileName = fileName,
-                mimeType = MimeTypes.fromFileName(fileName),
-                folderPath = folderPath
-            ) { output ->
-                temp.inputStream().buffered().use { input -> input.copyTo(output) }
+            val savedPath = try {
+                downloadWriter.write(
+                    fileName = fileName,
+                    mimeType = MimeTypes.fromFileName(fileName),
+                    folderPath = folderPath
+                ) { output ->
+                    temp.inputStream().buffered().use { input -> input.copyTo(output) }
+                }
+            } catch (failure: Exception) {
+                warnLog("stage=save failed file=${file.name}: ${describe(failure)}", failure)
+                throw wrapFailure("save", failure)
             }
             return savedPath ?: throw ArchiveException(
                 ArchiveErrorKind.SAVE_FAILED,
@@ -102,7 +128,7 @@ class RemoteArchiveService(
             checkReadable(file)
         } catch (failure: Exception) {
             warnLog("stage=checkReadable failed file=${file.name}: ${describe(failure)}", failure)
-            throw failure
+            throw wrapFailure("checkReadable", failure)
         }
         SafeLog.d(TAG, "stage=resolve ok file=${file.name} entry=$entryName occurrence=$occurrence")
         val source = openSource(file)
@@ -110,7 +136,12 @@ class RemoteArchiveService(
             val reader = ZipArchiveReader(source)
             // Occurrence counts only non-directory entries with this name; the preview view
             // model counts the same way, so both sides pick the same entry.
-            val matches = reader.entries().filter { it.name == entryName && !it.isDirectory }
+            val matches = try {
+                reader.entries().filter { it.name == entryName && !it.isDirectory }
+            } catch (failure: Exception) {
+                warnLog("stage=list failed file=${file.name}: ${describe(failure)}", failure)
+                throw wrapFailure("list", failure)
+            }
             SafeLog.d(TAG, "stage=list ok matches=${matches.size} entry=$entryName")
             val entry = matches.getOrNull(occurrence)
                 ?: throw ArchiveException(
@@ -136,7 +167,7 @@ class RemoteArchiveService(
             } catch (failure: Exception) {
                 warnLog("stage=data/writer failed entry=${entry.name}: ${describe(failure)}", failure)
                 temp.delete()
-                throw failure
+                throw wrapFailure("data", failure)
             }
             return temp
         } finally {
@@ -223,17 +254,33 @@ class RemoteArchiveService(
     }
 
     /** Exception class + TDLib error code, so a field recurrence names its own stage and cause. */
-    private fun describe(failure: Exception): String {
-        val code = (failure as? com.drdisagree.teledrive.core.telegram.TelegramException)?.code
-        val cause = failure.cause
-        val causeText = if (cause != null) {
-            " cause=${cause::class.simpleName}" +
-                ((cause as? com.drdisagree.teledrive.core.telegram.TelegramException)?.code
-                    ?.let { " code=$it" } ?: "") +
-                " msg=${cause.message}"
-        } else ""
-        return "${failure::class.simpleName}" + (code?.let { " code=$it" } ?: "") +
-            " msg=${failure.message}$causeText"
+    private fun describe(failure: Exception): String = archiveFailureDetail(failure)
+
+    /**
+     * Every failure leaving this service must carry its stage + [describe] detail in the
+     * exception the UI receives (1.6.23, report 52): non-[ArchiveException] failures are
+     * wrapped as [ArchiveErrorKind.REMOTE_FAILED]; ArchiveExceptions keep their kind but
+     * gain the underlying detail where a cause exists. Cancellation is never wrapped.
+     */
+    private fun wrapFailure(stage: String, failure: Exception): Exception = when {
+        failure is kotlinx.coroutines.CancellationException -> failure
+        failure is ArchiveException -> {
+            val cause = failure.cause
+            if (cause != null && failure.message?.contains("cause=") != true) {
+                ArchiveException(
+                    failure.kind,
+                    "${failure.message} [stage=$stage detail: ${archiveFailureDetail(cause)}]",
+                    cause
+                )
+            } else {
+                failure
+            }
+        }
+        else -> ArchiveException(
+            ArchiveErrorKind.REMOTE_FAILED,
+            "Archive stage $stage failed: ${archiveFailureDetail(failure)}",
+            failure
+        )
     }
 
     private companion object {

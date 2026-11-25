@@ -241,7 +241,10 @@ class PreviewContentResolver(
         }
     } catch (failure: Exception) {
         SafeLog.w(TAG, "Could not list remote ZIP", failure)
-        PreviewContent.Failed(Res.string.preview_archive_failed)
+        PreviewContent.Failed(
+            Res.string.preview_archive_failed,
+            messageText = com.drdisagree.teledrive.core.archive.archiveFailureDetail(failure)
+        )
     }
 
     private fun fromLocal(file: DriveFile, path: String): PreviewContent = when {

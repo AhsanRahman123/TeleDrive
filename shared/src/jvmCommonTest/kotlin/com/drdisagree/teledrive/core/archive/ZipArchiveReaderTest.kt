@@ -402,4 +402,38 @@ class ZipArchiveReaderTest {
         }
         return -1
     }
+
+    // ---- 1.6.23 failure visibility (report 52) ----
+
+    @Test
+    fun `telegram failure during data read names the telegram error instead of damaged archive`() = runBlocking {
+        val data = "hello data".toByteArray()
+        val bytes = zipOf(listOf(Triple("x.bin", data, ZipEntry.STORED)))
+        val entry = reader(bytes).entries().single()
+        val failing = object : MediaByteSource {
+            override suspend fun size(): Long = bytes.size.toLong()
+            override suspend fun read(position: Long, count: Int): ByteArray {
+                if (position == 0L) {
+                    return bytes.copyOfRange(0, minOf(count, bytes.size))
+                }
+                throw com.drdisagree.teledrive.core.telegram.TelegramException(
+                    400, "telegram boom xyz"
+                )
+            }
+            override fun close() = Unit
+        }
+        try {
+            ZipArchiveReader(failing).extract(entry, ByteArrayOutputStream())
+            fail("expected ArchiveException")
+        } catch (failure: ArchiveException) {
+            assertTrue(
+                "message must name the telegram error, was: ${failure.message}",
+                failure.message!!.contains("400") && failure.message.contains("telegram boom xyz")
+            )
+            assertFalse(
+                "a telegram failure must not present as a damaged archive: ${failure.message}",
+                failure.message.contains("is damaged and cannot be extracted")
+            )
+        }
+    }
 }

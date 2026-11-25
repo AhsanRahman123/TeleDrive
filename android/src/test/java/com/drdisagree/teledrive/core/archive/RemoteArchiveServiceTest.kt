@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -386,7 +387,7 @@ class RemoteArchiveServiceTest {
     }
 
     @Test
-    fun `crc corrupted entry never reaches the download writer and closes the source`() {
+    fun `crc corrupted entry never reaches the download writer`() {
         val content = "integrity matters".toByteArray()
         val zipBytes = storedZip(listOf("data.txt" to content))
         val at = zipBytes.indexOf(content)
@@ -398,7 +399,10 @@ class RemoteArchiveServiceTest {
             service(telegram.client, writer = writer).extractEntry(driveFile(), "data.txt")
         }
         assertEquals(null, writer.fileName)
-        assertTrue("byte source was not closed", telegram.cancelCalls > 0)
+        // 1.6.23 (report 52): range-only byte sources no longer cancel the Telegram
+        // download on close — re-targeting is TDLib's designed path and downloaded
+        // parts persist across windows, so closing must NOT issue a cancel.
+        assertEquals(0, telegram.cancelCalls)
     }
 
     @Test
@@ -556,5 +560,46 @@ class RemoteArchiveServiceTest {
         )
         assertArrayEquals(content, writer.bytes)
         assertProgressReportsFullExtraction(progress, content.size.toLong())
+    }
+
+    // ---- 1.6.23 failure visibility (report 52) ----
+
+    @Test
+    fun `telegram failure leaving the service carries stage and detail, never unknown error`() = runBlocking {
+        val zipBytes = storedZip(listOf("a.txt" to "abc".toByteArray()))
+        val info = TelegramFileInfo(
+            fileId = 7, sizeBytes = zipBytes.size.toLong(), localPath = null,
+            isDownloadingCompleted = false, isDownloadingActive = false,
+            downloadOffset = 0, downloadedPrefixSize = 0
+        )
+        val handler = InvocationHandler { _, method, _ ->
+            when (method.name) {
+                "resolveFile", "getFileInfo" -> info
+                "readFilePart" -> throw com.drdisagree.teledrive.core.telegram.TelegramException(
+                    500, "boom network detail"
+                )
+                "requestFileRange", "cancelFileDownload" -> Unit
+                "fileUpdates" -> flowOf(info)
+                else -> throw UnsupportedOperationException(method.name)
+            }
+        }
+        val telegram = Proxy.newProxyInstance(
+            TelegramClient::class.java.classLoader,
+            arrayOf(TelegramClient::class.java),
+            handler
+        ) as TelegramClient
+        try {
+            service(telegram).listEntries(driveFile())
+            fail("expected ArchiveException")
+        } catch (failure: ArchiveException) {
+            assertEquals(ArchiveErrorKind.REMOTE_FAILED, failure.kind)
+            assertTrue(
+                "message must carry stage + code + detail, was: ${failure.message}",
+                failure.message!!.contains("list") &&
+                    failure.message.contains("500") &&
+                    failure.message.contains("boom network detail")
+            )
+            assertFalse(failure.message.contains("unknown error"))
+        }
     }
 }

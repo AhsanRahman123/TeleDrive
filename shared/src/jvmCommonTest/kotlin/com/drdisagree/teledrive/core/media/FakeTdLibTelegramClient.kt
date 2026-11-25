@@ -170,18 +170,36 @@ class FakeTdLibTelegramClient(
         TelegramClient::class.java.classLoader,
         arrayOf(TelegramClient::class.java),
         InvocationHandler { _, method, args ->
-            when (method.name) {
+            try {
+                dispatch(method.name, args)
+            } catch (failure: TelegramException) {
+                // java.lang.reflect.Proxy wraps checked exceptions thrown by a handler in
+                // UndeclaredThrowableException; the real clients are plain Kotlin classes
+                // and deliver TelegramException directly. Resume the caller's continuation
+                // with the failure instead, so callers see the faithful exception.
+                val continuation = args?.lastOrNull() as? kotlin.coroutines.Continuation<*>
+                    ?: throw failure
+                @Suppress("UNCHECKED_CAST")
+                (continuation as kotlin.coroutines.Continuation<Any?>)
+                    .resumeWith(Result.failure(failure))
+                kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
+            }
+        }
+    ) as TelegramClient
+
+    private fun dispatch(methodName: String, args: Array<out Any?>?): Any? =
+            when (methodName) {
                 "resolveFile" -> info()
                 "getFileInfo" -> {
                     advance()
                     info()
                 }
                 "requestFileRange" -> {
-                    requestRange((args[1] as Number).toLong(), (args[2] as Number).toLong())
+                    requestRange((args!![1] as Number).toLong(), (args[2] as Number).toLong())
                     Unit
                 }
                 "readFilePart" -> readPart(
-                    (args[1] as Number).toLong(),
+                    (args!![1] as Number).toLong(),
                     (args[2] as Number).toLong()
                 )
                 "cancelFileDownload" -> {
@@ -195,10 +213,8 @@ class FakeTdLibTelegramClient(
                         delay(20)
                     }
                 }
-                else -> throw UnsupportedOperationException(method.name)
+                else -> throw UnsupportedOperationException(methodName)
             }
-        }
-    ) as TelegramClient
 
     companion object {
         const val FILE_ID = 7

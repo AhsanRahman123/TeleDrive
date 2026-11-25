@@ -15,7 +15,6 @@ import com.drdisagree.teledrive.resources.preview_added_favorites
 import com.drdisagree.teledrive.resources.preview_archive_entries_saved
 import com.drdisagree.teledrive.resources.preview_archive_entry_failed
 import com.drdisagree.teledrive.resources.preview_archive_entry_saved
-import com.drdisagree.teledrive.resources.preview_archive_failed
 import com.drdisagree.teledrive.resources.preview_archive_folder_empty
 import com.drdisagree.teledrive.resources.preview_archive_local_only
 import com.drdisagree.teledrive.resources.preview_archive_none_saved
@@ -30,6 +29,7 @@ import com.drdisagree.teledrive.core.files.DeleteConsentRequest
 import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
 import com.drdisagree.teledrive.core.archive.ArchiveException
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
+import com.drdisagree.teledrive.core.archive.archiveFailureDetail
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.DriveFile
@@ -314,8 +314,11 @@ class PreviewViewModel(
                 archiveDownloadReporter.fail(recordId, failure.message)
                 _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
             } catch (failure: Exception) {
-                archiveDownloadReporter.fail(recordId, null)
-                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+                val detail = archiveFailureDetail(failure)
+                archiveDownloadReporter.fail(recordId, detail)
+                _messages.tryEmit(
+                    UiText.Plain("Could not open archive: $detail")
+                )
             } finally {
                 _uiState.update { it.copy(archiveEntryBusyIndex = null) }
             }
@@ -417,7 +420,9 @@ class PreviewViewModel(
             } catch (failure: ArchiveException) {
                 _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
             } catch (failure: Exception) {
-                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+                _messages.tryEmit(
+                    UiText.Plain("Could not open archive: ${archiveFailureDetail(failure)}")
+                )
             } finally {
                 _uiState.update { it.copy(archiveEntryBusyIndex = null) }
             }
@@ -505,16 +510,17 @@ class PreviewViewModel(
                             UiText.Resource(
                                 Res.string.preview_archive_entry_failed,
                                 archiveEntryDisplayName(listing[step.entryIndex]),
-                                failure.message ?: "unknown error"
+                                failure.message ?: archiveFailureDetail(failure)
                             )
                         )
                     } catch (failure: Exception) {
-                        archiveDownloadReporter.fail(recordId, null)
+                        val detail = archiveFailureDetail(failure)
+                        archiveDownloadReporter.fail(recordId, detail)
                         _messages.tryEmit(
                             UiText.Resource(
                                 Res.string.preview_archive_entry_failed,
                                 archiveEntryDisplayName(listing[step.entryIndex]),
-                                "unknown error"
+                                detail
                             )
                         )
                     }

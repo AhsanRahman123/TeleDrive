@@ -55,6 +55,8 @@ enum class ArchiveErrorKind {
     UNSUPPORTED_METHOD,
     CRC_MISMATCH,
     ENTRY_NOT_FOUND,
+    /** A non-archive failure (Telegram/network/local IO) surfaced with its detail attached. */
+    REMOTE_FAILED,
     ENCRYPTED_FILE,
     SPLIT_FILE,
     NO_REMOTE_COPY,
@@ -244,11 +246,29 @@ class ZipArchiveReader(
         } catch (failure: ArchiveException) {
             throw failure
         } catch (failure: Exception) {
-            throw ArchiveException(
-                ArchiveErrorKind.CORRUPT,
-                "The compressed data of \"${entry.name}\" is damaged and cannot be extracted.",
-                failure
-            )
+            // A network/TDLib failure must never present as a corrupt archive (1.6.23,
+            // report 52): name the underlying error. Only genuine ZIP-format failures
+            // (here: the inflater's DataFormatException) keep the "damaged" wording.
+            throw when (failure) {
+                is com.drdisagree.teledrive.core.telegram.TelegramException -> ArchiveException(
+                    ArchiveErrorKind.CORRUPT,
+                    "Reading \"${entry.name}\" failed with a Telegram error " +
+                        "(code ${failure.code}: ${failure.message}), so it could not be " +
+                        "extracted. The archive itself may not be damaged.",
+                    failure
+                )
+                is java.util.zip.DataFormatException -> ArchiveException(
+                    ArchiveErrorKind.CORRUPT,
+                    "The compressed data of \"${entry.name}\" is damaged and cannot be extracted.",
+                    failure
+                )
+                else -> ArchiveException(
+                    ArchiveErrorKind.CORRUPT,
+                    "The compressed data of \"${entry.name}\" could not be extracted " +
+                        "(${failure::class.simpleName}: ${failure.message}).",
+                    failure
+                )
+            }
         } finally {
             inflater?.end()
         }
