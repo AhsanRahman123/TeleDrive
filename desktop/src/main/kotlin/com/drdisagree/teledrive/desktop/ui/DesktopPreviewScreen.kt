@@ -2075,6 +2075,11 @@ internal fun DesktopArchivePane(
                             }
                         }
                     }
+                    // No animateItem() here, ever (vc177): the default placement
+                    // spring draws rows at displaced offsets during fast scrolls —
+                    // the doubled/overlapping row text seen as scroll ghosting.
+                    // Row height is likewise constant (see DesktopArchiveRow's
+                    // 48.dp text column), so rows never resize mid-scroll either.
                     items(
                         count = rows.size,
                         key = { position -> archiveRowKey(rows[position]) }
