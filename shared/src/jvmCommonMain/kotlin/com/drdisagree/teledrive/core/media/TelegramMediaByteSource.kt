@@ -135,7 +135,14 @@ class TelegramMediaByteSource(
                         "requestFileRange offset=$readPosition " +
                             "(window=${info.downloadOffset}+${info.downloadedPrefixSize} active=${info.isDownloadingActive})"
                     )
-                    telegramClient.requestFileRange(fileId, readPosition, 0)
+                    // Range-only consumers (archives) request exactly the window
+                    // they need; streaming consumers keep the unbounded (to-EOF)
+                    // window that gives them their prefetch behaviour.
+                    telegramClient.requestFileRange(
+                        fileId,
+                        readPosition,
+                        if (primeFromStart) 0 else count
+                    )
                     forced = false
                 }
                 try {
