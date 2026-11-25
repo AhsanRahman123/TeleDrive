@@ -129,7 +129,9 @@ class TelegramArchiveHarnessTest {
     private val startData = Random(11).nextBytes(200_000)
     private val middleData = ByteArray(300_000) { (it % 251).toByte() }
     private val endData = Random(23).nextBytes(150_000)
-    private val fillerData = ByteArray(1_800_000) { (it % 97).toByte() }
+    // Random (incompressible) filler so the DEFLATE entry stays large on disk too:
+    // the archive must be genuinely multi-MB for the middle/end offsets to exist.
+    private val fillerData = Random(37).nextBytes(1_800_000)
 
     private val zipBytes: ByteArray = buildZip(
         listOf(
