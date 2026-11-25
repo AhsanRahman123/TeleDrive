@@ -572,15 +572,27 @@ class RemoteArchiveServiceTest {
             isDownloadingCompleted = false, isDownloadingActive = false,
             downloadOffset = 0, downloadedPrefixSize = 0
         )
-        val handler = InvocationHandler { _, method, _ ->
-            when (method.name) {
-                "resolveFile", "getFileInfo" -> info
-                "readFilePart" -> throw com.drdisagree.teledrive.core.telegram.TelegramException(
-                    500, "boom network detail"
-                )
-                "requestFileRange", "cancelFileDownload" -> Unit
-                "fileUpdates" -> flowOf(info)
-                else -> throw UnsupportedOperationException(method.name)
+        val handler = InvocationHandler { _, method, args ->
+            try {
+                when (method.name) {
+                    "resolveFile", "getFileInfo" -> info
+                    "readFilePart" -> throw com.drdisagree.teledrive.core.telegram.TelegramException(
+                        500, "boom network detail"
+                    )
+                    "requestFileRange", "cancelFileDownload" -> Unit
+                    "fileUpdates" -> flowOf(info)
+                    else -> throw UnsupportedOperationException(method.name)
+                }
+            } catch (failure: com.drdisagree.teledrive.core.telegram.TelegramException) {
+                // Deliver via the continuation: java.lang.reflect.Proxy would otherwise
+                // wrap the checked exception in UndeclaredThrowableException, unlike the
+                // real clients (see FakeTdLibTelegramClient).
+                val continuation = args?.lastOrNull() as? kotlin.coroutines.Continuation<*>
+                    ?: throw failure
+                @Suppress("UNCHECKED_CAST")
+                (continuation as kotlin.coroutines.Continuation<Any?>)
+                    .resumeWith(Result.failure(failure))
+                kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
             }
         }
         val telegram = Proxy.newProxyInstance(
