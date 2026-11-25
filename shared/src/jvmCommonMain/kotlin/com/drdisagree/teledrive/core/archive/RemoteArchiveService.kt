@@ -33,7 +33,7 @@ class RemoteArchiveService(
             SafeLog.d(TAG, "stage=list ok entries=${entries.size} file=${file.name}")
             return entries
         } catch (failure: Exception) {
-            SafeLog.w(TAG, "stage=list failed file=${file.name}: ${describe(failure)}", failure)
+            warnLog("stage=list failed file=${file.name}: ${describe(failure)}", failure)
             throw failure
         } finally {
             source.close()
@@ -101,7 +101,7 @@ class RemoteArchiveService(
         try {
             checkReadable(file)
         } catch (failure: Exception) {
-            SafeLog.w(TAG, "stage=checkReadable failed file=${file.name}: ${describe(failure)}", failure)
+            warnLog("stage=checkReadable failed file=${file.name}: ${describe(failure)}", failure)
             throw failure
         }
         SafeLog.d(TAG, "stage=resolve ok file=${file.name} entry=$entryName occurrence=$occurrence")
@@ -134,7 +134,7 @@ class RemoteArchiveService(
                 }
                 SafeLog.d(TAG, "stage=writer ok entry=${entry.name} temp=${temp.name}")
             } catch (failure: Exception) {
-                SafeLog.w(TAG, "stage=data/writer failed entry=${entry.name}: ${describe(failure)}", failure)
+                warnLog("stage=data/writer failed entry=${entry.name}: ${describe(failure)}", failure)
                 temp.delete()
                 throw failure
             }
@@ -215,6 +215,11 @@ class RemoteArchiveService(
         override fun close() {
             delegate.close()
         }
+    }
+
+    /** SafeLog.w that can never throw into the extraction path it only observes. */
+    private fun warnLog(message: String, failure: Throwable) {
+        runCatching { SafeLog.w(TAG, message, failure) }
     }
 
     /** Exception class + TDLib error code, so a field recurrence names its own stage and cause. */

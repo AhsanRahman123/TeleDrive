@@ -63,11 +63,13 @@ class TelegramMediaByteSource(
                 if (covers(info, position, toRead)) {
                     val part = telegramClient.readFilePart(fileId, position, toRead)
                     if (part.size.toLong() == toRead) return part
-                    SafeLog.w(
-                        TAG,
-                        "readFilePart returned ${part.size} of $toRead bytes at $position " +
-                            "despite reported coverage (attempt $attempt)"
-                    )
+                    runCatching {
+                        SafeLog.w(
+                            TAG,
+                            "readFilePart returned ${part.size} of $toRead bytes at $position " +
+                                "despite reported coverage (attempt $attempt)"
+                        )
+                    }
                 }
                 if (attempt >= MAX_READ_ATTEMPTS) {
                     throw TelegramException(
@@ -85,7 +87,9 @@ class TelegramMediaByteSource(
             // silently swallowed). A genuine external cancellation arrives as a plain
             // CancellationException from a cancelled job and is not caught here.
             if (!currentCoroutineContext().isActive) throw failure
-            SafeLog.w(TAG, "Timed out waiting for Telegram data at $position ($toRead bytes)")
+            runCatching {
+                SafeLog.w(TAG, "Timed out waiting for Telegram data at $position ($toRead bytes)")
+            }
             throw TelegramException(
                 BUFFER_TIMEOUT_CODE,
                 "Telegram did not deliver the requested data in time (offset $position)"
@@ -133,8 +137,14 @@ class TelegramMediaByteSource(
                     telegramClient.requestFileRange(fileId, readPosition, 0)
                     forced = false
                 }
-                withTimeoutOrNull(RECHECK_INTERVAL_MS.milliseconds) {
-                    telegramClient.fileUpdates(fileId).first { covers(it, readPosition, count) }
+                try {
+                    withTimeoutOrNull(RECHECK_INTERVAL_MS.milliseconds) {
+                        telegramClient.fileUpdates(fileId).first { covers(it, readPosition, count) }
+                    }
+                } catch (ignored: NoSuchElementException) {
+                    // The update flow completed without a covering update (some
+                    // clients expose a finite flow): fall through to the next
+                    // getFileInfo recheck instead of failing the read.
                 }
             }
         }

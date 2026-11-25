@@ -271,7 +271,7 @@ class TelegramArchiveHarnessTest {
                 zipBytes,
                 rangeVariant = FakeRangeVariant.R2_IGNORED_WHILE_ACTIVE,
                 growth = FakeGrowth.DELAYED,
-                growthStepBytes = 256 * 1024
+                growthStepBytes = 32 * 1024
             )
             val source = TelegramMediaByteSource(
                 fake.client, "remote-1", 100L, 200L, primeFromStart = false
