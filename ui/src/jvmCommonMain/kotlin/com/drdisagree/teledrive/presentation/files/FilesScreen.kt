@@ -165,7 +165,6 @@ import com.drdisagree.teledrive.presentation.components.FolderInfoSheet
 import com.drdisagree.teledrive.presentation.components.FolderPickerDialog
 import com.drdisagree.teledrive.presentation.components.FolderRow
 import com.drdisagree.teledrive.presentation.components.LoadingState
-import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.components.MenuAction
 import com.drdisagree.teledrive.presentation.components.RefreshAction
 import com.drdisagree.teledrive.presentation.components.RefreshableContent
@@ -1787,6 +1786,11 @@ private fun FilesContent(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // No animateItem() on any platform: on desktop it used the default
+        // underdamped MediumLow placement spring — the same mechanism removed
+        // from the Android archive list in vc177 for drawing rows at displaced
+        // offsets during fast scrolls (ghosting). Android already skipped it;
+        // desktop now matches, so Android behavior is unchanged.
         items(
             count = state.folders.size,
             key = { "folder-${state.folders[it].id}" },
@@ -1813,7 +1817,6 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .ctrlClickSelect { viewModel.toggleFolderSelection(folder.id) }
-                        .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                         .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
                             viewModel.selectFolderForContext(folder.id)
@@ -1835,7 +1838,6 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, index)
                         .ctrlClickSelect { viewModel.toggleFolderSelection(folder.id) }
-                        .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                         .fileTabDragSource { viewModel.dragPayloadForFolder(folder.id) }
                         .onDesktopContextClick {
                             viewModel.selectFolderForContext(folder.id)
@@ -1880,7 +1882,6 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .ctrlClickSelect { viewModel.toggleSelection(file.id) }
-                        .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
@@ -1916,7 +1917,6 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .ctrlClickSelect { viewModel.toggleSelection(file.id) }
-                        .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
@@ -1951,7 +1951,6 @@ private fun FilesContent(
                     modifier = Modifier
                         .keyboardCollectionItem(keyboard, state.folders.size + index)
                         .ctrlClickSelect { viewModel.toggleSelection(file.id) }
-                        .then(if (LocalAndroidLayout.current) Modifier else Modifier.animateItem())
                         .focusHighlight(highlighted)
                         .fileTabDragSource { viewModel.dragPayloadForFile(file.id) }
                         .onDesktopContextClick {
