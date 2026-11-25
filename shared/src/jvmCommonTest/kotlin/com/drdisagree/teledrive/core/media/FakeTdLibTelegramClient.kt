@@ -42,7 +42,23 @@ class FakeTdLibTelegramClient(
     private val bytes: ByteArray,
     private val growth: FakeGrowth = FakeGrowth.INSTANT,
     private val growthStepBytes: Long = 128 * 1024,
-    private val partSizeBytes: Long = DEFAULT_PART_SIZE
+    private val partSizeBytes: Long = DEFAULT_PART_SIZE,
+    /**
+     * When true, `fileUpdates` behaves like the real replay-0 SharedFlow: it emits
+     * NOTHING while the observed state is unchanged and emits only on an actual state
+     * change. The default (false) keeps the original unconditional 20 ms emission
+     * the other tests were written against (second pass, report 52 — the unconditional
+     * mode masked the stale-snapshot re-issue defect in `readRangeOnly`).
+     */
+    private val emitUpdatesOnlyOnChange: Boolean = false,
+    /**
+     * When > 0, a requested window stays active but lands NO parts until this many
+     * milliseconds have elapsed since the (latest) request, then lands whole. Models
+     * a slow-starting window whose first part arrives after more than one 500 ms
+     * wait slice in `readRangeOnly`. Re-issuing the request restarts the delay,
+     * like a re-target dropping in-flight parts.
+     */
+    private val slowStartDelayMs: Long = 0L
 ) {
     private val partSize = partSizeBytes.coerceAtLeast(1)
     private val numParts = if (bytes.isEmpty()) 0 else ((bytes.size + partSize - 1) / partSize).toInt()
@@ -51,6 +67,7 @@ class FakeTdLibTelegramClient(
     private var windowOffset = 0L
     private var windowLimit = 0L
     private var active = false
+    private var windowRequestedAtMs = 0L
 
     var rangeRequests = 0
         private set
@@ -115,7 +132,14 @@ class FakeTdLibTelegramClient(
 
     @Synchronized
     private fun advance() {
-        if (!active || growth != FakeGrowth.DELAYED) return
+        if (!active) return
+        if (slowStartDelayMs > 0L) {
+            if (System.currentTimeMillis() - windowRequestedAtMs < slowStartDelayMs) return
+            for (p in windowPartsInOrder()) ready[p] = true
+            if (windowSatisfied()) active = false
+            return
+        }
+        if (growth != FakeGrowth.DELAYED) return
         var budget = growthStepBytes
         for (p in windowPartsInOrder()) {
             if (budget <= 0) break
@@ -136,7 +160,8 @@ class FakeTdLibTelegramClient(
         windowOffset = offset
         windowLimit = limit
         active = true
-        if (growth == FakeGrowth.INSTANT) {
+        windowRequestedAtMs = System.currentTimeMillis()
+        if (growth == FakeGrowth.INSTANT && slowStartDelayMs == 0L) {
             for (p in windowPartsInOrder()) ready[p] = true
             active = false
         }
@@ -206,11 +231,26 @@ class FakeTdLibTelegramClient(
                     cancel()
                     Unit
                 }
-                "fileUpdates" -> flow {
-                    while (true) {
-                        advance()
-                        emit(info())
-                        delay(20)
+                "fileUpdates" -> if (emitUpdatesOnlyOnChange) {
+                    flow {
+                        var last = info()
+                        while (true) {
+                            delay(20)
+                            advance()
+                            val current = info()
+                            if (current != last) {
+                                last = current
+                                emit(current)
+                            }
+                        }
+                    }
+                } else {
+                    flow {
+                        while (true) {
+                            advance()
+                            emit(info())
+                            delay(20)
+                        }
                     }
                 }
                 else -> throw UnsupportedOperationException(methodName)

@@ -164,6 +164,12 @@ class TelegramMediaByteSource(
                     }
                     val info = telegramClient.getFileInfo(fileId)
                     lastInfo = info
+                    // Second pass (report 52): the catch above may have set
+                    // needRequest from the STALE pre-request snapshot in lastInfo
+                    // (active=false was the reason the request was issued). The
+                    // freshly polled info is authoritative: a window that is now
+                    // active is already outstanding, so no re-issue is needed.
+                    if (info.isDownloadingActive) needRequest = false
                     val gateHint = gateCouldPass(info, position, toRead)
                     if (needRequest || (!info.isDownloadingActive && !gateHint)) {
                         if (downloadAttempts >= MAX_DOWNLOAD_ATTEMPTS) {

@@ -442,4 +442,33 @@ class ZipArchiveReaderTest {
             )
         }
     }
+
+    @Test
+    fun `cancellation during the data loop surfaces as CancellationException, not ArchiveException`() = runBlocking {
+        // Second pass (report 52, must-fix 1): a CancellationException from
+        // source.read() inside the extract data loop must be rethrown untouched.
+        // Pre-fix it was laundered into ArchiveException(CORRUPT, "... could not
+        // be extracted (JobCancellationException: ...)").
+        val data = "hello data".toByteArray()
+        val bytes = zipOf(listOf(Triple("x.bin", data, ZipEntry.STORED)))
+        val entry = reader(bytes).entries().single()
+        val cancelling = object : MediaByteSource {
+            override suspend fun size(): Long = bytes.size.toLong()
+            override suspend fun read(position: Long, count: Int): ByteArray {
+                if (position == 0L) {
+                    return bytes.copyOfRange(0, minOf(count, bytes.size))
+                }
+                throw kotlinx.coroutines.CancellationException("user stopped the transfer")
+            }
+            override fun close() = Unit
+        }
+        try {
+            ZipArchiveReader(cancelling).extract(entry, ByteArrayOutputStream())
+            fail("expected CancellationException")
+        } catch (expected: kotlinx.coroutines.CancellationException) {
+            // Expected: genuine cancellation propagates untouched.
+        } catch (failure: ArchiveException) {
+            fail("cancellation must not be laundered into ArchiveException: ${failure.message}")
+        }
+    }
 }

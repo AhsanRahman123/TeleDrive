@@ -240,6 +240,35 @@ class TelegramArchiveHarnessTest {
         }
 
     @Test
+    fun `byte source - slow-starting window with silent updates issues exactly one DownloadFile`() =
+        runBlocking {
+            // Second pass (report 52, must-fix 2 + O4(i)): fileUpdates emits NOTHING
+            // during the wait (replay-0 SharedFlow behaviour) and the window's first
+            // part lands only after >1 wait slice (1_200 ms > 500 ms). Pre-fix, the
+            // re-issue decision read the stale pre-request snapshot and re-issued
+            // the identical DownloadFile on the next failed read (each re-issue
+            // also restarts this fake's slow-start delay, so the read never landed).
+            val fake = FakeTdLibTelegramClient(
+                zipBytes,
+                growth = FakeGrowth.INSTANT,
+                emitUpdatesOnlyOnChange = true,
+                slowStartDelayMs = 1_200
+            )
+            val source = TelegramMediaByteSource(
+                fake.client, "remote-1", 100L, 200L, primeFromStart = false
+            )
+            try {
+                assertArrayEquals(zipBytes.copyOfRange(0, 4_096), source.read(0, 4_096))
+                assertEquals(
+                    "exactly one DownloadFile must be issued while the window is active",
+                    1, fake.rangeRequests
+                )
+            } finally {
+                source.close()
+            }
+        }
+
+    @Test
     fun `byte source - range-only close does not cancel the download`() = runBlocking {
         val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
         val source = TelegramMediaByteSource(

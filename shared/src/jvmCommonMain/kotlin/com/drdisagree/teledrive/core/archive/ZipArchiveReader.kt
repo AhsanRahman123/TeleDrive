@@ -6,6 +6,7 @@ import java.io.OutputStream
 import java.nio.charset.Charset
 import java.util.zip.CRC32
 import java.util.zip.Inflater
+import kotlinx.coroutines.CancellationException
 
 /** One central-directory record of a ZIP archive. Sizes and offsets are the true (ZIP64-resolved) values. */
 data class ZipEntryInfo(
@@ -243,6 +244,11 @@ class ZipArchiveReader(
                     throw corrupt("The compressed data of \"${entry.name}\" is truncated or damaged.")
                 }
             }
+        } catch (failure: CancellationException) {
+            // Genuine cancellation (user stop / scope teardown) is NOT corruption
+            // (second pass, report 52): rethrow untouched so callers see a silent
+            // CANCELLED, never a "could not be extracted" ArchiveException.
+            throw failure
         } catch (failure: ArchiveException) {
             throw failure
         } catch (failure: Exception) {

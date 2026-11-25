@@ -605,4 +605,57 @@ class RemoteArchiveServiceTest {
             assertFalse(message.contains("unknown error"))
         }
     }
+
+    @Test
+    fun `cancellation during the extract data loop leaves the service as CancellationException`() = runBlocking {
+        // Second pass (report 52, must-fix 1, service level): the byte source is
+        // buffered in 512 KiB chunks, so for a 600_000-byte stored entry the data
+        // loop's SECOND chunk read is the telegram read at offset 524288
+        // (512 * 1024). Cancelling exactly that read exercises the ZipArchiveReader
+        // data loop through RemoteArchiveService.extractEntryToTempFile: pre-fix
+        // the reader laundered it into ArchiveException(CORRUPT); the service's
+        // wrapFailure already refused to wrap CancellationException, so with the
+        // reader fixed the cancellation must surface untouched end to end.
+        val content = ByteArray(600_000) { (it % 249).toByte() }
+        val zipBytes = storedZip(listOf("big.bin" to content))
+        val info = TelegramFileInfo(
+            fileId = 7, sizeBytes = zipBytes.size.toLong(), localPath = null,
+            isDownloadingCompleted = true, isDownloadingActive = false,
+            downloadOffset = 0, downloadedPrefixSize = zipBytes.size.toLong()
+        )
+        val handler = InvocationHandler { _, method, args ->
+            when (method.name) {
+                "resolveFile", "getFileInfo" -> info
+                "readFilePart" -> {
+                    val offset = (args!![1] as Number).toLong()
+                    val count = (args[2] as Number).toLong()
+                    if (offset == 524_288L) {
+                        throw kotlinx.coroutines.CancellationException("user stopped the transfer")
+                    }
+                    if (offset >= zipBytes.size) ByteArray(0)
+                    else zipBytes.copyOfRange(
+                        offset.toInt(),
+                        minOf(offset + count, zipBytes.size.toLong()).toInt()
+                    )
+                }
+                "requestFileRange", "cancelFileDownload" -> Unit
+                "fileUpdates" -> flowOf(info)
+                else -> throw UnsupportedOperationException(method.name)
+            }
+        }
+        val telegram = Proxy.newProxyInstance(
+            TelegramClient::class.java.classLoader,
+            arrayOf(TelegramClient::class.java),
+            handler
+        ) as TelegramClient
+        try {
+            service(telegram).extractEntryToTempFile(driveFile(), "big.bin")
+            fail("expected CancellationException")
+        } catch (expected: kotlinx.coroutines.CancellationException) {
+            // Expected: genuine cancellation propagates untouched.
+        } catch (failure: ArchiveException) {
+            fail("cancellation must not leave the service as ArchiveException: ${failure.message}")
+        }
+    }
 }
+
