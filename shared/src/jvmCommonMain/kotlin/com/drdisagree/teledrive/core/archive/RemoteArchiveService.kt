@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.core.archive
 
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.files.DownloadWriter
 import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.media.BufferedMediaByteSource
@@ -28,7 +29,12 @@ class RemoteArchiveService(
         checkReadable(file)
         val source = openSource(file)
         try {
-            return ZipArchiveReader(source).entries()
+            val entries = ZipArchiveReader(source).entries()
+            SafeLog.d(TAG, "stage=list ok entries=${entries.size} file=${file.name}")
+            return entries
+        } catch (failure: Exception) {
+            SafeLog.w(TAG, "stage=list failed file=${file.name}: ${describe(failure)}", failure)
+            throw failure
         } finally {
             source.close()
         }
@@ -92,13 +98,20 @@ class RemoteArchiveService(
         occurrence: Int = 0,
         onProgress: ((transferredBytes: Long) -> Unit)? = null
     ): java.io.File {
-        checkReadable(file)
+        try {
+            checkReadable(file)
+        } catch (failure: Exception) {
+            SafeLog.w(TAG, "stage=checkReadable failed file=${file.name}: ${describe(failure)}", failure)
+            throw failure
+        }
+        SafeLog.d(TAG, "stage=resolve ok file=${file.name} entry=$entryName occurrence=$occurrence")
         val source = openSource(file)
         try {
             val reader = ZipArchiveReader(source)
             // Occurrence counts only non-directory entries with this name; the preview view
             // model counts the same way, so both sides pick the same entry.
             val matches = reader.entries().filter { it.name == entryName && !it.isDirectory }
+            SafeLog.d(TAG, "stage=list ok matches=${matches.size} entry=$entryName")
             val entry = matches.getOrNull(occurrence)
                 ?: throw ArchiveException(
                     ArchiveErrorKind.ENTRY_NOT_FOUND,
@@ -108,6 +121,10 @@ class RemoteArchiveService(
                 .ifBlank { "unnamed" }
             val temp = createEntryTempFile(fileName)
             try {
+                SafeLog.d(
+                    TAG,
+                    "stage=data start entry=${entry.name} compressed=${entry.compressedBytes} size=${entry.sizeBytes}"
+                )
                 temp.outputStream().buffered().use { output ->
                     if (onProgress == null) {
                         reader.extract(entry, output)
@@ -115,7 +132,9 @@ class RemoteArchiveService(
                         reader.extract(entry, CountingOutputStream(output, onProgress))
                     }
                 }
+                SafeLog.d(TAG, "stage=writer ok entry=${entry.name} temp=${temp.name}")
             } catch (failure: Exception) {
+                SafeLog.w(TAG, "stage=data/writer failed entry=${entry.name}: ${describe(failure)}", failure)
                 temp.delete()
                 throw failure
             }
@@ -198,7 +217,22 @@ class RemoteArchiveService(
         }
     }
 
+    /** Exception class + TDLib error code, so a field recurrence names its own stage and cause. */
+    private fun describe(failure: Exception): String {
+        val code = (failure as? com.drdisagree.teledrive.core.telegram.TelegramException)?.code
+        val cause = failure.cause
+        val causeText = if (cause != null) {
+            " cause=${cause::class.simpleName}" +
+                ((cause as? com.drdisagree.teledrive.core.telegram.TelegramException)?.code
+                    ?.let { " code=$it" } ?: "") +
+                " msg=${cause.message}"
+        } else ""
+        return "${failure::class.simpleName}" + (code?.let { " code=$it" } ?: "") +
+            " msg=${failure.message}$causeText"
+    }
+
     private companion object {
+        const val TAG = "RemoteArchiveService"
         const val TEMP_PREFIX = "zip-entry-"
         const val MAX_EXTENSION_LENGTH = 16
         const val MAX_TEMP_BASE_LENGTH = 48

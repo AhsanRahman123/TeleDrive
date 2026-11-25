@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.core.archive
 
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.media.MediaByteSource
 import java.io.OutputStream
 import java.nio.charset.Charset
@@ -148,6 +149,10 @@ class ZipArchiveReader(
         if (header.u32(0) != LOCAL_HEADER_SIG) {
             throw corrupt("The local header of \"${entry.name}\" is damaged.")
         }
+        SafeLog.d(
+            "ZipArchiveReader",
+            "stage=local-header ok entry=${entry.name} offset=${entry.localHeaderOffset}"
+        )
         val dataStart = entry.localHeaderOffset + LOCAL_HEADER_SIZE + header.u16(26) + header.u16(28)
         if (dataStart + entry.compressedBytes > fileSize) {
             throw corrupt("\"${entry.name}\" extends past the end of the archive.")
@@ -253,6 +258,7 @@ class ZipArchiveReader(
                 "\"${entry.name}\" produced $produced bytes but the archive records ${entry.sizeBytes}."
             )
         }
+        SafeLog.d("ZipArchiveReader", "stage=data ok entry=${entry.name} produced=$produced")
         if (crc.value != entry.crc32) {
             throw ArchiveException(
                 ArchiveErrorKind.CRC_MISMATCH,
