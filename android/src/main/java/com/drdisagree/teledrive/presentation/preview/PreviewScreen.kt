@@ -853,6 +853,7 @@ private fun PreviewPage(
             )
 
         is PreviewContent.Pdf -> PdfPreview(path = content.path)
+        is PreviewContent.Html -> HtmlPreview(html = content.text)
         is PreviewContent.PlainText -> if (soleUrlOf(content.text) != null) {
             val url = normalizeUrl(soleUrlOf(content.text).orEmpty())
             val linkContext = LocalContext.current
@@ -1036,18 +1037,39 @@ private fun ArchiveEntryPreviewOverlay(
                         session = overlaySession
                     )
 
-                    is ArchiveEntryPreview.Text -> Column(
+                    is ArchiveEntryPreview.Pdf -> PdfPreview(path = preview.path)
+
+                    is ArchiveEntryPreview.Text -> if (preview.isHtml) {
+                        // The WebView scrolls itself; it must not sit inside the
+                        // scrolling text column below.
+                        HtmlPreview(html = preview.text)
+                    } else Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
                             .padding(previewContentPadding())
                     ) {
-                        Text(
-                            text = preview.text,
-                            style = MaterialTheme.typography.bodySmall
-                                .copy(fontFamily = FontFamily.Monospace)
-                                .copy(color = MaterialTheme.colorScheme.onSurface)
-                        )
+                        val overlayContext = LocalContext.current
+                        if (preview.isMarkdown) {
+                            MarkdownText(
+                                text = preview.text,
+                                onOpenUrl = { url -> openUrl(overlayContext, url) }
+                            )
+                        } else {
+                            Text(
+                                text = preview.text,
+                                style = MaterialTheme.typography.bodySmall
+                                    .copy(fontFamily = FontFamily.Monospace)
+                                    .copy(color = MaterialTheme.colorScheme.onSurface)
+                            )
+                        }
+                        if (preview.truncated) {
+                            Text(
+                                text = stringResource(Res.string.preview_truncated_download_view),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

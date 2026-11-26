@@ -360,7 +360,9 @@ class PreviewViewModel(
         when (archiveEntryTapAction(entry)) {
             ArchiveEntryTapAction.PREVIEW_IMAGE,
             ArchiveEntryTapAction.PLAY_AUDIO,
-            ArchiveEntryTapAction.PREVIEW_TEXT -> previewArchiveEntry(file, entryIndex)
+            ArchiveEntryTapAction.PREVIEW_TEXT,
+            ArchiveEntryTapAction.PREVIEW_PDF,
+            ArchiveEntryTapAction.PREVIEW_DOCUMENT -> previewArchiveEntry(file, entryIndex)
             ArchiveEntryTapAction.DOWNLOAD -> downloadArchiveEntry(file, entryIndex)
         }
     }
@@ -385,6 +387,28 @@ class PreviewViewModel(
             return
         }
         if (action == ArchiveEntryTapAction.PREVIEW_TEXT && !archiveEntryTextPreviewable(entry)) {
+            _messages.tryEmit(
+                UiText.Plain(
+                    "\"${archiveEntryDisplayName(entry)}\" is too large to preview here " +
+                        "(${com.drdisagree.teledrive.presentation.common.Formatters.bytes(entry.sizeBytes)}). " +
+                        "Download it instead."
+                )
+            )
+            return
+        }
+        if (action == ArchiveEntryTapAction.PREVIEW_DOCUMENT &&
+            !archiveEntryDocumentPreviewable(entry)
+        ) {
+            _messages.tryEmit(
+                UiText.Plain(
+                    "\"${archiveEntryDisplayName(entry)}\" is too large to preview here " +
+                        "(${com.drdisagree.teledrive.presentation.common.Formatters.bytes(entry.sizeBytes)}). " +
+                        "Download it instead."
+                )
+            )
+            return
+        }
+        if (action == ArchiveEntryTapAction.PREVIEW_PDF && !archiveEntryPdfPreviewable(entry)) {
             _messages.tryEmit(
                 UiText.Plain(
                     "\"${archiveEntryDisplayName(entry)}\" is too large to preview here " +
@@ -445,12 +469,52 @@ class PreviewViewModel(
                         ArchiveEntryPreview.Image(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PLAY_AUDIO ->
                         ArchiveEntryPreview.Audio(displayName, temp.absolutePath, entryIndex)
+                    ArchiveEntryTapAction.PREVIEW_PDF ->
+                        // The extracted temp file is already a real, seekable .pdf —
+                        // exactly what PdfRenderer needs, same as a normal local PDF.
+                        ArchiveEntryPreview.Pdf(displayName, temp.absolutePath, entryIndex)
+                    ArchiveEntryTapAction.PREVIEW_DOCUMENT -> {
+                        // EPUB Tier 1 / OOXML text extraction runs on the extracted
+                        // temp file, exactly as for a normal local document.
+                        val extraction = try {
+                            extractDocumentText(temp)
+                        } finally {
+                            temp.delete()
+                        }
+                        when (extraction) {
+                            is DocumentExtraction.Text -> ArchiveEntryPreview.Text(
+                                displayName,
+                                extraction.text,
+                                entryIndex,
+                                truncated = extraction.truncated
+                            )
+                            DocumentExtraction.DrmProtected -> throw DocumentPreviewException(
+                                "\"$displayName\" is DRM-protected and cannot be opened here."
+                            )
+                            DocumentExtraction.Failed -> throw DocumentPreviewException(
+                                "Could not read \"$displayName\"."
+                            )
+                        }
+                    }
                     ArchiveEntryTapAction.PREVIEW_TEXT -> {
                         // String decoding with the UTF-8 charset replaces malformed input
                         // instead of failing, so a non-UTF-8 text file still shows sanely.
-                        val text = temp.readBytes().toString(Charsets.UTF_8)
+                        val entryMime =
+                            com.drdisagree.teledrive.core.files.MimeTypes.fromFileName(entry.name)
+                        val text = com.drdisagree.teledrive.core.files.formatPreviewText(
+                            temp.readBytes().toString(Charsets.UTF_8),
+                            entryMime
+                        )
                         temp.delete()
-                        ArchiveEntryPreview.Text(displayName, text, entryIndex)
+                        ArchiveEntryPreview.Text(
+                            displayName,
+                            text,
+                            entryIndex,
+                            isMarkdown = com.drdisagree.teledrive.core.files.MimeTypes
+                                .isMarkdown(entryMime),
+                            isHtml = com.drdisagree.teledrive.core.files.MimeTypes
+                                .isHtml(entryMime)
+                        )
                     }
                     ArchiveEntryTapAction.DOWNLOAD -> error("unreachable")
                 }
@@ -469,6 +533,9 @@ class PreviewViewModel(
                 }
             } catch (failure: CancellationException) {
                 throw failure
+            } catch (failure: DocumentPreviewException) {
+                _uiState.update { it.withArchivePreviewStepFailure() }
+                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not read this file."))
             } catch (failure: ArchiveException) {
                 // The step failed: the published preview never moved, so signal the
                 // failure to snap the pager back to the published page.
@@ -548,6 +615,7 @@ class PreviewViewModel(
         when (preview) {
             is ArchiveEntryPreview.Image -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Audio -> java.io.File(preview.path).delete()
+            is ArchiveEntryPreview.Pdf -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Text -> Unit
         }
     }
