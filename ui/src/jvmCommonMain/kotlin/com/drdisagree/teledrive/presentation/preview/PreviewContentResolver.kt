@@ -11,6 +11,9 @@ import com.drdisagree.teledrive.resources.preview_fetch_failed
 import com.drdisagree.teledrive.core.archive.ArchiveErrorKind
 import com.drdisagree.teledrive.core.archive.ArchiveException
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
+import com.drdisagree.teledrive.core.archive.ZipArchiveReader
+import com.drdisagree.teledrive.core.media.BufferedMediaByteSource
+import com.drdisagree.teledrive.core.media.LocalFileByteSource
 import com.drdisagree.teledrive.resources.preview_no_copy_available
 import com.drdisagree.teledrive.resources.preview_no_preview_for_type
 import com.drdisagree.teledrive.resources.preview_only_zip
@@ -219,7 +222,7 @@ class PreviewContentResolver(
         PreviewContent.Failed(Res.string.preview_archive_failed)
     }
 
-    private fun fromLocal(file: DriveFile, path: String): PreviewContent = when {
+    private suspend fun fromLocal(file: DriveFile, path: String): PreviewContent = when {
         MimeTypes.isImage(file.mimeType) || file.category == FileCategory.IMAGE ->
             PreviewContent.Image(File(path))
         MimeTypes.isVideo(file.mimeType) || file.category == FileCategory.VIDEO ->
@@ -260,22 +263,57 @@ class PreviewContentResolver(
         PreviewContent.PlainText(String(bytes, Charsets.UTF_8), truncated)
     }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
 
-    private fun readArchive(file: DriveFile, path: String): PreviewContent =
+    private suspend fun readLocalZip(path: String): PreviewContent {
+        // zip4j first, exactly as before: every archive it can list today keeps the
+        // identical listing, including its timestamp handling.
+        val zip4jListing = runCatching {
+            ZipFile(path).fileHeaders.map { header ->
+                ArchiveEntry(
+                    name = header.fileName,
+                    sizeBytes = header.uncompressedSize,
+                    compressedBytes = header.compressedSize,
+                    isDirectory = header.isDirectory,
+                    // zip4j exposes the entry time as Java epoch millis; anything
+                    // non-positive is "no timestamp" for sorting purposes.
+                    modifiedAtMillis = header.lastModifiedTime.coerceAtLeast(0L)
+                )
+            }
+        }.getOrNull()
+        if (zip4jListing != null) return PreviewContent.Archive(zip4jListing, "ZIP")
+
+        // Fallback to the app's own ranged reader. zip4j refuses to even LIST an
+        // archive when any entry uses a compression method it does not implement —
+        // it throws ZipException("Unknown compression method") while parsing the
+        // central directory — even though the archive is perfectly valid. That hits
+        // ZIPs containing Deflate64, BZip2, LZMA or PPMd entries, all of which
+        // ZArchiver's 7-Zip engine offers when creating ZIP archives, so one such
+        // entry used to make the whole archive unopenable here. ZipArchiveReader
+        // records the method per entry and only refuses such an entry when it is
+        // actually extracted, so the archive opens and its other entries stay usable.
+        return try {
+            PreviewContent.Archive(localZipEntriesViaReader(path), "ZIP")
+        } catch (failure: ArchiveException) {
+            when (failure.kind) {
+                ArchiveErrorKind.NOT_A_ZIP ->
+                    PreviewContent.Failed(Res.string.preview_archive_not_zip)
+                ArchiveErrorKind.MULTI_DISK ->
+                    PreviewContent.Failed(Res.string.preview_archive_multi_disk)
+                ArchiveErrorKind.CORRUPT ->
+                    PreviewContent.Failed(Res.string.preview_archive_corrupt)
+                else -> PreviewContent.Failed(
+                    Res.string.preview_archive_failed,
+                    messageText = failure.message
+                )
+            }
+        } catch (failure: Exception) {
+            SafeLog.w(TAG, "Could not list local ZIP", failure)
+            PreviewContent.Failed(Res.string.preview_archive_failed)
+        }
+    }
+
+    private suspend fun readArchive(file: DriveFile, path: String): PreviewContent =
         when (file.mimeType) {
-            "application/zip" -> runCatching {
-                val entries = ZipFile(path).fileHeaders.map { header ->
-                    ArchiveEntry(
-                        name = header.fileName,
-                        sizeBytes = header.uncompressedSize,
-                        compressedBytes = header.compressedSize,
-                        isDirectory = header.isDirectory,
-                        // zip4j exposes the entry time as Java epoch millis; anything
-                        // non-positive is "no timestamp" for sorting purposes.
-                        modifiedAtMillis = header.lastModifiedTime.coerceAtLeast(0L)
-                    )
-                }
-                PreviewContent.Archive(entries, "ZIP")
-            }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
+            "application/zip" -> readLocalZip(path)
 
             "application/x-7z-compressed" -> runCatching {
                 val entries = SevenZFile.builder()
@@ -399,5 +437,31 @@ class PreviewContentResolver(
         private const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
         private const val TEXT_LIMIT = 256 * 1024
         private const val MAX_ARCHIVE_ENTRIES = 5_000
+    }
+}
+
+/**
+ * Lists a local ZIP file with the app's own ranged [ZipArchiveReader] over a
+ * [LocalFileByteSource], instead of zip4j. Only the file tail and the central
+ * directory are read, so even a very large archive lists fast. Unlike zip4j, the
+ * reader does not reject an archive over an entry's compression method: the
+ * method is recorded per entry and only an actual extraction of an unsupported
+ * entry is refused (with the specific unsupported-method message). Throws
+ * [ArchiveException] with the same kinds the remote listing path produces.
+ */
+suspend fun localZipEntriesViaReader(path: String): List<ArchiveEntry> {
+    val source = BufferedMediaByteSource(LocalFileByteSource(File(path)))
+    try {
+        return ZipArchiveReader(source).entries().map { entry ->
+            ArchiveEntry(
+                name = entry.name,
+                sizeBytes = entry.sizeBytes,
+                compressedBytes = entry.compressedBytes,
+                isDirectory = entry.isDirectory,
+                modifiedAtMillis = entry.modifiedAtMillis
+            )
+        }
+    } finally {
+        source.close()
     }
 }
