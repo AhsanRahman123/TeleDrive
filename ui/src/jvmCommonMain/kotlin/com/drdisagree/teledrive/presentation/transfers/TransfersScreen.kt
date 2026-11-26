@@ -740,11 +740,14 @@ fun TransfersScreen(
                 )
             }
             section("finished", finishedTitle, visibleCompleted, completedTotal) { transfer ->
+                val openActions = completedTransferOpenActions(transfer, fileOpener != null)
                 TransferRow(
                     transfer = transfer,
-                    onOpenInApp = transfer.fileId?.let { id -> { onOpenFile(id) } },
-                    onOpenWith = if (transfer.type.isIncoming) {
-                        transfer.localPath?.takeIf { fileOpener != null }?.let { path ->
+                    onOpenInApp = if (TransferOpenAction.OPEN_IN_APP in openActions) {
+                        transfer.fileId?.let { id -> { onOpenFile(id) } }
+                    } else null,
+                    onOpenWith = if (TransferOpenAction.OPEN_WITH in openActions) {
+                        transfer.localPath?.let { path ->
                             { fileOpener?.openWith(path, transfer.displayName, null) }
                         }
                     } else null,
