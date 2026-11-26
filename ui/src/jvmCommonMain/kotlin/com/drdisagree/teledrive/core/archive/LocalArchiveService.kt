@@ -57,7 +57,7 @@ class LocalArchiveService(
      * appended so a folder download recreates the in-archive structure —
      * the same destination rule [RemoteArchiveService.extractEntry] applies.
      */
-    fun extractEntry(
+    suspend fun extractEntry(
         file: DriveFile,
         localPath: String,
         format: LocalArchiveFormat,

@@ -7,6 +7,7 @@ import com.drdisagree.teledrive.resources.preview_archive_failed
 import com.drdisagree.teledrive.resources.preview_archive_multi_disk
 import com.drdisagree.teledrive.resources.preview_archive_not_zip
 import com.drdisagree.teledrive.resources.preview_archive_split
+import com.drdisagree.teledrive.resources.preview_epub_drm
 import com.drdisagree.teledrive.resources.preview_fetch_failed
 import com.drdisagree.teledrive.core.archive.ArchiveErrorKind
 import com.drdisagree.teledrive.core.archive.ArchiveException

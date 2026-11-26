@@ -60,8 +60,8 @@ fun hardenedDocumentBuilderFactory(): DocumentBuilderFactory {
             )
         }
     }
-    runCatching { factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_DTD, "") }
-    runCatching { factory.setAttribute(javax.xml.XMLConstants.ACCESS_EXTERNAL_SCHEMA, "") }
+    runCatching { factory.setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "") }
+    runCatching { factory.setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "") }
     return factory
 }
 
