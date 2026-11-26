@@ -128,6 +128,11 @@ class DesktopArchiveQueueGateTest {
      * a latch-blocked read would stall the Main thread the ViewModel runs
      * on and mask the very concurrency this test pins). Disarming restores
      * full coverage and every held read completes.
+     *
+     * This is a REAL implementation (by delegation to the proxy fake), not
+     * a dynamic proxy: a proxy wraps checked exceptions thrown by its
+     * handler in UndeclaredThrowableException, so the coverage-class
+     * [TelegramException] would never reach the byte source as itself.
      */
     private class GatedTelegram(private val bytes: ByteArray) {
         val firstArmedRead = CountDownLatch(1)
@@ -160,33 +165,38 @@ class DesktopArchiveQueueGateTest {
                 )
             }
 
-        val client: TelegramClient = archiveTestProxy { method, args ->
-            when (method) {
-                "resolveFile", "getFileInfo" -> info()
-                "readFilePart" -> {
-                    if (armed.get()) {
-                        firstArmedRead.countDown()
-                        throw TelegramException(400, "not enough downloaded bytes")
-                    }
-                    val offset = (args!![1] as Number).toLong()
-                    val count = (args[2] as Number).toLong()
-                    if (offset >= bytes.size) {
-                        ByteArray(0)
-                    } else {
-                        bytes.copyOfRange(
-                            offset.toInt(),
-                            minOf(offset + count, bytes.size.toLong()).toInt()
-                        )
-                    }
+        private val base: TelegramClient = archiveFakeTelegram(bytes)
+
+        val client: TelegramClient = object : TelegramClient by base {
+            override suspend fun resolveFile(remoteFileId: String): TelegramFileInfo = info()
+
+            override suspend fun resolveFile(
+                remoteFileId: String,
+                chatId: Long?,
+                messageId: Long?
+            ): TelegramFileInfo = info()
+
+            override suspend fun getFileInfo(fileId: Int): TelegramFileInfo = info()
+
+            override suspend fun readFilePart(
+                fileId: Int,
+                offset: Long,
+                count: Long
+            ): ByteArray {
+                if (armed.get()) {
+                    firstArmedRead.countDown()
+                    throw TelegramException(400, "not enough downloaded bytes")
                 }
-                "requestFileRange" -> {
-                    windowOffset.set((args!![1] as Number).toLong())
-                    Unit
-                }
-                "cancelFileDownload" -> Unit
-                "fileUpdates" -> flowOf(info())
-                else -> throw UnsupportedOperationException(method)
+                return base.readFilePart(fileId, offset, count)
             }
+
+            override suspend fun requestFileRange(fileId: Int, offset: Long, limit: Long) {
+                windowOffset.set(offset)
+            }
+
+            override suspend fun cancelFileDownload(fileId: Int) = Unit
+
+            override fun fileUpdates(fileId: Int): Flow<TelegramFileInfo> = flowOf(info())
         }
     }
 
