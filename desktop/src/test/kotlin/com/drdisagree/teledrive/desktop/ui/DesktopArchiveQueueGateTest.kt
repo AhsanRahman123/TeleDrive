@@ -17,6 +17,7 @@ import com.drdisagree.teledrive.core.files.PartialDownload
 import com.drdisagree.teledrive.core.media.ThumbnailStore
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramCredentials
+import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.core.telegram.TelegramFileInfo
 import com.drdisagree.teledrive.data.local.dao.CacheDao
 import com.drdisagree.teledrive.data.local.dao.FilePartDao
@@ -118,21 +119,37 @@ class DesktopArchiveQueueGateTest {
     }
 
     /**
-     * Fake TelegramClient (same shape as [archiveFakeTelegram]) whose ranged
-     * reads can be ARMED: once armed, the first read blocks until released,
-     * holding whichever extraction issued it genuinely in flight.
+     * Fake TelegramClient (same shape as [archiveFakeTelegram]) that can be
+     * ARMED: while armed, every ranged read fails with the coverage-class
+     * Telegram error and the file info reports an active download window at
+     * the last requested offset with zero bytes landed. The byte source
+     * therefore holds the extraction in its suspending 500 ms recheck loop
+     * (a genuinely in-flight extraction that does NOT block any thread —
+     * a latch-blocked read would stall the Main thread the ViewModel runs
+     * on and mask the very concurrency this test pins). Disarming restores
+     * full coverage and every held read completes.
      */
     private class GatedTelegram(private val bytes: ByteArray) {
-        val firstReadEntered = CountDownLatch(1)
-        val releaseReads = CountDownLatch(1)
+        val firstArmedRead = CountDownLatch(1)
         private val armed = AtomicBoolean(false)
-        private val blockConsumed = AtomicBoolean(false)
+        private val windowOffset = java.util.concurrent.atomic.AtomicLong(0)
 
         fun arm() = armed.set(true)
+        fun disarm() = armed.set(false)
 
-        val client: TelegramClient = archiveTestProxy { method, args ->
-            when (method) {
-                "resolveFile", "getFileInfo" -> TelegramFileInfo(
+        private fun info(): TelegramFileInfo =
+            if (armed.get()) {
+                TelegramFileInfo(
+                    fileId = 7,
+                    sizeBytes = bytes.size.toLong(),
+                    localPath = null,
+                    isDownloadingCompleted = false,
+                    isDownloadingActive = true,
+                    downloadOffset = windowOffset.get(),
+                    downloadedPrefixSize = 0
+                )
+            } else {
+                TelegramFileInfo(
                     fileId = 7,
                     sizeBytes = bytes.size.toLong(),
                     localPath = null,
@@ -141,10 +158,15 @@ class DesktopArchiveQueueGateTest {
                     downloadOffset = 0,
                     downloadedPrefixSize = bytes.size.toLong()
                 )
+            }
+
+        val client: TelegramClient = archiveTestProxy { method, args ->
+            when (method) {
+                "resolveFile", "getFileInfo" -> info()
                 "readFilePart" -> {
-                    if (armed.get() && blockConsumed.compareAndSet(false, true)) {
-                        firstReadEntered.countDown()
-                        releaseReads.await(60, TimeUnit.SECONDS)
+                    if (armed.get()) {
+                        firstArmedRead.countDown()
+                        throw TelegramException(400, "not enough downloaded bytes")
                     }
                     val offset = (args!![1] as Number).toLong()
                     val count = (args[2] as Number).toLong()
@@ -157,18 +179,12 @@ class DesktopArchiveQueueGateTest {
                         )
                     }
                 }
-                "requestFileRange", "cancelFileDownload" -> Unit
-                "fileUpdates" -> flowOf(
-                    TelegramFileInfo(
-                        fileId = 7,
-                        sizeBytes = bytes.size.toLong(),
-                        localPath = null,
-                        isDownloadingCompleted = true,
-                        isDownloadingActive = false,
-                        downloadOffset = 0,
-                        downloadedPrefixSize = bytes.size.toLong()
-                    )
-                )
+                "requestFileRange" -> {
+                    windowOffset.set((args!![1] as Number).toLong())
+                    Unit
+                }
+                "cancelFileDownload" -> Unit
+                "fileUpdates" -> flowOf(info())
                 else -> throw UnsupportedOperationException(method)
             }
         }
@@ -437,12 +453,12 @@ class DesktopArchiveQueueGateTest {
         val vm = h.viewModel
 
         // Start the preview and hold its extraction in flight inside the
-        // fake Telegram client's first ranged read.
+        // byte source's coverage-wait loop.
         gated.arm()
         vm.previewArchiveEntry(h.file, 0)
         assertTrue(
             "preview extraction never reached the fake Telegram read",
-            gated.firstReadEntered.await(15, TimeUnit.SECONDS)
+            gated.firstArmedRead.await(15, TimeUnit.SECONDS)
         )
         waitUntil("preview busy index") { vm.uiState.value.archiveEntryBusyIndex == 0 }
 
@@ -465,7 +481,7 @@ class DesktopArchiveQueueGateTest {
         assertEquals(0, vm.uiState.value.archiveEntryBusyIndex)
 
         // Release the preview: it publishes, then the queued download runs.
-        gated.releaseReads.countDown()
+        gated.disarm()
         waitUntil("preview published") { vm.uiState.value.archivePreview != null }
         waitUntil("download written after preview finished") {
             writer.writtenNames == listOf("two.bin")
