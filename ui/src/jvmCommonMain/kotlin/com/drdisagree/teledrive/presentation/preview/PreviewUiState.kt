@@ -13,6 +13,14 @@ data class PreviewUiState(
     val archiveListings: Map<String, List<ArchiveEntry>> = emptyMap(),
     /** An extracted archive entry being viewed/played/read in place, if any. */
     val archivePreview: ArchiveEntryPreview? = null,
+    /** The in-zip preview pager sequence: listing indices of the archive's previewable entries, in list order. */
+    val archivePreviewEntries: List<Int> = emptyList(),
+    /** Position of [archivePreview] within [archivePreviewEntries]; -1 when no preview is open. */
+    val archivePreviewPosition: Int = -1,
+    /** The ZIP file (DriveFile id) the open in-zip preview belongs to, so a swipe can extract the next entry from the same archive. */
+    val archivePreviewFileId: String? = null,
+    /** A pager step is extracting its entry; the current page stays up (or shows loading) until it lands. */
+    val archivePreviewLoading: Boolean = false,
     /** Progress of a multi-entry archive download: finished steps out of the plan total. */
     val archiveBatchProgress: ArchiveBatchProgress? = null
 )
@@ -21,9 +29,26 @@ data class PreviewUiState(
 sealed interface ArchiveEntryPreview {
     val name: String
 
-    data class Image(override val name: String, val path: String) : ArchiveEntryPreview
-    data class Audio(override val name: String, val path: String) : ArchiveEntryPreview
-    data class Text(override val name: String, val text: String) : ArchiveEntryPreview
+    /** Listing index of the entry this preview was extracted from (its pager identity). */
+    val entryIndex: Int
+
+    data class Image(
+        override val name: String,
+        val path: String,
+        override val entryIndex: Int
+    ) : ArchiveEntryPreview
+
+    data class Audio(
+        override val name: String,
+        val path: String,
+        override val entryIndex: Int
+    ) : ArchiveEntryPreview
+
+    data class Text(
+        override val name: String,
+        val text: String,
+        override val entryIndex: Int
+    ) : ArchiveEntryPreview
 }
 
 data class ArchiveBatchProgress(val done: Int, val total: Int)

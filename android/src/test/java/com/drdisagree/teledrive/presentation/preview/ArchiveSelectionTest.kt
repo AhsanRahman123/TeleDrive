@@ -358,4 +358,87 @@ class ArchiveSelectionTest {
         val plan = planArchiveDownloads(listing, pruned)
         assertEquals(listOf(1 to 0, 3 to 1), plan.map { it.entryIndex to it.occurrence })
     }
+
+    // ---- Preview pager data source (vc180) ----
+
+    @Test
+    fun `previewable means image, audio, or text within the cap`() {
+        assertTrue(archiveEntryPreviewable(entry("photo.png")))
+        assertTrue(archiveEntryPreviewable(entry("song.mp3")))
+        assertTrue(archiveEntryPreviewable(entry("notes.txt", size = ARCHIVE_TEXT_PREVIEW_MAX_BYTES)))
+        // An oversized text entry has no page: on tap it only shows the too-large message.
+        assertFalse(archiveEntryPreviewable(entry("notes.txt", size = ARCHIVE_TEXT_PREVIEW_MAX_BYTES + 1)))
+        // Download-only types are skipped, never shown as placeholder pages.
+        assertFalse(archiveEntryPreviewable(entry("movie.mp4")))
+        assertFalse(archiveEntryPreviewable(entry("blob.zip")))
+        assertFalse(archiveEntryPreviewable(entry("dir/", isDirectory = true)))
+    }
+
+    @Test
+    fun `pager follows the displayed order and skips download-only entries`() {
+        val listing = listOf(
+            entry("b/photo2.png", 1),                                        // 0 image
+            entry("a/song.mp3", 2),                                          // 1 audio
+            entry("b/movie.mp4", 3),                                         // 2 video: skipped
+            entry("a/notes.txt", 4),                                         // 3 text
+            entry("root.gif", 5),                                            // 4 image
+            entry("big.txt", ARCHIVE_TEXT_PREVIEW_MAX_BYTES + 1),            // 5 oversized text: skipped
+            entry("a/", 0, isDirectory = true)                               // 6 directory: no page
+        )
+        // Fully expanded NAME-ascending rows: a/notes(3), a/song(1), b/movie(2),
+        // b/photo2(0), big(5), root(4) — folders first per level, files by name.
+        assertEquals(listOf(3, 1, 0, 4), archivePreviewPagerIndices(listing))
+    }
+
+    @Test
+    fun `pager order follows the archive sort`() {
+        val listing = listOf(
+            entry("a.png", 30),
+            entry("b.mp3", 10),
+            entry("c.txt", 20)
+        )
+        assertEquals(
+            listOf(0, 2, 1),
+            archivePreviewPagerIndices(listing, FileSortField.SIZE, SortDirection.DESCENDING)
+        )
+        assertEquals(
+            listOf(1, 2, 0),
+            archivePreviewPagerIndices(listing, FileSortField.SIZE, SortDirection.ASCENDING)
+        )
+    }
+
+    @Test
+    fun `pager keeps duplicate names as separate pages`() {
+        val listing = listOf(entry("dup.png", 1), entry("dup.png", 2), entry("other.png", 3))
+        val pager = archivePreviewPagerIndices(listing)
+        assertEquals(listOf(0, 1, 2), pager)
+        assertEquals(1, archivePreviewPagerPosition(pager, 1))
+    }
+
+    @Test
+    fun `pager is empty when nothing is previewable`() {
+        assertEquals(emptyList<Int>(), archivePreviewPagerIndices(emptyList()))
+        assertEquals(
+            emptyList<Int>(),
+            archivePreviewPagerIndices(listOf(entry("movie.mp4"), entry("blob.zip")))
+        )
+        // A download-only entry has no position in the sequence.
+        assertEquals(-1, archivePreviewPagerPosition(listOf(0, 2), 1))
+    }
+
+    @Test
+    fun `pager target clamps at both ends without wrapping`() {
+        assertEquals(1, archivePreviewPagerTarget(pagerSize = 3, position = 0, delta = 1))
+        assertEquals(1, archivePreviewPagerTarget(pagerSize = 3, position = 2, delta = -1))
+        assertEquals(null, archivePreviewPagerTarget(pagerSize = 3, position = 0, delta = -1))
+        assertEquals(null, archivePreviewPagerTarget(pagerSize = 3, position = 2, delta = 1))
+        // A fast swipe can settle more than one page away: the full delta applies…
+        assertEquals(4, archivePreviewPagerTarget(pagerSize = 5, position = 1, delta = 3))
+        // …but never past the end.
+        assertEquals(null, archivePreviewPagerTarget(pagerSize = 5, position = 1, delta = 4))
+        // Empty sequence and unknown positions stay put.
+        assertEquals(null, archivePreviewPagerTarget(pagerSize = 0, position = 0, delta = 1))
+        assertEquals(null, archivePreviewPagerTarget(pagerSize = 3, position = -1, delta = 1))
+        assertEquals(null, archivePreviewPagerTarget(pagerSize = 3, position = 3, delta = -1))
+    }
 }

@@ -93,6 +93,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -107,6 +108,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 import androidx.core.content.FileProvider
@@ -629,6 +631,9 @@ fun PreviewScreen(
             state.archivePreview?.let { preview ->
                 ArchiveEntryPreviewOverlay(
                     preview = preview,
+                    pagerCount = state.archivePreviewEntries.size.coerceAtLeast(1),
+                    pagerPosition = state.archivePreviewPosition.coerceAtLeast(0),
+                    onPageSelected = viewModel::onArchivePreviewPageSelected,
                     dataSourceFactory = dataSourceFactory,
                     onDismiss = stepBack
                 )
@@ -960,48 +965,84 @@ private fun PreviewPage(
 /**
  * An archive entry opened in place: the verified temp extraction shown with the app's own
  * image viewer / audio player / text view. Read-only; closing deletes the temp file.
+ *
+ * The content sits in the same HorizontalPager the Files viewer uses: swiping steps
+ * through the zip's previewable entries (the view model extracts each page on demand
+ * and publishes it as the current preview), a page that is not the current preview yet
+ * shows the preview's own loading state, and the current page keeps its exact previous
+ * rendering — zoomable image, audio player, scrolling text.
  */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun ArchiveEntryPreviewOverlay(
     preview: ArchiveEntryPreview,
+    pagerCount: Int,
+    pagerPosition: Int,
+    onPageSelected: (Int) -> Unit,
     dataSourceFactory: TelegramDataSourceFactory,
     onDismiss: () -> Unit
 ) {
     val overlaySession = remember(preview) { PlayerSession() }
+    val pagerState = rememberPagerState(
+        initialPage = pagerPosition,
+        pageCount = { pagerCount }
+    )
+    // A settled swipe is reported once; the view model extracts that entry and only
+    // then moves pagerPosition, so this also scrolls the pager if a step was refused
+    // or the user swiped back to the page already shown.
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }
+            .distinctUntilChanged()
+            .collect { page -> onPageSelected(page) }
+    }
+    LaunchedEffect(pagerPosition) {
+        if (pagerState.currentPage != pagerPosition && !pagerState.isScrollInProgress) {
+            pagerState.scrollToPage(pagerPosition)
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        when (preview) {
-            is ArchiveEntryPreview.Image -> ZoomableImage(
-                model = File(preview.path),
-                contentDescription = preview.name,
-                modifier = Modifier.fillMaxSize()
-            )
+        HorizontalPager(
+            state = pagerState,
+            beyondViewportPageCount = 0,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            if (page != pagerPosition) {
+                LoadingState()
+            } else {
+                when (preview) {
+                    is ArchiveEntryPreview.Image -> ZoomableImage(
+                        model = File(preview.path),
+                        contentDescription = preview.name,
+                        modifier = Modifier.fillMaxSize()
+                    )
 
-            is ArchiveEntryPreview.Audio -> MediaPlayer(
-                content = PreviewContent.LocalMedia(preview.path, isAudio = true),
-                title = preview.name,
-                fileId = "archive-entry-${preview.name}",
-                dataSourceFactory = dataSourceFactory,
-                isActivePage = true,
-                session = overlaySession
-            )
+                    is ArchiveEntryPreview.Audio -> MediaPlayer(
+                        content = PreviewContent.LocalMedia(preview.path, isAudio = true),
+                        title = preview.name,
+                        fileId = "archive-entry-${preview.name}",
+                        dataSourceFactory = dataSourceFactory,
+                        isActivePage = true,
+                        session = overlaySession
+                    )
 
-            is ArchiveEntryPreview.Text -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(previewContentPadding())
-            ) {
-                Text(
-                    text = preview.text,
-                    style = MaterialTheme.typography.bodySmall
-                        .copy(fontFamily = FontFamily.Monospace)
-                        .copy(color = MaterialTheme.colorScheme.onSurface)
-                )
+                    is ArchiveEntryPreview.Text -> Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(previewContentPadding())
+                    ) {
+                        Text(
+                            text = preview.text,
+                            style = MaterialTheme.typography.bodySmall
+                                .copy(fontFamily = FontFamily.Monospace)
+                                .copy(color = MaterialTheme.colorScheme.onSurface)
+                        )
+                    }
+                }
             }
         }
         Surface(
@@ -1022,12 +1063,22 @@ private fun ArchiveEntryPreviewOverlay(
                         contentDescription = stringResource(Res.string.common_back)
                     )
                 }
-                Text(
-                    text = preview.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Column {
+                    Text(
+                        text = preview.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (pagerCount > 1) {
+                        Text(
+                            text = "${pagerPosition + 1}/$pagerCount",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
         }
     }
