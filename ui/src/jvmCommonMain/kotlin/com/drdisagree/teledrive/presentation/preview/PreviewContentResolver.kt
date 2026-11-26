@@ -222,18 +222,64 @@ class PreviewContentResolver(
         PreviewContent.Failed(Res.string.preview_archive_failed)
     }
 
-    private suspend fun fromLocal(file: DriveFile, path: String): PreviewContent = when {
-        MimeTypes.isImage(file.mimeType) || file.category == FileCategory.IMAGE ->
+    /**
+     * Preview an arbitrary saved local file (vc181: a completed Transfers row
+     * with no drive file id, e.g. an in-zip download). The mime/category are
+     * derived from [displayName] alone, then the exact same local dispatch as
+     * the Files preview runs. A stale path whose file was deleted fails
+     * cleanly with [Res.string.preview_no_copy_available] instead of crashing
+     * or hanging in a renderer.
+     */
+    fun resolveLocalPath(path: String, displayName: String): Flow<PreviewContent> = flow {
+        emit(PreviewContent.Loading)
+        if (!File(path).exists()) {
+            emit(PreviewContent.Failed(Res.string.preview_no_copy_available))
+            return@flow
+        }
+        val mimeType = MimeTypes.fromFileName(displayName)
+        emit(
+            fromLocal(
+                mimeType = mimeType,
+                category = FileCategory.fromMimeType(mimeType),
+                fileName = displayName,
+                path = path
+            )
+        )
+    }
+        .catch { failure ->
+            SafeLog.w(TAG, "Local preview failed", failure)
+            emit(PreviewContent.Failed(Res.string.preview_fetch_failed))
+        }
+        .flowOn(dispatchers.io)
+
+    private suspend fun fromLocal(file: DriveFile, path: String): PreviewContent =
+        fromLocal(
+            mimeType = file.mimeType,
+            category = file.category,
+            fileName = file.name,
+            path = path
+        )
+
+    // Branch order is load-bearing and unchanged from the original
+    // DriveFile-keyed dispatch: image -> video -> audio -> pdf -> text ->
+    // archive -> apk -> unsupported.
+    private suspend fun fromLocal(
+        mimeType: String,
+        category: FileCategory,
+        fileName: String,
+        path: String
+    ): PreviewContent = when {
+        MimeTypes.isImage(mimeType) || category == FileCategory.IMAGE ->
             PreviewContent.Image(File(path))
-        MimeTypes.isVideo(file.mimeType) || file.category == FileCategory.VIDEO ->
+        MimeTypes.isVideo(mimeType) || category == FileCategory.VIDEO ->
             PreviewContent.LocalMedia(path, isAudio = false)
-        MimeTypes.isAudio(file.mimeType) || file.category == FileCategory.AUDIO ->
+        MimeTypes.isAudio(mimeType) || category == FileCategory.AUDIO ->
             PreviewContent.LocalMedia(path, isAudio = true)
-        MimeTypes.isPdf(file.mimeType) -> PreviewContent.Pdf(path)
-        MimeTypes.isText(file.mimeType) -> readText(path)
-        MimeTypes.isArchive(file.mimeType) || file.category == FileCategory.ARCHIVE ->
-            readArchive(file, path)
-        MimeTypes.isApk(file.mimeType, file.name) -> readApk(path)
+        MimeTypes.isPdf(mimeType) -> PreviewContent.Pdf(path)
+        MimeTypes.isText(mimeType) -> readText(path)
+        MimeTypes.isArchive(mimeType) || category == FileCategory.ARCHIVE ->
+            readArchive(mimeType, path)
+        MimeTypes.isApk(mimeType, fileName) -> readApk(path)
         else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
     }
 
@@ -311,8 +357,8 @@ class PreviewContentResolver(
         }
     }
 
-    private suspend fun readArchive(file: DriveFile, path: String): PreviewContent =
-        when (file.mimeType) {
+    private suspend fun readArchive(mimeType: String, path: String): PreviewContent =
+        when (mimeType) {
             "application/zip" -> readLocalZip(path)
 
             "application/x-7z-compressed" -> runCatching {
