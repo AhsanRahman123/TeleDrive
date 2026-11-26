@@ -44,6 +44,34 @@ class ArchiveSelectionTest {
     }
 
     @Test
+    fun `pdf entries preview in place within the size cap and join the pager`() {
+        assertEquals(ArchiveEntryTapAction.PREVIEW_PDF, archiveEntryTapAction(entry("docs/book.pdf")))
+        assertTrue(archiveEntryPdfPreviewable(entry("docs/book.pdf", size = ARCHIVE_PDF_PREVIEW_MAX_BYTES)))
+        assertFalse(
+            archiveEntryPdfPreviewable(entry("docs/book.pdf", size = ARCHIVE_PDF_PREVIEW_MAX_BYTES + 1))
+        )
+        assertTrue(archiveEntryPreviewable(entry("docs/book.pdf")))
+        assertFalse(archiveEntryPreviewable(entry("docs/book.pdf", size = ARCHIVE_PDF_PREVIEW_MAX_BYTES + 1)))
+        // Subtitles route as text now (B7).
+        assertEquals(ArchiveEntryTapAction.PREVIEW_TEXT, archiveEntryTapAction(entry("subs/movie.srt")))
+        assertEquals(ArchiveEntryTapAction.PREVIEW_TEXT, archiveEntryTapAction(entry("subs/movie.vtt")))
+        // EPUB + OOXML extract as document text (B8/B9); legacy Office stays download-only.
+        assertEquals(ArchiveEntryTapAction.PREVIEW_DOCUMENT, archiveEntryTapAction(entry("books/novel.epub")))
+        assertEquals(ArchiveEntryTapAction.PREVIEW_DOCUMENT, archiveEntryTapAction(entry("docs/report.docx")))
+        assertEquals(ArchiveEntryTapAction.PREVIEW_DOCUMENT, archiveEntryTapAction(entry("docs/sheet.xlsx")))
+        assertEquals(ArchiveEntryTapAction.PREVIEW_DOCUMENT, archiveEntryTapAction(entry("docs/deck.pptx")))
+        assertTrue(archiveEntryPreviewable(entry("books/novel.epub")))
+        assertFalse(
+            archiveEntryPreviewable(
+                entry("books/novel.epub", size = ARCHIVE_DOCUMENT_PREVIEW_MAX_BYTES + 1)
+            )
+        )
+        assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("docs/old.doc")))
+        assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("docs/old.xls")))
+        assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("docs/old.ppt")))
+    }
+
+    @Test
     fun `text entries preview only within the size cap`() {
         assertEquals(ArchiveEntryTapAction.PREVIEW_TEXT, archiveEntryTapAction(entry("notes.txt")))
         assertEquals(ArchiveEntryTapAction.PREVIEW_TEXT, archiveEntryTapAction(entry("readme.md")))

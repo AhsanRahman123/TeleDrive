@@ -14,7 +14,9 @@ import com.drdisagree.teledrive.domain.model.SortDirection
  */
 
 /** What a tap on a file row does. Video is deliberately DOWNLOAD: it never plays in-archive. */
-enum class ArchiveEntryTapAction { PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, DOWNLOAD }
+enum class ArchiveEntryTapAction {
+    PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, PREVIEW_PDF, PREVIEW_DOCUMENT, DOWNLOAD
+}
 
 fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
     if (entry.isDirectory) return ArchiveEntryTapAction.DOWNLOAD
@@ -22,6 +24,10 @@ fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
     return when {
         MimeTypes.isImage(mimeType) -> ArchiveEntryTapAction.PREVIEW_IMAGE
         MimeTypes.isAudio(mimeType) -> ArchiveEntryTapAction.PLAY_AUDIO
+        MimeTypes.isPdf(mimeType) -> ArchiveEntryTapAction.PREVIEW_PDF
+        // EPUB and the OOXML trio extract to readable text from the extracted temp file.
+        MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType) ->
+            ArchiveEntryTapAction.PREVIEW_DOCUMENT
         // The app's own text classification (MimeTypes.isText) decides what counts as text.
         MimeTypes.isText(mimeType) -> ArchiveEntryTapAction.PREVIEW_TEXT
         // Video and everything else stay download-only.
@@ -40,6 +46,8 @@ fun archiveEntryPreviewable(entry: ArchiveEntry): Boolean =
         ArchiveEntryTapAction.PREVIEW_IMAGE,
         ArchiveEntryTapAction.PLAY_AUDIO -> true
         ArchiveEntryTapAction.PREVIEW_TEXT -> archiveEntryTextPreviewable(entry)
+        ArchiveEntryTapAction.PREVIEW_PDF -> archiveEntryPdfPreviewable(entry)
+        ArchiveEntryTapAction.PREVIEW_DOCUMENT -> archiveEntryDocumentPreviewable(entry)
         ArchiveEntryTapAction.DOWNLOAD -> false
     }
 
@@ -87,6 +95,22 @@ fun archivePreviewPagerTarget(pagerSize: Int, position: Int, delta: Int): Int? {
 
 /** Largest entry offered an in-archive text preview: 2 MiB of extracted text. */
 const val ARCHIVE_TEXT_PREVIEW_MAX_BYTES: Long = 2L * 1024 * 1024
+
+/** Largest entry offered an in-archive PDF preview: 50 MiB of extracted PDF. */
+const val ARCHIVE_PDF_PREVIEW_MAX_BYTES: Long = 50L * 1024 * 1024
+
+/** True when [entry] may be previewed as a PDF: right type AND within the size cap. */
+fun archiveEntryPdfPreviewable(entry: ArchiveEntry): Boolean =
+    archiveEntryTapAction(entry) == ArchiveEntryTapAction.PREVIEW_PDF &&
+        entry.sizeBytes <= ARCHIVE_PDF_PREVIEW_MAX_BYTES
+
+/** Largest entry offered an in-archive document (EPUB/OOXML) text extraction: 20 MiB. */
+const val ARCHIVE_DOCUMENT_PREVIEW_MAX_BYTES: Long = 20L * 1024 * 1024
+
+/** True when [entry] may be extracted as document text: right type AND within the cap. */
+fun archiveEntryDocumentPreviewable(entry: ArchiveEntry): Boolean =
+    archiveEntryTapAction(entry) == ArchiveEntryTapAction.PREVIEW_DOCUMENT &&
+        entry.sizeBytes <= ARCHIVE_DOCUMENT_PREVIEW_MAX_BYTES
 
 /** True when [entry] may be previewed as text: right type AND within the size cap. */
 fun archiveEntryTextPreviewable(entry: ArchiveEntry): Boolean =
