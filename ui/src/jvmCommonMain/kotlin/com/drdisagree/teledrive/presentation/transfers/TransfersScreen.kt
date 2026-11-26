@@ -50,6 +50,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -62,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import java.util.Date
 import androidx.compose.ui.Alignment
@@ -87,6 +90,8 @@ import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.collectionCommandShortcuts
+import com.drdisagree.teledrive.presentation.components.ctrlClickSelect
+import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.rememberCollectionCommandFocusRequester
 import com.drdisagree.teledrive.presentation.components.RegisterWindowSelectAll
 import com.drdisagree.teledrive.presentation.components.TextInputFocusTracker
@@ -100,6 +105,7 @@ import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollecti
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
 import com.drdisagree.teledrive.presentation.platform.LocalFileOpener
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
@@ -140,6 +146,7 @@ import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import kotlin.math.abs
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -161,6 +168,13 @@ fun TransfersScreen(
     var downloadDraft by remember { mutableIntStateOf(downloadConcurrency) }
     var confirmClearFinished by remember { mutableStateOf(false) }
     var confirmCancelAll by remember { mutableStateOf(false) }
+    var confirmRemoveAllFailed by remember { mutableStateOf(false) }
+    // Bulk-action outcomes and Open with failures are SHOWN here, never
+    // swallowed (field notes 3 and 6).
+    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarScope = rememberCoroutineScope()
+    // The selection snapshot a drag-select gesture paints onto (Files rule).
+    var dragSelectionBase by remember { mutableStateOf(emptySet<String>()) }
     var showMenu by remember { mutableStateOf(false) }
     var showTransferSettings by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -181,6 +195,12 @@ fun TransfersScreen(
         while (true) {
             speedClock = System.currentTimeMillis()
             delay(1_000L)
+        }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.userMessages.collect { message ->
+            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -267,10 +287,26 @@ fun TransfersScreen(
         )
     }
 
+    if (confirmRemoveAllFailed) {
+        ConfirmDialog(
+            title = "Remove all failed transfers?",
+            message = "Every failed entry will be removed from Transfers. " +
+                "The files themselves are not deleted.",
+            confirmLabel = "Remove",
+            destructive = true,
+            onConfirm = {
+                confirmRemoveAllFailed = false
+                viewModel.removeAllFailed()
+            },
+            onDismiss = { confirmRemoveAllFailed = false }
+        )
+    }
+
     val listState = rememberLazyListState()
     val lifted by rememberToolbarLift(listState)
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 colors = liftedTopAppBarColors(lifted),
@@ -434,6 +470,48 @@ fun TransfersScreen(
                 if (total > transfers.size) add(null)
             }
         }
+        // The LazyColumn's item space, parallel to the items emitted below:
+        // the toolbar slot first, then per section a header slot, its rows,
+        // and a "more" slot when the section is truncated (plus the
+        // empty-filter slot when nothing matches). Drag selection paints in
+        // this space and translates through it — the same shape the ZIP
+        // viewer's drag selection uses (report 54, Worker 2).
+        val listRows: List<TransferTask?> = buildList {
+            add(null)
+            if (visibleTransfers.isEmpty()) add(null)
+            listOf(
+                visibleActive to activeTotal,
+                visiblePaused to pausedTotal,
+                visibleFailed to failedTotal,
+                visibleCompleted to completedTotal
+            ).forEach { (transfers, total) ->
+                if (transfers.isEmpty()) return@forEach
+                add(null)
+                addAll(transfers)
+                if (total > transfers.size) add(null)
+            }
+        }
+        // Files-grade drag selection (field note 3), attached on desktop
+        // only — the capability gate the codebase already uses for
+        // desktop-only selection gestures (ctrlClickSelect does the same).
+        // Android keeps its checkbox selection exactly as before.
+        val dragSelect = rememberDragSelect(
+            listState = listState,
+            onStart = { dragSelectionBase = selectedTransferIds },
+            isSelected = { listIndex ->
+                transferDragAnchorSelected(listRows, listIndex, selectedTransferIds)
+            },
+            onRange = { range, shouldSelect ->
+                selectedTransferIds = applyTransferDragRange(
+                    listRows, range, dragSelectionBase, shouldSelect
+                )
+            },
+            onEnd = { },
+            mouseDragAddsToSelection = false,
+            resolveNearestVisibleItem = true
+        )
+        val isDesktopPlatform =
+            !LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
         val keyboard = rememberKeyboardCollection(listState) { rows.getOrNull(it) != null }
         val commandFocusRequester = rememberCollectionCommandFocusRequester()
         val shortcuts = CollectionShortcuts(
@@ -444,6 +522,18 @@ fun TransfersScreen(
                 } else {
                     selectedTransferIds + visibleIds
                 }
+            },
+            // Files-grade keyboard selection (field note 3): Space toggles
+            // the focused row, Escape clears the selection. Both were
+            // unwired here, so the keys did nothing in Transfers.
+            onToggleSelect = { index ->
+                selectedTransferIds =
+                    toggleTransferSelection(selectedTransferIds, rows.getOrNull(index))
+            },
+            onClear = if (selectedTransferIds.isNotEmpty()) {
+                { selectedTransferIds = emptySet() }
+            } else {
+                null
             },
             onDelete = { index ->
                 rows.getOrNull(index)
@@ -553,7 +643,8 @@ fun TransfersScreen(
                     focusRequester = commandFocusRequester,
                     onSelectAll = transfersSelectAllShortcut
                 )
-                .keyboardCollection(keyboard, rows.count { it != null }, shortcuts),
+                .keyboardCollection(keyboard, rows.count { it != null }, shortcuts)
+                .then(if (isDesktopPlatform) dragSelect else Modifier),
             contentPadding = padding.add(horizontal = 16.dp, top = 16.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
 ) {
@@ -706,6 +797,22 @@ fun TransfersScreen(
                             }, enabled = selectedTransfers.any { !it.state.isTerminal }) {
                                 Text("Cancel")
                             }
+                            if (selectedTransfers.any { it.state.isTerminal }) {
+                                // Terminal records (FAILED above all) cannot be
+                                // cancelled — they are REMOVED (field note 3).
+                                // Until now a selection of only failed rows had
+                                // no working action at all.
+                                TextButton(onClick = {
+                                    val terminalIds = selectedTransfers
+                                        .filter { it.state.isTerminal }
+                                        .map { it.id }
+                                    viewModel.removeSelected(terminalIds)
+                                    selectedTransferIds =
+                                        selectedTransferIds - terminalIds.toSet()
+                                }) {
+                                    Text("Remove")
+                                }
+                            }
                             TextButton(onClick = { selectedTransferIds = emptySet() }) { Text("Clear") }
                         }
                     }
@@ -763,7 +870,20 @@ fun TransfersScreen(
                     modifier = itemModifier(transfer)
                 )
             }
-            section("failed", failedTitle, visibleFailed, failedTotal) { transfer ->
+            section(
+                "failed", failedTitle, visibleFailed, failedTotal,
+                headerActions = {
+                    // The failed group's bulk actions (field note 3): retry
+                    // every failed record, or remove them all. "Remove" is
+                    // what "cancel" means for a record that already failed.
+                    TextButton(onClick = { viewModel.retryAllFailed() }) {
+                        Text("Retry all")
+                    }
+                    TextButton(onClick = { confirmRemoveAllFailed = true }) {
+                        Text("Remove all")
+                    }
+                }
+            ) { transfer ->
                 TransferRow(
                     transfer = transfer,
                     primaryIcon = Icons.Filled.Refresh,
@@ -785,15 +905,25 @@ fun TransfersScreen(
                 TransferRow(
                     transfer = transfer,
                     onOpenInApp = transfer.fileId?.let { id -> { onOpenFile(id) } },
-                    onOpenWith = transfer.localPath?.takeIf { fileOpener != null }?.let { path ->
+                    onOpenWith = transferOpenWithPath(transfer)?.takeIf { fileOpener != null }?.let { path ->
                         {
                             // Use the opener's real result: if the chooser
                             // could not open the file, reveal it in the file
-                            // manager instead of silently doing nothing.
+                            // manager AND say so — a failure is never silent
+                            // (field note 6).
                             val opened = fileOpener?.openWith(
                                 path, transfer.displayName, null
                             ) ?: false
-                            if (!opened) fileRevealer?.reveal(path)
+                            if (!opened) {
+                                fileRevealer?.reveal(path)
+                                snackbarScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        "Couldn't open ${transfer.displayName} — " +
+                                            "the saved file could not be opened. " +
+                                            "It may have been moved or deleted."
+                                    )
+                                }
+                            }
                         }
                     },
                     onShowInFolder = transfer.localPath?.takeIf { fileRevealer != null }?.let { path ->
@@ -877,17 +1007,25 @@ private fun LazyListScope.section(
     title: String,
     transfers: List<TransferTask>,
     total: Int,
+    headerActions: (@Composable () -> Unit)? = null,
     content: @Composable (TransferTask) -> Unit
 ) {
     if (transfers.isEmpty()) return
     item(key = "header-$sectionKey", contentType = "section-header") {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier
-                .padding(top = 8.dp, bottom = 2.dp)
-                .semantics { heading() }
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(top = 8.dp, bottom = 2.dp)
+                    .semantics { heading() }
+            )
+            headerActions?.invoke()
+        }
     }
     items(
         transfers,
@@ -974,6 +1112,16 @@ private fun TransferRow(
             .clip(MaterialTheme.shapes.large)
             .indication(interactionSource, ripple())
             .focusable(interactionSource = interactionSource)
+            // Ctrl+click toggles selection, the Files rows' gesture (field
+            // note 3). The modifier self-gates to desktop; Android rows are
+            // untouched.
+            .then(
+                if (onSelect != null) {
+                    Modifier.ctrlClickSelect { onSelect(!selected) }
+                } else {
+                    Modifier
+                }
+            )
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1098,6 +1246,34 @@ private fun TransferRow(
                                     onClick = {
                                         showRowMenu = false
                                         details()
+                                    }
+                                )
+                            }
+                            onCancel?.let { cancel ->
+                                // This callback was passed by every section
+                                // but never rendered, so a row had no cancel
+                                // or remove action in its menu at all. For a
+                                // terminal row (FAILED above all) the same
+                                // repository call removes the record.
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (transfer.state.isTerminal) {
+                                                "Remove record"
+                                            } else {
+                                                "Cancel transfer"
+                                            }
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Filled.Cancel,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showRowMenu = false
+                                        cancel()
                                     }
                                 )
                             }

@@ -99,6 +99,15 @@ class TransfersViewModel(
 
     fun retrySelected(ids: List<String>) = store.retrySelected(ids)
 
+    fun removeSelected(ids: List<String>) = store.removeSelected(ids)
+
+    fun retryAllFailed() = store.retryAllFailed()
+
+    fun removeAllFailed() = store.removeAllFailed()
+
+    /** One-line bulk-action outcomes the screen shows in its snackbar. */
+    val userMessages = store.userMessages
+
     fun pauseAll() = store.pauseAll()
 
     fun resumeAll() = store.resumeAll()

@@ -11,8 +11,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
@@ -182,7 +185,33 @@ class TransfersStore(
     }
 
     fun retrySelected(ids: List<String>) = launch {
-        ids.forEach { transferRepository.retry(it) }
+        val outcome = transferRepository.retryFailedTransfers(ids)
+        if (outcome.skippedArchiveDownloads > 0) {
+            _userMessages.emit(archiveRetrySkipMessage(outcome.skippedArchiveDownloads))
+        }
+    }
+
+    /** Removes the selected terminal records (field note 3: selected FAILED rows). */
+    fun removeSelected(ids: List<String>) = launch {
+        transferRepository.deleteTransfers(ids)
+    }
+
+    /** "Retry all" for the failed group: engine rows re-queue, archive rows are reported as skipped. */
+    fun retryAllFailed() = launch {
+        val outcome = transferRepository.retryAllFailed()
+        val message = retryAllFailedMessage(outcome.requeued, outcome.skippedArchiveDownloads)
+        if (message != null) _userMessages.emit(message)
+    }
+
+    /** "Remove all" for the failed group: every FAILED record is removed. */
+    fun removeAllFailed() = launch {
+        val removed = transferRepository.removeAllFailed()
+        if (removed > 0) {
+            _userMessages.emit(
+                if (removed == 1) "Removed 1 failed transfer."
+                else "Removed $removed failed transfers."
+            )
+        }
     }
 
     fun pauseAll() = launch { transferRepository.pauseAll() }
@@ -192,6 +221,14 @@ class TransfersStore(
     fun cancelAll() = launch { transferRepository.cancelAll() }
 
     fun clearFinished() = launch { transferRepository.clearFinished() }
+
+    /**
+     * One-line outcomes the screen must SHOW, never swallow (field notes 3
+     * and 6): bulk-retry results and the archive-retry skip. The screen
+     * collects this into its snackbar.
+     */
+    private val _userMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val userMessages: SharedFlow<String> = _userMessages.asSharedFlow()
 
     private fun launch(block: suspend () -> Unit) {
         scope.launch { block() }
@@ -217,6 +254,30 @@ class TransfersStore(
         /** ETA sampling cadence: fast enough to feel live, slow enough to be free. */
         const val ETA_SAMPLE_MS = 1_000L
     }
+}
+
+/**
+ * The plain message for skipped archive downloads in a bulk retry (field
+ * note 3): a failed in-ZIP download retains no archive or entry identity, so
+ * it cannot be retried — the user downloads it again from its ZIP.
+ */
+internal fun archiveRetrySkipMessage(skipped: Int): String =
+    if (skipped == 1) {
+        "1 failed ZIP download can't be retried — download it again from its ZIP."
+    } else {
+        "$skipped failed ZIP downloads can't be retried — download them again from their ZIP."
+    }
+
+/** The one-line result of "Retry all failed"; null when there was nothing to report. */
+internal fun retryAllFailedMessage(requeued: Int, skippedArchiveDownloads: Int): String? {
+    val parts = mutableListOf<String>()
+    if (requeued > 0) {
+        parts += if (requeued == 1) "Retrying 1 failed transfer." else "Retrying $requeued failed transfers."
+    }
+    if (skippedArchiveDownloads > 0) {
+        parts += archiveRetrySkipMessage(skippedArchiveDownloads)
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" ")
 }
 
 /** Both directions' ETAs plus the combined one (PC-39); see [TransferEtaEstimator]. */
