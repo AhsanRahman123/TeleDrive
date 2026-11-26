@@ -225,6 +225,7 @@ import com.drdisagree.teledrive.resources.preview_truncated_download_view
 import com.drdisagree.teledrive.resources.preview_unarchive
 import com.drdisagree.teledrive.resources.preview_zip_download_selected
 import com.drdisagree.teledrive.resources.preview_zip_search_entries
+import com.drdisagree.teledrive.resources.preview_archive_downloads_queued
 import com.drdisagree.teledrive.resources.preview_archive_remote_hint
 import com.drdisagree.teledrive.resources.preview_extraction_supported_yet_download
 import kotlinx.coroutines.launch
@@ -712,7 +713,9 @@ fun DesktopPreviewScreen(
                 onPlaybackFinished = ::handlePlaybackFinished,
                 onDelete = { if (trashTarget == null) trashTarget = pageFile },
                 onToggleImageChrome = { imageChromeVisible = !imageChromeVisible },
-                onPlayerControlsVisibilityChange = { playerChromeVisible = it }
+                onPlayerControlsVisibilityChange = { playerChromeVisible = it },
+                onRegisterArchiveBackStep = { handler -> archiveBackHandler = handler },
+                onExitViewer = ::leavePreview
             )
         }
 
@@ -1112,7 +1115,9 @@ private fun PreviewPane(
     onPlaybackFinished: () -> Unit,
     onDelete: () -> Unit,
     onToggleImageChrome: () -> Unit,
-    onPlayerControlsVisibilityChange: (Boolean) -> Unit
+    onPlayerControlsVisibilityChange: (Boolean) -> Unit,
+    onRegisterArchiveBackStep: ((() -> Boolean)?) -> Unit = {},
+    onExitViewer: () -> Unit = {}
 ) {
     val content by viewModel.contentFor(file).collectAsState()
     val backgroundPlayback by viewModel.backgroundPlayback.collectAsState()
@@ -1616,8 +1621,8 @@ private fun PreviewPane(
                     batchProgress = previewUiState.archiveBatchProgress,
                     queuedDownloads = previewUiState.archiveQueuedDownloads,
                     archivePreview = previewUiState.archivePreview,
-                    onRegisterBackStep = { handler -> archiveBackHandler = handler },
-                    onExitViewer = ::leavePreview,
+                    onRegisterBackStep = onRegisterArchiveBackStep,
+                    onExitViewer = onExitViewer,
                     sortField = archiveSortField,
                     sortDirection = archiveSortDirection,
                     onSortChange = { field, direction ->
