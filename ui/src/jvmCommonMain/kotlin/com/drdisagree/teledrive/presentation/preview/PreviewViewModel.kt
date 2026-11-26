@@ -73,6 +73,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PreviewViewModel(
@@ -299,6 +300,45 @@ class PreviewViewModel(
     private var archiveDownloadProcessor: Job? = null
 
     /**
+     * The single serialisation gate for EVERY archive extraction of this
+     * viewer — queued downloads AND previews (MF-1, report 54 second pass).
+     * [RemoteArchiveService] has no internal lock and all extractions of one
+     * archive share the one TDLib window for its fileId, so two extractions
+     * must never run at once on either axis:
+     *  - the queue processor [Mutex.lock]s the gate before running a request,
+     *    so a download waits while a preview extraction is in flight;
+     *  - a preview [Mutex.tryLock]s the gate synchronously before launching,
+     *    so a preview tap while a download (or another preview) holds the
+     *    gate is dropped, exactly as the old busy-index gate dropped it —
+     *    and a preview stays immediate when the gate is free.
+     * Each holder passes a unique owner token, and the busy index is only
+     * ever cleared by its owner ([clearArchiveBusy]), so one extraction's
+     * teardown can no longer wipe the other's busy mark.
+     */
+    private val archiveExtractionMutex = Mutex()
+    private var archiveBusyOwner: Any? = null
+    private val archiveBusyLock = Any()
+
+    /** Marks [entryIndex] busy on behalf of [owner] (the gate holder). */
+    private fun markArchiveBusy(owner: Any, entryIndex: Int) {
+        synchronized(archiveBusyLock) { archiveBusyOwner = owner }
+        _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+    }
+
+    /** Clears the busy index only if [owner] is the one who set it. */
+    private fun clearArchiveBusy(owner: Any) {
+        val owns = synchronized(archiveBusyLock) {
+            if (archiveBusyOwner === owner) {
+                archiveBusyOwner = null
+                true
+            } else {
+                false
+            }
+        }
+        if (owns) _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+    }
+
+    /**
      * Accepts a download request: it is queued behind any running request and its
      * start message is emitted immediately (1.6.24 note 5 — the message carries
      * the View -> Transfers action, so it must be on screen from the moment the
@@ -335,9 +375,34 @@ class PreviewViewModel(
                 next
             } ?: return
             publishArchiveQueueDepth()
-            when (request) {
-                is ArchiveDownloadRequest.Single -> runArchiveSingleDownload(request)
-                is ArchiveDownloadRequest.Batch -> runArchiveBatchDownload(request)
+            // Per-request isolation (MF-2): one request failing outside its
+            // own inner catches must never kill the processor and strand the
+            // requests still queued behind it. The failure is surfaced and
+            // the loop CONTINUES with the next request; only a cancellation
+            // of the processor's own context propagates.
+            val owner = Any()
+            try {
+                // MF-1: hold the extraction gate for the whole request, so a
+                // download never runs concurrently with a preview extraction
+                // (it waits here until the preview finishes).
+                archiveExtractionMutex.lock(owner)
+                try {
+                    when (request) {
+                        is ArchiveDownloadRequest.Single -> runArchiveSingleDownload(request, owner)
+                        is ArchiveDownloadRequest.Batch -> runArchiveBatchDownload(request, owner)
+                    }
+                } finally {
+                    archiveExtractionMutex.unlock(owner)
+                }
+            } catch (failure: CancellationException) {
+                if (!currentCoroutineContext().isActive) throw failure
+                _messages.tryEmit(
+                    UiText.Plain("Could not open archive: ${archiveFailureDetail(failure)}")
+                )
+            } catch (failure: Exception) {
+                _messages.tryEmit(
+                    UiText.Plain("Could not open archive: ${archiveFailureDetail(failure)}")
+                )
             }
         }
     }
@@ -377,14 +442,22 @@ class PreviewViewModel(
     }
 
     /** Runs one queued single-entry download; see [downloadArchiveEntry]. */
-    private suspend fun runArchiveSingleDownload(request: ArchiveDownloadRequest.Single) {
+    private suspend fun runArchiveSingleDownload(
+        request: ArchiveDownloadRequest.Single,
+        owner: Any
+    ) {
         val file = request.file
         val step = request.step
-        _uiState.update { it.copy(archiveEntryBusyIndex = step.entryIndex) }
+        markArchiveBusy(owner, step.entryIndex)
         // Report-only Transfers history record: written before extraction starts,
-        // completed/failed/stopped alongside the extraction's own outcome.
-        val recordId = archiveDownloadReporter.begin(request.displayName, request.sizeBytes)
+        // completed/failed/stopped alongside the extraction's own outcome. The
+        // begin() call lives INSIDE the try (MF-2): it is a suspending Room
+        // insert, and a throw from it must land in the catches below (recordId
+        // still null, which every reporter call tolerates) instead of escaping
+        // and killing the queue processor.
+        var recordId: String? = null
         try {
+            recordId = archiveDownloadReporter.begin(request.displayName, request.sizeBytes)
             // The extraction runs as a CHILD job registered under this record, so a
             // stop from Transfers cancels only this extraction while the queue
             // processor stays alive to run the next request — the same discipline
@@ -425,7 +498,7 @@ class PreviewViewModel(
                 UiText.Plain("Could not open archive: $detail")
             )
         } finally {
-            _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+            clearArchiveBusy(owner)
         }
     }
 
@@ -500,8 +573,17 @@ class PreviewViewModel(
         val occurrence = archiveEntryOccurrence(listing, entryIndex)
         if (occurrence < 0) return
         val displayName = archiveEntryDisplayName(entry)
+        // MF-1: claim the extraction gate SYNCHRONOUSLY, before launching.
+        // While a queued download holds the gate this tap is dropped, exactly
+        // as the busy-index gate dropped it; while a download is merely
+        // queued behind this preview, the processor's lock() waits for the
+        // unlock in the finally below. Claiming here (not inside the launch)
+        // closes the window where a just-tapped preview had not yet marked
+        // anything and a download could start underneath it.
+        val owner = Any()
+        if (!archiveExtractionMutex.tryLock(owner)) return
+        markArchiveBusy(owner, entryIndex)
         viewModelScope.launch {
-            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
             try {
                 val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
                 val preview = when (action) {
@@ -528,7 +610,8 @@ class PreviewViewModel(
                     UiText.Plain("Could not open archive: ${archiveFailureDetail(failure)}")
                 )
             } finally {
-                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+                clearArchiveBusy(owner)
+                archiveExtractionMutex.unlock(owner)
             }
         }
     }
@@ -594,8 +677,11 @@ class PreviewViewModel(
         val occurrence = archiveEntryOccurrence(listing, entryIndex)
         if (occurrence < 0) return
         val displayName = archiveEntryDisplayName(entry)
+        // MF-1: same synchronous gate claim as previewArchiveEntry.
+        val owner = Any()
+        if (!archiveExtractionMutex.tryLock(owner)) return
+        markArchiveBusy(owner, entryIndex)
         viewModelScope.launch {
-            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
             try {
                 val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
                 publishArchivePreview(ArchiveEntryPreview.Video(displayName, temp.absolutePath))
@@ -608,7 +694,8 @@ class PreviewViewModel(
                     UiText.Plain("Could not open archive: ${archiveFailureDetail(failure)}")
                 )
             } finally {
-                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+                clearArchiveBusy(owner)
+                archiveExtractionMutex.unlock(owner)
             }
         }
     }
@@ -652,7 +739,10 @@ class PreviewViewModel(
     }
 
     /** Runs one queued Download-selected batch; see [downloadArchiveSelection]. */
-    private suspend fun runArchiveBatchDownload(request: ArchiveDownloadRequest.Batch) {
+    private suspend fun runArchiveBatchDownload(
+        request: ArchiveDownloadRequest.Batch,
+        owner: Any
+    ) {
         val file = request.file
         val listing = request.listing
         val plan = request.plan
@@ -660,13 +750,18 @@ class PreviewViewModel(
         _uiState.update { it.copy(archiveBatchProgress = ArchiveBatchProgress(0, plan.size)) }
         try {
             for (step in plan) {
-                _uiState.update { it.copy(archiveEntryBusyIndex = step.entryIndex) }
+                markArchiveBusy(owner, step.entryIndex)
                 val stepEntry = listing[step.entryIndex]
-                val recordId = archiveDownloadReporter.begin(
-                    archiveEntryDisplayName(stepEntry),
-                    stepEntry.sizeBytes
-                )
+                // MF-2: begin() inside the per-step try, like the single path —
+                // a throwing Room insert fails THIS step through the catches
+                // below (recordId still null, tolerated by every reporter
+                // call) and the batch/queue continues, instead of escaping.
+                var recordId: String? = null
                 try {
+                    recordId = archiveDownloadReporter.begin(
+                        archiveEntryDisplayName(stepEntry),
+                        stepEntry.sizeBytes
+                    )
                     // The extraction runs as a CHILD job registered under this step's
                     // record, so a stop from Transfers cancels only this step's job
                     // while this batch coroutine stays alive to continue with the rest.
@@ -727,9 +822,8 @@ class PreviewViewModel(
                 }
             }
         } finally {
-            _uiState.update {
-                it.copy(archiveEntryBusyIndex = null, archiveBatchProgress = null)
-            }
+            clearArchiveBusy(owner)
+            _uiState.update { it.copy(archiveBatchProgress = null) }
         }
         when {
             saved == 0 -> _messages.tryEmit(
