@@ -97,6 +97,9 @@ class PreviewViewModel(
 
     private val contentCache = mutableMapOf<String, StateFlow<PreviewContent>>()
 
+    /** The in-flight in-zip preview extraction (initial open or a pager step), if any. */
+    private var archivePreviewJob: Job? = null
+
     init {
         viewModelScope.launch {
             val target = fileRepository.getFile(route.fileId)
@@ -391,28 +394,79 @@ class PreviewViewModel(
             )
             return
         }
+        val pagerIndices = archivePreviewPagerIndices(
+            listing,
+            archiveSort.value.first,
+            archiveSort.value.second
+        )
+        loadArchivePreview(
+            file = file,
+            entryIndex = entryIndex,
+            pagerIndices = pagerIndices,
+            pagerPosition = archivePreviewPagerPosition(pagerIndices, entryIndex)
+        )
+    }
+
+    /**
+     * Extracts [entryIndex] to a verified temp file and publishes it as the in-archive
+     * preview at [pagerPosition] in [pagerIndices]. Shared by the initial tap-open and
+     * by pager steps: a step keeps the current preview (and position) published until
+     * the new entry has landed, then swaps and deletes the previous temp file. A new
+     * load supersedes an in-flight preview load — fast swipes cancel the extraction
+     * they leave behind (the archive service deletes its partial temp on failure,
+     * cancellation included) and only the last page swiped to is published.
+     */
+    private fun loadArchivePreview(
+        file: DriveFile,
+        entryIndex: Int,
+        pagerIndices: List<Int>,
+        pagerPosition: Int
+    ) {
+        val listing = _uiState.value.archiveListings[file.id] ?: return
+        val entry = listing.getOrNull(entryIndex) ?: return
+        val action = archiveEntryTapAction(entry)
+        if (action == ArchiveEntryTapAction.DOWNLOAD) return
         val occurrence = archiveEntryOccurrence(listing, entryIndex)
         if (occurrence < 0) return
         val displayName = archiveEntryDisplayName(entry)
-        viewModelScope.launch {
-            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+        archivePreviewJob?.cancel()
+        val previous = _uiState.value.archivePreview
+        val job = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    archiveEntryBusyIndex = entryIndex,
+                    archivePreviewLoading = previous != null
+                )
+            }
             try {
                 val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
                 val preview = when (action) {
                     ArchiveEntryTapAction.PREVIEW_IMAGE ->
-                        ArchiveEntryPreview.Image(displayName, temp.absolutePath)
+                        ArchiveEntryPreview.Image(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PLAY_AUDIO ->
-                        ArchiveEntryPreview.Audio(displayName, temp.absolutePath)
+                        ArchiveEntryPreview.Audio(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PREVIEW_TEXT -> {
                         // String decoding with the UTF-8 charset replaces malformed input
                         // instead of failing, so a non-UTF-8 text file still shows sanely.
                         val text = temp.readBytes().toString(Charsets.UTF_8)
                         temp.delete()
-                        ArchiveEntryPreview.Text(displayName, text)
+                        ArchiveEntryPreview.Text(displayName, text, entryIndex)
                     }
                     ArchiveEntryTapAction.DOWNLOAD -> error("unreachable")
                 }
-                _uiState.update { it.copy(archivePreview = preview) }
+                _uiState.update {
+                    it.copy(
+                        archivePreview = preview,
+                        archivePreviewEntries = pagerIndices,
+                        archivePreviewPosition = pagerPosition,
+                        archivePreviewFileId = file.id
+                    )
+                }
+                // The previous page's temp file is deleted only after its replacement
+                // is published, so a failed or cancelled step never blanks the viewer.
+                if (previous != null && previous.entryIndex != entryIndex) {
+                    deleteArchivePreviewTemp(previous)
+                }
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: ArchiveException) {
@@ -420,20 +474,93 @@ class PreviewViewModel(
             } catch (failure: Exception) {
                 _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
             } finally {
-                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+                // A superseded load must not clear the busy/loading state its
+                // replacement just set; only the load still registered as current may.
+                if (archivePreviewJob === currentCoroutineContext()[Job]) {
+                    _uiState.update {
+                        it.copy(archiveEntryBusyIndex = null, archivePreviewLoading = false)
+                    }
+                }
             }
+        }
+        archivePreviewJob = job
+    }
+
+    /**
+     * The in-zip preview pager settled on [position]: steps the preview to that page,
+     * extracting its entry on demand. Settling back on the page already shown while a
+     * step is still extracting abandons that step, so its result cannot yank the pager
+     * away afterwards. Positions are pager positions, not listing indices.
+     */
+    fun onArchivePreviewPageSelected(position: Int) {
+        val state = _uiState.value
+        if (state.archivePreview == null) return
+        if (position == state.archivePreviewPosition) {
+            if (archivePreviewJob?.isActive == true) {
+                archivePreviewJob?.cancel()
+                archivePreviewJob = null
+                _uiState.update {
+                    it.copy(archiveEntryBusyIndex = null, archivePreviewLoading = false)
+                }
+            }
+            return
+        }
+        stepArchivePreview(position - state.archivePreviewPosition)
+    }
+
+    /**
+     * Steps the in-zip preview by [delta] pages (negative = previous), clamped to the
+     * pager sequence with no wrap-around. A step is refused while a list-side archive
+     * extraction (download / batch) owns the busy slot; an in-flight preview load is
+     * superseded instead, so rapid swiping lands on the last page swiped to.
+     */
+    fun stepArchivePreview(delta: Int) {
+        val state = _uiState.value
+        if (state.archivePreview == null || delta == 0) return
+        val target = archivePreviewPagerTarget(
+            state.archivePreviewEntries.size,
+            state.archivePreviewPosition,
+            delta
+        ) ?: return
+        if (archivePreviewJob?.isActive != true && state.archiveEntryBusyIndex != null) return
+        val fileId = state.archivePreviewFileId ?: return
+        val file = state.files.firstOrNull { it.id == fileId } ?: return
+        loadArchivePreview(
+            file = file,
+            entryIndex = state.archivePreviewEntries[target],
+            pagerIndices = state.archivePreviewEntries,
+            pagerPosition = target
+        )
+    }
+
+    /** Deletes an in-archive preview's temp file (text previews hold no file). */
+    private fun deleteArchivePreviewTemp(preview: ArchiveEntryPreview) {
+        when (preview) {
+            is ArchiveEntryPreview.Image -> java.io.File(preview.path).delete()
+            is ArchiveEntryPreview.Audio -> java.io.File(preview.path).delete()
+            is ArchiveEntryPreview.Text -> Unit
         }
     }
 
     /** Closes the in-archive preview and deletes its temp file (text previews hold no file). */
     fun dismissArchivePreview() {
         val preview = _uiState.value.archivePreview
-        _uiState.update { it.copy(archivePreview = null) }
-        when (preview) {
-            is ArchiveEntryPreview.Image -> java.io.File(preview.path).delete()
-            is ArchiveEntryPreview.Audio -> java.io.File(preview.path).delete()
-            else -> Unit
+        val previewLoadInFlight = archivePreviewJob?.isActive == true
+        archivePreviewJob?.cancel()
+        archivePreviewJob = null
+        _uiState.update {
+            it.copy(
+                archivePreview = null,
+                archivePreviewEntries = emptyList(),
+                archivePreviewPosition = -1,
+                archivePreviewFileId = null,
+                archivePreviewLoading = false,
+                // Only the preview load's own busy claim is released here; a list-side
+                // download running behind the overlay keeps its busy state.
+                archiveEntryBusyIndex = if (previewLoadInFlight) null else it.archiveEntryBusyIndex
+            )
         }
+        preview?.let(::deleteArchivePreviewTemp)
     }
 
     /**

@@ -1,6 +1,8 @@
 package com.drdisagree.teledrive.presentation.preview
 
 import com.drdisagree.teledrive.core.files.MimeTypes
+import com.drdisagree.teledrive.domain.model.FileSortField
+import com.drdisagree.teledrive.domain.model.SortDirection
 
 /**
  * Pure decision logic for the ZIP viewer's richer interactions (in-archive image/audio/text
@@ -25,6 +27,62 @@ fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
         // Video and everything else stay download-only.
         else -> ArchiveEntryTapAction.DOWNLOAD
     }
+}
+
+/**
+ * Whether [entry] can appear in the in-zip preview pager at all: it must open in place
+ * (image / audio / text) rather than download, and a text entry must be within the
+ * preview size cap — an oversized text entry only ever shows the too-large message on
+ * tap, so it has no page to swipe to.
+ */
+fun archiveEntryPreviewable(entry: ArchiveEntry): Boolean =
+    when (archiveEntryTapAction(entry)) {
+        ArchiveEntryTapAction.PREVIEW_IMAGE,
+        ArchiveEntryTapAction.PLAY_AUDIO -> true
+        ArchiveEntryTapAction.PREVIEW_TEXT -> archiveEntryTextPreviewable(entry)
+        ArchiveEntryTapAction.DOWNLOAD -> false
+    }
+
+/**
+ * The in-zip preview pager sequence: the LISTING INDICES of the previewable entries of
+ * [listing], in the order the archive list shows them — the archive tree flattened with
+ * every folder expanded under the remembered archive sort, i.e. the rows of the fully
+ * expanded list with the download-only rows removed. Download-only entries (video
+ * included) are skipped rather than shown as placeholders, matching the Files pager,
+ * whose sequence is built from the browsed query and simply contains no page for a
+ * file that is not in it. Identity stays the listing index, so duplicate names each
+ * keep their own page and extraction.
+ */
+fun archivePreviewPagerIndices(
+    listing: List<ArchiveEntry>,
+    sortField: FileSortField = FileSortField.NAME,
+    sortDirection: SortDirection = SortDirection.ASCENDING
+): List<Int> {
+    if (listing.isEmpty()) return emptyList()
+    val root = buildArchiveTreeIndexed(
+        listing.mapIndexed { index, entry -> IndexedArchiveEntry(index, entry) }
+    )
+    val rows = flattenArchive(root, allFolderPaths(root), sortField, sortDirection)
+    return rows.mapNotNull { row ->
+        val entryIndex = row.node.entryIndex ?: return@mapNotNull null
+        entryIndex.takeIf { archiveEntryPreviewable(listing[entryIndex]) }
+    }
+}
+
+/** The position of [entryIndex] in a pager sequence, or -1 when it has no page. */
+fun archivePreviewPagerPosition(pagerIndices: List<Int>, entryIndex: Int): Int =
+    pagerIndices.indexOf(entryIndex)
+
+/**
+ * Where one pager step lands: [position] moved by [delta] (negative = previous),
+ * clamped to the sequence — no wrap-around, like the Files pager for image/text
+ * pages. Null when the step would leave the sequence (already at that end), the
+ * sequence is empty, or [position] is not a valid page, so callers can treat a
+ * null as "stay".
+ */
+fun archivePreviewPagerTarget(pagerSize: Int, position: Int, delta: Int): Int? {
+    if (pagerSize <= 0 || position !in 0 until pagerSize) return null
+    return (position + delta).takeIf { it in 0 until pagerSize }
 }
 
 /** Largest entry offered an in-archive text preview: 2 MiB of extracted text. */
