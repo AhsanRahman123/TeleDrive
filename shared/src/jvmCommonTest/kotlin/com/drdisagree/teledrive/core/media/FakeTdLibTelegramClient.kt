@@ -37,6 +37,11 @@ enum class FakeGrowth { INSTANT, DELAYED, STALLED }
  *   throws TelegramException(400, "There is not enough downloaded bytes in the file to
  *   read"). count=0 returns the contiguous prefix from the offset (possibly empty) and
  *   never fails on coverage.
+ * - 1.6.24 modes: [evictLocalCache] models the node losing its readable local path
+ *   (ReadFilePart then throws 400 "File is not inside the cache", findings §2(a).6,
+ *   until a DownloadFile re-establishes a partial); [simulateCompetingDownload]
+ *   models another issuer holding the single window at a foreign offset;
+ *   `growthStepIntervalMs` makes DELAYED growth slow in wall time but progressing.
  */
 class FakeTdLibTelegramClient(
     private val bytes: ByteArray,
@@ -58,7 +63,13 @@ class FakeTdLibTelegramClient(
      * wait slice in `readRangeOnly`. Re-issuing the request restarts the delay,
      * like a re-target dropping in-flight parts.
      */
-    private val slowStartDelayMs: Long = 0L
+    private val slowStartDelayMs: Long = 0L,
+    /**
+     * When > 0 (DELAYED growth only), at most one growth step lands per this many
+     * milliseconds of wall time, however often the fake is polled. Models a window
+     * that is genuinely slow but still progressing (1.6.24, Failure B).
+     */
+    private val growthStepIntervalMs: Long = 0L
 ) {
     private val partSize = partSizeBytes.coerceAtLeast(1)
     private val numParts = if (bytes.isEmpty()) 0 else ((bytes.size + partSize - 1) / partSize).toInt()
@@ -68,6 +79,26 @@ class FakeTdLibTelegramClient(
     private var windowLimit = 0L
     private var active = false
     private var windowRequestedAtMs = 0L
+    private var lastGrowthStepMs = 0L
+
+    /**
+     * 1.6.24 Failure A: the file node has NO readable local path (the partial was
+     * evicted/deleted, or the node was re-resolved fresh), so ReadFilePart fails with
+     * 400 "File is not inside the cache" (findings §2(a).6) until a DownloadFile
+     * re-establishes a partial file. Set via [evictLocalCache].
+     */
+    private var cacheMissing = false
+
+    /**
+     * 1.6.24 Failure B: a competing issuer (e.g. a Transfers full-file download of the
+     * same fileId) holds the single window at ITS offset, active, landing none of our
+     * parts. Set via [simulateCompetingDownload]; cleared when our side re-issues a
+     * DownloadFile (the designed re-target path).
+     */
+    private var competitorHeld = false
+
+    var competingRequests = 0
+        private set
 
     var rangeRequests = 0
         private set
@@ -130,9 +161,30 @@ class FakeTdLibTelegramClient(
 
     private fun windowSatisfied(): Boolean = windowPartsInOrder().all { ready[it] }
 
+    /** The node's local copy vanishes between two operations (Failure A setup). */
+    @Synchronized
+    fun evictLocalCache() {
+        ready.fill(false)
+        active = false
+        competitorHeld = false
+        cacheMissing = true
+    }
+
+    /** Another issuer re-targets the single window to its own range and holds it. */
+    @Synchronized
+    fun simulateCompetingDownload(offset: Long, limit: Long) {
+        competingRequests++
+        windowOffset = offset
+        windowLimit = limit
+        active = true
+        competitorHeld = true
+        windowRequestedAtMs = System.currentTimeMillis()
+    }
+
     @Synchronized
     private fun advance() {
         if (!active) return
+        if (competitorHeld) return
         if (slowStartDelayMs > 0L) {
             if (System.currentTimeMillis() - windowRequestedAtMs < slowStartDelayMs) return
             for (p in windowPartsInOrder()) ready[p] = true
@@ -140,6 +192,11 @@ class FakeTdLibTelegramClient(
             return
         }
         if (growth != FakeGrowth.DELAYED) return
+        if (growthStepIntervalMs > 0L) {
+            val now = System.currentTimeMillis()
+            if (now - lastGrowthStepMs < growthStepIntervalMs) return
+            lastGrowthStepMs = now
+        }
         var budget = growthStepBytes
         for (p in windowPartsInOrder()) {
             if (budget <= 0) break
@@ -157,6 +214,10 @@ class FakeTdLibTelegramClient(
         rangeRequestList += offset to limit
         // Re-target: the single window moves; already-downloaded parts are kept, the
         // reported prefix re-bases to the new offset automatically via [info].
+        // A DownloadFile also re-establishes a readable partial file (clears the
+        // Failure-A cache-missing state) and takes the window back from a competitor.
+        cacheMissing = false
+        competitorHeld = false
         windowOffset = offset
         windowLimit = limit
         active = true
@@ -170,6 +231,11 @@ class FakeTdLibTelegramClient(
     @Synchronized
     private fun readPart(offset: Long, count: Long): ByteArray {
         readCalls++
+        // Failure A (findings §2(a).6): no readable local path at all. Modelled ahead
+        // of the coverage gate — the field-observed behaviour is this exact 400
+        // surfacing from the read; the node's bitmask state in that instant is not
+        // observable from the app.
+        if (cacheMissing) throw TelegramException(400, "File is not inside the cache")
         if (offset < 0) throw TelegramException(400, "Parameter offset must be non-negative")
         if (count < 0) throw TelegramException(400, "Parameter count must be non-negative")
         if (count == 0L) {

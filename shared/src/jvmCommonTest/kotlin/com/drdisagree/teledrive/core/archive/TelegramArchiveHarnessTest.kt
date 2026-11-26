@@ -24,6 +24,8 @@ import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlin.random.Random
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -305,7 +307,127 @@ class TelegramArchiveHarnessTest {
             }
         }
 
+    // ----- 1.6.24 field-failure reproductions (report 54) -----
+
+    @Test
+    fun `field sequence - cache evicted between list and extract recovers via DownloadFile`() =
+        runBlocking {
+            // Failure A (English.zip): the listing succeeds; between the listing and
+            // the click the file node loses its readable local path, so the extract's
+            // first ReadFilePart fails 400 "File is not inside the cache" (findings
+            // §2(a).6). Pre-fix that 400 is not the recognised coverage failure, so it
+            // propagates fatally from stage=list before any DownloadFile is issued.
+            val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+            val writer = HarnessDownloadWriter()
+            val service = service(fake, writer)
+            val file = driveFile()
+
+            val listing = service.listEntries(file)
+            assertEquals(4, listing.count { !it.isDirectory })
+
+            fake.evictLocalCache()
+
+            val temp = service.extractEntryToTempFile(file, "c-middle.txt")
+            try {
+                assertArrayEquals(middleData, temp.readBytes())
+            } finally {
+                temp.delete()
+            }
+            service.extractEntry(file, "a-start.bin")
+            assertArrayEquals(startData, writer.bytes)
+        }
+
+    @Test
+    fun `byte source - slow but progressing window survives past a fixed deadline`() =
+        runBlocking {
+            // Failure B, first half (Sent.zip mp4): the window IS ours and IS growing
+            // (field snapshot: prefix 458,470 of 524,288, active=true) but slower
+            // than the per-read deadline. One 64 KiB part lands every ~300 ms, so a
+            // 512 KiB read needs ~2.4 s against a 1.5 s deadline seam. Pre-fix the
+            // absolute deadline kills the read with a 408 mid-progress; post-fix the
+            // deadline measures NO-PROGRESS time and the read completes.
+            val fake = FakeTdLibTelegramClient(
+                zipBytes,
+                growth = FakeGrowth.DELAYED,
+                growthStepBytes = 64 * 1024,
+                growthStepIntervalMs = 300
+            )
+            val source = TelegramMediaByteSource(
+                fake.client, "remote-1", 100L, 200L,
+                primeFromStart = false, bufferTimeoutMs = 1_500
+            )
+            try {
+                assertArrayEquals(
+                    zipBytes.copyOfRange(0, 512 * 1024),
+                    source.read(0, 512 * 1024)
+                )
+            } finally {
+                source.close()
+            }
+        }
+
+    @Test
+    fun `byte source - window stolen by a competing download is re-issued, not waited out`() =
+        runBlocking {
+            // Failure B, second half: while our read waits, a competing issuer (a
+            // Transfers download of the same fileId) re-targets the single window to
+            // its own offset and holds it there, active. That window can never
+            // satisfy our read's gate. Pre-fix the loop never re-issues while
+            // isDownloadingActive is true, so it waits on the foreign window until
+            // the deadline; post-fix it re-issues its own DownloadFile (the designed
+            // re-target path) and completes.
+            // Slow start (600 ms) keeps our own window from landing before the steal
+            // at ~150 ms; a re-issue restarts the slow start, like a re-target
+            // dropping in-flight parts.
+            val fake = FakeTdLibTelegramClient(
+                zipBytes,
+                growth = FakeGrowth.INSTANT,
+                slowStartDelayMs = 600
+            )
+            val source = TelegramMediaByteSource(
+                fake.client, "remote-1", 100L, 200L,
+                primeFromStart = false, bufferTimeoutMs = 2_500
+            )
+            try {
+                val pending = async { source.read(0, 4_096) }
+                // Let our window get requested, then steal it mid-wait.
+                delay(150)
+                fake.simulateCompetingDownload(zipBytes.size - 65_536L, 65_536)
+                assertArrayEquals(zipBytes.copyOfRange(0, 4_096), pending.await())
+                assertTrue(
+                    "our DownloadFile must be re-issued after the steal, requests=${fake.rangeRequests}",
+                    fake.rangeRequests >= 2
+                )
+            } finally {
+                source.close()
+            }
+        }
+
     // ----- fake-level pins of the source semantics themselves -----
+
+    @Test
+    fun `fake - evicted cache makes ReadFilePart throw the not-inside-cache 400 until a DownloadFile`() =
+        runBlocking {
+            val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+            fake.client.requestFileRange(FakeTdLibTelegramClient.FILE_ID, 0, 100)
+            assertEquals(
+                100, fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 0, 100).size
+            )
+            fake.evictLocalCache()
+            try {
+                fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 0, 100)
+                fail("a node with no readable local path must throw")
+            } catch (expected: TelegramException) {
+                assertEquals(400, expected.code)
+                assertEquals("File is not inside the cache", expected.message)
+            }
+            // A DownloadFile re-establishes the partial file and reads work again.
+            fake.client.requestFileRange(FakeTdLibTelegramClient.FILE_ID, 0, 100)
+            assertEquals(
+                100, fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 0, 100).size
+            )
+        }
+
 
     @Test
     fun `fake - ReadFilePart gate is all-or-nothing with the exact 400 message`() = runBlocking {

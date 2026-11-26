@@ -25,7 +25,13 @@ class TelegramMediaByteSource(
      * first ranged [read] reaches `awaitAvailable()`, which requests exactly the window it
      * needs, so no whole-file download from offset 0 is ever started on their behalf.
      */
-    private val primeFromStart: Boolean = true
+    private val primeFromStart: Boolean = true,
+    /**
+     * The range-only read deadline in milliseconds (production default
+     * [BUFFER_TIMEOUT_MS]). A test seam so the harness can run the deadline paths in
+     * seconds instead of 30 s; the value carries no behaviour of its own.
+     */
+    private val bufferTimeoutMs: Long = BUFFER_TIMEOUT_MS
 ) : MediaByteSource {
 
     private var fileId: Int = 0
@@ -127,7 +133,7 @@ class TelegramMediaByteSource(
         var lastInfo: TelegramFileInfo? = null
         var lastReadError: TelegramException? = null
         try {
-            return withTimeout(BUFFER_TIMEOUT_MS.milliseconds) {
+            return withTimeout(bufferTimeoutMs.milliseconds) {
                 var downloadAttempts = 0
                 var needRequest = true
                 var shortReads = 0
