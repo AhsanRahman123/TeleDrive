@@ -28,6 +28,7 @@ import com.drdisagree.teledrive.resources.preview_removed_favorites
 import com.drdisagree.teledrive.resources.preview_unarchived
 import com.drdisagree.teledrive.resources.preview_unhidden
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
+import com.drdisagree.teledrive.core.files.MimeTypes
 import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
 import com.drdisagree.teledrive.core.archive.ArchiveException
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
@@ -505,7 +506,7 @@ class PreviewViewModel(
                 val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
                 val preview = when (action) {
                     ArchiveEntryTapAction.PREVIEW_IMAGE ->
-                        ArchiveEntryPreview.Image(displayName, temp.absolutePath)
+                        ArchiveEntryPreview.Image(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PLAY_AUDIO ->
                         ArchiveEntryPreview.Audio(displayName, temp.absolutePath)
                     ArchiveEntryTapAction.PREVIEW_TEXT -> {
@@ -517,7 +518,7 @@ class PreviewViewModel(
                     }
                     ArchiveEntryTapAction.DOWNLOAD -> error("unreachable")
                 }
-                _uiState.update { it.copy(archivePreview = preview) }
+                publishArchivePreview(preview)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: ArchiveException) {
@@ -532,14 +533,83 @@ class PreviewViewModel(
         }
     }
 
+    /**
+     * Publishes [preview] as the current in-archive preview, deleting the temp
+     * file of the preview it replaces. Switching photos in the in-zip pager goes
+     * through here, so a switch never leaks the previous photo's temp file; a
+     * failed extraction never reaches this point and the current preview (and
+     * its temp) stays exactly as it was.
+     */
+    private fun publishArchivePreview(preview: ArchiveEntryPreview) {
+        val replaced = _uiState.value.archivePreview
+        _uiState.update { it.copy(archivePreview = preview) }
+        if (replaced != null && replaced != preview) deleteArchivePreviewTemp(replaced)
+    }
+
+    /** Deletes the extracted temp file behind a preview, if it holds one (text holds none). */
+    private fun deleteArchivePreviewTemp(preview: ArchiveEntryPreview?) {
+        val path = when (preview) {
+            is ArchiveEntryPreview.Image -> preview.path
+            is ArchiveEntryPreview.Audio -> preview.path
+            is ArchiveEntryPreview.Video -> preview.path
+            is ArchiveEntryPreview.Text -> null
+            null -> null
+        }
+        // Best-effort, exactly as the audio branch has always behaved: when the
+        // desktop player has parked the file for background playback, the OS may
+        // refuse the delete while the player holds it open — playback is never
+        // interrupted to force it (known edge, shared with audio).
+        if (path != null) runCatching { java.io.File(path).delete() }
+    }
+
     /** Closes the in-archive preview and deletes its temp file (text previews hold no file). */
     fun dismissArchivePreview() {
         val preview = _uiState.value.archivePreview
         _uiState.update { it.copy(archivePreview = null) }
-        when (preview) {
-            is ArchiveEntryPreview.Image -> java.io.File(preview.path).delete()
-            is ArchiveEntryPreview.Audio -> java.io.File(preview.path).delete()
-            else -> Unit
+        deleteArchivePreviewTemp(preview)
+    }
+
+    /**
+     * Desktop-routed in-zip video playback (1.6.24 note 9): extracts the video
+     * entry at [entryIndex] to a verified temp file — the same extraction a
+     * download performs — and publishes it as an [ArchiveEntryPreview.Video]
+     * for the desktop player, exactly the pattern the audio branch uses. This
+     * is deliberately NOT part of the shared tap routing: [archiveEntryTapAction]
+     * keeps returning DOWNLOAD for video, so Android's tap behaviour is
+     * unchanged; only the desktop pane calls this. The busy gate serialises it
+     * with every other extraction (the ranged reads share one window), and a
+     * failure reports the same detailed message as the other preview paths and
+     * leaves any current preview untouched.
+     */
+    fun previewArchiveVideoEntry(file: DriveFile, entryIndex: Int) {
+        if (_uiState.value.archiveEntryBusyIndex != null) return
+        val listing = _uiState.value.archiveListings[file.id]
+        if (listing == null) {
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
+            return
+        }
+        val entry = listing.getOrNull(entryIndex) ?: return
+        if (entry.isDirectory) return
+        if (!MimeTypes.isVideo(MimeTypes.fromFileName(entry.name))) return
+        val occurrence = archiveEntryOccurrence(listing, entryIndex)
+        if (occurrence < 0) return
+        val displayName = archiveEntryDisplayName(entry)
+        viewModelScope.launch {
+            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+            try {
+                val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
+                publishArchivePreview(ArchiveEntryPreview.Video(displayName, temp.absolutePath))
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: ArchiveException) {
+                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
+            } catch (failure: Exception) {
+                _messages.tryEmit(
+                    UiText.Plain("Could not open archive: ${archiveFailureDetail(failure)}")
+                )
+            } finally {
+                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+            }
         }
     }
 

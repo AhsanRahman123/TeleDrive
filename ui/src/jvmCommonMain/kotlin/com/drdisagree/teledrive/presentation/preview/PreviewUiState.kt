@@ -27,8 +27,27 @@ data class PreviewUiState(
 sealed interface ArchiveEntryPreview {
     val name: String
 
-    data class Image(override val name: String, val path: String) : ArchiveEntryPreview
+    /**
+     * [entryIndex] is the entry's position in the archive listing (-1 when unknown), so a
+     * viewer can resolve the entry's own metadata and page to neighbouring entries.
+     */
+    data class Image(
+        override val name: String,
+        val path: String,
+        val entryIndex: Int = -1
+    ) : ArchiveEntryPreview
+
     data class Audio(override val name: String, val path: String) : ArchiveEntryPreview
+
+    /**
+     * A video entry extracted to a temp file for the platform's own media player
+     * (1.6.24 note 9). Produced only by the desktop-routed
+     * [PreviewViewModel.previewArchiveVideoEntry]; the shared tap action for video
+     * stays DOWNLOAD, so Android's tap behaviour is unchanged — Android's overlay
+     * renders this variant through the same LocalMedia player branch it already
+     * uses for audio if a future Android caller ever publishes one.
+     */
+    data class Video(override val name: String, val path: String) : ArchiveEntryPreview
     data class Text(override val name: String, val text: String) : ArchiveEntryPreview
 }
 

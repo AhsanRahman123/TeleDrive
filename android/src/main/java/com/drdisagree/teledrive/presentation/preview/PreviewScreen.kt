@@ -990,6 +990,20 @@ private fun ArchiveEntryPreviewOverlay(
                 session = overlaySession
             )
 
+            // Published only by the desktop-routed video preview today; rendered
+            // here through the same LocalMedia player branch as audio so the
+            // sealed type stays exhaustive on Android with no behaviour change
+            // (Android's own video tap still downloads — the shared tap action
+            // for video is DOWNLOAD).
+            is ArchiveEntryPreview.Video -> MediaPlayer(
+                content = PreviewContent.LocalMedia(preview.path, isAudio = false),
+                title = preview.name,
+                fileId = "archive-entry-${preview.name}",
+                dataSourceFactory = dataSourceFactory,
+                isActivePage = true,
+                session = overlaySession
+            )
+
             is ArchiveEntryPreview.Text -> Column(
                 modifier = Modifier
                     .fillMaxSize()

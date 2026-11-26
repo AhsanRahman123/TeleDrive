@@ -13,7 +13,14 @@ import com.drdisagree.teledrive.domain.model.SortDirection
  * sorting and filtering only change which rows are displayed and in what order.
  */
 
-/** What a tap on a file row does. Video is deliberately DOWNLOAD: it never plays in-archive. */
+/**
+ * What a tap on a file row does in the SHARED routing. Video is deliberately
+ * DOWNLOAD here: this decision is shared with Android, whose in-zip video
+ * arrives on its own line. The desktop pane intercepts video taps before this
+ * routing and plays them in the desktop player instead (1.6.24 note 9, via
+ * PreviewViewModel.previewArchiveVideoEntry); the per-entry Download action
+ * stays available for video entries on both platforms.
+ */
 enum class ArchiveEntryTapAction { PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, DOWNLOAD }
 
 fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
@@ -31,6 +38,39 @@ fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
 
 /** Largest entry offered an in-archive text preview: 2 MiB of extracted text. */
 const val ARCHIVE_TEXT_PREVIEW_MAX_BYTES: Long = 2L * 1024 * 1024
+
+/**
+ * The listing indices an in-zip photo pager steps through, in DISPLAYED order:
+ * the image entries among [displayedIndices] (listing indices in the order the
+ * viewer currently displays them — tree, sort and filter already applied by the
+ * caller). Paging never leaves the displayed set, so a photo in a collapsed or
+ * filtered-out folder is not a pager stop, exactly like Android's zip pager
+ * moving through the photos of the folder on screen.
+ */
+fun archiveImagePagerIndices(
+    listing: List<ArchiveEntry>,
+    displayedIndices: List<Int>
+): List<Int> = displayedIndices.filter { index ->
+    val entry = listing.getOrNull(index)
+    entry != null && !entry.isDirectory &&
+        archiveEntryTapAction(entry) == ArchiveEntryTapAction.PREVIEW_IMAGE
+}
+
+/**
+ * The pager neighbour of [currentIndex] within [pagerIndices] for [step]
+ * (-1 = previous, +1 = next), or null at either end / when the current entry
+ * is not a pager stop. No wrap-around: the ends are hard stops, like the real
+ * photo viewer's pager.
+ */
+fun archiveImagePagerNeighbour(
+    pagerIndices: List<Int>,
+    currentIndex: Int,
+    step: Int
+): Int? {
+    val position = pagerIndices.indexOf(currentIndex)
+    if (position < 0) return null
+    return pagerIndices.getOrNull(position + step)
+}
 
 /** True when [entry] may be previewed as text: right type AND within the size cap. */
 fun archiveEntryTextPreviewable(entry: ArchiveEntry): Boolean =

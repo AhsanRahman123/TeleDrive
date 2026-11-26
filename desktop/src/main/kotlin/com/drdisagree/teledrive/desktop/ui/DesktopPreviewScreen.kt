@@ -79,6 +79,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -97,6 +98,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -176,7 +178,10 @@ import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalUrlOpener
 import com.drdisagree.teledrive.presentation.preview.ArchiveBackStep
 import com.drdisagree.teledrive.presentation.preview.ArchiveBatchProgress
+import com.drdisagree.teledrive.presentation.preview.ArchiveEntry
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
+import com.drdisagree.teledrive.presentation.preview.archiveImagePagerIndices
+import com.drdisagree.teledrive.presentation.preview.archiveImagePagerNeighbour
 import com.drdisagree.teledrive.presentation.preview.archiveBackStep
 import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
 import com.drdisagree.teledrive.presentation.preview.ArchiveRowState
@@ -1248,13 +1253,16 @@ private fun PreviewPane(
             }
 
             is PreviewContent.Image -> {
-                var undecodable by remember(current.model) { mutableStateOf(false) }
-                val zoomableState = rememberZoomableState(
-                    zoomSpec = ZoomSpec(maxZoomFactor = 4f)
-                )
-                val zoomScope = rememberCoroutineScope()
-                Box(modifier = Modifier.fillMaxSize()) {
-                    if (undecodable) {
+                ZoomablePreviewImage(
+                    model = current.model,
+                    contentDescription = file.name,
+                    imageRotationDegrees = imageRotationDegrees,
+                    mirrorImageHorizontally = mirrorImageHorizontally,
+                    mirrorImageVertically = mirrorImageVertically,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    onToggleChrome = onToggleImageChrome,
+                    undecodableFallback = {
                         val imagePath = (current.model as? File)
                             ?.takeIf { it.isFile }
                             ?.absolutePath
@@ -1272,280 +1280,8 @@ private fun PreviewPane(
                                 title = stringResource(Res.string.preview_image_undecodable)
                             )
                         }
-                    } else {
-                        // AsyncImage sizes the decoded bitmap to the viewport, which makes
-                        // zooming a low-resolution preview look blurred. The painter intentionally
-                        // requests the original source dimensions for the viewing surface; grid
-                        // thumbnails continue to use the separate bounded thumbnail pipeline.
-                        val imagePainter = rememberAsyncImagePainter(
-                            model = current.model,
-                            onState = { imageState ->
-                                if (imageState is AsyncImagePainter.State.Error) undecodable = true
-                            },
-                            filterQuality = FilterQuality.High
-                        )
-                        Image(
-                            painter = imagePainter,
-                            contentDescription = file.name,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                // Left mouse is reserved for vertical zoom. Right mouse
-                                // handles horizontal image navigation at fit zoom and pans the
-                                // image in any direction when zoomed. A plain left click is left
-                                // untouched so the existing header/control toggle still works.
-                                .pointerInput(zoomableState, onPrevious, onNext) {
-                                    awaitEachGesture {
-                                        var downEvent = awaitPointerEvent(PointerEventPass.Initial)
-                                        var down = downEvent.changes.firstOrNull { it.pressed }
-                                        while (
-                                            downEvent.type != PointerEventType.Press ||
-                                            down == null
-                                        ) {
-                                            downEvent = awaitPointerEvent(PointerEventPass.Initial)
-                                            down = downEvent.changes.firstOrNull { it.pressed }
-                                        }
-
-                                        val mouseDown = down ?: return@awaitEachGesture
-                                        if (mouseDown.type != PointerType.Mouse) {
-                                            return@awaitEachGesture
-                                        }
-                                        val isLeftButton = downEvent.buttons.isPrimaryPressed
-                                        val isRightButton = downEvent.buttons.isSecondaryPressed
-                                        if (!isLeftButton && !isRightButton) {
-                                            return@awaitEachGesture
-                                        }
-
-                                        val initialZoomFraction =
-                                            (zoomableState.zoomFraction ?: 0f).coerceIn(0f, 1f)
-                                        var lastPosition = mouseDown.position
-                                        var totalX = 0f
-                                        var totalY = 0f
-                                        var leftZoomStarted = false
-                                        var leftDragConsumed = false
-                                        var rightSwipeStarted = false
-                                        var rightPanStarted = false
-                                        var rightDragConsumed = false
-                                        var lastAppliedZoomFraction = initialZoomFraction
-
-                                        fun updateZoomFromVerticalDrag(force: Boolean = false) {
-                                            val dragRange = (size.height * 0.65f).coerceAtLeast(1f)
-                                            val targetFraction =
-                                                (initialZoomFraction - totalY / dragRange)
-                                                    .coerceIn(0f, 1f)
-
-                                            // Snap small residual zoom back to the exact fit state.
-                                            // This also resets any pan offset left over from zooming.
-                                            if (targetFraction <= IMAGE_FIT_SNAP_FRACTION) {
-                                                if (lastAppliedZoomFraction > IMAGE_FIT_SNAP_FRACTION || force) {
-                                                    lastAppliedZoomFraction = 0f
-                                                    zoomScope.launch {
-                                                        zoomableState.resetZoom(animationSpec = SnapSpec())
-                                                    }
-                                                } else {
-                                                    lastAppliedZoomFraction = 0f
-                                                }
-                                                return
-                                            }
-
-                                            if (
-                                                !force &&
-                                                kotlin.math.abs(targetFraction - lastAppliedZoomFraction) < 0.012f
-                                            ) {
-                                                return
-                                            }
-
-                                            lastAppliedZoomFraction = targetFraction
-                                            zoomScope.launch {
-                                                zoomableState.zoomTo(
-                                                    zoomFactor = 1f + 3f * targetFraction,
-                                                    animationSpec = SnapSpec()
-                                                )
-                                            }
-                                        }
-
-                                        // Consume the right-button press immediately so it cannot
-                                        // be interpreted as the normal left-click header toggle.
-                                        if (isRightButton) mouseDown.consume()
-
-                                        while (true) {
-                                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                                            val change = event.changes.firstOrNull { it.id == mouseDown.id }
-                                                ?: break
-                                            val delta = change.position - lastPosition
-                                            lastPosition = change.position
-                                            totalX += delta.x
-                                            totalY += delta.y
-
-                                            if (!change.pressed) {
-                                                if (leftZoomStarted) {
-                                                    updateZoomFromVerticalDrag(force = true)
-                                                }
-                                                if (
-                                                    leftZoomStarted || leftDragConsumed ||
-                                                    rightSwipeStarted || rightPanStarted || rightDragConsumed
-                                                ) {
-                                                    change.consume()
-                                                }
-                                                break
-                                            }
-
-                                            val slop = viewConfiguration.touchSlop
-                                            val horizontalDistance = kotlin.math.abs(totalX)
-                                            val verticalDistance = kotlin.math.abs(totalY)
-
-                                            if (isLeftButton) {
-                                                if (!leftZoomStarted && !leftDragConsumed) {
-                                                    when {
-                                                        verticalDistance > slop &&
-                                                            verticalDistance > horizontalDistance * 1.2f -> {
-                                                            leftZoomStarted = true
-                                                            change.consume()
-                                                            updateZoomFromVerticalDrag()
-                                                        }
-                                                        horizontalDistance > slop &&
-                                                            horizontalDistance > verticalDistance * 1.2f -> {
-                                                            // Prevent the default zoomable gesture from
-                                                            // using the left button to pan the image.
-                                                            leftDragConsumed = true
-                                                            change.consume()
-                                                        }
-                                                    }
-                                                } else if (leftZoomStarted) {
-                                                    change.consume()
-                                                    updateZoomFromVerticalDrag()
-                                                } else if (leftDragConsumed) {
-                                                    change.consume()
-                                                }
-                                            } else if (isRightButton) {
-                                                if (initialZoomFraction > IMAGE_FIT_SNAP_FRACTION) {
-                                                    // At non-fit zoom, right-drag pans the image in
-                                                    // both axes using Telephoto's own pan constraints.
-                                                    val distance = kotlin.math.sqrt(
-                                                        totalX * totalX + totalY * totalY
-                                                    )
-                                                    if (!rightPanStarted && distance > slop) {
-                                                        rightPanStarted = true
-                                                        change.consume()
-                                                        val panDelta = androidx.compose.ui.geometry.Offset(totalX, totalY)
-                                                        zoomScope.launch {
-                                                            zoomableState.panBy(
-                                                                panDelta,
-                                                                animationSpec = SnapSpec()
-                                                            )
-                                                        }
-                                                    } else if (rightPanStarted) {
-                                                        change.consume()
-                                                        val panDelta = delta
-                                                        zoomScope.launch {
-                                                            zoomableState.panBy(
-                                                                panDelta,
-                                                                animationSpec = SnapSpec()
-                                                            )
-                                                        }
-                                                    }
-                                                } else if (!rightSwipeStarted && !rightDragConsumed) {
-                                                    when {
-                                                        horizontalDistance > slop &&
-                                                            horizontalDistance > verticalDistance * 1.2f -> {
-                                                            rightSwipeStarted = true
-                                                            change.consume()
-                                                        }
-                                                        verticalDistance > slop &&
-                                                            verticalDistance > horizontalDistance * 1.2f -> {
-                                                            // A vertical right-drag at fit zoom is
-                                                            // intentionally ignored, not treated as zoom.
-                                                            rightDragConsumed = true
-                                                            change.consume()
-                                                        }
-                                                    }
-                                                } else if (rightSwipeStarted || rightDragConsumed) {
-                                                    change.consume()
-                                                }
-                                            }
-                                        }
-
-                                        if (rightSwipeStarted && initialZoomFraction <= IMAGE_FIT_SNAP_FRACTION) {
-                                            val swipeThreshold = maxOf(
-                                                72.dp.toPx(),
-                                                size.width * 0.12f
-                                            )
-                                            when {
-                                                totalX >= swipeThreshold -> onPrevious()
-                                                totalX <= -swipeThreshold -> onNext()
-                                            }
-                                        }
-                                    }
-                                }
-                                .zoomable(
-                                    state = zoomableState,
-                                    // Telephoto routes clicks through this callback so its
-                                    // own double-click zoom and pan/pinch gestures remain intact.
-                                    onClick = { _ -> onToggleImageChrome() },
-                                    onDoubleClick = { state, centroid ->
-                                        zoomScope.launch {
-                                            if ((state.zoomFraction ?: 0f) > 0f) {
-                                                state.resetZoom()
-                                            } else {
-                                                state.zoomBy(zoomFactor = 1.35f, centroid = centroid)
-                                            }
-                                        }
-                                    }
-                                )
-                                .graphicsLayer {
-                                    val intrinsic = imagePainter.intrinsicSize
-                                    val intrinsicIsUsable = intrinsic.width.isFinite() &&
-                                        intrinsic.height.isFinite() &&
-                                        intrinsic.width > 0f && intrinsic.height > 0f
-                                    val sourceAspect = if (intrinsicIsUsable) {
-                                        intrinsic.width / intrinsic.height
-                                    } else {
-                                        size.width / size.height.coerceAtLeast(1f)
-                                    }
-                                    val isQuarterTurn = imageRotationDegrees % 180 != 0
-                                    val fitScale = if (isQuarterTurn && sourceAspect > 0f) {
-                                        val fittedWidth: Float
-                                        val fittedHeight: Float
-                                        val viewportAspect = size.width / size.height.coerceAtLeast(1f)
-                                        if (sourceAspect > viewportAspect) {
-                                            fittedWidth = size.width
-                                            fittedHeight = size.width / sourceAspect
-                                        } else {
-                                            fittedHeight = size.height
-                                            fittedWidth = size.height * sourceAspect
-                                        }
-                                        minOf(
-                                            size.width / fittedHeight.coerceAtLeast(1f),
-                                            size.height / fittedWidth.coerceAtLeast(1f)
-                                        )
-                                    } else {
-                                        1f
-                                    }
-                                    rotationZ = imageRotationDegrees.toFloat()
-                                    scaleX = fitScale * if (mirrorImageHorizontally) -1f else 1f
-                                    scaleY = fitScale * if (mirrorImageVertically) -1f else 1f
-                                },
-                            contentScale = ContentScale.Fit
-                        )
-                        VerticalZoomSlider(
-                            zoomFraction = zoomableState.zoomFraction ?: 0f,
-                            onZoomFractionChange = { fraction ->
-                                zoomScope.launch {
-                                    if (fraction <= 0.001f) {
-                                        zoomableState.resetZoom(animationSpec = SnapSpec())
-                                    } else {
-                                        zoomableState.zoomTo(
-                                            zoomFactor = 1f + 3f * fraction,
-                                            animationSpec = SnapSpec()
-                                        )
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .padding(end = 14.dp)
-                        )
                     }
-                }
+                )
             }
 
             is PreviewContent.LocalMedia -> if (!VlcPlayback.available) {
@@ -1630,6 +1366,12 @@ private fun PreviewPane(
                     },
                     onEntryTap = { entryIndex ->
                         viewModel.onArchiveEntryTap(displayedFile, entryIndex)
+                    },
+                    onPreviewEntry = { entryIndex ->
+                        viewModel.previewArchiveEntry(displayedFile, entryIndex)
+                    },
+                    onVideoEntryTap = { entryIndex ->
+                        viewModel.previewArchiveVideoEntry(displayedFile, entryIndex)
                     },
                     onEntryDownload = { entryIndex ->
                         viewModel.downloadArchiveEntry(displayedFile, entryIndex)
@@ -1722,6 +1464,573 @@ private fun PreviewPane(
                 }
             )
         }
+    }
+}
+
+/**
+ * The desktop photo viewer's zoomable surface, shared verbatim by the real
+ * viewer (PreviewContent.Image) and the in-zip photo viewer (1.6.24 note 7 —
+ * parity by reuse, not by a forked copy): telephoto zoom capped at 4x, the
+ * vertical zoom rail with mouse wheel, the left-drag vertical zoom /
+ * right-drag pan / right-swipe navigation mouse behaviour, and the
+ * rotate/flip transform applied from caller-owned state. Pinch zoom is NOT
+ * added: desktop input stays wheel/buttons/rail exactly as the real viewer
+ * has it (standing rule — pinch zoom stays removed).
+ */
+@OptIn(ExperimentalTelephotoApi::class)
+@Composable
+private fun ZoomablePreviewImage(
+    model: Any,
+    contentDescription: String,
+    imageRotationDegrees: Int,
+    mirrorImageHorizontally: Boolean,
+    mirrorImageVertically: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onToggleChrome: () -> Unit,
+    undecodableFallback: @Composable () -> Unit
+) {
+    var undecodable by remember(model) { mutableStateOf(false) }
+    val zoomableState = rememberZoomableState(
+        zoomSpec = ZoomSpec(maxZoomFactor = 4f)
+    )
+    val zoomScope = rememberCoroutineScope()
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (undecodable) {
+            undecodableFallback()
+        } else {
+            // AsyncImage sizes the decoded bitmap to the viewport, which makes
+            // zooming a low-resolution preview look blurred. The painter intentionally
+            // requests the original source dimensions for the viewing surface; grid
+            // thumbnails continue to use the separate bounded thumbnail pipeline.
+            val imagePainter = rememberAsyncImagePainter(
+                model = model,
+                onState = { imageState ->
+                    if (imageState is AsyncImagePainter.State.Error) undecodable = true
+                },
+                filterQuality = FilterQuality.High
+            )
+            Image(
+                painter = imagePainter,
+                contentDescription = contentDescription,
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Left mouse is reserved for vertical zoom. Right mouse
+                    // handles horizontal image navigation at fit zoom and pans the
+                    // image in any direction when zoomed. A plain left click is left
+                    // untouched so the existing header/control toggle still works.
+                    .pointerInput(zoomableState, onPrevious, onNext) {
+                        awaitEachGesture {
+                            var downEvent = awaitPointerEvent(PointerEventPass.Initial)
+                            var down = downEvent.changes.firstOrNull { it.pressed }
+                            while (
+                                downEvent.type != PointerEventType.Press ||
+                                down == null
+                            ) {
+                                downEvent = awaitPointerEvent(PointerEventPass.Initial)
+                                down = downEvent.changes.firstOrNull { it.pressed }
+                            }
+
+                            val mouseDown = down ?: return@awaitEachGesture
+                            if (mouseDown.type != PointerType.Mouse) {
+                                return@awaitEachGesture
+                            }
+                            val isLeftButton = downEvent.buttons.isPrimaryPressed
+                            val isRightButton = downEvent.buttons.isSecondaryPressed
+                            if (!isLeftButton && !isRightButton) {
+                                return@awaitEachGesture
+                            }
+
+                            val initialZoomFraction =
+                                (zoomableState.zoomFraction ?: 0f).coerceIn(0f, 1f)
+                            var lastPosition = mouseDown.position
+                            var totalX = 0f
+                            var totalY = 0f
+                            var leftZoomStarted = false
+                            var leftDragConsumed = false
+                            var rightSwipeStarted = false
+                            var rightPanStarted = false
+                            var rightDragConsumed = false
+                            var lastAppliedZoomFraction = initialZoomFraction
+
+                            fun updateZoomFromVerticalDrag(force: Boolean = false) {
+                                val dragRange = (size.height * 0.65f).coerceAtLeast(1f)
+                                val targetFraction =
+                                    (initialZoomFraction - totalY / dragRange)
+                                        .coerceIn(0f, 1f)
+
+                                // Snap small residual zoom back to the exact fit state.
+                                // This also resets any pan offset left over from zooming.
+                                if (targetFraction <= IMAGE_FIT_SNAP_FRACTION) {
+                                    if (lastAppliedZoomFraction > IMAGE_FIT_SNAP_FRACTION || force) {
+                                        lastAppliedZoomFraction = 0f
+                                        zoomScope.launch {
+                                            zoomableState.resetZoom(animationSpec = SnapSpec())
+                                        }
+                                    } else {
+                                        lastAppliedZoomFraction = 0f
+                                    }
+                                    return
+                                }
+
+                                if (
+                                    !force &&
+                                    kotlin.math.abs(targetFraction - lastAppliedZoomFraction) < 0.012f
+                                ) {
+                                    return
+                                }
+
+                                lastAppliedZoomFraction = targetFraction
+                                zoomScope.launch {
+                                    zoomableState.zoomTo(
+                                        zoomFactor = 1f + 3f * targetFraction,
+                                        animationSpec = SnapSpec()
+                                    )
+                                }
+                            }
+
+                            // Consume the right-button press immediately so it cannot
+                            // be interpreted as the normal left-click header toggle.
+                            if (isRightButton) mouseDown.consume()
+
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == mouseDown.id }
+                                    ?: break
+                                val delta = change.position - lastPosition
+                                lastPosition = change.position
+                                totalX += delta.x
+                                totalY += delta.y
+
+                                if (!change.pressed) {
+                                    if (leftZoomStarted) {
+                                        updateZoomFromVerticalDrag(force = true)
+                                    }
+                                    if (
+                                        leftZoomStarted || leftDragConsumed ||
+                                        rightSwipeStarted || rightPanStarted || rightDragConsumed
+                                    ) {
+                                        change.consume()
+                                    }
+                                    break
+                                }
+
+                                val slop = viewConfiguration.touchSlop
+                                val horizontalDistance = kotlin.math.abs(totalX)
+                                val verticalDistance = kotlin.math.abs(totalY)
+
+                                if (isLeftButton) {
+                                    if (!leftZoomStarted && !leftDragConsumed) {
+                                        when {
+                                            verticalDistance > slop &&
+                                                verticalDistance > horizontalDistance * 1.2f -> {
+                                                leftZoomStarted = true
+                                                change.consume()
+                                                updateZoomFromVerticalDrag()
+                                            }
+                                            horizontalDistance > slop &&
+                                                horizontalDistance > verticalDistance * 1.2f -> {
+                                                // Prevent the default zoomable gesture from
+                                                // using the left button to pan the image.
+                                                leftDragConsumed = true
+                                                change.consume()
+                                            }
+                                        }
+                                    } else if (leftZoomStarted) {
+                                        change.consume()
+                                        updateZoomFromVerticalDrag()
+                                    } else if (leftDragConsumed) {
+                                        change.consume()
+                                    }
+                                } else if (isRightButton) {
+                                    if (initialZoomFraction > IMAGE_FIT_SNAP_FRACTION) {
+                                        // At non-fit zoom, right-drag pans the image in
+                                        // both axes using Telephoto's own pan constraints.
+                                        val distance = kotlin.math.sqrt(
+                                            totalX * totalX + totalY * totalY
+                                        )
+                                        if (!rightPanStarted && distance > slop) {
+                                            rightPanStarted = true
+                                            change.consume()
+                                            val panDelta = androidx.compose.ui.geometry.Offset(totalX, totalY)
+                                            zoomScope.launch {
+                                                zoomableState.panBy(
+                                                    panDelta,
+                                                    animationSpec = SnapSpec()
+                                                )
+                                            }
+                                        } else if (rightPanStarted) {
+                                            change.consume()
+                                            val panDelta = delta
+                                            zoomScope.launch {
+                                                zoomableState.panBy(
+                                                    panDelta,
+                                                    animationSpec = SnapSpec()
+                                                )
+                                            }
+                                        }
+                                    } else if (!rightSwipeStarted && !rightDragConsumed) {
+                                        when {
+                                            horizontalDistance > slop &&
+                                                horizontalDistance > verticalDistance * 1.2f -> {
+                                                rightSwipeStarted = true
+                                                change.consume()
+                                            }
+                                            verticalDistance > slop &&
+                                                verticalDistance > horizontalDistance * 1.2f -> {
+                                                // A vertical right-drag at fit zoom is
+                                                // intentionally ignored, not treated as zoom.
+                                                rightDragConsumed = true
+                                                change.consume()
+                                            }
+                                        }
+                                    } else if (rightSwipeStarted || rightDragConsumed) {
+                                        change.consume()
+                                    }
+                                }
+                            }
+
+                            if (rightSwipeStarted && initialZoomFraction <= IMAGE_FIT_SNAP_FRACTION) {
+                                val swipeThreshold = maxOf(
+                                    72.dp.toPx(),
+                                    size.width * 0.12f
+                                )
+                                when {
+                                    totalX >= swipeThreshold -> onPrevious()
+                                    totalX <= -swipeThreshold -> onNext()
+                                }
+                            }
+                        }
+                    }
+                    .zoomable(
+                        state = zoomableState,
+                        // Telephoto routes clicks through this callback so its
+                        // own double-click zoom and pan/pinch gestures remain intact.
+                        onClick = { _ -> onToggleChrome() },
+                        onDoubleClick = { state, centroid ->
+                            zoomScope.launch {
+                                if ((state.zoomFraction ?: 0f) > 0f) {
+                                    state.resetZoom()
+                                } else {
+                                    state.zoomBy(zoomFactor = 1.35f, centroid = centroid)
+                                }
+                            }
+                        }
+                    )
+                    .graphicsLayer {
+                        val intrinsic = imagePainter.intrinsicSize
+                        val intrinsicIsUsable = intrinsic.width.isFinite() &&
+                            intrinsic.height.isFinite() &&
+                            intrinsic.width > 0f && intrinsic.height > 0f
+                        val sourceAspect = if (intrinsicIsUsable) {
+                            intrinsic.width / intrinsic.height
+                        } else {
+                            size.width / size.height.coerceAtLeast(1f)
+                        }
+                        val isQuarterTurn = imageRotationDegrees % 180 != 0
+                        val fitScale = if (isQuarterTurn && sourceAspect > 0f) {
+                            val fittedWidth: Float
+                            val fittedHeight: Float
+                            val viewportAspect = size.width / size.height.coerceAtLeast(1f)
+                            if (sourceAspect > viewportAspect) {
+                                fittedWidth = size.width
+                                fittedHeight = size.width / sourceAspect
+                            } else {
+                                fittedHeight = size.height
+                                fittedWidth = size.height * sourceAspect
+                            }
+                            minOf(
+                                size.width / fittedHeight.coerceAtLeast(1f),
+                                size.height / fittedWidth.coerceAtLeast(1f)
+                            )
+                        } else {
+                            1f
+                        }
+                        rotationZ = imageRotationDegrees.toFloat()
+                        scaleX = fitScale * if (mirrorImageHorizontally) -1f else 1f
+                        scaleY = fitScale * if (mirrorImageVertically) -1f else 1f
+                    },
+                contentScale = ContentScale.Fit
+            )
+            VerticalZoomSlider(
+                zoomFraction = zoomableState.zoomFraction ?: 0f,
+                onZoomFractionChange = { fraction ->
+                    zoomScope.launch {
+                        if (fraction <= 0.001f) {
+                            zoomableState.resetZoom(animationSpec = SnapSpec())
+                        } else {
+                            zoomableState.zoomTo(
+                                zoomFactor = 1f + 3f * fraction,
+                                animationSpec = SnapSpec()
+                            )
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 14.dp)
+            )
+        }
+    }
+}
+
+/**
+ * The in-zip photo viewer (1.6.24 note 7): the extracted temp photo shown with
+ * the REAL desktop photo viewer's feature set — parity by reuse, not by a
+ * forked copy. The zoom surface, rail, wheel and mouse behaviour come from
+ * [ZoomablePreviewImage] (the same composable the real viewer renders); the
+ * rotate/flip controls use the same transform-state approach as the real
+ * viewer's toolbar (rotation in degrees, two mirror flags), held per photo
+ * and reset on switch, like the real viewer resets per file. On top of that,
+ * what the in-zip context honestly has: prev/next paging through the photos
+ * of the currently displayed zip folder (arrows + keyboard, extraction
+ * serialised by the ViewModel's busy gate, a busy spinner while the
+ * neighbour extracts, failure keeps the current photo), an info panel built
+ * from the archive entry's own metadata, and Edit.
+ *
+ * Edit verdict: the real viewer's only Edit is the note editor for TEXT
+ * files (onEditNote, keyed by DriveFile id); images have no in-app editor
+ * there and nothing edit-and-replaces a DriveFile from the image viewer.
+ * So for an extracted temp photo the honest equivalent is opening the temp
+ * file in the system's default app — the same openExternally route the
+ * undecodable fallback uses. Edits land in the temp copy and are NOT saved
+ * back into the zip; there is deliberately no fake save-back here.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun ArchiveImagePreview(
+    preview: ArchiveEntryPreview.Image,
+    entry: ArchiveEntry?,
+    hasPrevious: Boolean,
+    hasNext: Boolean,
+    busy: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onDismiss: () -> Unit,
+    snackbarHostState: SnackbarHostState
+) {
+    var rotationDegrees by remember(preview.path) { mutableIntStateOf(0) }
+    var mirrorHorizontally by remember(preview.path) { mutableStateOf(false) }
+    var mirrorVertically by remember(preview.path) { mutableStateOf(false) }
+    var chromeVisible by remember(preview.path) { mutableStateOf(true) }
+    var infoOpen by remember(preview.path) { mutableStateOf(false) }
+    var openFailed by remember(preview.path) { mutableStateOf(false) }
+    if (openFailed) {
+        LaunchedEffect(preview.path) {
+            snackbarHostState.showSnackbar(getString(DesktopRes.string.preview_open_failed))
+            openFailed = false
+        }
+    }
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(preview.path) { focusRequester.requestFocus() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionLeft, Key.W -> {
+                        if (hasPrevious && !busy) onPrevious()
+                        true
+                    }
+                    Key.DirectionRight, Key.E -> {
+                        if (hasNext && !busy) onNext()
+                        true
+                    }
+                    Key.H -> {
+                        chromeVisible = !chromeVisible
+                        true
+                    }
+                    Key.Escape -> {
+                        onDismiss()
+                        true
+                    }
+                    else -> false
+                }
+            }
+    ) {
+        ZoomablePreviewImage(
+            model = File(preview.path),
+            contentDescription = preview.name,
+            imageRotationDegrees = rotationDegrees,
+            mirrorImageHorizontally = mirrorHorizontally,
+            mirrorImageVertically = mirrorVertically,
+            onPrevious = { if (hasPrevious && !busy) onPrevious() },
+            onNext = { if (hasNext && !busy) onNext() },
+            onToggleChrome = { chromeVisible = !chromeVisible },
+            undecodableFallback = {
+                EmptyState(
+                    icon = Icons.Filled.BrokenImage,
+                    title = stringResource(Res.string.preview_image_undecodable),
+                    actionLabel = stringResource(DesktopRes.string.preview_open_externally),
+                    onAction = { if (!openExternally(preview.path)) openFailed = true }
+                )
+            }
+        )
+        if (chromeVisible) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = preview.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                )
+                TooltipIconButton(
+                    tooltip = "Rotate counter-clockwise",
+                    onClick = { rotationDegrees = (rotationDegrees + 270) % 360 }
+                ) {
+                    Icon(
+                        Icons.Filled.Rotate90DegreesCcw,
+                        contentDescription = "Rotate counter-clockwise"
+                    )
+                }
+                TooltipIconButton(
+                    tooltip = "Rotate clockwise",
+                    onClick = { rotationDegrees = (rotationDegrees + 90) % 360 }
+                ) {
+                    Icon(
+                        Icons.Filled.Rotate90DegreesCw,
+                        contentDescription = "Rotate clockwise"
+                    )
+                }
+                TooltipIconButton(
+                    tooltip = "Mirror horizontally",
+                    onClick = { mirrorHorizontally = !mirrorHorizontally }
+                ) {
+                    Icon(
+                        Icons.Filled.Flip,
+                        contentDescription = "Mirror horizontally",
+                        tint = if (mirrorHorizontally) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                TooltipIconButton(
+                    tooltip = "Mirror vertically",
+                    onClick = { mirrorVertically = !mirrorVertically }
+                ) {
+                    Icon(
+                        Icons.Filled.FlipCameraAndroid,
+                        contentDescription = "Mirror vertically",
+                        tint = if (mirrorVertically) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                TooltipIconButton(
+                    tooltip = "Edit",
+                    onClick = { if (!openExternally(preview.path)) openFailed = true }
+                ) {
+                    Icon(Icons.Filled.Edit, contentDescription = "Edit")
+                }
+                TooltipIconButton(
+                    tooltip = stringResource(Res.string.preview_file_info),
+                    onClick = { infoOpen = true }
+                ) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = stringResource(Res.string.preview_file_info)
+                    )
+                }
+                TooltipIconButton(tooltip = "Close", onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close")
+                }
+            }
+            if (hasPrevious || hasNext) {
+                PreviewPagerButton(
+                    icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = stringResource(Res.string.preview_previous),
+                    enabled = hasPrevious && !busy,
+                    onClick = onPrevious,
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp)
+                )
+                PreviewPagerButton(
+                    icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = stringResource(Res.string.preview_next),
+                    enabled = hasNext && !busy,
+                    onClick = onNext,
+                    // Leave the outermost right edge for the image zoom rail.
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 72.dp)
+                )
+            }
+        }
+        if (busy) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        }
+    }
+    if (infoOpen) {
+        ArchiveEntryInfoDialog(
+            previewName = preview.name,
+            entry = entry,
+            onDismiss = { infoOpen = false }
+        )
+    }
+}
+
+/**
+ * File info for an archive entry, adapted from the real viewer's FileInfoSheet
+ * to what an entry honestly has: its name, its path inside the zip, its size
+ * and compressed size, its stored date, and its type. (No DriveFile identity,
+ * no local/remote copy state, no resolution/duration — the entry does not
+ * carry them.)
+ */
+@Composable
+private fun ArchiveEntryInfoDialog(
+    previewName: String,
+    entry: ArchiveEntry?,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(previewName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (entry == null) {
+                    Text("No entry details are available for this photo.")
+                } else {
+                    ArchiveInfoRow("Path in archive", entry.name)
+                    ArchiveInfoRow("Size", Formatters.bytes(entry.sizeBytes))
+                    ArchiveInfoRow(
+                        "Compressed size",
+                        Formatters.bytes(entry.compressedBytes)
+                    )
+                    ArchiveInfoRow(
+                        "Modified",
+                        if (entry.modifiedAtMillis > 0) {
+                            Formatters.dateTime(entry.modifiedAtMillis)
+                        } else {
+                            "Unknown"
+                        }
+                    )
+                    ArchiveInfoRow("Type", MimeTypes.fromFileName(entry.name))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+}
+
+@Composable
+private fun ArchiveInfoRow(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(text = value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -1878,10 +2187,13 @@ internal const val ARCHIVE_LIST_TEST_TAG = "desktop-archive-list"
  * - Rows use `combinedClickable` with a no-op long-click, so the long-press that
  *   starts a drag can never also fire a click on release.
  * - A tap on a file row routes through the merged ViewModel
- *   (`onArchiveEntryTap(file, entryIndex)`): images reach the image overlay, audio
- *   the desktop player (open-externally when VLC is unavailable), text the read-only
- *   overlay, and video/downloads go through the tracked download path. Failures are
- *   the ViewModel's app-authored messages; no raw exception text is surfaced here.
+ *   (`onArchiveEntryTap(file, entryIndex)`): images reach the full photo viewer
+ *   overlay (note 7), audio the desktop player (open-externally when VLC is
+ *   unavailable), text the read-only overlay, and everything else the tracked
+ *   download path. Video taps are intercepted before that shared routing and
+ *   play in the desktop player instead (note 9, desktop-only routing; the
+ *   row's Download action still downloads). Failures are the ViewModel's
+ *   app-authored messages; no raw exception text is surfaced here.
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -1898,6 +2210,14 @@ internal fun DesktopArchivePane(
     sortDirection: SortDirection,
     onSortChange: (FileSortField, SortDirection) -> Unit,
     onEntryTap: (Int) -> Unit,
+    /** Direct preview request (the in-zip photo pager's neighbour switch). */
+    onPreviewEntry: (Int) -> Unit = onEntryTap,
+    /**
+     * A video entry tap (1.6.24 note 9): the desktop routes it to its own
+     * player instead of the shared tap routing, where video stays DOWNLOAD.
+     * Defaults to the plain tap so existing callers keep the old behaviour.
+     */
+    onVideoEntryTap: (Int) -> Unit = onEntryTap,
     onEntryDownload: (Int) -> Unit,
     onDownloadSelection: (Set<Int>, Set<String>) -> Unit,
     onDismissPreview: () -> Unit,
@@ -2200,7 +2520,23 @@ internal fun DesktopArchivePane(
                                             expanded + row.node.path
                                         }
                                     }
-                                    !busy -> entryIndex?.let { onEntryTap(it) }
+                                    !busy -> entryIndex?.let { tappedIndex ->
+                                        // Desktop-only routing (note 9): a video
+                                        // entry plays in the desktop player. The
+                                        // shared tap routing still maps video to
+                                        // DOWNLOAD (Android unchanged), and the
+                                        // row's Download action stays available.
+                                        val tappedEntry = listing.getOrNull(tappedIndex)
+                                        if (tappedEntry != null &&
+                                            MimeTypes.isVideo(
+                                                MimeTypes.fromFileName(tappedEntry.name)
+                                            )
+                                        ) {
+                                            onVideoEntryTap(tappedIndex)
+                                        } else {
+                                            onEntryTap(tappedIndex)
+                                        }
+                                    }
                                     else -> Unit
                                 }
                             },
@@ -2268,23 +2604,67 @@ internal fun DesktopArchivePane(
                 }
             }
         }
-        // In-archive preview overlay: image in the desktop image viewer, audio in the
-        // desktop player, text read-only. Video never reaches here — its tap action
-        // is DOWNLOAD in the shared ViewModel.
+        // The in-zip photo pager's stops: the image entries among the rows as
+        // currently displayed (tree + sort + filter applied), in display order.
+        val displayedImageIndices = remember(rows, listing) {
+            archiveImagePagerIndices(listing, rows.mapNotNull { it.node.entryIndex })
+        }
+        // In-archive preview overlay: image in the full desktop photo viewer
+        // (note 7), audio AND video in the desktop player (notes 9 — video is
+        // routed here by the desktop pane, never by the shared tap action),
+        // text read-only.
         when (val preview = archivePreview) {
             is ArchiveEntryPreview.Image -> {
-                val painter = rememberAsyncImagePainter(File(preview.path))
+                val pagerPosition = displayedImageIndices.indexOf(preview.entryIndex)
+                ArchiveImagePreview(
+                    preview = preview,
+                    entry = listing.getOrNull(preview.entryIndex),
+                    hasPrevious = pagerPosition > 0,
+                    hasNext = pagerPosition >= 0 &&
+                        pagerPosition < displayedImageIndices.lastIndex,
+                    busy = busyEntryIndex != null,
+                    onPrevious = {
+                        archiveImagePagerNeighbour(
+                            displayedImageIndices, preview.entryIndex, -1
+                        )?.let(onPreviewEntry)
+                    },
+                    onNext = {
+                        archiveImagePagerNeighbour(
+                            displayedImageIndices, preview.entryIndex, +1
+                        )?.let(onPreviewEntry)
+                    },
+                    onDismiss = onDismissPreview,
+                    snackbarHostState = snackbarHostState
+                )
+            }
+
+            is ArchiveEntryPreview.Video -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    Image(
-                        painter = painter,
-                        contentDescription = preview.name,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
+                    if (VlcPlayback.available) {
+                        DesktopMediaPlayer(
+                            mrl = preview.path,
+                            isAudio = false,
+                            mediaId = "archive-video-${preview.name}",
+                            mediaTitle = preview.name,
+                            preferredAudioLanguage = preferredAudioLanguage,
+                            preferredSubtitleLanguage = preferredSubtitleLanguage,
+                            onPreferredAudioLanguage = onPreferredAudioLanguage,
+                            onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
+                            backgroundPlayback = backgroundPlayback,
+                            onBackgroundPlaybackChange = onBackgroundPlaybackChange
+                        )
+                    } else {
+                        OpenExternallyState(
+                            icon = Icons.Filled.Movie,
+                            file = file,
+                            path = preview.path,
+                            snackbarHostState = snackbarHostState
+                        )
+                    }
                     FilledIconButton(
                         onClick = onDismissPreview,
                         modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)

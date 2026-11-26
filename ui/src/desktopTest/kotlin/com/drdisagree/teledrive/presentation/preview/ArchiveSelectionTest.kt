@@ -302,4 +302,45 @@ class ArchiveSelectionTest {
         val plan = planArchiveDownloads(listing, pruned)
         assertEquals(listOf(1 to 0, 3 to 1), plan.map { it.entryIndex to it.occurrence })
     }
+
+    // ---- In-zip photo pager (1.6.24 note 7) ----
+
+    @Test
+    fun `photo pager steps through image entries in displayed order only`() {
+        val listing = listOf(
+            entry("b/second.png"),
+            entry("a/song.mp3"),
+            entry("a/first.jpg"),
+            entry("a/clip.mp4"),
+            entry("a/third.webp"),
+            entry("a/notes.txt")
+        )
+        // Displayed order as the pane shows it (sorted by name here): the pager
+        // keeps that order and skips every non-image entry.
+        val displayed = listOf(2, 1, 5, 4, 3, 0)
+        val pager = archiveImagePagerIndices(listing, displayed)
+        assertEquals(listOf(2, 4, 0), pager)
+        assertEquals(4, archiveImagePagerNeighbour(pager, 2, +1))
+        assertEquals(0, archiveImagePagerNeighbour(pager, 4, +1))
+        assertEquals(2, archiveImagePagerNeighbour(pager, 4, -1))
+        // Hard stops at both ends — no wrap-around.
+        assertEquals(null, archiveImagePagerNeighbour(pager, 2, -1))
+        assertEquals(null, archiveImagePagerNeighbour(pager, 0, +1))
+        // A non-image current entry has no neighbours.
+        assertEquals(null, archiveImagePagerNeighbour(pager, 3, +1))
+    }
+
+    @Test
+    fun `photo pager follows the displayed set under a filter`() {
+        val listing = listOf(
+            entry("cats/one.png"),
+            entry("dogs/two.png"),
+            entry("cats/three.png")
+        )
+        // Only the "cats" folder is displayed (filter): dogs/two.png is not a stop.
+        val pager = archiveImagePagerIndices(listing, listOf(0, 2))
+        assertEquals(listOf(0, 2), pager)
+        assertEquals(2, archiveImagePagerNeighbour(pager, 0, +1))
+        assertEquals(null, archiveImagePagerNeighbour(pager, 2, +1))
+    }
 }
