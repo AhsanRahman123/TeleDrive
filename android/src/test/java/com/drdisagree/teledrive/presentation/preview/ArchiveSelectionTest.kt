@@ -358,4 +358,50 @@ class ArchiveSelectionTest {
         val plan = planArchiveDownloads(listing, pruned)
         assertEquals(listOf(1 to 0, 3 to 1), plan.map { it.entryIndex to it.occurrence })
     }
+
+    // ---- Select all (selection bar) ----
+
+    @Test
+    fun `select all selects every visible row, folders and files alike`() {
+        // Collapsed view: [dirA, dirB, another(4), loose(3)].
+        val all = selectAllArchiveVisible(dragRows(), ArchiveSelectionSet())
+        assertEquals(setOf("dirA", "dirB"), all.folderPaths)
+        assertEquals(setOf(3, 4), all.entryIndices)
+        // The plan covers the whole archive exactly once: folder rows pull in
+        // their contents, loose files are planned flat.
+        val listing = listOf(
+            entry("dirA/a.txt", 1),
+            entry("dirA/b.txt", 2),
+            entry("dirB/c.txt", 3),
+            entry("loose.txt", 4),
+            entry("another.txt", 5)
+        )
+        val plan = planArchiveSelectionDownloads(listing, all.entryIndices, all.folderPaths)
+        assertEquals(listOf(0, 1, 2, 3, 4), plan.map { it.entryIndex })
+    }
+
+    @Test
+    fun `select all in an expanded view adds the visible children too`() {
+        val listing = listOf(
+            entry("dirA/a.txt", 1),
+            entry("dirA/b.txt", 2),
+            entry("dirB/c.txt", 3)
+        )
+        val rows = flattenArchive(buildArchiveTree(listing), expanded = setOf("dirA"))
+        val all = selectAllArchiveVisible(rows, ArchiveSelectionSet())
+        assertEquals(setOf("dirA", "dirB"), all.folderPaths)
+        assertEquals(setOf(0, 1), all.entryIndices)
+    }
+
+    @Test
+    fun `select all merges onto the current selection instead of replacing it`() {
+        // Entry 99 is not a visible row (e.g. selected before a folder was
+        // collapsed); Select all must keep it, like Transfers' Select visible.
+        val merged = selectAllArchiveVisible(
+            dragRows(),
+            ArchiveSelectionSet(entryIndices = setOf(99))
+        )
+        assertEquals(setOf(99, 3, 4), merged.entryIndices)
+        assertEquals(setOf("dirA", "dirB"), merged.folderPaths)
+    }
 }
