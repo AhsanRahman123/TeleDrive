@@ -19,7 +19,7 @@ android {
         // Pinned on this single-purpose branch: it ships exactly one install-over
         // update above the vc173 build (vc174), so the CI run number (which has
         // drifted well past 163 since) must not leak into the version code.
-        versionCode = 179
+        versionCode = 180
         versionName = libs.versions.appVersion.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
