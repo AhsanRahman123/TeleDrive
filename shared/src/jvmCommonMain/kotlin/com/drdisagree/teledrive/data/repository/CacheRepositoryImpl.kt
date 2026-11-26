@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.data.repository
 
+import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
 import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.files.AppStoragePaths
 import com.drdisagree.teledrive.core.files.StorageInspector
@@ -61,7 +62,8 @@ class CacheRepositoryImpl(
         // Walking TDLib and temporary cache directories can touch thousands of files.
         // Keep this work off the UI dispatcher during startup and cache-stat refreshes.
         val (workingBytes, tdlibBytes) = withContext(Dispatchers.IO) {
-            (stagingSize() + partSize()) to storageInspector.directorySize(tdlibFilesDir())
+            (stagingSize() + partSize() + archiveThumbsSize()) to
+                storageInspector.directorySize(tdlibFilesDir())
         }
         stats.value = CacheStats(
             thumbnailBytes = thumbnailBytes,
@@ -139,7 +141,8 @@ class CacheRepositoryImpl(
         val tempBytes = cacheDao.sizeByType(CacheEntryType.TEMP)
         val thumbnailBytes = thumbnailDao.totalSizeBytes()
         val untrackedBytes = withContext(Dispatchers.IO) {
-            stagingSize() + partSize() + storageInspector.directorySize(tdlibFilesDir())
+            stagingSize() + partSize() + archiveThumbsSize() +
+                storageInspector.directorySize(tdlibFilesDir())
         }
         return CacheManagerSummary(
             totalBytes = previewBytes + streamBytes + tempBytes + thumbnailBytes + untrackedBytes,
@@ -1064,6 +1067,16 @@ class CacheRepositoryImpl(
     private fun partSize(): Long =
         storageInspector.directorySize(partsDir()) +
                 storageInspector.directorySize(assemblyDir())
+
+    /**
+     * vc182 item 6: generated archive-entry thumbnails (cacheDir/archive-thumbs).
+     * The store caps this dir itself at 32 MiB; here it is only accounted as
+     * untracked/temp bytes so the cache totals stay honest. The dir does not
+     * exist on platforms or installs that never opened a remote archive.
+     */
+    private fun archiveThumbsSize(): Long = storageInspector.directorySize(
+        File(storagePaths.cacheDir, ArchiveEntryThumbnailPolicy.CACHE_DIR_NAME)
+    )
 
     private fun tdlibFilesDir(): File = File(File(storagePaths.filesDir, "tdlib"), "files")
 

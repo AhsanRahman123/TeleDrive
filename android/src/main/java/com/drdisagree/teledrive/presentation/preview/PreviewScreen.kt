@@ -150,6 +150,12 @@ import com.drdisagree.teledrive.presentation.components.SortMenu
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.RenameDialog
 import com.drdisagree.teledrive.presentation.components.iconFor
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
+import com.drdisagree.teledrive.core.media.ArchiveEntryThumbnailStore
+import com.drdisagree.teledrive.core.media.ArchiveThumbState
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
@@ -920,6 +926,7 @@ private fun PreviewPage(
 
         is PreviewContent.Archive -> ArchiveList(
             archive = content,
+            archiveFile = if (content.remote) file else null,
             busyEntryIndex = archiveEntryBusyIndex,
             batchProgress = archiveBatchProgress,
             onEntryTap = onArchiveEntryTap,
@@ -1183,6 +1190,7 @@ private fun previewContentPadding(): PaddingValues =
 @Composable
 private fun ArchiveList(
     archive: PreviewContent.Archive,
+    archiveFile: DriveFile? = null,
     busyEntryIndex: Int? = null,
     batchProgress: ArchiveBatchProgress? = null,
     onEntryTap: (Int) -> Unit = {},
@@ -1237,6 +1245,14 @@ private fun ArchiveList(
     val selectionMode = selectedEntries.isNotEmpty() || selectedFolders.isNotEmpty()
     val busy = busyEntryIndex != null
     val listState = rememberLazyListState()
+    // vc182 item 6: on-demand entry thumbnails for remote archives only (local
+    // archives keep generic icons). The store holds per-key state entirely
+    // outside this list's UI state; rows ask it individually as they compose.
+    val thumbnailStore = if (archiveFile != null) {
+        koinInject<ArchiveEntryThumbnailStore>()
+    } else {
+        null
+    }
 
     // This list's internal steps of the screen's shared step-back (see PreviewScreen):
     // the preview step is handled one level up, so the decision here starts at the
@@ -1466,6 +1482,8 @@ private fun ArchiveList(
                 }
                 ArchiveRow(
                     row = row,
+                    thumbnailStore = thumbnailStore,
+                    archiveFile = archiveFile,
                     canDownload = archive.remote && !row.node.isDirectory,
                     isBusy = busyEntryIndex != null && busyEntryIndex == entryIndex,
                     selectionMode = selectionMode,
@@ -1620,6 +1638,8 @@ private val ARCHIVE_SORT_FIELDS = listOf(
 private fun ArchiveRow(
     row: ArchiveRowState,
     onToggle: () -> Unit,
+    thumbnailStore: ArchiveEntryThumbnailStore? = null,
+    archiveFile: DriveFile? = null,
     modifier: Modifier = Modifier,
     canDownload: Boolean = false,
     isBusy: Boolean = false,
@@ -1687,6 +1707,41 @@ private fun ArchiveRow(
                 modifier = Modifier.padding(end = 4.dp)
             )
         }
+        // vc182 item 6: for image entries of a remote archive, the 40dp slot shows
+        // a real thumbnail once the store has one; until then (and on any failure)
+        // it shows exactly the generic icon it always showed. The key is derived
+        // from this row's own listing identity only — no list-level state.
+        val entryIndex = node.entryIndex
+        val thumbnailKey = remember(
+            archiveFile?.id, entryIndex, node.sizeBytes, node.compressedBytes, node.modifiedAtMillis
+        ) {
+            val file = archiveFile
+            if (file != null && entryIndex != null && !node.isDirectory &&
+                ArchiveEntryThumbnailPolicy.isImageEntryName(node.name)
+            ) {
+                ArchiveEntryThumbnailPolicy.cacheKey(
+                    archiveFileId = file.id,
+                    entryIndex = entryIndex,
+                    sizeBytes = node.sizeBytes,
+                    compressedBytes = node.compressedBytes,
+                    modifiedAtMillis = node.modifiedAtMillis
+                )
+            } else {
+                null
+            }
+        }
+        val genericIcon: @Composable () -> Unit = {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (node.isDirectory) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(20.dp)
+            )
+        }
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -1700,16 +1755,21 @@ private fun ArchiveRow(
                     }
                 )
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (node.isDirectory) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.size(20.dp)
-            )
+            if (thumbnailKey != null && thumbnailStore != null && archiveFile != null &&
+                entryIndex != null
+            ) {
+                ArchiveEntryThumbnail(
+                    store = thumbnailStore,
+                    archiveFile = archiveFile,
+                    entryIndex = entryIndex,
+                    entryName = node.name,
+                    sizeBytes = node.sizeBytes,
+                    cacheKey = thumbnailKey,
+                    placeholder = genericIcon
+                )
+            } else {
+                genericIcon()
+            }
         }
         Column(
             modifier = Modifier
@@ -1765,6 +1825,52 @@ private fun ArchiveRow(
                 }
             }
         }
+    }
+}
+
+/**
+ * One archive row's thumbnail (vc182 item 6): asks [ArchiveEntryThumbnailStore]
+ * for this entry's thumbnail while composed and releases the request on dispose,
+ * so a row that scrolls off cancels its fetch if nobody else waits on it. Shows
+ * [placeholder] (the row's generic icon) until the thumbnail is ready, and keeps
+ * showing it on failure. Crossfade is disabled for these rows: the global image
+ * loader fades in, which reads as flicker in a fast-scrolling list.
+ */
+@Composable
+private fun ArchiveEntryThumbnail(
+    store: ArchiveEntryThumbnailStore,
+    archiveFile: DriveFile,
+    entryIndex: Int,
+    entryName: String,
+    sizeBytes: Long,
+    cacheKey: String,
+    placeholder: @Composable () -> Unit
+) {
+    val state by store.state(cacheKey).collectAsStateWithLifecycle()
+    var loadFailed by remember(cacheKey) { mutableStateOf(false) }
+    LaunchedEffect(cacheKey) {
+        store.request(cacheKey, archiveFile, entryIndex, entryName, sizeBytes)
+    }
+    DisposableEffect(cacheKey) {
+        onDispose { store.release(cacheKey) }
+    }
+    val readyFile = (state as? ArchiveThumbState.Ready)?.file
+    if (readyFile != null && !loadFailed) {
+        val context = LocalContext.current
+        AsyncImage(
+            model = remember(readyFile) {
+                ImageRequest.Builder(context)
+                    .data(readyFile)
+                    .crossfade(false)
+                    .build()
+            },
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            onError = { loadFailed = true },
+            modifier = Modifier.fillMaxSize()
+        )
+    } else {
+        placeholder()
     }
 }
 
