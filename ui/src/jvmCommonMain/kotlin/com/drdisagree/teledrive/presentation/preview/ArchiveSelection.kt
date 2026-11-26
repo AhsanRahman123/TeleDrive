@@ -204,14 +204,16 @@ fun selectAllArchiveVisible(
     rows: List<ArchiveRowState>,
     current: ArchiveSelectionSet
 ): ArchiveSelectionSet {
-    var entries = current.entryIndices
-    var folders = current.folderPaths
+    // Accumulate into mutable sets: rebuilding with `set + element` per row is
+    // O(n²) in set copies (~11k visible rows froze the UI thread).
+    val entries = current.entryIndices.toMutableSet()
+    val folders = current.folderPaths.toMutableSet()
     for (row in rows) {
         val node = row.node
         if (node.isDirectory) {
-            folders = folders + node.path
+            folders.add(node.path)
         } else {
-            node.entryIndex?.let { entries = entries + it }
+            node.entryIndex?.let { entries.add(it) }
         }
     }
     return ArchiveSelectionSet(entries, folders)
