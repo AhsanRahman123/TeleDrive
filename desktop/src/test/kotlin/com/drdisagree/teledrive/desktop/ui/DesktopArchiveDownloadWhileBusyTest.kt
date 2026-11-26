@@ -7,8 +7,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
-import androidx.compose.ui.test.hasParent
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -150,7 +150,7 @@ class DesktopArchiveDownloadWhileBusyTest {
         // Address entry 1's own Download action through its row (semantics
         // node order across rows is not something to rely on).
         rule.onNode(
-            hasParent(hasTestTag("archive-entry-1")) and hasContentDescription("Download")
+            hasAnyAncestor(hasTestTag("archive-entry-1")) and hasContentDescription("Download")
         ).performClick()
         rule.waitForIdle()
         assertEquals(listOf(1), entryDownloads.toList())
