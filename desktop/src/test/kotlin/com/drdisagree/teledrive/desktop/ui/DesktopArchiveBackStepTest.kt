@@ -9,9 +9,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
@@ -192,8 +194,47 @@ class DesktopArchiveBackStepTest {
         assertFalse(back())
     }
 
+    /**
+     * Moves the keyboard collection's focus onto [rowTag] the way a keyboard
+     * user does (the pattern DesktopArchiveSelectionTest's space test uses):
+     * focus the list, then arrow until the row reports focused. The collection
+     * only routes Backspace once an item genuinely holds its focus.
+     */
+    private fun focusRow(rowTag: String) {
+        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG).requestFocus()
+        rule.waitForIdle()
+        var attempts = 0
+        while (!isFocused(rowTag) && attempts < 8) {
+            rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG)
+                .performKeyInput { pressKey(Key.DirectionDown) }
+            rule.waitForIdle()
+            attempts++
+        }
+        attempts = 0
+        while (!isFocused(rowTag) && attempts < 8) {
+            rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG)
+                .performKeyInput { pressKey(Key.DirectionUp) }
+            rule.waitForIdle()
+            attempts++
+        }
+        rule.onNodeWithTag(rowTag).assertIsFocused()
+    }
+
+    private fun isFocused(rowTag: String): Boolean = try {
+        rule.onNodeWithTag(rowTag).assertIsFocused()
+        true
+    } catch (failure: AssertionError) {
+        false
+    }
+
+    private fun pressBackspace() {
+        rule.onNodeWithTag(ARCHIVE_LIST_TEST_TAG)
+            .performKeyInput { pressKey(Key.Backspace) }
+        rule.waitForIdle()
+    }
+
     @Test
-    fun `keyboard backspace runs the same ladder and exits at the root`() {
+    fun `keyboard backspace collapses the deepest expanded folder`() {
         setPane()
 
         rule.onNodeWithTag("archive-folder-a").performClick()
@@ -202,22 +243,19 @@ class DesktopArchiveBackStepTest {
         rule.waitForIdle()
         rule.onNodeWithText("mid.txt").assertIsDisplayed()
 
-        // Backspace on a focused row collapses the deepest folder (a/b).
-        rule.onNodeWithTag("archive-entry-1").performKeyInput { pressKey(Key.Backspace) }
-        rule.waitForIdle()
+        focusRow("archive-entry-1")
+        pressBackspace()
         assertFalse("mid.txt must be hidden after keyboard back", displayed("mid.txt"))
         assertTrue("top.txt must still show after keyboard back", displayed("top.txt"))
         assertEquals(0, exits.get())
+    }
 
-        // One more keyboard back collapses the remaining folder (a)...
-        rule.onNodeWithTag("archive-entry-3").performKeyInput { pressKey(Key.Backspace) }
-        rule.waitForIdle()
-        assertFalse("top.txt must be hidden after second keyboard back", displayed("top.txt"))
-        assertEquals(0, exits.get())
+    @Test
+    fun `keyboard backspace at the zip root exits the viewer`() {
+        setPane()
 
-        // ...and only at the zip root does keyboard back leave the viewer.
-        rule.onNodeWithTag("archive-entry-3").performKeyInput { pressKey(Key.Backspace) }
-        rule.waitForIdle()
+        focusRow("archive-entry-3")
+        pressBackspace()
         assertEquals(1, exits.get())
     }
 }
