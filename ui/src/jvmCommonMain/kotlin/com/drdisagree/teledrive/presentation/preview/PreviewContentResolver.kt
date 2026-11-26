@@ -159,12 +159,14 @@ class PreviewContentResolver(
         }
 
         // Only small files are fetched on open, so browsing stays instant and a large transfer
-        // never starts unasked.
-        val autoFetchable = file.sizeBytes <= AUTO_PREVIEW_LIMIT &&
-                (MimeTypes.isImage(file.mimeType) ||
-                        file.category == FileCategory.IMAGE ||
-                        MimeTypes.isText(file.mimeType) ||
-                        MimeTypes.isApk(file.mimeType, file.name))
+        // never starts unasked. PDF and EPUB/OOXML documents get their own larger caps
+        // (see isAutoFetchable) so a remote copy previews exactly like an in-zip entry.
+        val autoFetchable = isAutoFetchable(
+            mimeType = file.mimeType,
+            category = file.category,
+            fileName = file.name,
+            sizeBytes = file.sizeBytes
+        )
         if (!autoFetchable) {
             emit(PreviewContent.RequiresDownload(file.sizeBytes))
             return@flow
@@ -497,10 +499,61 @@ class PreviewContentResolver(
 
     companion object {
         private const val TAG = "PreviewContent"
-        private const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
+
+        // Public (not private) only so the top-level pure isAutoFetchable seam
+        // in this file — and its host tests — can use the same values.
+        const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
+
+        /**
+         * Largest remote PDF fetched on open: 50 MiB. Deliberately equal to the
+         * in-zip cap ARCHIVE_PDF_PREVIEW_MAX_BYTES (ArchiveSelection.kt), as a
+         * literal with this parity note — the same way the in-zip cap itself is
+         * defined — rather than a new cross-reference.
+         */
+        const val PDF_AUTO_PREVIEW_LIMIT = 50L * 1024 * 1024
+
+        /**
+         * Largest remote EPUB/OOXML document fetched on open: 20 MiB.
+         * Deliberately equal to the in-zip cap
+         * ARCHIVE_DOCUMENT_PREVIEW_MAX_BYTES (ArchiveSelection.kt), as a
+         * literal with this parity note, for the same reason as
+         * [PDF_AUTO_PREVIEW_LIMIT].
+         */
+        const val DOCUMENT_AUTO_PREVIEW_LIMIT = 20L * 1024 * 1024
+
         private const val TEXT_LIMIT = 256 * 1024
     }
 }
+
+/**
+ * Whether a remote-only file is fetched automatically on open instead of
+ * showing the Download-to-view gate (PreviewContent.RequiresDownload).
+ *
+ * The original rule is unchanged: images, text and APKs fetch only up to
+ * [PreviewContentResolver.AUTO_PREVIEW_LIMIT] (10 MiB). vc182 adds parity for
+ * the document types that already preview in place inside a ZIP: a PDF
+ * fetches up to [PreviewContentResolver.PDF_AUTO_PREVIEW_LIMIT] and an EPUB
+ * or OOXML document up to
+ * [PreviewContentResolver.DOCUMENT_AUTO_PREVIEW_LIMIT] — exactly the in-zip
+ * caps — so the same file is not gated on the normal-file route while being
+ * previewable in-zip. Everything else (unsupported types, images/text/APKs
+ * over 10 MiB, documents over their caps) keeps the gate exactly as before.
+ * Pure and side-effect free so host tests can pin the boundaries.
+ */
+fun isAutoFetchable(
+    mimeType: String,
+    category: FileCategory,
+    fileName: String,
+    sizeBytes: Long
+): Boolean =
+    (sizeBytes <= PreviewContentResolver.AUTO_PREVIEW_LIMIT &&
+        (MimeTypes.isImage(mimeType) ||
+            category == FileCategory.IMAGE ||
+            MimeTypes.isText(mimeType) ||
+            MimeTypes.isApk(mimeType, fileName))) ||
+        (MimeTypes.isPdf(mimeType) && sizeBytes <= PreviewContentResolver.PDF_AUTO_PREVIEW_LIMIT) ||
+        ((MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType)) &&
+            sizeBytes <= PreviewContentResolver.DOCUMENT_AUTO_PREVIEW_LIMIT)
 
 /**
  * Lists a local ZIP file with the app's own ranged [ZipArchiveReader] over a
