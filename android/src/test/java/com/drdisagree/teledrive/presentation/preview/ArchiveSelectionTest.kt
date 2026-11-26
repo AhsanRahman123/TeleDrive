@@ -30,13 +30,14 @@ class ArchiveSelectionTest {
     // ---- Tap routing (item 4 + item 8) ----
 
     @Test
-    fun `image and audio entries preview, video never does`() {
+    fun `image and audio entries preview, video plays on tap`() {
         assertEquals(ArchiveEntryTapAction.PREVIEW_IMAGE, archiveEntryTapAction(entry("a/photo.JPG")))
         assertEquals(ArchiveEntryTapAction.PLAY_AUDIO, archiveEntryTapAction(entry("a/song.mp3")))
         assertEquals(ArchiveEntryTapAction.PLAY_AUDIO, archiveEntryTapAction(entry("a/tone.flac")))
-        // Video stays download-only: no playback action exists for it.
-        assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("a/movie.mp4")))
-        assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("a/movie.mkv")))
+        // vc181 B11: video plays in-archive on tap (PLAY_VIDEO) — but stays
+        // out of the pager; InZipVideoTest pins the pager exclusion.
+        assertEquals(ArchiveEntryTapAction.PLAY_VIDEO, archiveEntryTapAction(entry("a/movie.mp4")))
+        assertEquals(ArchiveEntryTapAction.PLAY_VIDEO, archiveEntryTapAction(entry("a/movie.mkv")))
         // (A known non-media type: an unknown extension would consult the platform
         // MimeTypeMap, which is a stub in host unit tests.)
         assertEquals(ArchiveEntryTapAction.DOWNLOAD, archiveEntryTapAction(entry("a/blob.zip")))

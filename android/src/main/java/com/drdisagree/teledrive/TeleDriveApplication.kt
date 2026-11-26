@@ -70,6 +70,16 @@ class TeleDriveApplication : Application(), SingletonImageLoader.Factory {
         proxyFailover.start(applicationScope)
         debugLogController.start(applicationScope, alwaysVerbose = BuildConfig.DEBUG)
         applicationScope.launch {
+            // Sweep orphaned in-archive preview temps (vc181 B11): a preview
+            // temp is deleted on dismiss/swap, but process death mid-preview
+            // orphans it in the cache dir — and a video temp can be gigabytes.
+            // At app start no preview is open yet, so every zip-entry- temp
+            // present is an orphan. Best-effort only.
+            runCatching {
+                cacheDir.listFiles()
+                    ?.filter { it.isFile && it.name.startsWith("zip-entry-") }
+                    ?.forEach { it.delete() }
+            }
             transferRepository.recoverOrphanedTransfers()
             fileRepository.sweepImportOrphans()
             folderOwnershipRepair.runOnce()

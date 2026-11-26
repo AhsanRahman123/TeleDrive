@@ -30,6 +30,7 @@ import com.drdisagree.teledrive.resources.preview_unarchived
 import com.drdisagree.teledrive.resources.preview_unhidden
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
 import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
+import com.drdisagree.teledrive.core.archive.ArchiveErrorKind
 import com.drdisagree.teledrive.core.archive.ArchiveException
 import com.drdisagree.teledrive.core.archive.LocalArchiveFormat
 import com.drdisagree.teledrive.core.archive.LocalArchiveService
@@ -390,10 +391,10 @@ class PreviewViewModel(
     }
 
     /**
-     * Routes a tap on an archive file row: images open in the image viewer, audio plays,
-     * text reads in place — each after the same verified extraction a download performs —
-     * and everything else (video included, always) downloads. In selection mode the screen
-     * toggles selection instead and never calls this.
+     * Routes a tap on an archive file row: images open in the image viewer, audio
+     * and video play, text reads in place — each after the same verified
+     * extraction a download performs — and everything else downloads. In
+     * selection mode the screen toggles selection instead and never calls this.
      */
     fun onArchiveEntryTap(file: DriveFile, entryIndex: Int) {
         val listing = _uiState.value.archiveListings[file.id]
@@ -405,6 +406,7 @@ class PreviewViewModel(
         when (archiveEntryTapAction(entry)) {
             ArchiveEntryTapAction.PREVIEW_IMAGE,
             ArchiveEntryTapAction.PLAY_AUDIO,
+            ArchiveEntryTapAction.PLAY_VIDEO,
             ArchiveEntryTapAction.PREVIEW_TEXT -> previewArchiveEntry(file, entryIndex)
             ArchiveEntryTapAction.DOWNLOAD -> downloadArchiveEntry(file, entryIndex)
         }
@@ -439,10 +441,14 @@ class PreviewViewModel(
             )
             return
         }
+        // A tapped video is tap-only (vc181 B11): it publishes a single-entry
+        // pager sequence, never the full pager — see archiveVideoPreviewSequence.
         // A CBZ reads as a comic: image pages only, in natural path order —
         // not the archive list's sort. Any other tap inside a CBZ (a text file,
         // say) keeps the plain ZIP pager behaviour.
-        val pagerIndices = if (archiveFormats[file.id] == "CBZ" &&
+        val pagerIndices = if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
+            archiveVideoPreviewSequence(entryIndex)
+        } else if (archiveFormats[file.id] == "CBZ" &&
             action == ArchiveEntryTapAction.PREVIEW_IMAGE
         ) {
             comicPageSequence(listing)
@@ -493,6 +499,29 @@ class PreviewViewModel(
                 )
             }
             try {
+                // In-archive video preflight (vc181 B11): the entry extracts
+                // WHOLE to a temp file before the first frame, so refuse up
+                // front when the temp dir cannot hold it — otherwise a full
+                // disk mid-extraction would be misreported as corruption.
+                if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
+                    val tempDir = java.io.File(
+                        System.getProperty("java.io.tmpdir") ?: "."
+                    )
+                    val freeBytes = tempDir.usableSpace
+                    if (!archiveVideoFitsInFreeSpace(entry.sizeBytes, freeBytes)) {
+                        throw ArchiveException(
+                            ArchiveErrorKind.INSUFFICIENT_SPACE,
+                            "There is not enough free space to play this video here. " +
+                                "It needs about " +
+                                com.drdisagree.teledrive.presentation.common.Formatters
+                                    .bytes(entry.sizeBytes) +
+                                " but only " +
+                                com.drdisagree.teledrive.presentation.common.Formatters
+                                    .bytes(freeBytes) +
+                                " is free. Download it instead."
+                        )
+                    }
+                }
                 val local = localArchives[file.id]
                 val temp = if (local != null) {
                     localArchiveService.extractEntryToTempFile(
@@ -509,6 +538,8 @@ class PreviewViewModel(
                         ArchiveEntryPreview.Image(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PLAY_AUDIO ->
                         ArchiveEntryPreview.Audio(displayName, temp.absolutePath, entryIndex)
+                    ArchiveEntryTapAction.PLAY_VIDEO ->
+                        ArchiveEntryPreview.Video(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PREVIEW_TEXT -> {
                         // String decoding with the UTF-8 charset replaces malformed input
                         // instead of failing, so a non-UTF-8 text file still shows sanely.
@@ -612,6 +643,7 @@ class PreviewViewModel(
         when (preview) {
             is ArchiveEntryPreview.Image -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Audio -> java.io.File(preview.path).delete()
+            is ArchiveEntryPreview.Video -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Text -> Unit
         }
     }

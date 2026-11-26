@@ -57,7 +57,10 @@ enum class ArchiveErrorKind {
     ENCRYPTED_FILE,
     SPLIT_FILE,
     NO_REMOTE_COPY,
-    SAVE_FAILED
+    SAVE_FAILED,
+
+    /** The temp dir cannot hold the extracted entry (vc181 B11 preflight). */
+    INSUFFICIENT_SPACE
 }
 
 /** A failure the UI can show to the user verbatim; [message] is deliberately plain and specific. */

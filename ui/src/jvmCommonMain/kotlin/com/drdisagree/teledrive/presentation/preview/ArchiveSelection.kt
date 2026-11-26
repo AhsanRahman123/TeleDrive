@@ -13,8 +13,8 @@ import com.drdisagree.teledrive.domain.model.SortDirection
  * sorting and filtering only change which rows are displayed and in what order.
  */
 
-/** What a tap on a file row does. Video is deliberately DOWNLOAD: it never plays in-archive. */
-enum class ArchiveEntryTapAction { PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, DOWNLOAD }
+/** What a tap on a file row does. */
+enum class ArchiveEntryTapAction { PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, PLAY_VIDEO, DOWNLOAD }
 
 fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
     if (entry.isDirectory) return ArchiveEntryTapAction.DOWNLOAD
@@ -22,9 +22,12 @@ fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
     return when {
         MimeTypes.isImage(mimeType) -> ArchiveEntryTapAction.PREVIEW_IMAGE
         MimeTypes.isAudio(mimeType) -> ArchiveEntryTapAction.PLAY_AUDIO
+        // Video plays in-archive on tap (vc181 B11) via the same verified
+        // temp extraction as audio — but it is NOT pager-previewable below.
+        MimeTypes.isVideo(mimeType) -> ArchiveEntryTapAction.PLAY_VIDEO
         // The app's own text classification (MimeTypes.isText) decides what counts as text.
         MimeTypes.isText(mimeType) -> ArchiveEntryTapAction.PREVIEW_TEXT
-        // Video and everything else stay download-only.
+        // Everything else stays download-only.
         else -> ArchiveEntryTapAction.DOWNLOAD
     }
 }
@@ -40,8 +43,39 @@ fun archiveEntryPreviewable(entry: ArchiveEntry): Boolean =
         ArchiveEntryTapAction.PREVIEW_IMAGE,
         ArchiveEntryTapAction.PLAY_AUDIO -> true
         ArchiveEntryTapAction.PREVIEW_TEXT -> archiveEntryTextPreviewable(entry)
+        // PLAY_VIDEO is tap-only: a video is never a pager page. Swiping
+        // across one would trigger a full (potentially multi-GB) extraction
+        // for a page the user may pass in a second, breaking the pager's
+        // cheap-page contract. A tapped video publishes a single-entry
+        // sequence instead (see archiveVideoPreviewSequence).
+        ArchiveEntryTapAction.PLAY_VIDEO,
         ArchiveEntryTapAction.DOWNLOAD -> false
     }
+
+/**
+ * The pager sequence for a tapped in-archive video: just the video itself.
+ * The overlay's invariant "entries[position] is the open preview" holds,
+ * the pager has one page (no swipe neighbours, no counter), and a stray
+ * page-selected callback can only ever re-target the same entry.
+ */
+fun archiveVideoPreviewSequence(entryIndex: Int): List<Int> = listOf(entryIndex)
+
+/** Headroom kept free beyond an in-archive video's own temp file. */
+const val ARCHIVE_VIDEO_SPACE_MARGIN_BYTES: Long = 16L * 1024 * 1024
+
+/**
+ * The free-space preflight for in-archive video (vc181 B11): the entry's
+ * exact uncompressed size (from the listing) plus a fixed margin must fit
+ * in [freeBytes] (the temp dir's usable space) BEFORE extraction starts.
+ * Extraction streams ranged reads to the temp file, so peak extra usage is
+ * the temp itself plus small buffers — the margin covers the buffers.
+ * Without this, a disk-full mid-extraction would surface as archive
+ * corruption, which it is not. Written subtraction-first so no size can
+ * overflow it.
+ */
+fun archiveVideoFitsInFreeSpace(entrySizeBytes: Long, freeBytes: Long): Boolean =
+    entrySizeBytes >= 0 &&
+        freeBytes - entrySizeBytes >= ARCHIVE_VIDEO_SPACE_MARGIN_BYTES
 
 /**
  * The in-zip preview pager sequence: the LISTING INDICES of the previewable entries of
