@@ -600,19 +600,21 @@ class PreviewViewModel(
                     // The extraction runs as a CHILD job registered under this step's
                     // record, so a stop from Transfers cancels only this step's job
                     // while this batch coroutine stays alive to continue with the rest.
-                    val stepJob = async {
-                        remoteArchiveService.extractEntry(
-                            file = file,
-                            entryName = step.entryName,
-                            occurrence = step.occurrence,
-                            subFolderPath = step.subFolderPath.ifBlank { null },
-                            onProgress = { done ->
-                                archiveDownloadReporter.progress(recordId, done)
-                            }
-                        )
+                    val savedPath = coroutineScope {
+                        val stepJob = async {
+                            remoteArchiveService.extractEntry(
+                                file = file,
+                                entryName = step.entryName,
+                                occurrence = step.occurrence,
+                                subFolderPath = step.subFolderPath.ifBlank { null },
+                                onProgress = { done ->
+                                    archiveDownloadReporter.progress(recordId, done)
+                                }
+                            )
+                        }
+                        archiveDownloadReporter.attach(recordId, stepJob)
+                        stepJob.await()
                     }
-                    archiveDownloadReporter.attach(recordId, stepJob)
-                    val savedPath = stepJob.await()
                     archiveDownloadReporter.complete(recordId, savedPath)
                     saved++
                 } catch (failure: CancellationException) {
