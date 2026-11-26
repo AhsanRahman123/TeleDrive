@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.core.archive
 
 import com.drdisagree.teledrive.core.files.DownloadWriter
 import com.drdisagree.teledrive.core.files.PartialDownload
+import com.drdisagree.teledrive.core.media.TelegramMediaByteSource
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.core.telegram.TelegramException
 import com.drdisagree.teledrive.core.telegram.TelegramFileInfo
@@ -17,6 +18,7 @@ import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
 import com.drdisagree.teledrive.testing.unused
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.OutputStream
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
@@ -118,6 +120,7 @@ class RemoteArchiveServiceTest {
     ) {
         val rangeRequests = mutableListOf<Pair<Long, Long>>()
         var cancelCalls = 0
+        var deleteLocalCopyCalls = 0
 
         val client: TelegramClient = Proxy.newProxyInstance(
             TelegramClient::class.java.classLoader,
@@ -149,6 +152,7 @@ class RemoteArchiveServiceTest {
                         Unit
                     }
                     "cancelFileDownload" -> { cancelCalls++; Unit }
+                    "deleteLocalCopy" -> { deleteLocalCopyCalls++; Unit }
                     "fileUpdates" -> flowOf(info)
                     else -> throw UnsupportedOperationException(method.name)
                 }
@@ -274,6 +278,71 @@ class RemoteArchiveServiceTest {
                         Unit
                     }
                     "deleteLocalCopy" -> { deleteLocalCopyCalls++; evicted = true; Unit }
+                    "cancelFileDownload" -> Unit
+                    "fileUpdates" -> flowOf(info())
+                    else -> throw UnsupportedOperationException(method.name)
+                }
+            }
+        ) as TelegramClient
+    }
+
+    /**
+     * vc181 A3 (second-pass MF-1): a genuinely healthy completed file — its claimed
+     * local copy is a real file on disk at exactly the claimed size, so
+     * localCopyVerified() passes — whose read sequence reaches the byte source's
+     * final read and fails there exactly once (transient). The first readFilePart
+     * call returns empty, which is what sends read() past its optimistic
+     * readDownloaded() into awaitAvailable() and the final read; the second call
+     * throws; every later call serves bytes. Recovery must happen through the
+     * bounded retry WITHOUT eviction: deleteLocalCopy and requestFileRange are
+     * both recorded so the test can pin that neither fired.
+     */
+    private class HealthyCompletedTransientTelegram(private val bytes: ByteArray) {
+        val rangeRequests = mutableListOf<Pair<Long, Long>>()
+        var deleteLocalCopyCalls = 0
+        var readCalls = 0
+        private val localFile: File = File.createTempFile("healthy-completed-", ".bin").apply {
+            writeBytes(bytes)
+            deleteOnExit()
+        }
+
+        private fun info() = TelegramFileInfo(
+            fileId = 7,
+            sizeBytes = bytes.size.toLong(),
+            localPath = localFile.absolutePath,
+            isDownloadingCompleted = true,
+            isDownloadingActive = false,
+            downloadOffset = 0,
+            downloadedPrefixSize = bytes.size.toLong()
+        )
+
+        val client: TelegramClient = Proxy.newProxyInstance(
+            TelegramClient::class.java.classLoader,
+            arrayOf(TelegramClient::class.java),
+            InvocationHandler { _, method, args ->
+                when (method.name) {
+                    "resolveFile", "getFileInfo" -> info()
+                    "readFilePart" -> {
+                        readCalls++
+                        when (readCalls) {
+                            1 -> ByteArray(0)
+                            2 -> throw TelegramException(400, "transient read failure")
+                            else -> {
+                                val offset = (args[1] as Number).toLong()
+                                val count = (args[2] as Number).toLong()
+                                if (offset >= bytes.size) ByteArray(0)
+                                else bytes.copyOfRange(
+                                    offset.toInt(),
+                                    minOf(offset + count, bytes.size.toLong()).toInt()
+                                )
+                            }
+                        }
+                    }
+                    "requestFileRange" -> {
+                        rangeRequests += (args[1] as Number).toLong() to (args[2] as Number).toLong()
+                        Unit
+                    }
+                    "deleteLocalCopy" -> { deleteLocalCopyCalls++; Unit }
                     "cancelFileDownload" -> Unit
                     "fileUpdates" -> flowOf(info())
                     else -> throw UnsupportedOperationException(method.name)
@@ -683,8 +752,10 @@ class RemoteArchiveServiceTest {
     @Test
     fun `healthy completed zip lists with no range request and no eviction`() = runBlocking {
         // Guard: a genuinely readable completed file must not be re-downloaded or
-        // evicted by the A3 recovery. RecordingTelegram throws on deleteLocalCopy,
-        // and its range requests are asserted empty below.
+        // evicted by the A3 recovery. RecordingTelegram now COUNTS deleteLocalCopy
+        // calls instead of throwing on them (evictStaleCompleted wraps the call in
+        // runCatching, so a throw would be swallowed and an eviction invisible);
+        // the count and the range requests are both asserted empty below.
         val telegram = RecordingTelegram(
             storedZip(listOf("a.txt" to "abc".toByteArray())),
             completed = true
@@ -695,7 +766,44 @@ class RemoteArchiveServiceTest {
             "healthy completed file was re-downloaded: ${telegram.rangeRequests}",
             telegram.rangeRequests.isEmpty()
         )
+        assertEquals(
+            "healthy completed file was evicted",
+            0, telegram.deleteLocalCopyCalls
+        )
     }
+
+    @Test
+    fun `healthy completed file recovers from a transient final read failure without eviction`() =
+        runBlocking {
+            // Second-pass MF-1 pin: the final readFilePart throws once while the
+            // claimed local copy verifies on disk at exactly the claimed size.
+            // read() must retry exactly once and recover WITHOUT calling
+            // deleteLocalCopy (DeleteFile would destroy the good local copy and
+            // force a re-download) and without a ranged re-download. On the
+            // pre-fix code the catch evicted unconditionally, so
+            // deleteLocalCopyCalls would be 1 here.
+            val content = "healthy completed content".toByteArray()
+            val telegram = HealthyCompletedTransientTelegram(content)
+            val source = TelegramMediaByteSource(
+                telegram.client,
+                remoteFileId = "remote-1",
+                primeFromStart = false
+            )
+            val read = source.read(0, content.size)
+            assertArrayEquals(content, read)
+            assertEquals(
+                "the transient failure must be retried exactly once (3 read calls total)",
+                3, telegram.readCalls
+            )
+            assertEquals(
+                "verified healthy completed file was evicted",
+                0, telegram.deleteLocalCopyCalls
+            )
+            assertTrue(
+                "verified healthy completed file was re-downloaded: ${telegram.rangeRequests}",
+                telegram.rangeRequests.isEmpty()
+            )
+        }
 
     @Test
     fun `zip whose reads fail despite reported coverage recovers after eviction`() = runBlocking {

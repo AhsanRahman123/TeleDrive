@@ -54,12 +54,16 @@ class TelegramMediaByteSource(
         } catch (failure: CancellationException) {
             throw failure
         } catch (failure: Exception) {
-            // The state TDLib reported did not yield bytes (stale completed claim, or
-            // coverage reported over an unreadable local reference): evict the stale
-            // download state like downloadDocument() does, force the ranged download
-            // for exactly this range through awaitAvailable, and read once more. A
+            // The state TDLib reported did not yield bytes. Evict the stale download
+            // state like downloadDocument() does ONLY when a re-fetched file info
+            // proves the claim broken (see readFailureProvesStaleState): a transient
+            // failure on a healthy partial or a verified completed copy must not
+            // DeleteFile a good local copy. Either way, force the ranged download
+            // for exactly this range through awaitAvailable and read once more. A
             // second failure is real and propagates unchanged.
-            evictStaleCompleted()
+            if (readFailureProvesStaleState()) {
+                evictStaleCompleted()
+            }
             awaitAvailable(position, toRead)
             telegramClient.readFilePart(fileId, position, toRead)
         }
@@ -134,6 +138,23 @@ class TelegramMediaByteSource(
         val candidate = File(path)
         if (!candidate.isFile) return false
         return info.sizeBytes <= 0 || candidate.length() == info.sizeBytes
+    }
+
+    /**
+     * Whether a failed final read proves the reported state stale enough to evict.
+     * Proven broken means: the claimed local copy does not verify on disk AND
+     * either TDLib claims completion for it, or there is no local copy on disk to
+     * verify at all (path null/blank or not a file — the H2 shape, whose reads fail
+     * despite reported coverage until eviction). A copy that verifies, and an
+     * existing partial copy that simply has not finished, are both healthy: the
+     * retry must go ahead without evicting either.
+     */
+    private suspend fun readFailureProvesStaleState(): Boolean {
+        val info = runCatching { telegramClient.getFileInfo(fileId) }.getOrNull() ?: return false
+        if (localCopyVerified(info)) return false
+        if (info.isDownloadingCompleted) return true
+        val path = info.localPath?.takeIf { it.isNotBlank() } ?: return true
+        return !File(path).isFile
     }
 
     /**
