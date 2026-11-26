@@ -6,6 +6,12 @@ import org.koin.core.module.dsl.singleOf
 import org.koin.dsl.module
 
 val updateModule = module {
-    single { UpdateChecker(BuildConfig.VERSION_NAME) }
+    single {
+        UpdateChecker(
+            currentVersion = BuildConfig.VERSION_NAME,
+            currentVersionCode = BuildConfig.VERSION_CODE,
+            channel = UpdateChannel.ANDROID
+        )
+    }
     workerOf(::UpdateCheckWorker)
 }
