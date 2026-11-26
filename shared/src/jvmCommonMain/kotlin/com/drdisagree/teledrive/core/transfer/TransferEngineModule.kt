@@ -12,8 +12,5 @@ val transferEngineModule = module {
     singleOf(::TransferExecutor)
     singleOf(::TransferQueueDrainer)
     singleOf(::ArchiveExtractionJobs)
-    // Explicit primary-constructor binding: vc181 A2 added a secondary
-    // 3-arg test-seam constructor to ArchiveDownloadTracker, which makes
-    // singleOf(::ArchiveDownloadTracker) overload-ambiguous.
-    single { ArchiveDownloadTracker(get(), get()) }
+    singleOf(::ArchiveDownloadTracker)
 }

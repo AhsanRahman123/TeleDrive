@@ -84,19 +84,12 @@ class ArchiveDownloadTracker(
 
     /**
      * Test seam (vc181 A2): the clock the throttle and speed math read. Production
-     * uses the system clock via the primary constructor — which is also the
-     * constructor Koin's singleOf binds, so the seam must not move into it (see
-     * CommonModule's AndroidTransferBubbleStore note).
+     * uses the system clock. Integration note (vc181): the seam is a settable
+     * property, not a secondary constructor — a Function0 constructor parameter
+     * made Koin's singleOf binding overload-ambiguous and tripped the
+     * AppModulesTest Koin verify reflection over this class.
      */
-    private var nowMillis: () -> Long = System::currentTimeMillis
-
-    constructor(
-        transferDao: TransferDao,
-        jobs: ArchiveExtractionJobs,
-        nowMillis: () -> Long
-    ) : this(transferDao, jobs) {
-        this.nowMillis = nowMillis
-    }
+    var nowMillis: () -> Long = System::currentTimeMillis
 
     private val writeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 

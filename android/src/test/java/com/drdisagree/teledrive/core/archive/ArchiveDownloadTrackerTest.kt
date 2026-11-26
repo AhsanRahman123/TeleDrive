@@ -80,7 +80,7 @@ class ArchiveDownloadTrackerTest {
     fun `burst samples report the cumulative average speed, not the burst rate`() =
         runBlocking {
             var now = 0L
-            val clocked = ArchiveDownloadTracker(dao, jobs) { now }
+            val clocked = ArchiveDownloadTracker(dao, jobs).apply { nowMillis = { now } }
             val size = 4_000_000L
             val id = clocked.begin("photo.jpg", size)!!
 
@@ -105,7 +105,7 @@ class ArchiveDownloadTrackerTest {
     @Test
     fun `speed stays zero until one second of the extraction has elapsed`() = runBlocking {
         var now = 0L
-        val clocked = ArchiveDownloadTracker(dao, jobs) { now }
+        val clocked = ArchiveDownloadTracker(dao, jobs).apply { nowMillis = { now } }
         val id = clocked.begin("fast.bin", 10_000_000L)!!
 
         now = 500L
@@ -117,7 +117,7 @@ class ArchiveDownloadTrackerTest {
     @Test
     fun `out of order and repeated samples never move progress backwards`() = runBlocking {
         var now = 0L
-        val clocked = ArchiveDownloadTracker(dao, jobs) { now }
+        val clocked = ArchiveDownloadTracker(dao, jobs).apply { nowMillis = { now } }
         val id = clocked.begin("photo.jpg", 1_000_000L)!!
 
         now = 2_000L
