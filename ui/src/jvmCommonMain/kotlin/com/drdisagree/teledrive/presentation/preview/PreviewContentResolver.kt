@@ -10,7 +10,9 @@ import com.drdisagree.teledrive.resources.preview_archive_split
 import com.drdisagree.teledrive.resources.preview_fetch_failed
 import com.drdisagree.teledrive.core.archive.ArchiveErrorKind
 import com.drdisagree.teledrive.core.archive.ArchiveException
+import com.drdisagree.teledrive.core.archive.LocalArchiveFormat
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
+import com.drdisagree.teledrive.core.archive.localArchiveReader
 import com.drdisagree.teledrive.core.archive.ZipArchiveReader
 import com.drdisagree.teledrive.core.media.BufferedMediaByteSource
 import com.drdisagree.teledrive.core.media.LocalFileByteSource
@@ -42,9 +44,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import net.lingala.zip4j.ZipFile
-import org.apache.commons.compress.archivers.sevenz.SevenZFile
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.CompressorStreamFactory
 import java.io.File
 
 /** Original local files are always plaintext; only remote copies and caches are ever encrypted. */
@@ -327,24 +326,12 @@ class PreviewContentResolver(
             // viewer to the comic pager sequence.
             "application/vnd.comicbook+zip" -> readLocalZip(path, format = "CBZ")
 
+            // Listing delegates to the local readers (vc181 B10): the entries
+            // produced are exactly the ones the open-coded listing produced,
+            // and the same readers now also extract for preview/download.
             "application/x-7z-compressed" -> runCatching {
-                val entries = SevenZFile.builder()
-                    // Keep archive metadata parsing bounded on low-memory devices.
-                    .setMaxMemoryLimitKiB(128 * 1024)
-                    .setFile(File(path))
-                    .get()
-                    .use { archive ->
-                        archive.entries.map { header ->
-                            ArchiveEntry(
-                                name = header.name.orEmpty(),
-                                sizeBytes = header.size.coerceAtLeast(0L),
-                                // Commons Compress does not expose this 7z value publicly.
-                                compressedBytes = 0L,
-                                isDirectory = header.isDirectory
-                            )
-                        }
-                    }
-                PreviewContent.Archive(entries, "7Z")
+                val entries = localArchiveReader(LocalArchiveFormat.SEVEN_Z).list(File(path))
+                PreviewContent.Archive(entries, LocalArchiveFormat.SEVEN_Z.archiveLabel)
             }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
 
             "application/x-tar" -> readTar(path, compressed = false)
@@ -354,31 +341,15 @@ class PreviewContentResolver(
         }
 
     private fun readTar(path: String, compressed: Boolean): PreviewContent = runCatching {
-        val input = File(path).inputStream().buffered()
-        val tarInput = if (compressed) {
-            CompressorStreamFactory().createCompressorInputStream(input)
+        val format = if (compressed) {
+            LocalArchiveFormat.TAR_COMPRESSED
         } else {
-            input
+            LocalArchiveFormat.TAR
         }
-        TarArchiveInputStream(tarInput).use { archive ->
-            val entries = buildList {
-                while (size < MAX_ARCHIVE_ENTRIES) {
-                    val entry = archive.nextEntry ?: break
-                    add(
-                        ArchiveEntry(
-                            name = entry.name,
-                            sizeBytes = entry.size.coerceAtLeast(0L),
-                            compressedBytes = 0L,
-                            isDirectory = entry.isDirectory
-                        )
-                    )
-                }
-            }
-            PreviewContent.Archive(
-                entries = entries,
-                format = if (compressed) "TAR (compressed)" else "TAR"
-            )
-        }
+        PreviewContent.Archive(
+            entries = localArchiveReader(format).list(File(path)),
+            format = format.archiveLabel
+        )
     }.getOrElse {
         SafeLog.w(TAG, "Could not read TAR archive metadata", it)
         PreviewContent.Failed(Res.string.preview_archive_failed)
@@ -448,7 +419,6 @@ class PreviewContentResolver(
         private const val TAG = "PreviewContent"
         private const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
         private const val TEXT_LIMIT = 256 * 1024
-        private const val MAX_ARCHIVE_ENTRIES = 5_000
     }
 }
 
