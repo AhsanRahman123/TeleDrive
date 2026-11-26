@@ -119,6 +119,8 @@ fun LocalPreviewScreen(
 
                 is PreviewContent.Pdf -> PdfPreview(path = current.path)
 
+                is PreviewContent.Html -> HtmlPreview(html = current.text)
+
                 is PreviewContent.PlainText -> Column(
                     modifier = Modifier
                         .fillMaxSize()
