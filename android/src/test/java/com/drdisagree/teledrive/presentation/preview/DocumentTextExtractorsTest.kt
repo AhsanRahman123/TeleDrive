@@ -120,7 +120,7 @@ class DocumentTextExtractorsTest {
         val xxe = """<?xml version="1.0"?><!DOCTYPE r [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
             <w:document xmlns:w="urn:x"><w:p><w:r><w:t>&xxe;</w:t></w:r></w:p></w:document>"""
         val text = docxToText(xxe.toByteArray())
-        assertTrue(!text.contains("root:"), text)
+        assertTrue(text, !text.contains("root:"))
     }
 
     @Test
