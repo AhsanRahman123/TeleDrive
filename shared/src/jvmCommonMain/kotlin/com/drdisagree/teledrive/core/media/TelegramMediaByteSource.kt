@@ -54,9 +54,10 @@ class TelegramMediaByteSource(
      * from the TDLight / upstream TDLib source findings): ReadFilePart succeeds iff the
      * parts are contiguous from the READ offset — bytes downloaded under any earlier
      * window count, even though `downloaded_prefix_size` only ever describes the current
-     * window. So the range-only loop tries the read first, and only the specific
-     * 400 "not enough downloaded bytes" coverage failure triggers a DownloadFile for
-     * exactly this range.
+     * window. So the range-only loop tries the read first, and only a coverage-class
+     * 400 (see [readRangeOnly]'s isCoverageFailure: "not enough downloaded bytes", or
+     * "File is not inside the cache" since 1.6.24) triggers a DownloadFile for exactly
+     * this range.
      */
     override suspend fun read(position: Long, count: Int): ByteArray {
         resolve()
@@ -110,128 +111,167 @@ class TelegramMediaByteSource(
     }
 
     /**
-     * Range-only read loop (1.6.23): driven by ReadFilePart's own all-or-nothing gate.
+     * Range-only read loop (1.6.23, deadline/window rules revised 1.6.24): driven by
+     * ReadFilePart's own all-or-nothing gate.
      *
      * 1. Try `readFilePart(position, toRead)` directly — bytes already in the partial file
      *    from ANY earlier window (e.g. the listing's tail window) are readable with no new
      *    DownloadFile, even after the window was re-targeted elsewhere.
-     * 2. On the specific coverage failure (400 + "not enough downloaded bytes"), ensure a
-     *    DownloadFile for exactly [position, position+toRead) is outstanding (clamped at
-     *    EOF by the caller's `toRead`), then poll `getFileInfo` / `fileUpdates` at a
-     *    non-spinning interval and retry the read when the info suggests the gate could
-     *    pass, when the window has finished, or periodically regardless (getFileInfo can
-     *    lag the bitmask).
+     * 2. On a coverage-class failure (see [isCoverageFailure]), ensure a DownloadFile for
+     *    exactly [position, position+toRead) is outstanding (clamped at EOF by the
+     *    caller's `toRead`), then poll `getFileInfo` / `fileUpdates` at a non-spinning
+     *    interval and retry the read when the info suggests the gate could pass, when
+     *    the window has finished, or periodically regardless (getFileInfo can lag the
+     *    bitmask).
      * 3. If the window finished and the read still fails, re-issue the DownloadFile —
      *    bounded by [MAX_DOWNLOAD_ATTEMPTS] — then fail with full state detail.
      *
-     * Other TelegramExceptions are real failures and propagate untouched. The overall
-     * per-read deadline is [BUFFER_TIMEOUT_MS]; expiry becomes a typed
-     * TelegramException(408) whose message carries the last observed state and the last
-     * ReadFilePart error, so a field recurrence is diagnosable from the message alone.
+     * Other TelegramExceptions are real failures and propagate untouched.
+     *
+     * 1.6.24 changes, from Pranto's 1.6.23 field retest (report 54):
+     * - The deadline measures NO-PROGRESS time, not total time. The field failure was a
+     *   window active at the requested offset with 458,470 of 524,288 bytes landed when
+     *   the absolute 30 s deadline killed the read; a window that keeps landing parts
+     *   now keeps the read alive, and only [bufferTimeoutMs] without any advance of the
+     *   contiguous coverage toward this range produces the typed 408 (still carrying
+     *   the last observed state and the last ReadFilePart error).
+     * - An ACTIVE window whose offset is not this read's position is a FOREIGN window
+     *   (another issuer — e.g. a Transfers download of the same file — re-targeted the
+     *   single per-file window, findings §1b). It can never satisfy this read's gate,
+     *   so the read re-issues its own DownloadFile instead of waiting on it. An active
+     *   window at exactly this read's position is ours and is never re-issued while it
+     *   runs (the report-52 second-pass rule, now keyed on the offset as well).
      */
     private suspend fun readRangeOnly(position: Long, toRead: Long): ByteArray {
         var lastInfo: TelegramFileInfo? = null
         var lastReadError: TelegramException? = null
-        try {
-            return withTimeout(bufferTimeoutMs.milliseconds) {
-                var downloadAttempts = 0
-                var needRequest = true
-                var shortReads = 0
-                var result: ByteArray? = null
-                while (result == null) {
-                    try {
-                        val part = telegramClient.readFilePart(fileId, position, toRead)
-                        if (part.size.toLong() == toRead) {
-                            result = part
-                            break
-                        }
-                        // ReadFilePart is all-or-nothing per the source, so a short reply
-                        // despite the gate is an anomaly: keep the length check as a guard,
-                        // treat it like a coverage failure, and bound the retries.
-                        shortReads++
-                        lastReadError = TelegramException(
-                            INCOMPLETE_READ_CODE,
-                            "Telegram returned ${part.size} of $toRead bytes at offset $position"
-                        )
-                        if (shortReads >= MAX_READ_ATTEMPTS) {
-                            throw TelegramException(
-                                INCOMPLETE_READ_CODE,
-                                "Telegram returned incomplete data at offset $position " +
-                                    "($toRead bytes requested): ${stateText(lastInfo, lastReadError)}"
-                            )
-                        }
-                        needRequest = true
-                    } catch (failure: TelegramException) {
-                        if (!isCoverageFailure(failure)) throw failure
-                        lastReadError = failure
-                        // If the previous poll already showed a finished window, the read
-                        // failing again means that window did not deliver: re-issue.
-                        if (lastInfo != null && !lastInfo!!.isDownloadingActive) needRequest = true
-                    }
-                    val info = telegramClient.getFileInfo(fileId)
-                    lastInfo = info
-                    // Second pass (report 52): the catch above may have set
-                    // needRequest from the STALE pre-request snapshot in lastInfo
-                    // (active=false was the reason the request was issued). The
-                    // freshly polled info is authoritative: a window that is now
-                    // active is already outstanding, so no re-issue is needed.
-                    if (info.isDownloadingActive) needRequest = false
-                    val gateHint = gateCouldPass(info, position, toRead)
-                    if (needRequest || (!info.isDownloadingActive && !gateHint)) {
-                        if (downloadAttempts >= MAX_DOWNLOAD_ATTEMPTS) {
-                            throw TelegramException(
-                                INCOMPLETE_READ_CODE,
-                                "Telegram could not deliver the requested data at offset $position " +
-                                    "($toRead bytes requested) after $downloadAttempts download " +
-                                    "requests: ${stateText(lastInfo, lastReadError)}"
-                            )
-                        }
-                        runCatching {
-                            SafeLog.d(
-                                TAG,
-                                "requestFileRange offset=$position limit=$toRead " +
-                                    "(window=${info.downloadOffset}+${info.downloadedPrefixSize} " +
-                                    "active=${info.isDownloadingActive})"
-                            )
-                        }
-                        telegramClient.requestFileRange(fileId, position, toRead)
-                        downloadAttempts++
-                        needRequest = false
-                    }
-                    // Wait, but never spin: retry the read when an update suggests the gate
-                    // could pass or the window finished, and in any case after the slice.
-                    try {
-                        withTimeoutOrNull(RECHECK_INTERVAL_MS.milliseconds) {
-                            telegramClient.fileUpdates(fileId).first { update ->
-                                lastInfo = update
-                                gateCouldPass(update, position, toRead) ||
-                                    !update.isDownloadingActive
-                            }
-                        }
-                    } catch (ignored: NoSuchElementException) {
-                        delay(RECHECK_INTERVAL_MS.milliseconds)
+        var downloadAttempts = 0
+        var needRequest = true
+        var shortReads = 0
+        // No-progress clock: [bestCoverageEnd] is the furthest contiguous coverage
+        // toward [position, position+toRead) observed so far; the 408 fires only when
+        // it has not advanced for [bufferTimeoutMs].
+        var bestCoverageEnd = position
+        var lastProgressAtMs = System.currentTimeMillis()
+
+        fun noteProgress(info: TelegramFileInfo) {
+            val end = when {
+                info.isDownloadingCompleted -> position + toRead
+                info.downloadOffset <= position ->
+                    info.downloadOffset + info.downloadedPrefixSize
+                else -> position
+            }
+            if (end > bestCoverageEnd) {
+                bestCoverageEnd = end
+                lastProgressAtMs = System.currentTimeMillis()
+            }
+        }
+
+        while (true) {
+            if (System.currentTimeMillis() - lastProgressAtMs > bufferTimeoutMs) {
+                runCatching {
+                    SafeLog.w(TAG, "No progress waiting for Telegram data at $position ($toRead bytes)")
+                }
+                throw TelegramException(
+                    BUFFER_TIMEOUT_CODE,
+                    "Telegram did not deliver the requested data in time " +
+                        "(offset $position, $toRead bytes requested): " +
+                        stateText(lastInfo, lastReadError)
+                )
+            }
+            try {
+                val part = telegramClient.readFilePart(fileId, position, toRead)
+                if (part.size.toLong() == toRead) return part
+                // ReadFilePart is all-or-nothing per the source, so a short reply
+                // despite the gate is an anomaly: keep the length check as a guard,
+                // treat it like a coverage failure, and bound the retries.
+                shortReads++
+                lastReadError = TelegramException(
+                    INCOMPLETE_READ_CODE,
+                    "Telegram returned ${part.size} of $toRead bytes at offset $position"
+                )
+                if (shortReads >= MAX_READ_ATTEMPTS) {
+                    throw TelegramException(
+                        INCOMPLETE_READ_CODE,
+                        "Telegram returned incomplete data at offset $position " +
+                            "($toRead bytes requested): ${stateText(lastInfo, lastReadError)}"
+                    )
+                }
+                needRequest = true
+            } catch (failure: TelegramException) {
+                if (!isCoverageFailure(failure)) throw failure
+                lastReadError = failure
+                // If the previous poll already showed a finished window, the read
+                // failing again means that window did not deliver: re-issue.
+                if (lastInfo != null && !lastInfo!!.isDownloadingActive) needRequest = true
+            }
+            val info = telegramClient.getFileInfo(fileId)
+            lastInfo = info
+            noteProgress(info)
+            // Second pass (report 52): the catch above may have set needRequest from
+            // the STALE pre-request snapshot in lastInfo (active=false was the reason
+            // the request was issued). The freshly polled info is authoritative: OUR
+            // window — active at exactly this read's offset — is already outstanding,
+            // so no re-issue is needed. 1.6.24: an active window at any OTHER offset
+            // is foreign (see the KDoc above) and must not clear the request.
+            val gateHint = gateCouldPass(info, position, toRead)
+            val windowIsOurs = info.downloadOffset == position
+            if (info.isDownloadingActive && windowIsOurs) needRequest = false
+            val foreignWindow = info.isDownloadingActive && !windowIsOurs && !gateHint
+            if (needRequest || foreignWindow || (!info.isDownloadingActive && !gateHint)) {
+                if (downloadAttempts >= MAX_DOWNLOAD_ATTEMPTS) {
+                    throw TelegramException(
+                        INCOMPLETE_READ_CODE,
+                        "Telegram could not deliver the requested data at offset $position " +
+                            "($toRead bytes requested) after $downloadAttempts download " +
+                            "requests: ${stateText(lastInfo, lastReadError)}"
+                    )
+                }
+                runCatching {
+                    SafeLog.d(
+                        TAG,
+                        "requestFileRange offset=$position limit=$toRead " +
+                            "(window=${info.downloadOffset}+${info.downloadedPrefixSize} " +
+                            "active=${info.isDownloadingActive})"
+                    )
+                }
+                telegramClient.requestFileRange(fileId, position, toRead)
+                downloadAttempts++
+                needRequest = false
+            }
+            // Wait, but never spin: retry the read when an update suggests the gate
+            // could pass or the window finished, and in any case after the slice.
+            try {
+                withTimeoutOrNull(RECHECK_INTERVAL_MS.milliseconds) {
+                    telegramClient.fileUpdates(fileId).first { update ->
+                        lastInfo = update
+                        noteProgress(update)
+                        gateCouldPass(update, position, toRead) ||
+                            !update.isDownloadingActive
                     }
                 }
-                result!!
+            } catch (ignored: NoSuchElementException) {
+                delay(RECHECK_INTERVAL_MS.milliseconds)
             }
-        } catch (failure: TimeoutCancellationException) {
-            if (!currentCoroutineContext().isActive) throw failure
-            runCatching {
-                SafeLog.w(TAG, "Timed out waiting for Telegram data at $position ($toRead bytes)")
-            }
-            throw TelegramException(
-                BUFFER_TIMEOUT_CODE,
-                "Telegram did not deliver the requested data in time " +
-                    "(offset $position, $toRead bytes requested): " +
-                    stateText(lastInfo, lastReadError)
-            )
         }
     }
 
-    /** The exact ReadFilePart coverage failure from the TDLib source (code + message). */
+    /**
+     * The ReadFilePart coverage-class failures from the TDLib source (code 400): the
+     * requested bytes are not readable YET and a DownloadFile for the range is the
+     * remedy — as opposed to a real failure, which propagates.
+     * - "not enough downloaded bytes": the contiguous-parts gate (findings §2b).
+     * - "File is not inside the cache" (1.6.24, Failure A): the file node has NO
+     *   readable local path at all (findings §2(a).6) — e.g. the partial was evicted
+     *   between the archive listing and the click, or the node was re-resolved fresh.
+     *   Pre-fix this propagated fatally from the extract's first read, before any
+     *   DownloadFile was ever issued; a DownloadFile re-establishes a partial file,
+     *   after which the read is retried like any other coverage miss.
+     */
     private fun isCoverageFailure(failure: TelegramException): Boolean =
         failure.code == 400 &&
-            failure.message.contains("not enough downloaded bytes", ignoreCase = true)
+            (failure.message.contains("not enough downloaded bytes", ignoreCase = true) ||
+                failure.message.contains("File is not inside the cache", ignoreCase = true))
 
     /** Hint only: whether [info] suggests ReadFilePart's gate could pass for the range. */
     private fun gateCouldPass(info: TelegramFileInfo, readPosition: Long, count: Long): Boolean {
