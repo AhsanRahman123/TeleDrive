@@ -1,5 +1,7 @@
 package com.drdisagree.teledrive.core.archive
 
+import com.drdisagree.teledrive.core.media.BufferedMediaByteSource
+import com.drdisagree.teledrive.core.media.LocalFileByteSource
 import com.drdisagree.teledrive.core.media.MediaByteSource
 import java.io.ByteArrayOutputStream
 import java.util.zip.CRC32
@@ -184,6 +186,59 @@ class ZipArchiveReaderTest {
         assertEquals(99, entry.method)
         expectArchiveError(ArchiveErrorKind.UNSUPPORTED_METHOD) {
             runBlocking { archive.extract(entry, ByteArrayOutputStream()) }
+        }
+    }
+
+    @Test
+    fun `listing tolerates entries whose compression method extraction does not support`() =
+        runBlocking {
+            // ZArchiver's 7-Zip engine can write ZIP entries with Deflate64 (9), BZip2 (12),
+            // LZMA (14) or PPMd (98) compression. Listing must record those entries like
+            // any other; only extracting one may refuse, with UNSUPPORTED_METHOD. This is
+            // the tolerance the local-open fallback relies on: zip4j throws
+            // "Unknown compression method" for the whole archive on any of these.
+            for (method in listOf(9, 12, 14, 98)) {
+                val bytes = zipOf(listOf(Triple("odd-$method.bin", "data".toByteArray(), ZipEntry.STORED)))
+                patchU16(bytes, findSig(bytes, 0x04034b50) + 8, method)
+                patchU16(bytes, findSig(bytes, 0x02014b50) + 10, method)
+                val archive = reader(bytes)
+                val entry = archive.entries().single()
+                assertEquals(method, entry.method)
+                assertEquals("odd-$method.bin", entry.name)
+                assertEquals(4L, entry.sizeBytes)
+                expectArchiveError(ArchiveErrorKind.UNSUPPORTED_METHOD) {
+                    runBlocking { archive.extract(entry, ByteArrayOutputStream()) }
+                }
+            }
+        }
+
+    @Test
+    fun `local file source lists an archive with an unsupported-method entry`() = runBlocking {
+        // The exact wiring the local-open fallback uses (LocalFileByteSource behind the
+        // buffering source, read by ZipArchiveReader) must list an archive whose first
+        // entry uses a method the extractor does not support.
+        val bytes = zipOf(
+            listOf(
+                Triple("photo.jpg", "jpeg bytes".toByteArray(), ZipEntry.DEFLATED),
+                Triple("song.mp3", "audio bytes".toByteArray(), ZipEntry.STORED)
+            )
+        )
+        patchU16(bytes, findSig(bytes, 0x02014b50) + 10, 12)
+        val file = java.io.File.createTempFile("zip-reader-local-", ".zip")
+        try {
+            file.writeBytes(bytes)
+            val source = BufferedMediaByteSource(LocalFileByteSource(file))
+            try {
+                val entries = ZipArchiveReader(source).entries()
+                assertEquals(listOf("photo.jpg", "song.mp3"), entries.map { it.name })
+                assertEquals(12, entries[0].method)
+                assertEquals(0, entries[1].method)
+                assertEquals("audio bytes".length.toLong(), entries[1].sizeBytes)
+            } finally {
+                source.close()
+            }
+        } finally {
+            file.delete()
         }
     }
 
