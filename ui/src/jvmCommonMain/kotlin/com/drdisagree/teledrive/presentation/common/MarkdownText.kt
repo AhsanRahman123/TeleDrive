@@ -28,7 +28,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.core.files.Urls
 
-/** Anything it does not recognize stays as written, so no text is lost to the parser. */
+/** Renders the pure [MarkdownBlock]/[MarkdownInline] model; unrecognized text stays as written. */
 @Composable
 fun MarkdownText(
     text: String,
@@ -40,20 +40,16 @@ fun MarkdownText(
     val quoteColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(modifier = modifier.fillMaxWidth()) {
-        text.lines().forEach { line ->
-            if (line.isBlank()) {
-                Spacer(Modifier.height(8.dp))
-            } else {
-                MarkdownBlock(line, textScale, linkColor, quoteColor, onOpenUrl)
-            }
+        parseMarkdownBlocks(text).forEach { block ->
+            MarkdownBlockView(block, textScale, linkColor, quoteColor, onOpenUrl)
         }
     }
 }
 
-/** Block markers nest, so what follows an outer marker is rendered by recursion. */
+/** Block markers nest, so a quote's content is rendered by recursion on its inner text. */
 @Composable
-private fun MarkdownBlock(
-    line: String,
+private fun MarkdownBlockView(
+    block: MarkdownBlock,
     textScale: Float,
     linkColor: Color,
     quoteColor: Color,
@@ -61,16 +57,31 @@ private fun MarkdownBlock(
     quoted: Boolean = false,
     depth: Int = 0
 ) {
-    val trimmed = line.trimStart()
     val body = MaterialTheme.typography.bodyMedium.let {
         if (quoted) it.copy(fontStyle = FontStyle.Italic, color = quoteColor) else it
     }
 
-    when {
-        depth >= MAX_BLOCK_DEPTH ->
-            MarkdownLine(line, body.scaledBy(textScale), linkColor, onOpenUrl)
+    when (block) {
+        MarkdownBlock.Blank -> Spacer(Modifier.height(8.dp))
 
-        trimmed.startsWith("> ") -> Row(modifier = Modifier.fillMaxWidth()) {
+        is MarkdownBlock.CodeFence -> Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(12.dp)
+        ) {
+            Text(
+                text = block.lines.joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall
+                    .copy(fontFamily = FontFamily.Monospace)
+                    .scaledBy(textScale),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+
+        is MarkdownBlock.Quote -> Row(modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
                     .padding(vertical = 2.dp)
@@ -80,68 +91,69 @@ private fun MarkdownBlock(
                     .background(MaterialTheme.colorScheme.primary)
             )
             Spacer(Modifier.width(10.dp))
-            MarkdownBlock(
-                line = trimmed.removePrefix("> "),
-                textScale = textScale,
-                linkColor = linkColor,
-                quoteColor = quoteColor,
-                onOpenUrl = onOpenUrl,
-                quoted = true,
-                depth = depth + 1
-            )
+            Column {
+                parseMarkdownBlocks(block.text).forEach { inner ->
+                    MarkdownBlockView(inner, textScale, linkColor, quoteColor, onOpenUrl, quoted = true, depth = depth + 1)
+                }
+            }
         }
 
-        trimmed.isBullet() -> Row(
-            modifier = Modifier.padding(start = 8.dp + NESTED_INDENT * line.indentDepth())
+        is MarkdownBlock.Bullet -> Row(
+            modifier = Modifier.padding(start = 8.dp + NESTED_INDENT * block.depth)
         ) {
             Text(
-                text = bulletFor(line.indentDepth()),
+                text = bulletFor(block.depth),
                 style = body.scaledBy(textScale),
                 color = if (quoted) quoteColor else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(vertical = 2.dp)
             )
             Spacer(Modifier.width(8.dp))
-            MarkdownBlock(
-                line = trimmed.drop(2),
-                textScale = textScale,
-                linkColor = linkColor,
-                quoteColor = quoteColor,
-                onOpenUrl = onOpenUrl,
-                quoted = quoted,
-                depth = depth + 1
+            MarkdownBlockView(
+                classifyMarkdownLine(block.text), textScale, linkColor, quoteColor,
+                onOpenUrl, quoted, depth + 1
             )
         }
 
-        else -> {
-            val heading = HEADING_PATTERN.find(trimmed)
-            if (heading != null) {
-                val level = heading.groupValues[1].length
-                val style = when (level) {
-                    1 -> MaterialTheme.typography.titleLarge
-                    2 -> MaterialTheme.typography.titleMedium
-                    else -> MaterialTheme.typography.titleSmall
-                }
-                MarkdownLine(
-                    trimmed.removeRange(heading.range),
-                    style.scaledBy(textScale),
-                    linkColor,
-                    onOpenUrl
-                )
-            } else {
-                MarkdownLine(trimmed, body.scaledBy(textScale), linkColor, onOpenUrl)
-            }
+        is MarkdownBlock.Numbered -> Row(
+            modifier = Modifier.padding(start = 8.dp + NESTED_INDENT * block.depth)
+        ) {
+            Text(
+                text = "${block.number}.",
+                style = body.scaledBy(textScale),
+                color = if (quoted) quoteColor else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            MarkdownBlockView(
+                classifyMarkdownLine(block.text), textScale, linkColor, quoteColor,
+                onOpenUrl, quoted, depth + 1
+            )
         }
+
+        is MarkdownBlock.Heading -> {
+            val style = when (block.level) {
+                1 -> MaterialTheme.typography.titleLarge
+                2 -> MaterialTheme.typography.titleMedium
+                else -> MaterialTheme.typography.titleSmall
+            }
+            MarkdownLine(block.text, style.scaledBy(textScale), linkColor, onOpenUrl)
+        }
+
+        is MarkdownBlock.Paragraph ->
+            if (depth >= MAX_BLOCK_DEPTH) {
+                MarkdownLine(block.text, body.scaledBy(textScale), linkColor, onOpenUrl)
+            } else {
+                // A paragraph can still carry a nested block marker (e.g. inside a
+                // bullet's text): re-classify once so nesting keeps working.
+                val inner = classifyMarkdownLine(block.text)
+                if (inner is MarkdownBlock.Paragraph || inner is MarkdownBlock.Blank) {
+                    MarkdownLine(block.text, body.scaledBy(textScale), linkColor, onOpenUrl)
+                } else {
+                    MarkdownBlockView(inner, textScale, linkColor, quoteColor, onOpenUrl, quoted, depth + 1)
+                }
+            }
     }
 }
-
-private val HEADING_PATTERN = Regex("""^(#{1,6})\s+""")
-
-private fun String.isBullet(): Boolean =
-    trimStart().let { it.startsWith("- ") || it.startsWith("* ") }
-
-/** Leading spaces decide how deep a list item sits, two spaces per level. */
-private fun String.indentDepth(): Int =
-    (takeWhile { it == ' ' }.length / INDENT_UNIT).coerceAtMost(MAX_NESTING)
 
 private fun bulletFor(depth: Int): String = when (depth % 3) {
     0 -> "•"
@@ -175,64 +187,38 @@ private fun MarkdownLine(
 private fun Color.takeOrElse(fallback: () -> Color): Color =
     if (this == Color.Unspecified) fallback() else this
 
-private val INLINE_PATTERN = Regex(
-    """\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|~~(.+?)~~|`([^`]+)`|_(.+?)_|\*([^*]+)\*"""
-)
-
 private fun inlineMarkdown(line: String, linkColor: Color): AnnotatedString =
-    buildAnnotatedString { appendMarkdown(line, linkColor, 0) }
+    buildAnnotatedString { appendInline(parseMarkdownInline(line), linkColor) }
 
-/**
- * Styles nest, so wrapped text is parsed again; code is the exception, since Markdown inside it
- * stays as written.
- */
-private fun AnnotatedString.Builder.appendMarkdown(
-    line: String,
-    linkColor: Color,
-    depth: Int
+/** Styles nest, so wrapped text renders its parsed children; code stays as written. */
+private fun AnnotatedString.Builder.appendInline(
+    nodes: List<MarkdownInline>,
+    linkColor: Color
 ) {
-    if (depth >= MAX_NESTING) {
-        appendPlain(line, linkColor)
-        return
-    }
-    var cursor = 0
-    INLINE_PATTERN.findAll(line).forEach { match ->
-        appendPlain(line.substring(cursor, match.range.first), linkColor)
-        val (label, url, bold, strike, code, italic) = match.destructured
-        val starred = match.groupValues[7]
-        when {
-            url.isNotEmpty() -> {
-                pushStringAnnotation(URL_TAG, Urls.normalize(url))
-                withLinkStyle(linkColor) { appendMarkdown(label, linkColor, depth + 1) }
+    for (node in nodes) {
+        when (node) {
+            is MarkdownInline.Text -> appendPlain(node.text, linkColor)
+            is MarkdownInline.Link -> {
+                pushStringAnnotation(URL_TAG, Urls.normalize(node.url))
+                withLinkStyle(linkColor) { appendInline(node.children, linkColor) }
                 pop()
             }
-
-            bold.isNotEmpty() ->
+            is MarkdownInline.Bold ->
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                    appendMarkdown(bold, linkColor, depth + 1)
+                    appendInline(node.children, linkColor)
                 }
-
-            strike.isNotEmpty() ->
+            is MarkdownInline.Strike ->
                 withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
-                    appendMarkdown(strike, linkColor, depth + 1)
+                    appendInline(node.children, linkColor)
                 }
-
-            code.isNotEmpty() ->
-                withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(code) }
-
-            italic.isNotEmpty() ->
+            is MarkdownInline.Code ->
+                withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(node.text) }
+            is MarkdownInline.Italic ->
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                    appendMarkdown(italic, linkColor, depth + 1)
-                }
-
-            starred.isNotEmpty() ->
-                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                    appendMarkdown(starred, linkColor, depth + 1)
+                    appendInline(node.children, linkColor)
                 }
         }
-        cursor = match.range.last + 1
     }
-    appendPlain(line.substring(cursor), linkColor)
 }
 
 private fun AnnotatedString.Builder.appendPlain(
@@ -270,9 +256,7 @@ private inline fun AnnotatedString.Builder.withStyle(
 fun TextStyle.scaledBy(scale: Float): TextStyle =
     if (scale == 1f) this else copy(fontSize = fontSize * scale, lineHeight = lineHeight * scale)
 
-private const val MAX_NESTING = 6
 private const val MAX_BLOCK_DEPTH = 6
-private const val INDENT_UNIT = 2
 private val NESTED_INDENT = 16.dp
 private val QUOTE_BAR_WIDTH = 3.dp
 private val QUOTE_BAR_MIN_HEIGHT = 20.dp
