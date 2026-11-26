@@ -67,6 +67,14 @@ jobs:
       - name: Run Android unit tests
         run: ./gradlew testDebugUnitTest
 
+      - name: TEMP DIAG upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: unit-test-results-diag
+          path: android/build/test-results/testDebugUnitTest
+          if-no-files-found: warn
+
       - name: Build FFmpeg audio decoder
         uses: ./.github/actions/build-ffmpeg-decoder
 
