@@ -106,6 +106,27 @@ private data class GalleryBrowseState(
     val filters: GalleryFilters
 )
 
+/**
+ * The categories a gallery listing may show: the tab's category set intersected
+ * with the album media-type filter's set. With the filter at
+ * [GalleryMediaType.ALL] this is exactly the tab behaviour that predates the
+ * filter, so the root Gallery is unchanged; inside an album (tab stuck at
+ * [GalleryTab.ALL]) PHOTOS narrows to images and VIDEOS to videos.
+ */
+fun mediaCategories(tab: GalleryTab, mediaType: GalleryMediaType): List<FileCategory> {
+    val tabCategories = when (tab) {
+        GalleryTab.PHOTOS -> listOf(FileCategory.IMAGE)
+        GalleryTab.VIDEOS -> listOf(FileCategory.VIDEO)
+        else -> listOf(FileCategory.IMAGE, FileCategory.VIDEO)
+    }
+    val mediaTypeCategories = when (mediaType) {
+        GalleryMediaType.PHOTOS -> listOf(FileCategory.IMAGE)
+        GalleryMediaType.VIDEOS -> listOf(FileCategory.VIDEO)
+        GalleryMediaType.ALL -> listOf(FileCategory.IMAGE, FileCategory.VIDEO)
+    }
+    return tabCategories.filter { it in mediaTypeCategories }
+}
+
 private fun albumComparator(
     field: FileSortField,
     direction: SortDirection
@@ -297,11 +318,7 @@ class GalleryViewModel(
         FileQuerySpec(
             folderId = albumFolderId,
             filterByFolder = isAlbumView,
-            categories = when (currentTab) {
-                GalleryTab.PHOTOS -> listOf(FileCategory.IMAGE)
-                GalleryTab.VIDEOS -> listOf(FileCategory.VIDEO)
-                else -> listOf(FileCategory.IMAGE, FileCategory.VIDEO)
-            },
+            categories = mediaCategories(currentTab, currentFilters.mediaType),
             nameQuery = query.takeIf { it.isNotBlank() },
             favoritesOnly = currentFilters.favoritesOnly,
             availableOfflineOnly = currentFilters.availableOfflineOnly,
@@ -346,11 +363,7 @@ class GalleryViewModel(
             folderId = albumFolderId,
             filterByFolder = isAlbumView,
             nameQuery = currentFilters.searchQuery.takeIf { it.isNotBlank() },
-            categories = when (current) {
-                GalleryTab.PHOTOS -> listOf(FileCategory.IMAGE)
-                GalleryTab.VIDEOS -> listOf(FileCategory.VIDEO)
-                else -> listOf(FileCategory.IMAGE, FileCategory.VIDEO)
-            },
+            categories = mediaCategories(current, currentFilters.mediaType),
             favoritesOnly = currentFilters.favoritesOnly,
             availableOfflineOnly = currentFilters.availableOfflineOnly,
             backedUpOnly = currentFilters.backedUpOnly,
@@ -476,6 +489,11 @@ class GalleryViewModel(
     fun setSearchQuery(value: String) {
         if (filters.value.searchQuery != value) clearSelection()
         filters.update { it.copy(searchQuery = value) }
+    }
+
+    fun setMediaTypeFilter(value: GalleryMediaType) {
+        clearSelection()
+        filters.update { it.copy(mediaType = value) }
     }
 
     fun setFavoritesFilter(enabled: Boolean) {
