@@ -53,6 +53,11 @@ sealed interface ArchiveThumbState {
  * Generated JPEGs live in cacheDir/archive-thumbs/<key>.jpg under a hard 32 MiB
  * LRU cap. Failures are remembered for the process session only and never
  * retried until the app restarts; a failure leaves the row on its generic icon.
+ * Two failures are NOT remembered, because they say nothing about the entry:
+ * a fetch whose session was superseded mid-flight when another archive was
+ * opened (the closed-session race), and a Ready key whose cache file was
+ * evicted or externally cleared — both stay retryable and refetch on the next
+ * request.
  */
 class ArchiveEntryThumbnailStore private constructor(
     private val thumbsDir: File,
@@ -127,9 +132,15 @@ class ArchiveEntryThumbnailStore private constructor(
             waiters[cacheKey] = (waiters[cacheKey] ?: 0) + 1
         }
         if (flow.value is ArchiveThumbState.Ready) {
-            // Cache hit: refresh the LRU timestamp, no fetch, no reads.
-            cacheFile(cacheKey).setLastModified(System.currentTimeMillis())
-            return
+            val cached = cacheFile(cacheKey)
+            if (cached.isFile && cached.length() > 0L) {
+                // Cache hit: refresh the LRU timestamp, no fetch, no reads.
+                cached.setLastModified(System.currentTimeMillis())
+                return
+            }
+            // Ready in memory but the file is gone (LRU-evicted, or the cache
+            // was cleared externally): fall through to the fetch path instead
+            // of stranding the row on the generic icon for this process.
         }
         if (cacheKey in failedKeys) {
             flow.value = ArchiveThumbState.Failed
@@ -173,9 +184,11 @@ class ArchiveEntryThumbnailStore private constructor(
             flow.value = ArchiveThumbState.Ready(target)
             return
         }
+        var usedSession: ArchiveThumbnailSession? = null
         try {
             fetchSemaphore.withPermit {
                 val session = sessionFor(archiveFile)
+                usedSession = session
                 val info = session.entries().getOrNull(entryIndex)
                 if (info == null || !ArchiveEntryThumbnailPolicy.isEligible(info)) {
                     failedKeys += cacheKey
@@ -202,9 +215,38 @@ class ArchiveEntryThumbnailStore private constructor(
             // Not a failure: the row scrolled away. The key stays retryable.
             throw cancelled
         } catch (failure: Exception) {
-            failedKeys += cacheKey
-            flow.value = ArchiveThumbState.Failed
+            if (isSupersededSessionFailure(usedSession, failure)) {
+                // Not a failure: opening another archive closed this fetch's
+                // session underneath it. The key stays retryable — the next
+                // request reopens this archive's session and fetches afresh —
+                // instead of being marked Failed for the whole process.
+                flow.value = ArchiveThumbState.Placeholder
+            } else {
+                failedKeys += cacheKey
+                flow.value = ArchiveThumbState.Failed
+            }
         }
+    }
+
+    /**
+     * Whether [failure] came from [candidate] having been closed because a
+     * different archive's session replaced it. The session-identity check is
+     * the primary signal: it catches every superseded failure regardless of
+     * the exception type it surfaced as (the session's own `check(!closed)`
+     * IllegalStateException when the fetch had not started extracting, or an
+     * I/O failure from reading the closed byte source mid-extraction). The
+     * closed-session message check is defence in depth for a session closed
+     * without a replacement ever being installed.
+     */
+    private fun isSupersededSessionFailure(
+        candidate: ArchiveThumbnailSession?,
+        failure: Exception
+    ): Boolean {
+        if (candidate != null && synchronized(sessionLock) { session !== candidate }) {
+            return true
+        }
+        return failure is IllegalStateException &&
+            failure.message?.contains("closed", ignoreCase = true) == true
     }
 
     /**
@@ -292,7 +334,19 @@ class ArchiveEntryThumbnailStore private constructor(
             for (victim in files.sortedBy { it.lastModified() }) {
                 if (total <= MAX_CACHE_BYTES) break
                 val length = victim.length()
-                if (victim.delete()) total -= length
+                if (victim.delete()) {
+                    total -= length
+                    // Keep memory and disk in agreement: a Ready key whose
+                    // file was just evicted goes back to Placeholder, so the
+                    // next request for a visible row refetches it instead of
+                    // returning early on a Ready that points at nothing.
+                    val victimKey = victim.name.removeSuffix(JPEG_SUFFIX)
+                    states[victimKey]?.let { flow ->
+                        if (flow.value is ArchiveThumbState.Ready) {
+                            flow.value = ArchiveThumbState.Placeholder
+                        }
+                    }
+                }
             }
         }
     }
