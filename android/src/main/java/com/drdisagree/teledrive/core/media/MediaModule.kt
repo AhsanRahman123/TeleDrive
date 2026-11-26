@@ -33,6 +33,10 @@ val mediaModule = module {
             .build()
     }
     singleOf(::AndroidThumbnailStore) bind ThumbnailStore::class
+    // vc182 item 6: on-demand archive-entry thumbnails. Explicit lambda because
+    // the store's public constructor is its (Context, RemoteArchiveService) one
+    // while the primary constructor takes the resolved cache dir (test seam).
+    single { ArchiveEntryThumbnailStore(androidContext(), get()) }
     singleOf(::AndroidMediaMetadataExtractor) bind MediaMetadataExtractor::class
     factoryOf(::TelegramDataSourceFactory)
     single<ThumbnailMemoryCache> { CoilThumbnailMemoryCache(get()) }
