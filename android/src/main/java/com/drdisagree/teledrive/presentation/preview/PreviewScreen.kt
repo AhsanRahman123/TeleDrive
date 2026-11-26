@@ -1691,7 +1691,7 @@ private fun ArchiveRow(
 private const val CHEVRON_ROTATE_MS = 220
 private val INDENT_STEP = 16.dp
 
-private fun openFileWith(
+internal fun openFileWith(
     context: Context,
     displayName: String,
     localPath: String,

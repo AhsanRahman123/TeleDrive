@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -143,6 +144,7 @@ import kotlin.math.abs
 fun TransfersScreen(
     onBack: () -> Unit,
     onOpenFile: (String) -> Unit = {},
+    onOpenLocalFile: (String, String) -> Unit = { _, _ -> },
     viewModel: TransfersViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -741,10 +743,22 @@ fun TransfersScreen(
             }
             section("finished", finishedTitle, visibleCompleted, completedTotal) { transfer ->
                 val openActions = completedTransferOpenActions(transfer, fileOpener != null)
+                // vc181: the ⋮ "Open in Pranto Drive" item and a tap on the row
+                // itself resolve through the same pure target — fileId rows keep
+                // the exact existing route, archive rows go to the local preview.
+                val rowTapTarget = completedTransferRowTap(transfer)
+                val openInApp: (() -> Unit)? = when (rowTapTarget) {
+                    is TransferRowTapTarget.InApp -> ({ onOpenFile(rowTapTarget.fileId) })
+                    is TransferRowTapTarget.LocalPreview -> ({
+                        onOpenLocalFile(rowTapTarget.localPath, rowTapTarget.displayName)
+                    })
+                    TransferRowTapTarget.None -> null
+                }
                 TransferRow(
                     transfer = transfer,
+                    onRowTap = openInApp,
                     onOpenInApp = if (TransferOpenAction.OPEN_IN_APP in openActions) {
-                        transfer.fileId?.let { id -> { onOpenFile(id) } }
+                        openInApp
                     } else null,
                     onOpenWith = if (TransferOpenAction.OPEN_WITH in openActions) {
                         transfer.localPath?.let { path ->
@@ -910,6 +924,7 @@ private fun TransferRow(
     onPriorityChange: ((Int) -> Unit)? = null,
     onMoveToTop: (() -> Unit)? = null,
     dragEnabled: Boolean = false,
+    onRowTap: (() -> Unit)? = null,
     onOpenInApp: (() -> Unit)? = null,
     onOpenWith: (() -> Unit)? = null,
     onShowInFolder: (() -> Unit)? = null,
@@ -927,8 +942,18 @@ private fun TransferRow(
         modifier = modifier
             .semantics(mergeDescendants = true) {}
             .clip(MaterialTheme.shapes.large)
-            .indication(interactionSource, ripple())
-            .focusable(interactionSource = interactionSource)
+            .then(
+                if (onRowTap != null) {
+                    Modifier.clickable(
+                        interactionSource = interactionSource,
+                        indication = ripple()
+                    ) { onRowTap() }
+                } else {
+                    Modifier
+                        .indication(interactionSource, ripple())
+                        .focusable(interactionSource = interactionSource)
+                }
+            )
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
