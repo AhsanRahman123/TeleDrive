@@ -141,7 +141,7 @@ fun FileInfoSheet(
 }
 
 @Composable
-private fun InfoRow(label: String, value: String, monospace: Boolean = false) {
+internal fun InfoRow(label: String, value: String, monospace: Boolean = false) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

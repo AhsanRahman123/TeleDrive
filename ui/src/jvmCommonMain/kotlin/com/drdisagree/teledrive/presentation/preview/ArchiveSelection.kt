@@ -112,6 +112,34 @@ fun archivePreviewPagerIndices(
 }
 
 /**
+ * The in-zip video queue: the LISTING INDICES of the archive's video entries, in the
+ * same flattened display order as [archivePreviewPagerIndices] — the archive tree
+ * flattened with every folder expanded under the remembered archive sort — filtered
+ * to entries whose tap action is PLAY_VIDEO. Videos stay out of the preview pager
+ * (see [archiveEntryPreviewable]); this queue is what the player's SkipPrevious /
+ * SkipNext buttons step through while an in-zip video is open (vc182). Identity
+ * stays the listing index, so duplicate names each keep their own queue slot and
+ * extraction.
+ */
+fun archiveVideoQueueIndices(
+    listing: List<ArchiveEntry>,
+    sortField: FileSortField = FileSortField.NAME,
+    sortDirection: SortDirection = SortDirection.ASCENDING
+): List<Int> {
+    if (listing.isEmpty()) return emptyList()
+    val root = buildArchiveTreeIndexed(
+        listing.mapIndexed { index, entry -> IndexedArchiveEntry(index, entry) }
+    )
+    val rows = flattenArchive(root, allFolderPaths(root), sortField, sortDirection)
+    return rows.mapNotNull { row ->
+        val entryIndex = row.node.entryIndex ?: return@mapNotNull null
+        entryIndex.takeIf {
+            archiveEntryTapAction(listing[entryIndex]) == ArchiveEntryTapAction.PLAY_VIDEO
+        }
+    }
+}
+
+/**
  * Natural ordering for archive paths: digit runs compare by numeric value, so
  * `page2.jpg` sorts before `page10.jpg` (the archive list's plain lexicographic
  * NAME sort gives 1, 10, 11, 2, … — unusable for comic pages). Non-digit runs

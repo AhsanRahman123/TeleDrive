@@ -19,6 +19,10 @@ data class PreviewUiState(
     val archivePreviewPosition: Int = -1,
     /** The ZIP file (DriveFile id) the open in-zip preview belongs to, so a swipe can extract the next entry from the same archive. */
     val archivePreviewFileId: String? = null,
+    /** Listing indices of the archive's video entries in display order, for the open in-zip video's SkipPrevious/SkipNext stepping (vc182); empty unless a video preview is open. */
+    val archiveVideoQueue: List<Int> = emptyList(),
+    /** Position of the open in-zip video within [archiveVideoQueue]; -1 when no video preview is open. */
+    val archiveVideoQueuePosition: Int = -1,
     /** A pager step is extracting its entry; the current page stays up (or shows loading) until it lands. */
     val archivePreviewLoading: Boolean = false,
     /**
@@ -79,6 +83,18 @@ sealed interface ArchiveEntryPreview {
 }
 
 data class ArchiveBatchProgress(val done: Int, val total: Int)
+
+/**
+ * The target of the in-zip viewer's Info sheet (vc182): the listing entry being
+ * viewed, plus the containing archive's display name and format label. Built from
+ * the listing entry itself — never a fabricated DriveFile, which would invent
+ * Drive-side metadata (backup state, chat ids, …) an archive entry does not have.
+ */
+data class ArchiveEntryInfo(
+    val entry: ArchiveEntry,
+    val archiveName: String,
+    val archiveFormat: String
+)
 
 /**
  * The state after an in-zip pager step failed or was refused: the published preview

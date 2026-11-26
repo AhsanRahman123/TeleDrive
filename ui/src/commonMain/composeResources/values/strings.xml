@@ -406,6 +406,7 @@
     <string name="info_backup_none">Not backed up</string>
     <string name="info_backup_queued">Queued</string>
     <string name="info_backup_uploading">Uploading</string>
+    <string name="info_compressed_size">Compressed size</string>
     <string name="info_contents">Contents</string>
     <string name="info_created">Created</string>
     <string name="info_details">Info</string>

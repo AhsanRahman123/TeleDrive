@@ -99,6 +99,9 @@ class PreviewViewModel(
     private val _infoTarget = MutableStateFlow<DriveFile?>(null)
     val infoTarget: StateFlow<DriveFile?> = _infoTarget.asStateFlow()
 
+    private val _archiveInfoTarget = MutableStateFlow<ArchiveEntryInfo?>(null)
+    val archiveInfoTarget: StateFlow<ArchiveEntryInfo?> = _archiveInfoTarget.asStateFlow()
+
     private val contentCache = mutableMapOf<String, StateFlow<PreviewContent>>()
 
     /** The in-flight in-zip preview extraction (initial open or a pager step), if any. */
@@ -372,6 +375,40 @@ class PreviewViewModel(
         }
     }
 
+    /**
+     * Downloads the entry currently open in the in-zip viewer (vc182), through
+     * the exact same [downloadArchiveEntry] path as a list-row download — so
+     * the instant "saving" message and the Transfers record behave identically.
+     * The download runs in viewModelScope, not in the preview load job, and
+     * [dismissArchivePreview] only releases the busy slot for a preview load,
+     * so dismissing the overlay mid-download lets the download complete.
+     */
+    fun downloadCurrentArchiveEntry() {
+        val state = _uiState.value
+        val fileId = state.archivePreviewFileId ?: return
+        val entryIndex = state.archivePreview?.entryIndex ?: return
+        val file = state.files.firstOrNull { it.id == fileId } ?: return
+        downloadArchiveEntry(file, entryIndex)
+    }
+
+    /** Opens the Info sheet for the entry currently open in the in-zip viewer (vc182). */
+    fun showArchiveEntryInfo() {
+        val state = _uiState.value
+        val fileId = state.archivePreviewFileId ?: return
+        val entryIndex = state.archivePreview?.entryIndex ?: return
+        val file = state.files.firstOrNull { it.id == fileId } ?: return
+        val entry = state.archiveListings[fileId]?.getOrNull(entryIndex) ?: return
+        _archiveInfoTarget.update {
+            ArchiveEntryInfo(
+                entry = entry,
+                archiveName = file.name,
+                archiveFormat = archiveFormats[fileId].orEmpty()
+            )
+        }
+    }
+
+    fun dismissArchiveEntryInfo() = _archiveInfoTarget.update { null }
+
     /** The ZIP viewer's remembered sort (its own pair in preferences, like the gallery's). */
     val archiveSort: StateFlow<Pair<FileSortField, SortDirection>> =
         settingsRepository.preferences
@@ -465,6 +502,24 @@ class PreviewViewModel(
             )
             return
         }
+        // An in-zip video steps through the archive's other videos with the
+        // player's SkipPrevious/SkipNext buttons (vc182): remember the video
+        // queue in display order and the tapped video's position in it. The
+        // queue position only ever moves inside a successful load's publish
+        // (see loadArchivePreview), so a failed step cannot advance it.
+        if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
+            val videoQueue = archiveVideoQueueIndices(
+                listing,
+                archiveSort.value.first,
+                archiveSort.value.second
+            )
+            _uiState.update {
+                it.copy(
+                    archiveVideoQueue = videoQueue,
+                    archiveVideoQueuePosition = videoQueue.indexOf(entryIndex)
+                )
+            }
+        }
         // A tapped video is tap-only (vc181 B11): it publishes a single-entry
         // pager sequence, never the full pager — see archiveVideoPreviewSequence.
         // A CBZ reads as a comic: image pages only, in natural path order —
@@ -504,7 +559,8 @@ class PreviewViewModel(
         file: DriveFile,
         entryIndex: Int,
         pagerIndices: List<Int>,
-        pagerPosition: Int
+        pagerPosition: Int,
+        videoQueuePosition: Int? = null
     ) {
         val listing = _uiState.value.archiveListings[file.id] ?: return
         val entry = listing.getOrNull(entryIndex) ?: return
@@ -618,7 +674,22 @@ class PreviewViewModel(
                         archivePreview = preview,
                         archivePreviewEntries = pagerIndices,
                         archivePreviewPosition = pagerPosition,
-                        archivePreviewFileId = file.id
+                        archivePreviewFileId = file.id,
+                        // The video queue position moves only here, inside the
+                        // successful publish (vc182): a failed step — the
+                        // INSUFFICIENT_SPACE preflight included — leaves the
+                        // published video and its queue position untouched.
+                        // Publishing a non-video preview clears the queue.
+                        archiveVideoQueue = if (preview is ArchiveEntryPreview.Video) {
+                            it.archiveVideoQueue
+                        } else {
+                            emptyList()
+                        },
+                        archiveVideoQueuePosition = if (preview is ArchiveEntryPreview.Video) {
+                            videoQueuePosition ?: it.archiveVideoQueuePosition
+                        } else {
+                            -1
+                        }
                     )
                 }
                 // The previous page's temp file is deleted only after its replacement
@@ -705,6 +776,40 @@ class PreviewViewModel(
         )
     }
 
+    /**
+     * Steps the open in-zip video by [delta] entries in the video queue
+     * (negative = previous), clamped to the queue with no wrap-around — the
+     * player's SkipPrevious/SkipNext buttons for in-zip video (vc182). Videos
+     * stay out of the swipe pager: the stepped-to video publishes the same
+     * single-entry overlay sequence a tapped video does, and only its queue
+     * position moves, inside the successful publish. Refused under the same
+     * busy-slot rule as [stepArchivePreview]; an in-flight preview load is
+     * superseded instead. Playback finishing does NOT auto-advance.
+     */
+    fun stepArchiveVideo(delta: Int) {
+        val state = _uiState.value
+        if (state.archivePreview !is ArchiveEntryPreview.Video || delta == 0) return
+        val target = archivePreviewPagerTarget(
+            state.archiveVideoQueue.size,
+            state.archiveVideoQueuePosition,
+            delta
+        ) ?: return
+        if (archivePreviewJob?.isActive != true && state.archiveEntryBusyIndex != null) {
+            // Refused: a list-side extraction owns the busy slot.
+            return
+        }
+        val fileId = state.archivePreviewFileId ?: return
+        val file = state.files.firstOrNull { it.id == fileId } ?: return
+        val targetIndex = state.archiveVideoQueue[target]
+        loadArchivePreview(
+            file = file,
+            entryIndex = targetIndex,
+            pagerIndices = archiveVideoPreviewSequence(targetIndex),
+            pagerPosition = 0,
+            videoQueuePosition = target
+        )
+    }
+
     /** Deletes an in-archive preview's temp file (text previews hold no file). */
     private fun deleteArchivePreviewTemp(preview: ArchiveEntryPreview) {
         when (preview) {
@@ -728,6 +833,8 @@ class PreviewViewModel(
                 archivePreviewEntries = emptyList(),
                 archivePreviewPosition = -1,
                 archivePreviewFileId = null,
+                archiveVideoQueue = emptyList(),
+                archiveVideoQueuePosition = -1,
                 archivePreviewLoading = false,
                 // Only the preview load's own busy claim is released here; a list-side
                 // download running behind the overlay keeps its busy state.

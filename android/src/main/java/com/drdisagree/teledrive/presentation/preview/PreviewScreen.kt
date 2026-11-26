@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.defaultMinSize
@@ -136,6 +138,7 @@ import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.normalizeUrl
 import com.drdisagree.teledrive.presentation.common.scaledBy
 import com.drdisagree.teledrive.presentation.common.soleUrlOf
+import com.drdisagree.teledrive.presentation.components.ArchiveEntryInfoSheet
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.components.EmptyState
@@ -217,6 +220,7 @@ fun PreviewScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val infoTarget by viewModel.infoTarget.collectAsStateWithLifecycle()
+    val archiveInfoTarget by viewModel.archiveInfoTarget.collectAsStateWithLifecycle()
     val backgroundPlayback by viewModel.backgroundPlayback.collectAsStateWithLifecycle()
     val preferredAudioLanguage by viewModel.preferredAudioLanguage.collectAsStateWithLifecycle()
     val preferredSubtitleLanguage by
@@ -637,6 +641,12 @@ fun PreviewScreen(
                     pagerPosition = state.archivePreviewPosition.coerceAtLeast(0),
                     pagerResyncCount = state.archivePreviewResyncCount,
                     onPageSelected = viewModel::onArchivePreviewPageSelected,
+                    onStepVideo = viewModel::stepArchiveVideo,
+                    videoQueuePosition = state.archiveVideoQueuePosition,
+                    videoQueueLastIndex = state.archiveVideoQueue.lastIndex,
+                    onDownload = viewModel::downloadCurrentArchiveEntry,
+                    onInfo = viewModel::showArchiveEntryInfo,
+                    downloadBusy = state.archiveEntryBusyIndex != null,
                     dataSourceFactory = dataSourceFactory,
                     onDismiss = stepBack
                 )
@@ -698,6 +708,9 @@ fun PreviewScreen(
     }
     infoTarget?.let { file ->
         FileInfoSheet(file = file, onDismiss = viewModel::dismissInfo)
+    }
+    archiveInfoTarget?.let { info ->
+        ArchiveEntryInfoSheet(info = info, onDismiss = viewModel::dismissArchiveEntryInfo)
     }
 }
 
@@ -984,6 +997,12 @@ private fun ArchiveEntryPreviewOverlay(
     pagerPosition: Int,
     pagerResyncCount: Int,
     onPageSelected: (Int) -> Unit,
+    onStepVideo: (Int) -> Unit = {},
+    videoQueuePosition: Int = -1,
+    videoQueueLastIndex: Int = -1,
+    onDownload: () -> Unit = {},
+    onInfo: () -> Unit = {},
+    downloadBusy: Boolean = false,
     dataSourceFactory: TelegramDataSourceFactory,
     onDismiss: () -> Unit
 ) {
@@ -1048,6 +1067,15 @@ private fun ArchiveEntryPreviewOverlay(
                         fileId = "archive-entry-${preview.name}",
                         dataSourceFactory = dataSourceFactory,
                         isActivePage = true,
+                        // Prev/next step through the archive's video queue
+                        // (vc182) via the player's existing SkipPrevious /
+                        // SkipNext buttons — not the swipe pager, which
+                        // videos stay out of. No onPlaybackFinished: finishing
+                        // a video does not auto-advance.
+                        onPreviousFile = { onStepVideo(-1) },
+                        onNextFile = { onStepVideo(+1) },
+                        hasPreviousFile = videoQueuePosition > 0,
+                        hasNextFile = videoQueuePosition < videoQueueLastIndex,
                         session = overlaySession
                     )
 
@@ -1095,7 +1123,13 @@ private fun ArchiveEntryPreviewOverlay(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    // Top-only insets (vc182): the full systemBars padding also
+                    // added the bottom navigation inset, making this band tall
+                    // enough to cover the media player's own top control row
+                    // (statusBarsPadding + the 64dp top bar) — the player's
+                    // Fit/subtitles/PiP/Lock/⋮ row rendered greyed underneath
+                    // this surface and its taps were eaten by it.
+                    .windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top))
                     .padding(horizontal = 4.dp, vertical = 4.dp)
             ) {
                 IconButton(onClick = onDismiss) {
@@ -1104,7 +1138,7 @@ private fun ArchiveEntryPreviewOverlay(
                         contentDescription = stringResource(Res.string.common_back)
                     )
                 }
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = preview.name,
                         style = MaterialTheme.typography.titleMedium,
@@ -1119,6 +1153,18 @@ private fun ArchiveEntryPreviewOverlay(
                             maxLines = 1
                         )
                     }
+                }
+                IconButton(onClick = onDownload, enabled = !downloadBusy) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = stringResource(Res.string.common_download)
+                    )
+                }
+                IconButton(onClick = onInfo) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = stringResource(Res.string.preview_file_info)
+                    )
                 }
             }
         }
