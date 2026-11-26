@@ -199,7 +199,20 @@ fun AppNavHost(
                 onBack = { navController.popBackStackOnce() },
                 onOpenFile = { fileId ->
                     navController.navigateOnce(Route.Preview(fileId = fileId))
+                },
+                onOpenLocalFile = { localPath, displayName ->
+                    navController.navigateOnce(
+                        Route.LocalPreview(localPath = localPath, displayName = displayName)
+                    )
                 }
+            )
+        }
+        composable<Route.LocalPreview> { entry ->
+            val route = entry.toRoute<Route.LocalPreview>()
+            LocalPlatformScreens.current.LocalPreview(
+                localPath = route.localPath,
+                displayName = route.displayName,
+                onBack = { navController.popBackStackOnce() }
             )
         }
         composable<Route.Search> {

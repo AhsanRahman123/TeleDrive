@@ -51,6 +51,10 @@ sealed interface Route {
         val sortDescending: Boolean = false
     ) : Route
 
+    /** In-app preview of a saved local file that has no drive file row (vc181 Transfers rows). */
+    @Serializable
+    data class LocalPreview(val localPath: String, val displayName: String) : Route
+
     @Serializable
     data object Transfers : Route
 
