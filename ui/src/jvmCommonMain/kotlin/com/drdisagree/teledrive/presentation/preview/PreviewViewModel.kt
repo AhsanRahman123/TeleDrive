@@ -470,8 +470,12 @@ class PreviewViewModel(
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: ArchiveException) {
+                // The step failed: the published preview never moved, so signal the
+                // failure to snap the pager back to the published page.
+                _uiState.update { it.withArchivePreviewStepFailure() }
                 _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
             } catch (failure: Exception) {
+                _uiState.update { it.withArchivePreviewStepFailure() }
                 _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
             } finally {
                 // A superseded load must not clear the busy/loading state its
@@ -522,7 +526,13 @@ class PreviewViewModel(
             state.archivePreviewPosition,
             delta
         ) ?: return
-        if (archivePreviewJob?.isActive != true && state.archiveEntryBusyIndex != null) return
+        if (archivePreviewJob?.isActive != true && state.archiveEntryBusyIndex != null) {
+            // Refused: a list-side extraction owns the busy slot. Signal the refusal
+            // so the pager snaps back to the published page instead of staying
+            // settled on the unpublished one, showing loading forever.
+            _uiState.update { it.withArchivePreviewStepFailure() }
+            return
+        }
         val fileId = state.archivePreviewFileId ?: return
         val file = state.files.firstOrNull { it.id == fileId } ?: return
         loadArchivePreview(

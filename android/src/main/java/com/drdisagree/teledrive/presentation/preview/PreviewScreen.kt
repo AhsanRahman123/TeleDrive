@@ -635,6 +635,7 @@ fun PreviewScreen(
                     preview = preview,
                     pagerCount = state.archivePreviewEntries.size.coerceAtLeast(1),
                     pagerPosition = state.archivePreviewPosition.coerceAtLeast(0),
+                    pagerResyncCount = state.archivePreviewResyncCount,
                     onPageSelected = viewModel::onArchivePreviewPageSelected,
                     dataSourceFactory = dataSourceFactory,
                     onDismiss = stepBack
@@ -980,6 +981,7 @@ private fun ArchiveEntryPreviewOverlay(
     preview: ArchiveEntryPreview,
     pagerCount: Int,
     pagerPosition: Int,
+    pagerResyncCount: Int,
     onPageSelected: (Int) -> Unit,
     dataSourceFactory: TelegramDataSourceFactory,
     onDismiss: () -> Unit
@@ -997,7 +999,10 @@ private fun ArchiveEntryPreviewOverlay(
             .distinctUntilChanged()
             .collect { page -> onPageSelected(page) }
     }
-    LaunchedEffect(pagerPosition) {
+    // Keyed on the resync count as well as the position: a failed or refused step
+    // never changes pagerPosition, so the count is what re-runs this effect and
+    // scrolls the pager back to the published page after such a step.
+    LaunchedEffect(pagerPosition, pagerResyncCount) {
         if (pagerState.currentPage != pagerPosition && !pagerState.isScrollInProgress) {
             pagerState.scrollToPage(pagerPosition)
         }

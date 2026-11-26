@@ -21,6 +21,13 @@ data class PreviewUiState(
     val archivePreviewFileId: String? = null,
     /** A pager step is extracting its entry; the current page stays up (or shows loading) until it lands. */
     val archivePreviewLoading: Boolean = false,
+    /**
+     * Monotonic count of in-zip pager steps that failed or were refused. A failed step
+     * never moves the published preview or [archivePreviewPosition], so this counter is
+     * the only changing signal the pager can key its snap-back on: without it the pager
+     * stays settled on the unpublished page, showing its loading state forever.
+     */
+    val archivePreviewResyncCount: Int = 0,
     /** Progress of a multi-entry archive download: finished steps out of the plan total. */
     val archiveBatchProgress: ArchiveBatchProgress? = null
 )
@@ -52,3 +59,13 @@ sealed interface ArchiveEntryPreview {
 }
 
 data class ArchiveBatchProgress(val done: Int, val total: Int)
+
+/**
+ * The state after an in-zip pager step failed or was refused: the published preview
+ * and its position stay exactly as they were — only [PreviewUiState.archivePreviewResyncCount]
+ * advances, so the pager's snap-back effect (keyed on position + this count) re-runs
+ * and scrolls back to the published page. Kept pure so the failure-resync contract is
+ * host-testable without the view model.
+ */
+fun PreviewUiState.withArchivePreviewStepFailure(): PreviewUiState =
+    copy(archivePreviewResyncCount = archivePreviewResyncCount + 1)
