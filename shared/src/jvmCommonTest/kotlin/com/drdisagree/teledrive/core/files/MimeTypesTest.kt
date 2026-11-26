@@ -80,6 +80,19 @@ class MimeTypesTest {
     }
 
     @Test
+    fun `cbz is the registered comic-book ZIP mime and an archive`() {
+        assertEquals(
+            "application/vnd.comicbook+zip",
+            MimeTypes.fromFileName("chapter 1.cbz")
+        )
+        assertEquals(
+            "application/vnd.comicbook+zip",
+            MimeTypes.fromFileName("CHAPTER 1.CBZ")
+        )
+        assertTrue(MimeTypes.isArchive(MimeTypes.fromFileName("chapter 1.cbz")))
+    }
+
+    @Test
     fun `recognized media MIME is classified for preview routing`() {
         assertTrue(MimeTypes.isAudio(MimeTypes.resolve("voice.opus", "application/octet-stream")))
         assertTrue(MimeTypes.isVideo(MimeTypes.resolve("clip.mp4", "application/octet-stream")))

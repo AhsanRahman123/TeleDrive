@@ -30,7 +30,10 @@ import com.drdisagree.teledrive.resources.preview_unarchived
 import com.drdisagree.teledrive.resources.preview_unhidden
 import com.drdisagree.teledrive.core.files.DeleteConsentRequest
 import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
+import com.drdisagree.teledrive.core.archive.ArchiveErrorKind
 import com.drdisagree.teledrive.core.archive.ArchiveException
+import com.drdisagree.teledrive.core.archive.LocalArchiveFormat
+import com.drdisagree.teledrive.core.archive.LocalArchiveService
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.common.AppResult
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
@@ -81,6 +84,7 @@ class PreviewViewModel(
     private val settingsRepository: SettingsRepository,
     private val contentResolver: PreviewContentResolver,
     private val remoteArchiveService: RemoteArchiveService,
+    private val localArchiveService: LocalArchiveService,
     private val archiveDownloadReporter: ArchiveDownloadReporter
 ) : ViewModel() {
 
@@ -99,6 +103,14 @@ class PreviewViewModel(
 
     /** The in-flight in-zip preview extraction (initial open or a pager step), if any. */
     private var archivePreviewJob: Job? = null
+
+    /** Archive format label ("ZIP", "CBZ", "7Z", …) per file id, as last resolved. */
+    private val archiveFormats = mutableMapOf<String, String>()
+
+    /** A local 7z/TAR copy a [LocalArchiveService] extraction can read, per file id. */
+    private data class LocalArchiveSource(val path: String, val format: LocalArchiveFormat)
+
+    private val localArchives = mutableMapOf<String, LocalArchiveSource>()
 
     init {
         viewModelScope.launch {
@@ -232,9 +244,31 @@ class PreviewViewModel(
                     }
                 }
                 .onEach { content ->
+                    if (content is PreviewContent.Archive) {
+                        archiveFormats[file.id] = content.format
+                    }
                     if (content is PreviewContent.Archive && content.remote) {
                         _uiState.update {
                             it.copy(archiveListings = it.archiveListings + (file.id to content.entries))
+                        }
+                    }
+                    // A local 7z/TAR listing is tappable too (vc181 B10): its
+                    // entries extract from the local copy via LocalArchiveService,
+                    // so the listing is stored and the local source remembered.
+                    // Local ZIP/CBZ listings are NOT stored here — they keep the
+                    // existing local-only behaviour unless re-marked remote.
+                    if (content is PreviewContent.Archive && !content.remote) {
+                        val format = LocalArchiveFormat.fromArchiveLabel(content.format)
+                        val localPath = file.localPath
+                            ?.takeIf { java.io.File(it).exists() }
+                        if (format != null && localPath != null) {
+                            localArchives[file.id] = LocalArchiveSource(localPath, format)
+                            _uiState.update {
+                                it.copy(
+                                    archiveListings = it.archiveListings +
+                                        (file.id to content.entries)
+                                )
+                            }
                         }
                     }
                 }
@@ -299,12 +333,24 @@ class PreviewViewModel(
                 archiveDownloadReporter.attach(recordId, job)
             }
             try {
-                val savedPath = remoteArchiveService.extractEntry(
-                    file,
-                    entry.name,
-                    occurrence,
-                    onProgress = { done -> archiveDownloadReporter.progress(recordId, done) }
-                )
+                val local = localArchives[file.id]
+                val savedPath = if (local != null) {
+                    localArchiveService.extractEntry(
+                        file = file,
+                        localPath = local.path,
+                        format = local.format,
+                        entryIndex = entryIndex,
+                        entryName = entry.name,
+                        onProgress = { done -> archiveDownloadReporter.progress(recordId, done) }
+                    )
+                } else {
+                    remoteArchiveService.extractEntry(
+                        file,
+                        entry.name,
+                        occurrence,
+                        onProgress = { done -> archiveDownloadReporter.progress(recordId, done) }
+                    )
+                }
                 archiveDownloadReporter.complete(recordId, savedPath)
                 _messages.tryEmit(
                     UiText.Resource(Res.string.preview_archive_entry_saved, displayName)
@@ -345,10 +391,10 @@ class PreviewViewModel(
     }
 
     /**
-     * Routes a tap on an archive file row: images open in the image viewer, audio plays,
-     * text reads in place — each after the same verified extraction a download performs —
-     * and everything else (video included, always) downloads. In selection mode the screen
-     * toggles selection instead and never calls this.
+     * Routes a tap on an archive file row: images open in the image viewer, audio
+     * and video play, text reads in place — each after the same verified
+     * extraction a download performs — and everything else downloads. In
+     * selection mode the screen toggles selection instead and never calls this.
      */
     fun onArchiveEntryTap(file: DriveFile, entryIndex: Int) {
         val listing = _uiState.value.archiveListings[file.id]
@@ -360,6 +406,7 @@ class PreviewViewModel(
         when (archiveEntryTapAction(entry)) {
             ArchiveEntryTapAction.PREVIEW_IMAGE,
             ArchiveEntryTapAction.PLAY_AUDIO,
+            ArchiveEntryTapAction.PLAY_VIDEO,
             ArchiveEntryTapAction.PREVIEW_TEXT,
             ArchiveEntryTapAction.PREVIEW_PDF,
             ArchiveEntryTapAction.PREVIEW_DOCUMENT -> previewArchiveEntry(file, entryIndex)
@@ -418,11 +465,24 @@ class PreviewViewModel(
             )
             return
         }
-        val pagerIndices = archivePreviewPagerIndices(
-            listing,
-            archiveSort.value.first,
-            archiveSort.value.second
-        )
+        // A tapped video is tap-only (vc181 B11): it publishes a single-entry
+        // pager sequence, never the full pager — see archiveVideoPreviewSequence.
+        // A CBZ reads as a comic: image pages only, in natural path order —
+        // not the archive list's sort. Any other tap inside a CBZ (a text file,
+        // say) keeps the plain ZIP pager behaviour.
+        val pagerIndices = if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
+            archiveVideoPreviewSequence(entryIndex)
+        } else if (archiveFormats[file.id] == "CBZ" &&
+            action == ArchiveEntryTapAction.PREVIEW_IMAGE
+        ) {
+            comicPageSequence(listing)
+        } else {
+            archivePreviewPagerIndices(
+                listing,
+                archiveSort.value.first,
+                archiveSort.value.second
+            )
+        }
         loadArchivePreview(
             file = file,
             entryIndex = entryIndex,
@@ -463,7 +523,40 @@ class PreviewViewModel(
                 )
             }
             try {
-                val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
+                // In-archive video preflight (vc181 B11): the entry extracts
+                // WHOLE to a temp file before the first frame, so refuse up
+                // front when the temp dir cannot hold it — otherwise a full
+                // disk mid-extraction would be misreported as corruption.
+                if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
+                    val tempDir = java.io.File(
+                        System.getProperty("java.io.tmpdir") ?: "."
+                    )
+                    val freeBytes = tempDir.usableSpace
+                    if (!archiveVideoFitsInFreeSpace(entry.sizeBytes, freeBytes)) {
+                        throw ArchiveException(
+                            ArchiveErrorKind.INSUFFICIENT_SPACE,
+                            "There is not enough free space to play this video here. " +
+                                "It needs about " +
+                                com.drdisagree.teledrive.presentation.common.Formatters
+                                    .bytes(entry.sizeBytes) +
+                                " but only " +
+                                com.drdisagree.teledrive.presentation.common.Formatters
+                                    .bytes(freeBytes) +
+                                " is free. Download it instead."
+                        )
+                    }
+                }
+                val local = localArchives[file.id]
+                val temp = if (local != null) {
+                    localArchiveService.extractEntryToTempFile(
+                        local.path,
+                        local.format,
+                        entryIndex,
+                        entry.name
+                    )
+                } else {
+                    remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
+                }
                 val preview = when (action) {
                     ArchiveEntryTapAction.PREVIEW_IMAGE ->
                         ArchiveEntryPreview.Image(displayName, temp.absolutePath, entryIndex)
@@ -496,6 +589,8 @@ class PreviewViewModel(
                             )
                         }
                     }
+                    ArchiveEntryTapAction.PLAY_VIDEO ->
+                        ArchiveEntryPreview.Video(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PREVIEW_TEXT -> {
                         // String decoding with the UTF-8 charset replaces malformed input
                         // instead of failing, so a non-UTF-8 text file still shows sanely.
@@ -616,6 +711,7 @@ class PreviewViewModel(
             is ArchiveEntryPreview.Image -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Audio -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Pdf -> java.io.File(preview.path).delete()
+            is ArchiveEntryPreview.Video -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Text -> Unit
         }
     }
@@ -687,15 +783,30 @@ class PreviewViewModel(
                         // record, so a stop from Transfers cancels only this step's job
                         // while this batch coroutine stays alive to continue with the rest.
                         val stepJob = async {
-                            remoteArchiveService.extractEntry(
-                                file = file,
-                                entryName = step.entryName,
-                                occurrence = step.occurrence,
-                                subFolderPath = step.subFolderPath.ifBlank { null },
-                                onProgress = { done ->
-                                    archiveDownloadReporter.progress(recordId, done)
-                                }
-                            )
+                            val local = localArchives[file.id]
+                            if (local != null) {
+                                localArchiveService.extractEntry(
+                                    file = file,
+                                    localPath = local.path,
+                                    format = local.format,
+                                    entryIndex = step.entryIndex,
+                                    entryName = step.entryName,
+                                    subFolderPath = step.subFolderPath.ifBlank { null },
+                                    onProgress = { done ->
+                                        archiveDownloadReporter.progress(recordId, done)
+                                    }
+                                )
+                            } else {
+                                remoteArchiveService.extractEntry(
+                                    file = file,
+                                    entryName = step.entryName,
+                                    occurrence = step.occurrence,
+                                    subFolderPath = step.subFolderPath.ifBlank { null },
+                                    onProgress = { done ->
+                                        archiveDownloadReporter.progress(recordId, done)
+                                    }
+                                )
+                            }
                         }
                         archiveDownloadReporter.attach(recordId, stepJob)
                         val savedPath = stepJob.await()

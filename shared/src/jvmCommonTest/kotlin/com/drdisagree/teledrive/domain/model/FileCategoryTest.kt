@@ -31,6 +31,7 @@ class FileCategoryTest {
         assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/zstd"))
         assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/x-cpio"))
         assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/x-lz4"))
+        assertEquals(FileCategory.ARCHIVE, FileCategory.fromMimeType("application/vnd.comicbook+zip"))
     }
 
     @Test

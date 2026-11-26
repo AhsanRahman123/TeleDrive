@@ -10,7 +10,9 @@ import com.drdisagree.teledrive.resources.preview_archive_split
 import com.drdisagree.teledrive.resources.preview_fetch_failed
 import com.drdisagree.teledrive.core.archive.ArchiveErrorKind
 import com.drdisagree.teledrive.core.archive.ArchiveException
+import com.drdisagree.teledrive.core.archive.LocalArchiveFormat
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
+import com.drdisagree.teledrive.core.archive.localArchiveReader
 import com.drdisagree.teledrive.core.archive.ZipArchiveReader
 import com.drdisagree.teledrive.core.media.BufferedMediaByteSource
 import com.drdisagree.teledrive.core.media.LocalFileByteSource
@@ -42,9 +44,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import net.lingala.zip4j.ZipFile
-import org.apache.commons.compress.archivers.sevenz.SevenZFile
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.CompressorStreamFactory
 import java.io.File
 
 /** Original local files are always plaintext; only remote copies and caches are ever encrypted. */
@@ -70,7 +69,8 @@ class PreviewContentResolver(
             // occurrence in the same central-directory order, so its rows are tappable.
             // A local-ONLY zip stays remote = false with the existing local-only message.
             emit(
-                if (content is PreviewContent.Archive && content.format == "ZIP" &&
+                if (content is PreviewContent.Archive &&
+                    (content.format == "ZIP" || content.format == "CBZ") &&
                     file.hasRemoteCopy
                 ) {
                     content.copy(remote = true)
@@ -185,7 +185,13 @@ class PreviewContentResolver(
         .flowOn(dispatchers.io)
 
     private fun isZipFile(file: DriveFile): Boolean =
-        file.mimeType == "application/zip" || file.extension.equals("zip", ignoreCase = true)
+        file.mimeType == "application/zip" || file.extension.equals("zip", ignoreCase = true) ||
+            isCbzFile(file)
+
+    /** A CBZ is a ZIP of comic pages: it browses and extracts through the ZIP machinery. */
+    private fun isCbzFile(file: DriveFile): Boolean =
+        file.mimeType == "application/vnd.comicbook+zip" ||
+            file.extension.equals("cbz", ignoreCase = true)
 
     private suspend fun remoteArchive(file: DriveFile): PreviewContent = try {
         val entries = remoteArchiveService.listEntries(file).map { entry ->
@@ -197,7 +203,7 @@ class PreviewContentResolver(
                 modifiedAtMillis = entry.modifiedAtMillis
             )
         }
-        PreviewContent.Archive(entries, "ZIP", remote = true)
+        PreviewContent.Archive(entries, if (isCbzFile(file)) "CBZ" else "ZIP", remote = true)
     } catch (failure: ArchiveException) {
         when (failure.kind) {
             ArchiveErrorKind.ENCRYPTED_FILE ->
@@ -342,7 +348,7 @@ class PreviewContentResolver(
         PreviewContent.Html(raw, truncated)
     }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
 
-    private suspend fun readLocalZip(path: String): PreviewContent {
+    private suspend fun readLocalZip(path: String, format: String = "ZIP"): PreviewContent {
         // zip4j first, exactly as before: every archive it can list today keeps the
         // identical listing, including its timestamp handling.
         val zip4jListing = runCatching {
@@ -358,7 +364,7 @@ class PreviewContentResolver(
                 )
             }
         }.getOrNull()
-        if (zip4jListing != null) return PreviewContent.Archive(zip4jListing, "ZIP")
+        if (zip4jListing != null) return PreviewContent.Archive(zip4jListing, format)
 
         // Fallback to the app's own ranged reader. zip4j refuses to even LIST an
         // archive when any entry uses a compression method it does not implement —
@@ -370,7 +376,7 @@ class PreviewContentResolver(
         // records the method per entry and only refuses such an entry when it is
         // actually extracted, so the archive opens and its other entries stay usable.
         return try {
-            PreviewContent.Archive(localZipEntriesViaReader(path), "ZIP")
+            PreviewContent.Archive(localZipEntriesViaReader(path), format)
         } catch (failure: ArchiveException) {
             when (failure.kind) {
                 ArchiveErrorKind.NOT_A_ZIP ->
@@ -394,24 +400,17 @@ class PreviewContentResolver(
         when (mimeType) {
             "application/zip" -> readLocalZip(path)
 
+            // A CBZ is listed by the exact ZIP listers (zip4j, then the app's own
+            // reader); only the format label differs, which is what switches the
+            // viewer to the comic pager sequence.
+            "application/vnd.comicbook+zip" -> readLocalZip(path, format = "CBZ")
+
+            // Listing delegates to the local readers (vc181 B10): the entries
+            // produced are exactly the ones the open-coded listing produced,
+            // and the same readers now also extract for preview/download.
             "application/x-7z-compressed" -> runCatching {
-                val entries = SevenZFile.builder()
-                    // Keep archive metadata parsing bounded on low-memory devices.
-                    .setMaxMemoryLimitKiB(128 * 1024)
-                    .setFile(File(path))
-                    .get()
-                    .use { archive ->
-                        archive.entries.map { header ->
-                            ArchiveEntry(
-                                name = header.name.orEmpty(),
-                                sizeBytes = header.size.coerceAtLeast(0L),
-                                // Commons Compress does not expose this 7z value publicly.
-                                compressedBytes = 0L,
-                                isDirectory = header.isDirectory
-                            )
-                        }
-                    }
-                PreviewContent.Archive(entries, "7Z")
+                val entries = localArchiveReader(LocalArchiveFormat.SEVEN_Z).list(File(path))
+                PreviewContent.Archive(entries, LocalArchiveFormat.SEVEN_Z.archiveLabel)
             }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
 
             "application/x-tar" -> readTar(path, compressed = false)
@@ -421,31 +420,15 @@ class PreviewContentResolver(
         }
 
     private fun readTar(path: String, compressed: Boolean): PreviewContent = runCatching {
-        val input = File(path).inputStream().buffered()
-        val tarInput = if (compressed) {
-            CompressorStreamFactory().createCompressorInputStream(input)
+        val format = if (compressed) {
+            LocalArchiveFormat.TAR_COMPRESSED
         } else {
-            input
+            LocalArchiveFormat.TAR
         }
-        TarArchiveInputStream(tarInput).use { archive ->
-            val entries = buildList {
-                while (size < MAX_ARCHIVE_ENTRIES) {
-                    val entry = archive.nextEntry ?: break
-                    add(
-                        ArchiveEntry(
-                            name = entry.name,
-                            sizeBytes = entry.size.coerceAtLeast(0L),
-                            compressedBytes = 0L,
-                            isDirectory = entry.isDirectory
-                        )
-                    )
-                }
-            }
-            PreviewContent.Archive(
-                entries = entries,
-                format = if (compressed) "TAR (compressed)" else "TAR"
-            )
-        }
+        PreviewContent.Archive(
+            entries = localArchiveReader(format).list(File(path)),
+            format = format.archiveLabel
+        )
     }.getOrElse {
         SafeLog.w(TAG, "Could not read TAR archive metadata", it)
         PreviewContent.Failed(Res.string.preview_archive_failed)
@@ -515,7 +498,6 @@ class PreviewContentResolver(
         private const val TAG = "PreviewContent"
         private const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
         private const val TEXT_LIMIT = 256 * 1024
-        private const val MAX_ARCHIVE_ENTRIES = 5_000
     }
 }
 

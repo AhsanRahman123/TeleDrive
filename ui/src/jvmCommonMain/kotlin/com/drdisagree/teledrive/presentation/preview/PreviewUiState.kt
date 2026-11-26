@@ -51,6 +51,13 @@ sealed interface ArchiveEntryPreview {
         override val entryIndex: Int
     ) : ArchiveEntryPreview
 
+    /** A video entry extracted whole to a verified temp file, played by the existing player. */
+    data class Video(
+        override val name: String,
+        val path: String,
+        override val entryIndex: Int
+    ) : ArchiveEntryPreview
+
     data class Text(
         override val name: String,
         val text: String,

@@ -13,9 +13,9 @@ import com.drdisagree.teledrive.domain.model.SortDirection
  * sorting and filtering only change which rows are displayed and in what order.
  */
 
-/** What a tap on a file row does. Video is deliberately DOWNLOAD: it never plays in-archive. */
+/** What a tap on a file row does. Video plays in-archive on tap only (vc181 B11); it is never a pager page. */
 enum class ArchiveEntryTapAction {
-    PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, PREVIEW_PDF, PREVIEW_DOCUMENT, DOWNLOAD
+    PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, PREVIEW_PDF, PREVIEW_DOCUMENT, PLAY_VIDEO, DOWNLOAD
 }
 
 fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
@@ -28,9 +28,12 @@ fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
         // EPUB and the OOXML trio extract to readable text from the extracted temp file.
         MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType) ->
             ArchiveEntryTapAction.PREVIEW_DOCUMENT
+        // Video plays in-archive on tap (vc181 B11) via the same verified
+        // temp extraction as audio — but it is NOT pager-previewable below.
+        MimeTypes.isVideo(mimeType) -> ArchiveEntryTapAction.PLAY_VIDEO
         // The app's own text classification (MimeTypes.isText) decides what counts as text.
         MimeTypes.isText(mimeType) -> ArchiveEntryTapAction.PREVIEW_TEXT
-        // Video and everything else stay download-only.
+        // Everything else stays download-only.
         else -> ArchiveEntryTapAction.DOWNLOAD
     }
 }
@@ -48,8 +51,39 @@ fun archiveEntryPreviewable(entry: ArchiveEntry): Boolean =
         ArchiveEntryTapAction.PREVIEW_TEXT -> archiveEntryTextPreviewable(entry)
         ArchiveEntryTapAction.PREVIEW_PDF -> archiveEntryPdfPreviewable(entry)
         ArchiveEntryTapAction.PREVIEW_DOCUMENT -> archiveEntryDocumentPreviewable(entry)
+        // PLAY_VIDEO is tap-only: a video is never a pager page. Swiping
+        // across one would trigger a full (potentially multi-GB) extraction
+        // for a page the user may pass in a second, breaking the pager's
+        // cheap-page contract. A tapped video publishes a single-entry
+        // sequence instead (see archiveVideoPreviewSequence).
+        ArchiveEntryTapAction.PLAY_VIDEO,
         ArchiveEntryTapAction.DOWNLOAD -> false
     }
+
+/**
+ * The pager sequence for a tapped in-archive video: just the video itself.
+ * The overlay's invariant "entries[position] is the open preview" holds,
+ * the pager has one page (no swipe neighbours, no counter), and a stray
+ * page-selected callback can only ever re-target the same entry.
+ */
+fun archiveVideoPreviewSequence(entryIndex: Int): List<Int> = listOf(entryIndex)
+
+/** Headroom kept free beyond an in-archive video's own temp file. */
+const val ARCHIVE_VIDEO_SPACE_MARGIN_BYTES: Long = 16L * 1024 * 1024
+
+/**
+ * The free-space preflight for in-archive video (vc181 B11): the entry's
+ * exact uncompressed size (from the listing) plus a fixed margin must fit
+ * in [freeBytes] (the temp dir's usable space) BEFORE extraction starts.
+ * Extraction streams ranged reads to the temp file, so peak extra usage is
+ * the temp itself plus small buffers — the margin covers the buffers.
+ * Without this, a disk-full mid-extraction would surface as archive
+ * corruption, which it is not. Written subtraction-first so no size can
+ * overflow it.
+ */
+fun archiveVideoFitsInFreeSpace(entrySizeBytes: Long, freeBytes: Long): Boolean =
+    entrySizeBytes >= 0 &&
+        freeBytes - entrySizeBytes >= ARCHIVE_VIDEO_SPACE_MARGIN_BYTES
 
 /**
  * The in-zip preview pager sequence: the LISTING INDICES of the previewable entries of
@@ -76,6 +110,73 @@ fun archivePreviewPagerIndices(
         entryIndex.takeIf { archiveEntryPreviewable(listing[entryIndex]) }
     }
 }
+
+/**
+ * Natural ordering for archive paths: digit runs compare by numeric value, so
+ * `page2.jpg` sorts before `page10.jpg` (the archive list's plain lexicographic
+ * NAME sort gives 1, 10, 11, 2, … — unusable for comic pages). Non-digit runs
+ * compare case-insensitively. Digit runs compare by stripped-of-leading-zeros
+ * length, then lexicographically, so absurdly long runs cannot overflow.
+ * Numerically equal runs (zero-padded variants like `001.jpg` vs `1.jpg`) fall
+ * through to the remaining characters; the caller adds a listing-index
+ * tie-break, so the overall order is always deterministic.
+ */
+fun compareNaturalPaths(a: String, b: String): Int {
+    var i = 0
+    var j = 0
+    while (i < a.length && j < b.length) {
+        val ca = a[i]
+        val cb = b[j]
+        if (ca.isDigit() && cb.isDigit()) {
+            var endA = i
+            while (endA < a.length && a[endA].isDigit()) endA++
+            var endB = j
+            while (endB < b.length && b[endB].isDigit()) endB++
+            val runA = a.substring(i, endA).trimStart('0')
+            val runB = b.substring(j, endB).trimStart('0')
+            if (runA.length != runB.length) return runA.length - runB.length
+            val byDigits = runA.compareTo(runB)
+            if (byDigits != 0) return byDigits
+            i = endA
+            j = endB
+        } else {
+            val byChar = ca.lowercaseChar().compareTo(cb.lowercaseChar())
+            if (byChar != 0) return byChar
+            i++
+            j++
+        }
+    }
+    return (a.length - i) - (b.length - j)
+}
+
+/**
+ * The CBZ comic pager sequence: the LISTING INDICES of the archive's page
+ * entries, in reading order. Pages are IMAGE entries only, filtered by image
+ * mime explicitly — a ZIP pager's text rule would turn `ComicInfo.xml` (XML
+ * counts as text) into a page, and `.txt`/`.nfo`/`Thumbs.db`/nested archives
+ * are not pages either. Order is the natural sort of the full normalized
+ * path, so flat books and one-folder books both read 1, 2, …, 10; ties (and
+ * duplicate names) break on the listing index, so every page keeps its own
+ * listing-index identity for extraction. This is a separate sequence builder
+ * on purpose: the plain-ZIP pager sequence and archive sort do not move.
+ */
+fun comicPageSequence(listing: List<ArchiveEntry>): List<Int> =
+    listing.indices
+        .filter { index ->
+            val entry = listing[index]
+            // macOS resource-fork junk carries real image extensions, so the
+            // mime filter alone cannot keep it out of the page sequence.
+            val segments = entry.name.replace('\\', '/').split('/')
+            !entry.isDirectory && "__MACOSX" !in segments &&
+                MimeTypes.isImage(MimeTypes.fromFileName(entry.name))
+        }
+        .sortedWith { first, second ->
+            val byPath = compareNaturalPaths(
+                listing[first].name.replace('\\', '/'),
+                listing[second].name.replace('\\', '/')
+            )
+            if (byPath != 0) byPath else first - second
+        }
 
 /** The position of [entryIndex] in a pager sequence, or -1 when it has no page. */
 fun archivePreviewPagerPosition(pagerIndices: List<Int>, entryIndex: Int): Int =

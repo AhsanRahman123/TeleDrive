@@ -1039,6 +1039,18 @@ private fun ArchiveEntryPreviewOverlay(
 
                     is ArchiveEntryPreview.Pdf -> PdfPreview(path = preview.path)
 
+                    // In-archive video (vc181 B11): the audio branch with
+                    // isAudio = false — the same existing player, fed the
+                    // verified temp extraction as a plain local file.
+                    is ArchiveEntryPreview.Video -> MediaPlayer(
+                        content = PreviewContent.LocalMedia(preview.path, isAudio = false),
+                        title = preview.name,
+                        fileId = "archive-entry-${preview.name}",
+                        dataSourceFactory = dataSourceFactory,
+                        isActivePage = true,
+                        session = overlaySession
+                    )
+
                     is ArchiveEntryPreview.Text -> if (preview.isHtml) {
                         // The WebView scrolls itself; it must not sit inside the
                         // scrolling text column below.
