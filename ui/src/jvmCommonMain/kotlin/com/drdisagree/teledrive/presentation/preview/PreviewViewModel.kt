@@ -100,6 +100,9 @@ class PreviewViewModel(
     /** The in-flight in-zip preview extraction (initial open or a pager step), if any. */
     private var archivePreviewJob: Job? = null
 
+    /** Archive format label ("ZIP", "CBZ", "7Z", …) per file id, as last resolved. */
+    private val archiveFormats = mutableMapOf<String, String>()
+
     init {
         viewModelScope.launch {
             val target = fileRepository.getFile(route.fileId)
@@ -232,6 +235,9 @@ class PreviewViewModel(
                     }
                 }
                 .onEach { content ->
+                    if (content is PreviewContent.Archive) {
+                        archiveFormats[file.id] = content.format
+                    }
                     if (content is PreviewContent.Archive && content.remote) {
                         _uiState.update {
                             it.copy(archiveListings = it.archiveListings + (file.id to content.entries))
@@ -394,11 +400,20 @@ class PreviewViewModel(
             )
             return
         }
-        val pagerIndices = archivePreviewPagerIndices(
-            listing,
-            archiveSort.value.first,
-            archiveSort.value.second
-        )
+        // A CBZ reads as a comic: image pages only, in natural path order —
+        // not the archive list's sort. Any other tap inside a CBZ (a text file,
+        // say) keeps the plain ZIP pager behaviour.
+        val pagerIndices = if (archiveFormats[file.id] == "CBZ" &&
+            action == ArchiveEntryTapAction.PREVIEW_IMAGE
+        ) {
+            comicPageSequence(listing)
+        } else {
+            archivePreviewPagerIndices(
+                listing,
+                archiveSort.value.first,
+                archiveSort.value.second
+            )
+        }
         loadArchivePreview(
             file = file,
             entryIndex = entryIndex,

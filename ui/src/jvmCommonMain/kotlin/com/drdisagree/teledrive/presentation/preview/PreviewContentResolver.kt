@@ -70,7 +70,8 @@ class PreviewContentResolver(
             // occurrence in the same central-directory order, so its rows are tappable.
             // A local-ONLY zip stays remote = false with the existing local-only message.
             emit(
-                if (content is PreviewContent.Archive && content.format == "ZIP" &&
+                if (content is PreviewContent.Archive &&
+                    (content.format == "ZIP" || content.format == "CBZ") &&
                     file.hasRemoteCopy
                 ) {
                     content.copy(remote = true)
@@ -185,7 +186,13 @@ class PreviewContentResolver(
         .flowOn(dispatchers.io)
 
     private fun isZipFile(file: DriveFile): Boolean =
-        file.mimeType == "application/zip" || file.extension.equals("zip", ignoreCase = true)
+        file.mimeType == "application/zip" || file.extension.equals("zip", ignoreCase = true) ||
+            isCbzFile(file)
+
+    /** A CBZ is a ZIP of comic pages: it browses and extracts through the ZIP machinery. */
+    private fun isCbzFile(file: DriveFile): Boolean =
+        file.mimeType == "application/vnd.comicbook+zip" ||
+            file.extension.equals("cbz", ignoreCase = true)
 
     private suspend fun remoteArchive(file: DriveFile): PreviewContent = try {
         val entries = remoteArchiveService.listEntries(file).map { entry ->
@@ -197,7 +204,7 @@ class PreviewContentResolver(
                 modifiedAtMillis = entry.modifiedAtMillis
             )
         }
-        PreviewContent.Archive(entries, "ZIP", remote = true)
+        PreviewContent.Archive(entries, if (isCbzFile(file)) "CBZ" else "ZIP", remote = true)
     } catch (failure: ArchiveException) {
         when (failure.kind) {
             ArchiveErrorKind.ENCRYPTED_FILE ->
@@ -263,7 +270,7 @@ class PreviewContentResolver(
         PreviewContent.PlainText(String(bytes, Charsets.UTF_8), truncated)
     }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
 
-    private suspend fun readLocalZip(path: String): PreviewContent {
+    private suspend fun readLocalZip(path: String, format: String = "ZIP"): PreviewContent {
         // zip4j first, exactly as before: every archive it can list today keeps the
         // identical listing, including its timestamp handling.
         val zip4jListing = runCatching {
@@ -279,7 +286,7 @@ class PreviewContentResolver(
                 )
             }
         }.getOrNull()
-        if (zip4jListing != null) return PreviewContent.Archive(zip4jListing, "ZIP")
+        if (zip4jListing != null) return PreviewContent.Archive(zip4jListing, format)
 
         // Fallback to the app's own ranged reader. zip4j refuses to even LIST an
         // archive when any entry uses a compression method it does not implement —
@@ -291,7 +298,7 @@ class PreviewContentResolver(
         // records the method per entry and only refuses such an entry when it is
         // actually extracted, so the archive opens and its other entries stay usable.
         return try {
-            PreviewContent.Archive(localZipEntriesViaReader(path), "ZIP")
+            PreviewContent.Archive(localZipEntriesViaReader(path), format)
         } catch (failure: ArchiveException) {
             when (failure.kind) {
                 ArchiveErrorKind.NOT_A_ZIP ->
@@ -314,6 +321,11 @@ class PreviewContentResolver(
     private suspend fun readArchive(file: DriveFile, path: String): PreviewContent =
         when (file.mimeType) {
             "application/zip" -> readLocalZip(path)
+
+            // A CBZ is listed by the exact ZIP listers (zip4j, then the app's own
+            // reader); only the format label differs, which is what switches the
+            // viewer to the comic pager sequence.
+            "application/vnd.comicbook+zip" -> readLocalZip(path, format = "CBZ")
 
             "application/x-7z-compressed" -> runCatching {
                 val entries = SevenZFile.builder()

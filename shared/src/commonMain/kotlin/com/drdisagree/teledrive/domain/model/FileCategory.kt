@@ -37,6 +37,7 @@ enum class FileCategory {
                     mimeType.contains("presentation") -> DOCUMENT
 
             mimeType == "application/zip" ||
+                    mimeType == "application/vnd.comicbook+zip" ||
                     mimeType == "application/x-7z-compressed" ||
                     mimeType == "application/vnd.rar" ||
                     mimeType == "application/x-tar" ||

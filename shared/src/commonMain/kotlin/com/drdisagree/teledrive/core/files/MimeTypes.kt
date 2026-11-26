@@ -203,6 +203,7 @@ object MimeTypes {
 
         // Archives and compressed files
         "zip" to "application/zip",
+        "cbz" to "application/vnd.comicbook+zip",
         "7z" to "application/x-7z-compressed",
         "rar" to "application/vnd.rar",
         "tar" to "application/x-tar",
@@ -314,6 +315,7 @@ object MimeTypes {
 
     fun isArchive(mimeType: String): Boolean = mimeType in setOf(
         "application/zip",
+        "application/vnd.comicbook+zip",
         "application/x-7z-compressed",
         "application/vnd.rar",
         "application/x-tar",
