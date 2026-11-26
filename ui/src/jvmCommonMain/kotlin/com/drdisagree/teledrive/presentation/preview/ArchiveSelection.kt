@@ -128,6 +128,37 @@ fun planArchiveSelectionDownloads(
 fun toggleArchiveSelection(selection: Set<Int>, entryIndex: Int): Set<Int> =
     if (entryIndex in selection) selection - entryIndex else selection + entryIndex
 
+/** A selection over the archive tree: file entries by listing index, folders by path. */
+data class ArchiveSelectionSet(
+    val entryIndices: Set<Int> = emptySet(),
+    val folderPaths: Set<String> = emptySet()
+)
+
+/**
+ * The selection bar's Select all: every row in the current folder view — the
+ * flattened [rows] the list is showing right now, so an active search filter or
+ * collapsed folders bound it exactly like Transfers' "Select visible" bounds
+ * its list — merged onto the current selection. File rows contribute their
+ * listing index; folder rows contribute their path (a selected folder downloads
+ * its whole contents, so rows inside a collapsed folder are covered through it).
+ */
+fun selectAllArchiveVisible(
+    rows: List<ArchiveRowState>,
+    current: ArchiveSelectionSet
+): ArchiveSelectionSet {
+    var entries = current.entryIndices
+    var folders = current.folderPaths
+    for (row in rows) {
+        val node = row.node
+        if (node.isDirectory) {
+            folders = folders + node.path
+        } else {
+            node.entryIndex?.let { entries = entries + it }
+        }
+    }
+    return ArchiveSelectionSet(entries, folders)
+}
+
 /**
  * The main browser's range-selection rule (FilesViewModel.extendRangeSelection): a drag
  * paints [rangeIndices] onto the snapshot taken when the drag started — selecting when

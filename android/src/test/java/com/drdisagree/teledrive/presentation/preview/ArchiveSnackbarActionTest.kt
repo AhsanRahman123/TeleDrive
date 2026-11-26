@@ -4,8 +4,10 @@ import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.isTransferMessage
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.message_download_queued
+import com.drdisagree.teledrive.resources.preview_archive_downloading_selected
 import com.drdisagree.teledrive.resources.preview_archive_entries_saved
 import com.drdisagree.teledrive.resources.preview_archive_entry_saved
+import com.drdisagree.teledrive.resources.preview_archive_entry_saving
 import com.drdisagree.teledrive.resources.preview_archive_failed
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -27,6 +29,18 @@ class ArchiveSnackbarActionTest {
         )
         assertTrue(
             UiText.Resource(Res.string.preview_archive_entries_saved, 3).isTransferMessage()
+        )
+    }
+
+    @Test
+    fun `zip download started messages carry the view action from download start`() {
+        // Emitted by PreviewViewModel the moment a single in-ZIP download starts.
+        assertTrue(
+            UiText.Resource(Res.string.preview_archive_entry_saving, "song.mp3").isTransferMessage()
+        )
+        // Emitted the moment a batch (Download selected, any count) starts.
+        assertTrue(
+            UiText.Resource(Res.string.preview_archive_downloading_selected, 28).isTransferMessage()
         )
     }
 

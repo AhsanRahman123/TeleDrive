@@ -63,6 +63,7 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -148,6 +149,7 @@ import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_actions
 import com.drdisagree.teledrive.resources.common_back
 import com.drdisagree.teledrive.resources.common_cancel
+import com.drdisagree.teledrive.resources.common_select_all
 import com.drdisagree.teledrive.resources.common_collapse
 import com.drdisagree.teledrive.resources.common_download
 import com.drdisagree.teledrive.resources.files_copy_here
@@ -1393,7 +1395,7 @@ private fun ArchiveList(
 
         // The touch selection action bar, mirroring the main browser's: a floating
         // surface above the system navigation bar. The zip viewer is read-only, so
-        // Download selected is its only action.
+        // Select all and Download selected are its only actions.
         if (selectionMode) {
             Surface(
                 modifier = Modifier
@@ -1431,6 +1433,18 @@ private fun ArchiveList(
                         style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.weight(1f)
                     )
+                    TextButton(
+                        onClick = {
+                            val all = selectAllArchiveVisible(
+                                rows,
+                                ArchiveSelectionSet(selectedEntries, selectedFolders)
+                            )
+                            selectedEntries = all.entryIndices
+                            selectedFolders = all.folderPaths
+                        }
+                    ) {
+                        Text(stringResource(Res.string.common_select_all))
+                    }
                     Button(
                         enabled = !busy,
                         onClick = {

@@ -10,9 +10,17 @@ import java.net.URL
 /**
  * An anonymous read of a public endpoint, so a check reveals no more than visiting the releases
  * page.
+ *
+ * The repository is shared between platforms, so [channel] decides which releases
+ * may be offered at all (see [decideUpdate]): the Android checker passes
+ * [UpdateChannel.ANDROID] with its version code, so PC releases (v1.6.x tags,
+ * MSI-only assets) are ignored on the phone instead of popping a desktop
+ * changelog. Callers that pass no channel keep the historical behaviour.
  */
 class UpdateChecker(
-    private val currentVersion: String
+    private val currentVersion: String,
+    private val currentVersionCode: Int? = null,
+    private val channel: UpdateChannel = UpdateChannel.GENERIC
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -27,14 +35,18 @@ class UpdateChecker(
             json.decodeFromString(GitHubRelease.serializer(), payload)
         }.getOrNull() ?: return@withContext null
 
-        if (release.draft || release.preRelease) return@withContext null
-        val latest = release.tag.removePrefix("v").trim()
-        if (!isNewer(latest, currentVersion)) return@withContext null
-
-        AppRelease(
-            version = latest,
-            notes = release.body.orEmpty().trim(),
-            pageUrl = release.pageUrl
+        decideUpdate(
+            candidate = ReleaseCandidate(
+                tag = release.tag,
+                assetNames = release.assets.map { it.name },
+                body = release.body,
+                pageUrl = release.pageUrl,
+                draft = release.draft,
+                preRelease = release.preRelease
+            ),
+            currentVersion = currentVersion,
+            currentVersionCode = currentVersionCode,
+            channel = channel
         )
     }
 
@@ -55,22 +67,6 @@ class UpdateChecker(
             connection.disconnect()
         }
     }
-
-    /** Compares dotted numbers so 1.10 counts as newer than 1.9. */
-    private fun isNewer(candidate: String, current: String): Boolean {
-        val left = candidate.numbers()
-        val right = current.removePrefix("v").numbers()
-        if (left.isEmpty()) return false
-        for (index in 0 until maxOf(left.size, right.size)) {
-            val a = left.getOrElse(index) { 0 }
-            val b = right.getOrElse(index) { 0 }
-            if (a != b) return a > b
-        }
-        return false
-    }
-
-    private fun String.numbers(): List<Int> = split('.', '-', '_')
-        .mapNotNull { part -> part.takeWhile(Char::isDigit).toIntOrNull() }
 
     private companion object {
         const val TAG = "UpdateChecker"

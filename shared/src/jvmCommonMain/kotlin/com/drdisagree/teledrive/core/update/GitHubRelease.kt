@@ -9,5 +9,12 @@ internal data class GitHubRelease(
     @SerialName("html_url") val pageUrl: String,
     val body: String? = null,
     val draft: Boolean = false,
-    @SerialName("prerelease") val preRelease: Boolean = false
+    @SerialName("prerelease") val preRelease: Boolean = false,
+    val assets: List<GitHubAsset> = emptyList()
+)
+
+@Serializable
+internal data class GitHubAsset(
+    val name: String = "",
+    @SerialName("browser_download_url") val downloadUrl: String = ""
 )
