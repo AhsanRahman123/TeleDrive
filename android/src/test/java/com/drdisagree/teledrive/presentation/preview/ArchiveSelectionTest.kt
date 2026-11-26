@@ -403,6 +403,8 @@ class ArchiveSelectionTest {
         )
         assertEquals(setOf(99, 3, 4), merged.entryIndices)
         assertEquals(setOf("dirA", "dirB"), merged.folderPaths)
+    }
+
     // ---- Preview pager data source (vc180) ----
 
     @Test
