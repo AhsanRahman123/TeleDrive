@@ -48,13 +48,105 @@ class TransferOpenActionsTest {
 
     @Test
     fun `completed archive download offers open with from its local path`() {
-        // Report-only record: no fileId (nothing for the in-app preview to
+        // Report-only record: no fileId (nothing for the id-based preview to
         // resolve), but the extracted file is on disk, so Open with… must show.
+        // Since vc181 it also offers Open in Pranto Drive, routed to the
+        // local-path preview instead of the id-based one.
         val actions = completedTransferOpenActions(
             task(type = TransferType.ARCHIVE_DOWNLOAD, fileId = null),
             fileOpenerAvailable = true
         )
-        assertEquals(setOf(TransferOpenAction.OPEN_WITH), actions)
+        assertEquals(
+            setOf(TransferOpenAction.OPEN_IN_APP, TransferOpenAction.OPEN_WITH),
+            actions
+        )
+    }
+
+    @Test
+    fun `completed archive download without a local path offers no open actions`() {
+        assertTrue(
+            completedTransferOpenActions(
+                task(type = TransferType.ARCHIVE_DOWNLOAD, fileId = null, localPath = null),
+                fileOpenerAvailable = true
+            ).isEmpty()
+        )
+        assertTrue(
+            completedTransferOpenActions(
+                task(type = TransferType.ARCHIVE_DOWNLOAD, fileId = null, localPath = "  "),
+                fileOpenerAvailable = true
+            ).isEmpty()
+        )
+    }
+
+    // --- vc181 row-tap target matrix ---
+
+    @Test
+    fun `completed normal download row tap opens in app by file id`() {
+        assertEquals(
+            TransferRowTapTarget.InApp("file-1"),
+            completedTransferRowTap(task())
+        )
+    }
+
+    @Test
+    fun `completed archive row tap opens local preview from its saved path`() {
+        assertEquals(
+            TransferRowTapTarget.LocalPreview(
+                "/storage/emulated/0/Download/song.mp3",
+                "song.mp3"
+            ),
+            completedTransferRowTap(
+                task(type = TransferType.ARCHIVE_DOWNLOAD, fileId = null)
+            )
+        )
+    }
+
+    @Test
+    fun `completed archive row tap with blank or missing local path is none`() {
+        assertEquals(
+            TransferRowTapTarget.None,
+            completedTransferRowTap(
+                task(type = TransferType.ARCHIVE_DOWNLOAD, fileId = null, localPath = null)
+            )
+        )
+        assertEquals(
+            TransferRowTapTarget.None,
+            completedTransferRowTap(
+                task(type = TransferType.ARCHIVE_DOWNLOAD, fileId = null, localPath = "  ")
+            )
+        )
+    }
+
+    @Test
+    fun `non-completed row taps are none`() {
+        for (state in listOf(
+            TransferState.RUNNING,
+            TransferState.PAUSED,
+            TransferState.FAILED,
+            TransferState.QUEUED
+        )) {
+            assertEquals(TransferRowTapTarget.None, completedTransferRowTap(task(state = state)))
+            assertEquals(
+                TransferRowTapTarget.None,
+                completedTransferRowTap(
+                    task(type = TransferType.ARCHIVE_DOWNLOAD, fileId = null, state = state)
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `completed upload row tap keeps in app route and upload without file id is none`() {
+        assertEquals(
+            TransferRowTapTarget.InApp("file-1"),
+            completedTransferRowTap(task(type = TransferType.UPLOAD))
+        )
+        // An upload's localPath is its source file, not a Transfers download
+        // to preview, so a file-less upload row tap stays a no-op.
+        assertEquals(
+            TransferRowTapTarget.None,
+            completedTransferRowTap(task(type = TransferType.UPLOAD, fileId = null))
+        )
     }
 
     @Test
