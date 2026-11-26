@@ -2,7 +2,6 @@ package com.drdisagree.teledrive.desktop.files
 
 import com.drdisagree.teledrive.presentation.platform.FileOpener
 import com.sun.jna.Platform
-import com.sun.jna.Pointer
 import com.sun.jna.platform.win32.Shell32
 import com.sun.jna.platform.win32.WinUser
 import java.awt.Desktop
@@ -56,7 +55,7 @@ class DesktopFileOpener(
                 file.parent,
                 WinUser.SW_SHOWNORMAL
             )
-            shellExecuteSucceeded(Pointer.nativeValue(instance.pointer))
+            shellExecuteSucceeded(instance.toLong())
         }.getOrDefault(false)
     }
 }
