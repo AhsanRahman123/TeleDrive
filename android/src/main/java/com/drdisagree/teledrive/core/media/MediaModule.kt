@@ -16,6 +16,7 @@ val mediaModule = module {
     single {
         ImageLoader.Builder(androidContext())
             .components {
+                addAnimatedImageDecoder()
                 add(ThumbnailFetcherFactory(get<ThumbnailStore>()))
                 add(Keyer<ThumbnailModel> { data, _: Options -> thumbnailCacheKey(data.fileId) })
             }
