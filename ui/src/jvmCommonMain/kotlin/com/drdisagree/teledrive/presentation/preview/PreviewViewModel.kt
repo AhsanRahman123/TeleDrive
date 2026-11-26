@@ -12,9 +12,11 @@ import com.drdisagree.teledrive.resources.message_moved_to_trash
 import com.drdisagree.teledrive.resources.message_renamed
 import com.drdisagree.teledrive.resources.message_upload_queued
 import com.drdisagree.teledrive.resources.preview_added_favorites
+import com.drdisagree.teledrive.resources.preview_archive_downloading_selected
 import com.drdisagree.teledrive.resources.preview_archive_entries_saved
 import com.drdisagree.teledrive.resources.preview_archive_entry_failed
 import com.drdisagree.teledrive.resources.preview_archive_entry_saved
+import com.drdisagree.teledrive.resources.preview_archive_entry_saving
 import com.drdisagree.teledrive.resources.preview_archive_failed
 import com.drdisagree.teledrive.resources.preview_archive_folder_empty
 import com.drdisagree.teledrive.resources.preview_archive_local_only
@@ -282,6 +284,11 @@ class PreviewViewModel(
             .ifBlank { entry.name }
         viewModelScope.launch {
             _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+            // View -> Transfers from the very start, like a normal download's
+            // queued message — not only on the finished snackbar.
+            _messages.tryEmit(
+                UiText.Resource(Res.string.preview_archive_entry_saving, displayName)
+            )
             // Report-only Transfers history record: written before extraction starts,
             // completed/failed/stopped alongside the extraction's own outcome.
             val recordId = archiveDownloadReporter.begin(displayName, entry.sizeBytes)
@@ -456,6 +463,12 @@ class PreviewViewModel(
         viewModelScope.launch {
             var saved = 0
             _uiState.update { it.copy(archiveBatchProgress = ArchiveBatchProgress(0, plan.size)) }
+            // View -> Transfers from the very start of the batch, like a normal
+            // download's queued message — not only on the finished snackbar.
+            // The header progress display above stays exactly as it was.
+            _messages.tryEmit(
+                UiText.Resource(Res.string.preview_archive_downloading_selected, plan.size)
+            )
             try {
                 for (step in plan) {
                     _uiState.update { it.copy(archiveEntryBusyIndex = step.entryIndex) }
