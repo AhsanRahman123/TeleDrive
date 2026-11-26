@@ -13,12 +13,21 @@ class AppModulesTest {
     @OptIn(KoinExperimentalAPI::class)
     @Test
     fun everyConstructorDependencyResolves() {
-        module { includes(appModules) }.verify(
-            extraTypes = listOf(
-                Context::class,
-                WorkerParameters::class,
-                SavedStateHandle::class
+        try {
+            module { includes(appModules) }.verify(
+                extraTypes = listOf(
+                    Context::class,
+                    WorkerParameters::class,
+                    SavedStateHandle::class
+                )
             )
-        )
+        } catch (t: Throwable) {
+            var c: Throwable? = t
+            while (c != null) {
+                println("DIAG-VERIFY: ${c::class.qualifiedName}: ${c.message}")
+                c = c.cause
+            }
+            throw t
+        }
     }
 }

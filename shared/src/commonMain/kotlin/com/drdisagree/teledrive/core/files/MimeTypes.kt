@@ -203,6 +203,11 @@ object MimeTypes {
         "diff" to "text/x-diff",
         "patch" to "text/x-diff",
 
+        // Junk/system files with no previewable type: pinned to GENERIC here so
+        // host unit tests never consult the platform MimeTypeMap stub for them
+        // (on-device the platform map returns null for .db, i.e. GENERIC anyway).
+        "db" to GENERIC,
+
         // Archives and compressed files
         "zip" to "application/zip",
         "cbz" to "application/vnd.comicbook+zip",
