@@ -73,8 +73,11 @@ private fun trackLabel(
         ?.let { Locale.forLanguageTag(it).displayLanguage }
         ?.takeIf { it.isNotBlank() }
     val parts = buildList {
-        add(language ?: description?.takeIf { it.isNotBlank() } ?: fallback)
-        track?.description()?.takeIf { it.isNotBlank() }?.let { add(it) }
+        // Track descriptions cross the same vlcj/JNA native-string seam as
+        // media meta, so embedded stream titles get the same guarded
+        // mojibake repair (no-op for the usual ASCII language names).
+        add(language ?: description?.takeIf { it.isNotBlank() }?.let(::repairMetaText) ?: fallback)
+        track?.description()?.takeIf { it.isNotBlank() }?.let { add(repairMetaText(it)) }
         channelLabel(channels)?.let { add(it) }
         track?.codecDescription()?.takeIf { it.isNotBlank() }?.let { add(it) }
     }

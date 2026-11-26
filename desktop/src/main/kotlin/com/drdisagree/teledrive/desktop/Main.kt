@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalWindowInfo
+import com.drdisagree.teledrive.desktop.media.player.ensureJnaUtf8StringEncoding
 import com.sun.jna.Platform
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -93,6 +94,10 @@ import org.koin.core.context.startKoin
 import org.koin.java.KoinJavaComponent.getKoin
 
 fun main() {
+    // Before anything touches JNA/vlcj: libvlc speaks UTF-8, but JNA's
+    // default native-string decoding is the OS charset (windows-1252),
+    // which mangles non-English audio tags in the player (1.6.24 note 4).
+    ensureJnaUtf8StringEncoding()
     StartupTrace.markMainEntry()
     SafeLog.verbose = true
     startKoin {

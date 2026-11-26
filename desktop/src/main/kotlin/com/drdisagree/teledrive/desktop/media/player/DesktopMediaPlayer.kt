@@ -2613,12 +2613,16 @@ private fun AudioStage(
         repeat(12) {
             val meta = runCatching { player.media().meta() }.getOrNull()
             if (meta != null) {
+                // vlcj hands libvlc's UTF-8 meta through JNA's default
+                // (OS-native, windows-1252) string decoding, so non-English
+                // tags arrive as mojibake; repair at this seam — see
+                // MetaTextRepair. No-op for clean text.
                 metaTitle = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.TITLE) }
-                    .getOrNull().orEmpty()
+                    .getOrNull().orEmpty().let(::repairMetaText)
                 artist = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.ARTIST) }
-                    .getOrNull().orEmpty()
+                    .getOrNull().orEmpty().let(::repairMetaText)
                 album = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.ALBUM) }
-                    .getOrNull().orEmpty()
+                    .getOrNull().orEmpty().let(::repairMetaText)
                 if (metaTitle.isNotBlank() || artist.isNotBlank()) return@LaunchedEffect
             }
             delay(500)
