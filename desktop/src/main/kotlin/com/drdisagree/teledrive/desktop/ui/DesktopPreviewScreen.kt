@@ -1469,6 +1469,42 @@ private fun PreviewPane(
                 )
             }
 
+            // Desktop has no WebView safe viewer: HTML falls back to plain text
+            // (the raw source), exactly what desktop showed before the Android
+            // HtmlPreview existed.
+            is PreviewContent.Html -> {
+                val htmlScrollState = rememberScrollState()
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(htmlScrollState)
+                            .padding(end = 10.dp)
+                            .padding(24.dp)
+                    ) {
+                        LinkedText(
+                            text = current.text,
+                            style = MaterialTheme.typography.bodySmall
+                                .copy(fontFamily = FontFamily.Monospace)
+                                .copy(color = MaterialTheme.colorScheme.onSurface),
+                            linkColor = MaterialTheme.colorScheme.primary,
+                            onOpenUrl = { url -> urlOpener.open(url) }
+                        )
+                        if (current.truncated) {
+                            Text(
+                                text = stringResource(Res.string.preview_truncated_download_view),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    DesktopVerticalScrollbar(
+                        state = htmlScrollState,
+                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                    )
+                }
+            }
+
             is PreviewContent.PlainText -> {
                 val previewTextScrollState = rememberScrollState()
                 Box(modifier = Modifier.fillMaxSize()) {

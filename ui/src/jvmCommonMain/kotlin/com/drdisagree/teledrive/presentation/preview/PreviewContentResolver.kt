@@ -276,9 +276,12 @@ class PreviewContentResolver(
         MimeTypes.isAudio(mimeType) || category == FileCategory.AUDIO ->
             PreviewContent.LocalMedia(path, isAudio = true)
         MimeTypes.isPdf(mimeType) -> PreviewContent.Pdf(path)
-        MimeTypes.isText(mimeType) -> readText(path)
+        MimeTypes.isHtml(mimeType) -> readHtml(path)
+        MimeTypes.isText(mimeType) -> readText(path, mimeType)
         MimeTypes.isArchive(mimeType) || category == FileCategory.ARCHIVE ->
             readArchive(mimeType, path)
+        MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType) ->
+            readDocumentText(path)
         MimeTypes.isApk(mimeType, fileName) -> readApk(path)
         else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
     }
@@ -293,20 +296,50 @@ class PreviewContentResolver(
         }
     }.getOrElse { PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path) }
 
-    private fun readText(path: String): PreviewContent = runCatching {
+    /** Reads up to [limit] bytes of [path] as UTF-8 text; the flag marks a longer file. */
+    private fun readTextBytes(path: String, limit: Int = TEXT_LIMIT): Pair<String, Boolean> {
         val target = File(path)
-        val truncated = target.length() > TEXT_LIMIT
+        val truncated = target.length() > limit
         val bytes = target.inputStream().use { stream ->
-            val buffer = ByteArray(TEXT_LIMIT)
+            val buffer = ByteArray(limit)
             var read = 0
-            while (read < TEXT_LIMIT) {
-                val count = stream.read(buffer, read, TEXT_LIMIT - read)
+            while (read < limit) {
+                val count = stream.read(buffer, read, limit - read)
                 if (count <= 0) break
                 read += count
             }
             buffer.copyOf(read)
         }
-        PreviewContent.PlainText(String(bytes, Charsets.UTF_8), truncated)
+        return String(bytes, Charsets.UTF_8) to truncated
+    }
+
+    private fun readText(path: String, mimeType: String): PreviewContent = runCatching {
+        val (raw, truncated) = readTextBytes(path)
+        PreviewContent.PlainText(
+            com.drdisagree.teledrive.core.files.formatPreviewText(raw, mimeType),
+            truncated
+        )
+    }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
+
+    /**
+     * EPUB (Tier 1) and OOXML files extract to plain text on this IO flow. A DRM'd
+     * EPUB gets its own honest message; an unparseable document keeps "Open with…".
+     * Legacy .doc/.xls/.ppt never reach here — they are not OOXML and stay Unsupported.
+     */
+    private fun readDocumentText(path: String): PreviewContent =
+        when (val extraction = extractDocumentText(File(path))) {
+            is DocumentExtraction.Text ->
+                PreviewContent.PlainText(extraction.text, extraction.truncated)
+            DocumentExtraction.DrmProtected ->
+                PreviewContent.Failed(Res.string.preview_epub_drm)
+            DocumentExtraction.Failed ->
+                PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
+        }
+
+    /** HTML goes to the safe viewer as a raw string — no formatting transform applies. */
+    private fun readHtml(path: String): PreviewContent = runCatching {
+        val (raw, truncated) = readTextBytes(path)
+        PreviewContent.Html(raw, truncated)
     }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
 
     private suspend fun readLocalZip(path: String): PreviewContent {
