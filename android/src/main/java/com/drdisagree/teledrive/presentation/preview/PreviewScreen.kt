@@ -153,6 +153,7 @@ import com.drdisagree.teledrive.presentation.components.iconFor
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
 import com.drdisagree.teledrive.core.media.ArchiveEntryThumbnailStore
 import com.drdisagree.teledrive.core.media.ArchiveThumbState
