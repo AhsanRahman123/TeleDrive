@@ -96,6 +96,41 @@ class TransferBubbleLogicTest {
     }
 
     @Test
+    fun `archive download rows count as downloads, not uploads`() {
+        // vc181 A2: ARCHIVE_DOWNLOAD is report-only with isIncoming == false, so the
+        // old predicate bucketed it as uploading. It must land in the downloading
+        // bucket while active and in downloadedTotalBytes when completed.
+        val now = 100_000L
+        val state = TransfersUiState(
+            active = listOf(
+                task("arch", TransferType.ARCHIVE_DOWNLOAD, TransferState.RUNNING, 400, 100, speed = 30, updatedAt = now),
+                task("up", TransferType.UPLOAD, TransferState.RUNNING, 200, 50, speed = 10, updatedAt = now)
+            ),
+            completed = listOf(
+                task("archDone", TransferType.ARCHIVE_DOWNLOAD, TransferState.COMPLETED, 900, 900),
+                task("upDone", TransferType.UPLOAD, TransferState.COMPLETED, 500, 500)
+            ),
+            activeTotal = 2,
+            pausedTotal = 0,
+            completedTotal = 2,
+            loading = false
+        )
+        val summary = summarizeTransfers(state, now)
+        assertEquals(1, summary.downloadingActive)
+        assertEquals(1, summary.uploadingActive)
+        assertEquals(30L, summary.downloadingSpeedBytesPerSecond)
+        assertEquals(10L, summary.uploadingSpeedBytesPerSecond)
+        assertEquals(100L, summary.downloadingTransferredBytes)
+        assertEquals(400L, summary.downloadingTotalBytes)
+        assertEquals(50L, summary.uploadingTransferredBytes)
+        assertEquals(200L, summary.uploadingTotalBytes)
+        assertEquals(900L, summary.downloadedTotalBytes)
+        assertEquals(500L, summary.uploadedTotalBytes)
+        // Overall progress is direction-neutral and unchanged by the re-bucket.
+        assertEquals(150f / 600f, summary.overallProgress, 0.0001f)
+    }
+
+    @Test
     fun `summary of an idle state is complete and not cancellable`() {
         val summary = summarizeTransfers(TransfersUiState(loading = false), nowMillis = 0)
         assertFalse(summary.hasUnfinishedWork)

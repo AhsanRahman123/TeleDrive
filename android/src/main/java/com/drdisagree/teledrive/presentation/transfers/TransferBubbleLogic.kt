@@ -278,7 +278,10 @@ object TransferStripLayout {
  * Everything the transfer widget renders, derived from [TransfersUiState] — the exact
  * state the Transfers screen renders. Presentation arithmetic only: sums and counts over
  * the screen's own task lists. Direction follows the app-wide convention: incoming =
- * DOWNLOAD/RESTORE, outgoing = UPLOAD/BACKUP (see TransferType.isIncoming). A RUNNING
+ * DOWNLOAD/RESTORE, outgoing = UPLOAD/BACKUP (see TransferType.isIncoming) — plus
+ * report-only ARCHIVE_DOWNLOAD rows, which are downloads in every user-visible
+ * sense and count as such here (vc181 A2; they were previously bucketed as
+ * uploads because isIncoming is false for them). A RUNNING
  * task whose last progress update is older than [SPEED_STALE_AFTER_MS] displays speed 0 —
  * the same rule, with the same threshold, as the Transfers screen.
  */
@@ -315,8 +318,8 @@ data class TransferBubbleSummary(
 
 fun summarizeTransfers(state: TransfersUiState, nowMillis: Long): TransferBubbleSummary {
     val unfinished = state.active + state.paused
-    val uploading = unfinished.filter { !it.type.isIncoming }
-    val downloading = unfinished.filter { it.type.isIncoming }
+    val uploading = unfinished.filter { !it.type.isIncoming && !it.type.isReportOnly }
+    val downloading = unfinished.filter { it.type.isIncoming || it.type.isReportOnly }
 
     fun List<TransferTask>.running(): List<TransferTask> =
         filter { it.state == TransferState.RUNNING }
@@ -344,10 +347,10 @@ fun summarizeTransfers(state: TransfersUiState, nowMillis: Long): TransferBubble
         queuedCount = state.active.count { it.state == TransferState.QUEUED },
         pausedCount = state.paused.size,
         uploadedTotalBytes = state.completed
-            .filter { !it.type.isIncoming }
+            .filter { !it.type.isIncoming && !it.type.isReportOnly }
             .sumOf { it.transferredBytes },
         downloadedTotalBytes = state.completed
-            .filter { it.type.isIncoming }
+            .filter { it.type.isIncoming || it.type.isReportOnly }
             .sumOf { it.transferredBytes },
         anyRunning = state.active.any { it.state == TransferState.RUNNING },
         anyQueued = state.active.any { it.state == TransferState.QUEUED }
