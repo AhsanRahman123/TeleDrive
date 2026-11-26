@@ -27,6 +27,13 @@ sealed interface PreviewContent {
 
     data class PlainText(val text: String, val truncated: Boolean) : PreviewContent
 
+    /**
+     * An HTML document carried as a string (never a path/URL), so the Android safe
+     * viewer can load it with no base URL, no JavaScript and no network access.
+     * Desktop has no WebView: its screen renders this as plain text instead.
+     */
+    data class Html(val text: String, val truncated: Boolean) : PreviewContent
+
     /** [remote] means the listing came from the online copy: entries can be downloaded one by one. */
     data class Archive(
         val entries: List<ArchiveEntry>,
