@@ -210,7 +210,12 @@ private class FakeTransferDao : TransferDao {
 
     override suspend fun updateProgress(id: String, transferred: Long, speed: Long, updatedAt: Long) {
         rows[id]?.takeIf { it.state == TransferState.RUNNING }?.let {
-            rows[id] = it.copy(transferredBytes = transferred, speedBytesPerSecond = speed, updatedAt = updatedAt)
+            // Mirrors the real DAO's MAX(transferredBytes, :transferred) guard.
+            rows[id] = it.copy(
+                transferredBytes = maxOf(it.transferredBytes, transferred),
+                speedBytesPerSecond = speed,
+                updatedAt = updatedAt
+            )
         }
     }
 

@@ -74,6 +74,75 @@ class ArchiveDownloadTrackerTest {
             awaitTrue("total written") { dao.byId(id)!!.transferredBytes == size }
         }
 
+    // ---- vc181 A2: honest speed (cumulative average) and monotonic progress ----
+
+    @Test
+    fun `burst samples report the cumulative average speed, not the burst rate`() =
+        runBlocking {
+            var now = 0L
+            val clocked = ArchiveDownloadTracker(dao, jobs) { now }
+            val size = 4_000_000L
+            val id = clocked.begin("photo.jpg", size)!!
+
+            // Three seconds of network wait, then a 256 KiB inflater burst lands:
+            // the old per-write window divided the burst by its ~1 ms decompression
+            // time and wrote 250.0 MB/s. The cumulative average over the whole
+            // extraction so far is ~85 KiB/s.
+            now = 3_000L
+            clocked.progress(id, 262_144L)
+            awaitTrue("first burst written") { dao.byId(id)!!.transferredBytes == 262_144L }
+            assertEquals(262_144L * 1_000L / 3_000L, dao.byId(id)!!.speedBytesPerSecond)
+
+            // A second identical burst 1 ms later must stay at the true average.
+            now = 3_001L
+            clocked.progress(id, 524_288L)
+            awaitTrue("second burst written") { dao.byId(id)!!.transferredBytes == 524_288L }
+            val speed = dao.byId(id)!!.speedBytesPerSecond
+            assertEquals(524_288L * 1_000L / 3_001L, speed)
+            assertTrue("burst speed is still a fantasy number: $speed", speed < 1_000_000L)
+        }
+
+    @Test
+    fun `speed stays zero until one second of the extraction has elapsed`() = runBlocking {
+        var now = 0L
+        val clocked = ArchiveDownloadTracker(dao, jobs) { now }
+        val id = clocked.begin("fast.bin", 10_000_000L)!!
+
+        now = 500L
+        clocked.progress(id, 300_000L)
+        awaitTrue("early write landed") { dao.byId(id)!!.transferredBytes == 300_000L }
+        assertEquals(0L, dao.byId(id)!!.speedBytesPerSecond)
+    }
+
+    @Test
+    fun `out of order and repeated samples never move progress backwards`() = runBlocking {
+        var now = 0L
+        val clocked = ArchiveDownloadTracker(dao, jobs) { now }
+        val id = clocked.begin("photo.jpg", 1_000_000L)!!
+
+        now = 2_000L
+        clocked.progress(id, 500_000L)
+        awaitTrue("half written") { dao.byId(id)!!.transferredBytes == 500_000L }
+
+        // Late, replayed and duplicate samples — the old unordered-launch
+        // regression — are dropped before any write is launched.
+        clocked.progress(id, 300_000L)
+        clocked.progress(id, 499_999L)
+        clocked.progress(id, 500_000L)
+        delay(150)
+        assertEquals(500_000L, dao.byId(id)!!.transferredBytes)
+    }
+
+    @Test
+    fun `dao progress writes never regress transferred bytes`() = runBlocking {
+        // The MAX(transferredBytes, :transferred) guard, mirrored by the fake:
+        // even a directly out-of-order pair of writes cannot move a row backwards.
+        val id = tracker.begin("guard.bin", 1_000L)!!
+        dao.updateProgress(id, 800L, 10L, System.currentTimeMillis())
+        dao.updateProgress(id, 200L, 10L, System.currentTimeMillis())
+        assertEquals(800L, dao.byId(id)!!.transferredBytes)
+    }
+
     @Test
     fun `complete sets the local path and completed state with full bytes`() = runBlocking {
         val id = tracker.begin("song.mp3", 777L)!!

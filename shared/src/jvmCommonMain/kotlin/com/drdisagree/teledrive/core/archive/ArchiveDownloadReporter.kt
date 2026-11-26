@@ -12,6 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Reports in-ZIP downloads into Transfers history as report-only
@@ -56,10 +58,45 @@ object NoOpArchiveDownloadReporter : ArchiveDownloadReporter {
     override suspend fun ownerStopped(recordId: String?) = Unit
 }
 
+/**
+ * The honest archive speed (vc181 A2): a cumulative average over the whole
+ * extraction — total bytes over total elapsed since begin() — published only
+ * once a full second has elapsed (0 before that, which the UI renders as no
+ * speed). The old per-write window divided a 256 KiB inflater burst by the
+ * 1–8 ms the burst took to decompress and displayed up to 250 MB/s; a
+ * cumulative average can never exceed the true average rate.
+ */
+object ArchiveProgressMath {
+
+    const val SPEED_FLOOR_MS = 1_000L
+
+    fun speedBytesPerSecond(transferredBytes: Long, startedAtMillis: Long, nowMillis: Long): Long {
+        val elapsed = nowMillis - startedAtMillis
+        if (elapsed < SPEED_FLOOR_MS || transferredBytes <= 0L) return 0L
+        return transferredBytes * 1_000L / elapsed
+    }
+}
+
 class ArchiveDownloadTracker(
     private val transferDao: TransferDao,
     private val jobs: ArchiveExtractionJobs
 ) : ArchiveDownloadReporter {
+
+    /**
+     * Test seam (vc181 A2): the clock the throttle and speed math read. Production
+     * uses the system clock via the primary constructor — which is also the
+     * constructor Koin's singleOf binds, so the seam must not move into it (see
+     * CommonModule's AndroidTransferBubbleStore note).
+     */
+    private var nowMillis: () -> Long = System::currentTimeMillis
+
+    constructor(
+        transferDao: TransferDao,
+        jobs: ArchiveExtractionJobs,
+        nowMillis: () -> Long
+    ) : this(transferDao, jobs) {
+        this.nowMillis = nowMillis
+    }
 
     private val writeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -67,13 +104,18 @@ class ArchiveDownloadTracker(
     private data class ProgressSample(
         val sizeBytes: Long,
         var lastWrittenBytes: Long,
-        var lastWrittenAtMillis: Long
+        var lastWrittenAtMillis: Long,
+        /** Immutable begin() timestamp; the cumulative-average speed divides by it. */
+        val startedAtMillis: Long
     )
 
     private val samples = ConcurrentHashMap<String, ProgressSample>()
 
+    /** Serializes progress writes per record so launched writes cannot land out of order. */
+    private val writeMutexes = ConcurrentHashMap<String, Mutex>()
+
     override suspend fun begin(displayName: String, sizeBytes: Long): String? {
-        val now = System.currentTimeMillis()
+        val now = nowMillis()
         val id = UUID.randomUUID().toString()
         val entity = TransferEntity(
             id = id,
@@ -93,7 +135,7 @@ class ArchiveDownloadTracker(
         )
         return try {
             transferDao.upsert(entity)
-            samples[id] = ProgressSample(sizeBytes, 0L, now)
+            samples[id] = ProgressSample(sizeBytes, 0L, now, startedAtMillis = now)
             id
         } catch (failure: CancellationException) {
             throw failure
@@ -110,36 +152,51 @@ class ArchiveDownloadTracker(
 
     override fun progress(recordId: String?, transferredBytes: Long) {
         if (recordId == null) return
+        val now = nowMillis()
         val sample = samples.getOrPut(recordId) {
             // No begin() sample (should not happen): last write at the epoch, so
             // the first progress call flushes immediately.
-            ProgressSample(sizeBytes = -1L, lastWrittenBytes = 0L, lastWrittenAtMillis = 0L)
+            ProgressSample(
+                sizeBytes = -1L,
+                lastWrittenBytes = 0L,
+                lastWrittenAtMillis = 0L,
+                startedAtMillis = now
+            )
         }
-        val now = System.currentTimeMillis()
-        val shouldWrite: Boolean
         val speed: Long
         synchronized(sample) {
+            // Non-advancing samples carry no new information. Dropping them here,
+            // before any launch, makes the launched write sequence strictly
+            // increasing by construction — the old code launched one unordered
+            // coroutine per sample, so a smaller value could land after a larger
+            // one and the displayed progress jumped backwards.
+            if (transferredBytes <= sample.lastWrittenBytes) return
             val elapsed = now - sample.lastWrittenAtMillis
             val advanced = transferredBytes - sample.lastWrittenBytes
-            shouldWrite = elapsed >= PROGRESS_MIN_INTERVAL_MS ||
+            val shouldWrite = elapsed >= PROGRESS_MIN_INTERVAL_MS ||
                 advanced >= PROGRESS_MIN_ADVANCE_BYTES ||
                 (sample.sizeBytes >= 0 && transferredBytes == sample.sizeBytes)
-            if (shouldWrite) {
-                speed = if (elapsed > 0 && advanced > 0) advanced * 1000L / elapsed else 0L
-                sample.lastWrittenBytes = transferredBytes
-                sample.lastWrittenAtMillis = now
-            } else {
-                speed = 0L
-            }
+            if (!shouldWrite) return
+            speed = ArchiveProgressMath.speedBytesPerSecond(
+                transferredBytes,
+                sample.startedAtMillis,
+                now
+            )
+            sample.lastWrittenBytes = transferredBytes
+            sample.lastWrittenAtMillis = now
         }
-        if (!shouldWrite) return
+        val mutex = writeMutexes.getOrPut(recordId) { Mutex() }
         writeScope.launch {
-            try {
-                transferDao.updateProgress(recordId, transferredBytes, speed, now)
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (failure: Exception) {
-                // Progress is best-effort; the row's terminal write still lands.
+            // Serialized per record; together with the drop above and the DAO's
+            // MAX guard, a written row's transferredBytes can never regress.
+            mutex.withLock {
+                try {
+                    transferDao.updateProgress(recordId, transferredBytes, speed, now)
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (failure: Exception) {
+                    // Progress is best-effort; the row's terminal write still lands.
+                }
             }
         }
     }
@@ -150,7 +207,7 @@ class ArchiveDownloadTracker(
             val row = transferDao.byId(recordId)
             if (row != null && row.state == TransferState.RUNNING) {
                 transferDao.setLocalPath(recordId, localPath)
-                transferDao.setCompleted(recordId, System.currentTimeMillis())
+                transferDao.setCompleted(recordId, nowMillis())
             }
             // Any other state was written by the transfer repository first
             // (pause/cancel from Transfers) and is left untouched.
@@ -161,6 +218,7 @@ class ArchiveDownloadTracker(
         } finally {
             jobs.unregister(recordId)
             samples.remove(recordId)
+            writeMutexes.remove(recordId)
         }
     }
 
@@ -173,7 +231,7 @@ class ArchiveDownloadTracker(
                     recordId,
                     TransferState.FAILED,
                     message,
-                    System.currentTimeMillis()
+                    nowMillis()
                 )
             }
             // Any other state was written by the transfer repository first
@@ -185,6 +243,7 @@ class ArchiveDownloadTracker(
         } finally {
             jobs.unregister(recordId)
             samples.remove(recordId)
+            writeMutexes.remove(recordId)
         }
     }
 
@@ -196,7 +255,7 @@ class ArchiveDownloadTracker(
                 transferDao.setState(
                     recordId,
                     TransferState.CANCELLED,
-                    System.currentTimeMillis()
+                    nowMillis()
                 )
             }
             // Any other state was written by the transfer repository first
@@ -208,6 +267,7 @@ class ArchiveDownloadTracker(
         } finally {
             jobs.unregister(recordId)
             samples.remove(recordId)
+            writeMutexes.remove(recordId)
         }
     }
 
