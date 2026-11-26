@@ -17,7 +17,9 @@ import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.isTransferMessage
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.message_download_queued
+import com.drdisagree.teledrive.resources.preview_archive_entries_downloading
 import com.drdisagree.teledrive.resources.preview_archive_entries_saved
+import com.drdisagree.teledrive.resources.preview_archive_entry_downloading
 import com.drdisagree.teledrive.resources.preview_archive_entry_saved
 import com.drdisagree.teledrive.resources.preview_archive_failed
 import java.util.concurrent.atomic.AtomicInteger
@@ -65,6 +67,60 @@ class DesktopArchiveSnackbarViewActionTest {
             UiText.Resource(Res.string.preview_archive_entries_saved, 3).isTransferMessage()
         )
         assertFalse(UiText.Resource(Res.string.preview_archive_failed).isTransferMessage())
+    }
+
+    /**
+     * 1.6.24 note 5: the View action must be present IMMEDIATELY when an in-ZIP
+     * download starts — the ViewModel now emits a download-start message at
+     * acceptance time (single and batch alike, queued ones included), and that
+     * message is a transfer message, so it carries the same View action the
+     * completion messages always had.
+     */
+    @Test
+    fun `zip download start messages are transfer messages too`() {
+        assertTrue(
+            UiText.Resource(Res.string.preview_archive_entry_downloading, "song.mp3")
+                .isTransferMessage()
+        )
+        assertTrue(
+            UiText.Resource(Res.string.preview_archive_entries_downloading, 3)
+                .isTransferMessage()
+        )
+    }
+
+    @Test
+    fun `start messages show View immediately and tapping it opens Transfers`() {
+        val opens = AtomicInteger(0)
+        val messages = MutableSharedFlow<UiText>(extraBufferCapacity = 4)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(
+                    LocalOpenTransfers provides { opens.incrementAndGet() }
+                ) {
+                    val hostState = remember { SnackbarHostState() }
+                    CollectSnackbarMessages(messages, hostState)
+                    SnackbarHost(hostState)
+                }
+            }
+        }
+        rule.waitForIdle()
+
+        // Single-entry download START (PreviewViewModel.downloadArchiveEntry
+        // acceptance) — shown before any completion message exists.
+        messages.tryEmit(
+            UiText.Resource(Res.string.preview_archive_entry_downloading, "song.mp3")
+        )
+        waitForText("Downloading song.mp3…")
+        rule.onNodeWithText("View").assertIsDisplayed().performClick()
+        rule.waitUntil(5_000) { opens.get() == 1 }
+
+        // Download-selected batch START (downloadArchiveSelection acceptance).
+        messages.tryEmit(UiText.Resource(Res.string.preview_archive_entries_downloading, 3))
+        waitForText("Downloading 3 files…")
+        rule.onNodeWithText("View").assertIsDisplayed().performClick()
+        rule.waitUntil(5_000) { opens.get() == 2 }
+
+        assertEquals(2, opens.get())
     }
 
     @Test

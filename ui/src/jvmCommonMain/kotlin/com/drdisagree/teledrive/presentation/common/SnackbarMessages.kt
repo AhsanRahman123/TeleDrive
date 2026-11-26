@@ -19,7 +19,9 @@ import com.drdisagree.teledrive.resources.files_queued_for_upload
 import com.drdisagree.teledrive.resources.files_queued_partial
 import com.drdisagree.teledrive.resources.message_download_queued
 import com.drdisagree.teledrive.resources.message_upload_queued
+import com.drdisagree.teledrive.resources.preview_archive_entries_downloading
 import com.drdisagree.teledrive.resources.preview_archive_entries_saved
+import com.drdisagree.teledrive.resources.preview_archive_entry_downloading
 import com.drdisagree.teledrive.resources.preview_archive_entry_saved
 import com.drdisagree.teledrive.resources.snackbar_view_transfers
 import kotlinx.coroutines.flow.Flow
@@ -87,5 +89,10 @@ fun UiText.isTransferMessage(): Boolean {
             // A file saved out of a ZIP lands in Downloads exactly like a normal
             // download, so its completion carries the same View -> Transfers action.
             resource == Res.string.preview_archive_entry_saved ||
-            resource == Res.string.preview_archive_entries_saved
+            resource == Res.string.preview_archive_entries_saved ||
+            // The same action rides the download-START messages (1.6.24 note 5):
+            // View -> Transfers must be present from the moment an in-ZIP download
+            // is accepted, not only once it completes.
+            resource == Res.string.preview_archive_entry_downloading ||
+            resource == Res.string.preview_archive_entries_downloading
 }

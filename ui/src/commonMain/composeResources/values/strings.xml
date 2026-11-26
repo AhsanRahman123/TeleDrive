@@ -501,6 +501,9 @@
     <string name="preview_extraction_supported_yet_download">Extraction is not supported yet. Download the archive to open it.</string>
     <string name="preview_archive_remote_hint">This ZIP is stored online. Tap an image or audio file to open it here, or any other file to download just that file — downloads are saved to Downloads like a normal download. Long-press and drag to select several files to download at once.</string>
     <string name="preview_archive_entry_saved">Saved %1$s to Downloads</string>
+    <string name="preview_archive_entry_downloading">Downloading %1$s…</string>
+    <string name="preview_archive_entries_downloading">Downloading %1$d files…</string>
+    <string name="preview_archive_downloads_queued">%1$d more downloads queued</string>
     <string name="settings_show_transfer_bubble">Show transfer widget</string>
     <string name="settings_show_transfer_bubble_subtitle">Floating widget with live transfer progress and pause, resume and cancel controls</string>
     <string name="settings_transfer_widget_style">Transfer widget style</string>

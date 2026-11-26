@@ -174,8 +174,11 @@ import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.presentation.components.RenameDialog
 import com.drdisagree.teledrive.presentation.platform.LocalFileRevealer
 import com.drdisagree.teledrive.presentation.platform.LocalUrlOpener
+import com.drdisagree.teledrive.presentation.preview.ArchiveBackStep
 import com.drdisagree.teledrive.presentation.preview.ArchiveBatchProgress
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
+import com.drdisagree.teledrive.presentation.preview.archiveBackStep
+import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
 import com.drdisagree.teledrive.presentation.preview.ArchiveRowState
 import com.drdisagree.teledrive.presentation.preview.allFolderPaths
 import com.drdisagree.teledrive.presentation.preview.applyArchiveDragRange
@@ -265,6 +268,16 @@ fun DesktopPreviewScreen(
         // Back navigates to the previous screen; fullscreen is a window-level preference
         // and must not be silently exited as a side effect of navigation.
         onBack()
+    }
+
+    // The ZIP pane registers its internal back step here while it is composed
+    // (1.6.24 note 1), mirroring Android's PreviewScreen: one back press first
+    // closes an in-zip preview, clears search, exits selection, or collapses the
+    // deepest expanded in-zip folder — and only leaves the viewer at the zip root.
+    var archiveBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
+
+    fun stepBack() {
+        if (archiveBackHandler?.invoke() != true) leavePreview()
     }
 
     LaunchedEffect(state.closed) {
@@ -531,7 +544,7 @@ fun DesktopPreviewScreen(
                     }
                 },
                 navigationIcon = {
-                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = ::leavePreview) {
+                    TooltipIconButton(tooltip = stringResource(Res.string.common_back), onClick = ::stepBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(Res.string.common_back)
@@ -1601,7 +1614,10 @@ private fun PreviewPane(
                     archive = current,
                     busyEntryIndex = previewUiState.archiveEntryBusyIndex,
                     batchProgress = previewUiState.archiveBatchProgress,
+                    queuedDownloads = previewUiState.archiveQueuedDownloads,
                     archivePreview = previewUiState.archivePreview,
+                    onRegisterBackStep = { handler -> archiveBackHandler = handler },
+                    onExitViewer = ::leavePreview,
                     sortField = archiveSortField,
                     sortDirection = archiveSortDirection,
                     onSortChange = { field, direction ->
@@ -1869,7 +1885,10 @@ internal fun DesktopArchivePane(
     archive: PreviewContent.Archive,
     busyEntryIndex: Int?,
     batchProgress: ArchiveBatchProgress?,
+    queuedDownloads: Int = 0,
     archivePreview: ArchiveEntryPreview?,
+    onRegisterBackStep: ((() -> Boolean)?) -> Unit = {},
+    onExitViewer: () -> Unit = {},
     sortField: FileSortField,
     sortDirection: SortDirection,
     onSortChange: (FileSortField, SortDirection) -> Unit,
@@ -1916,6 +1935,54 @@ internal fun DesktopArchivePane(
     val busy = busyEntryIndex != null || batchProgress != null
     val listState = rememberLazyListState()
 
+    // The pane's internal back step (1.6.24 note 1), using the SAME shared
+    // decision as Android's ArchiveList (archiveBackStep in ArchiveSelection.kt):
+    // close an open in-zip preview, clear search, exit selection, then collapse
+    // the deepest expanded folder — one folder level per press. Returns true
+    // when a step consumed the press; false at the zip root with nothing
+    // active, letting the press leave the viewer. Android handles the preview
+    // step one level up because its overlay lives in the screen; the desktop
+    // overlay lives in this pane, so the pane takes that step itself — the
+    // user-visible sequence is identical.
+    val handleArchiveBackStep: () -> Boolean = {
+        when (
+            archiveBackStep(
+                hasPreview = archivePreview != null,
+                searchActive = query.isNotBlank(),
+                selectionActive = selectionMode,
+                hasExpandedFolder = expanded.isNotEmpty()
+            )
+        ) {
+            ArchiveBackStep.CLOSE_PREVIEW -> {
+                onDismissPreview()
+                true
+            }
+            ArchiveBackStep.CLEAR_SEARCH -> {
+                query = ""
+                true
+            }
+            ArchiveBackStep.EXIT_SELECTION -> {
+                selection.clear()
+                true
+            }
+            ArchiveBackStep.COLLAPSE_FOLDER -> {
+                val target = deepestExpandedArchiveFolder(expanded)
+                if (target == null) {
+                    false
+                } else {
+                    expanded = expanded - target
+                    true
+                }
+            }
+            ArchiveBackStep.EXIT_VIEWER -> false
+        }
+    }
+    val currentArchiveBackStep by rememberUpdatedState(handleArchiveBackStep)
+    DisposableEffect(Unit) {
+        onRegisterBackStep { currentArchiveBackStep() }
+        onDispose { onRegisterBackStep(null) }
+    }
+
     fun toggleRow(row: ArchiveRowState) {
         if (row.node.isDirectory) {
             selection.toggleFolder(row.node.path)
@@ -1943,7 +2010,13 @@ internal fun DesktopArchivePane(
         onToggleSelect = { position -> rows.getOrNull(position)?.let { toggleRow(it) } },
         onSelectAll = { toggleSelectAll() },
         onClear = if (selectionMode) selection::clear else null,
-        onBack = if (selectionMode) selection::clear else null
+        // The keyboard collection's back keys (Alt+Left / Backspace) run the
+        // same step ladder as the top-bar back button; at the zip root the
+        // ladder reports false and the press exits the viewer, as Android's
+        // system back does.
+        onBack = {
+            if (!handleArchiveBackStep()) onExitViewer()
+        }
     )
     val textInputTracker = remember { TextInputFocusTracker() }
     RegisterWindowSelectAll(
@@ -2065,7 +2138,22 @@ internal fun DesktopArchivePane(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(bottom = 4.dp)
                                 )
-                            } else if (selectionMode) {
+                            }
+                            if (queuedDownloads > 0) {
+                                // Accepted downloads waiting behind the running one
+                                // (1.6.24 note 2), accounted for in the same
+                                // small-header-line pattern as the batch progress.
+                                Text(
+                                    text = stringResource(
+                                        Res.string.preview_archive_downloads_queued,
+                                        queuedDownloads
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 4.dp)
+                                )
+                            }
+                            if (batchProgress == null && selectionMode) {
                                 Text(
                                     text = "${selection.count} selected",
                                     style = MaterialTheme.typography.bodySmall,
@@ -2113,7 +2201,10 @@ internal fun DesktopArchivePane(
                             },
                             onToggleSelection = { toggleRow(row) },
                             onDownloadClick = {
-                                if (!busy) entryIndex?.let { onEntryDownload(it) }
+                                // No busy gate (1.6.24 note 2): a download tap
+                                // while another download runs queues behind it
+                                // in the ViewModel instead of being dropped.
+                                entryIndex?.let { onEntryDownload(it) }
                             },
                             modifier = Modifier
                                 .keyboardCollectionItem(keyboard, position)
@@ -2150,7 +2241,10 @@ internal fun DesktopArchivePane(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        enabled = !busy,
+                        // Enabled whenever the bar shows — the bar only exists in
+                        // selection mode, i.e. something is selected (1.6.24 note
+                        // 2). A batch started while a download runs queues behind
+                        // it in the ViewModel instead of being refused.
                         onClick = {
                             val entryIndices = selection.entries
                             val folderPaths = selection.folders
