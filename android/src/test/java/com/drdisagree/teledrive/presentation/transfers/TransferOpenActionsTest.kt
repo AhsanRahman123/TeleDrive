@@ -157,11 +157,14 @@ class TransferOpenActionsTest {
                 fileOpenerAvailable = true
             ).none { it == TransferOpenAction.OPEN_WITH }
         )
-        assertTrue(
+        // No platform opener drops OPEN_WITH, but since vc181 the archive row
+        // keeps OPEN_IN_APP: the local preview needs no platform opener.
+        assertEquals(
+            setOf(TransferOpenAction.OPEN_IN_APP),
             completedTransferOpenActions(
                 task(type = TransferType.ARCHIVE_DOWNLOAD, fileId = null),
                 fileOpenerAvailable = false
-            ).isEmpty()
+            )
         )
         assertTrue(
             completedTransferOpenActions(
