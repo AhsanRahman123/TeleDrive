@@ -137,6 +137,33 @@ class ProgressiveEntryStartTest {
     }
 
     @Test
+    fun `large free box before moov does not start before the moov is produced`() {
+        // MF-1 regression: ftyp -> free(2 MiB) -> moov. The retained prefix
+        // (1 MiB cap) ends inside the free box, so the walk runs past it
+        // without ever seeing the moov. Even with writtenBytes past the
+        // free box, the verdict must not be StartNow until the moov is
+        // fully produced (or the entry completes).
+        val ftyp = box("ftyp", 16)
+        val free = box("free", 2 * 1024 * 1024)
+        val moov = box("moov", 2_000)
+        val whole = concat(ftyp, free, moov)
+        val entrySize = whole.size.toLong() + 5_000_000L
+        val retained = whole.copyOf(1024 * 1024)
+        val pastFree = (ftyp.size + free.size).toLong()
+        assertEquals(
+            ProgressiveStartDecision.WaitForMore,
+            ProgressiveStartPolicy.evaluate("movie.mp4", retained, pastFree, entrySize)
+        )
+        // Once the whole moov has been produced it may start.
+        val moovEnd = pastFree + moov.size
+        val retainedThroughMoov = whole.copyOf(moovEnd.toInt())
+        assertEquals(
+            ProgressiveStartDecision.StartNow,
+            ProgressiveStartPolicy.evaluate("movie.mp4", retainedThroughMoov, moovEnd, entrySize)
+        )
+    }
+
+    @Test
     fun `mp4 with 64-bit largesize moov starts when that moov is produced`() {
         val ftyp = box("ftyp", 16)
         val moov = largeBox("moov", 3_000)

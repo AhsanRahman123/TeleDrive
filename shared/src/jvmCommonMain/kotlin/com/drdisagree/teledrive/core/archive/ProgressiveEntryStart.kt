@@ -91,16 +91,14 @@ object ProgressiveStartPolicy {
         while (true) {
             val remainingInPrefix = prefix.size - offset
             if (remainingInPrefix < 8) {
-                // The next box header is not fully in hand yet. If everything
-                // produced so far was walked (no mdat, no moov), more data is
-                // the only honest answer — unless a generous prefix has been
-                // walked without meeting either box, which no real MP4 does;
-                // then let the player try rather than stalling forever.
-                return if (offset > 0L && writtenBytes >= DEFAULT_PREFIX_BYTES) {
-                    ProgressiveStartDecision.StartNow
-                } else {
-                    ProgressiveStartDecision.WaitForMore
-                }
+                // The next box header is not fully in hand yet: the walk ran
+                // past the retained prefix (e.g. a large `free` box before
+                // the moov). The moov has NOT been seen, so starting now
+                // would hand the player an index-less file — WaitForMore.
+                // This cannot stall: evaluate() returns StartNow
+                // unconditionally once writtenBytes >= entrySize, so the
+                // worst case degrades to wait-for-complete (MF-1).
+                return ProgressiveStartDecision.WaitForMore
             }
             val headerAt = offset.toInt()
             val size32 = u32be(prefix, headerAt)

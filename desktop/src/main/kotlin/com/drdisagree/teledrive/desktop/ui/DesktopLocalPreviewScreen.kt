@@ -96,7 +96,7 @@ fun DesktopLocalPreviewScreen(
     // unconditional, so hiding the player UI left this header floating
     // over the video. Only the player reports here, so every non-media
     // content keeps the header.
-    var playerChromeVisible by remember { mutableStateOf(true) }
+    var playerChromeVisible by remember(localPath) { mutableStateOf(true) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
