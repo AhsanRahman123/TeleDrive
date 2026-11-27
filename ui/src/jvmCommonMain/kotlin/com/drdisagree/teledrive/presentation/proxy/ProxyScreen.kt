@@ -95,6 +95,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.drdisagree.teledrive.core.telegram.ProxyLink
 import com.drdisagree.teledrive.core.telegram.TelegramProxyType
 import com.drdisagree.teledrive.domain.model.ProxyServer
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.common.imeTargetBottomInset
@@ -161,6 +162,9 @@ fun ProxyScreen(
     var pendingDelete by remember { mutableStateOf<ProxyServer?>(null) }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
+
+    // P2 (1.6.26): Esc is a back key here too, not only the top-bar button.
+    AppBackHandler { onBack() }
 
     val listState = rememberLazyListState()
     val lifted by rememberToolbarLift(listState)

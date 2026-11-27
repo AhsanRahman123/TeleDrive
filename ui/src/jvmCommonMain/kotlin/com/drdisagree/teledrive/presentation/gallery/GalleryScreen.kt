@@ -615,7 +615,11 @@ fun GalleryScreen(
         )
     }
 
-    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
+    // P2 (1.6.26): the back ladder covers leaving the album too, not just
+    // clearing a selection — Esc must reach the top-bar Back action.
+    AppBackHandler(enabled = selectionMode || onBack != null) {
+        if (selectionMode) viewModel.clearSelection() else onBack?.invoke()
+    }
 
     val mediaListState = rememberSaveable(state.tab, saver = LazyListState.Saver) {
         LazyListState()

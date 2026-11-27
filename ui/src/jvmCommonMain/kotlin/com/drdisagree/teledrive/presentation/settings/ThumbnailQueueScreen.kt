@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.repository.CacheRepository
 import com.drdisagree.teledrive.domain.repository.ThumbnailQueueItem
 import com.drdisagree.teledrive.domain.repository.ThumbnailQueueSort
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
@@ -79,6 +80,9 @@ fun ThumbnailQueueScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // P2 (1.6.26): Esc is a back key here too, not only the top-bar button.
+    AppBackHandler { onBack() }
+
     val androidLayout = LocalAndroidLayout.current
     val repository = koinInject<CacheRepository>()
     val scope = rememberCoroutineScope()

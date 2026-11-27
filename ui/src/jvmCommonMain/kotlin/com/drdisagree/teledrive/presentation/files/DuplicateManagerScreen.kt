@@ -48,6 +48,7 @@ import com.drdisagree.teledrive.domain.repository.DuplicateManagerRepository
 import com.drdisagree.teledrive.domain.repository.DuplicateScanFile
 import com.drdisagree.teledrive.domain.repository.DuplicateScanStatus
 import com.drdisagree.teledrive.domain.repository.TrashRepository
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.TooltipIconButton
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
@@ -79,6 +80,12 @@ fun DuplicateManagerScreen(
     val state by repository.state.collectAsState()
 
     var showQueue by remember { mutableStateOf(false) }
+
+    // P2 (1.6.26): Esc runs the same ladder as the top-bar back button —
+    // close the queue view first, then leave the manager.
+    AppBackHandler {
+        if (showQueue) showQueue = false else onBack()
+    }
     var showCheckedQueue by remember(folderId) { mutableStateOf(false) }
     var showFailedQueue by remember(folderId) { mutableStateOf(false) }
     var selectedIds by remember(folderId) { mutableStateOf(emptySet<String>()) }

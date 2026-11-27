@@ -55,6 +55,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_cancel
 import com.drdisagree.teledrive.resources.common_create
@@ -125,9 +127,19 @@ fun FileSystemFolderPickerDialog(
 
     val quickChipsScrollState = rememberScrollState()
 
+    // P2 (1.6.26): on desktop, Escape runs this dialog's back ladder (up
+    // one level, dismiss only at the root) instead of dismissing outright.
+    val desktopKeys = !LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.backspaceUp(parentPath?.let { path -> { currentPath = path } }),
+        properties = DialogProperties(dismissOnBackPress = !desktopKeys),
+        modifier = Modifier
+            .backspaceUp(parentPath?.let { path -> { currentPath = path } })
+            .dialogEscapeBack(desktopKeys) {
+                val parent = parentPath
+                if (parent != null) currentPath = parent else onDismiss()
+            },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         titleContentColor = MaterialTheme.colorScheme.onSurface,
         textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,

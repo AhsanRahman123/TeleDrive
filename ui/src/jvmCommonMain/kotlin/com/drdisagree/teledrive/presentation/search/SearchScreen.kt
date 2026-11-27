@@ -129,7 +129,11 @@ fun SearchScreen(
         if (!selectionMode) showSelectionMenu = false
     }
 
-    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
+    // P2 (1.6.26): Esc runs the full back ladder — clear the selection
+    // first, then the top-bar Back action.
+    AppBackHandler {
+        if (selectionMode) viewModel.clearSelection() else onBack()
+    }
 
     val folderStart = if (state.folders.isNotEmpty()) 1 else 0
     val fileStart = if (state.folders.isNotEmpty()) {

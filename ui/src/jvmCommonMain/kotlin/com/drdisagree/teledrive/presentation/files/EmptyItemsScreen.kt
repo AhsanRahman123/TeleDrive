@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -78,6 +79,10 @@ fun EmptyItemsScreen(
     modifier: Modifier = Modifier
 ) {
     val repository = koinInject<FileRepository>()
+
+    // P2 (1.6.26): Esc is a back key here too, not only the back button.
+    AppBackHandler { onBack() }
+
     var includeSubfolders by remember(folderId) { mutableStateOf(true) }
     var refreshToken by remember(folderId) { mutableIntStateOf(0) }
     var results by remember(folderId) { mutableStateOf(emptyList<EmptyItemEntry>()) }

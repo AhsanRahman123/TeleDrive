@@ -38,6 +38,7 @@ import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -545,6 +546,25 @@ fun DesktopPreviewScreen(
                         true
                     }
                     else -> false
+                }
+            }
+            .onKeyEvent { event ->
+                // P2 (1.6.26): Escape is a back key in the preview too,
+                // running the SAME stepBack() as the top-bar button (in-zip
+                // ladder first, leave the viewer at the zip root / for
+                // normal files). This is the BUBBLE phase on purpose: a
+                // descendant that owns Escape consumes it first — the VLC
+                // surface exits fullscreen, the in-zip image overlay closes
+                // itself, a focused archive row clears its selection — and
+                // only an unconsumed Escape reaches this handler.
+                if (event.type == KeyEventType.KeyDown &&
+                    event.key == Key.Escape &&
+                    !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                ) {
+                    stepBack()
+                    true
+                } else {
+                    false
                 }
             }
             .focusable()
@@ -1544,7 +1564,7 @@ private fun PreviewPane(
  */
 @OptIn(ExperimentalTelephotoApi::class)
 @Composable
-private fun ZoomablePreviewImage(
+internal fun ZoomablePreviewImage(
     model: Any,
     contentDescription: String,
     imageRotationDegrees: Int,

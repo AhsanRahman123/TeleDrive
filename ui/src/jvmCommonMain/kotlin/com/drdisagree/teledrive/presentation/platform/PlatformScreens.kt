@@ -7,6 +7,9 @@ interface PlatformScreens {
 
     @Composable
     fun Preview(onBack: () -> Unit, onEditNote: (String, String) -> Unit)
+
+    @Composable
+    fun LocalPreview(localPath: String, displayName: String, onBack: () -> Unit)
 }
 
 val LocalPlatformScreens = staticCompositionLocalOf<PlatformScreens> {

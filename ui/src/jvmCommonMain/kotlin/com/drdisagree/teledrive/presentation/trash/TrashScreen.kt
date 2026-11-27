@@ -136,7 +136,11 @@ fun TrashScreen(
         BlockingProgressDialog(message = message.resolve())
     }
 
-    AppBackHandler(enabled = selectionMode) { viewModel.clearSelection() }
+    // P2 (1.6.26): Esc runs the full back ladder — clear the selection
+    // first, then the top-bar Back action.
+    AppBackHandler {
+        if (selectionMode) viewModel.clearSelection() else onBack()
+    }
 
     // Use the same one-column LazyVerticalGrid as Files LIST mode. This deliberately
     // shares Files' x/y hit-testing, nearest-visible-item resolution and edge auto-scroll

@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.drdisagree.teledrive.domain.model.DriveChannel
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.add
@@ -128,6 +129,9 @@ fun ChannelsScreen(
     var deleteTarget by remember { mutableStateOf<DriveChannel?>(null) }
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
+
+    // P2 (1.6.26): Esc is a back key here too, not only the top-bar button.
+    AppBackHandler { onBack() }
 
     working?.let { BlockingProgressDialog(message = it.resolve()) }
 
