@@ -44,7 +44,10 @@ inline fun <reified T : Any> archiveTestProxy(
  * the same fake shape as `RemoteArchiveServiceTest`'s: ranged reads are answered
  * straight out of [bytes].
  */
-fun archiveFakeTelegram(bytes: ByteArray): TelegramClient {
+fun archiveFakeTelegram(
+    bytes: ByteArray,
+    onReadPart: (() -> Unit)? = null
+): TelegramClient {
     val info = TelegramFileInfo(
         fileId = 7,
         sizeBytes = bytes.size.toLong(),
@@ -58,6 +61,7 @@ fun archiveFakeTelegram(bytes: ByteArray): TelegramClient {
         when (method) {
             "resolveFile", "getFileInfo" -> info
             "readFilePart" -> {
+                onReadPart?.invoke()
                 val offset = (args!![1] as Number).toLong()
                 val count = (args[2] as Number).toLong()
                 if (offset >= bytes.size) {

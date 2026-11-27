@@ -347,9 +347,14 @@ class PreviewViewModel(
      *    refusals, so a preview tap while a download runs is still dropped
      *    exactly as before — the gate closes the race where a just-tapped
      *    preview had launched but not yet marked anything.
-     * Each holder passes a unique owner token, and the downloads' busy index
-     * is only ever cleared by its owner ([clearArchiveBusy]), so one
-     * extraction's teardown can no longer wipe the other's busy mark.
+     * Each download holder passes a unique owner token, preview loads share
+     * [archivePreviewBusyOwner], and the busy index is only ever cleared by
+     * its owner ([clearArchiveBusy]), so one extraction's teardown can no
+     * longer wipe the other's busy mark. Preview loads claim their busy mark
+     * at registration time — before their job starts, hence before/independently
+     * of gate acquisition (MF-1) — so a load waiting on the gate behind a
+     * download is visible (busy/loading) instead of silently popping in when
+     * the download finishes, and it never claims a download-owned mark.
      */
     private val archiveExtractionMutex = Mutex()
     private var archiveBusyOwner: Any? = null
@@ -372,6 +377,38 @@ class PreviewViewModel(
             }
         }
         if (owns) _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+    }
+
+    /**
+     * The busy-owner token for preview loads (second-pass MF-1). Downloads
+     * each own a unique token; preview loads share this one, because a
+     * superseding preview load must be able to take over the previous preview
+     * load's busy claim (the superseded load's teardown is identity-guarded
+     * and never clears it), while NO preview-side teardown — dismiss,
+     * pager settle-back, video placeholder — may ever clear a busy mark that
+     * belongs to a download, and vice versa. All preview-side clears go
+     * through [clearArchiveBusy] with this token.
+     */
+    private val archivePreviewBusyOwner = Any()
+
+    /**
+     * Claims the busy index for a preview load on behalf of
+     * [archivePreviewBusyOwner], unless a download currently owns it (a load
+     * waiting on the extraction gate behind that download must not steal or
+     * later clear the download's mark). Returns true when the preview side
+     * owns the busy index after the call.
+     */
+    private fun claimArchivePreviewBusy(entryIndex: Int): Boolean {
+        val owns = synchronized(archiveBusyLock) {
+            if (archiveBusyOwner == null || archiveBusyOwner === archivePreviewBusyOwner) {
+                archiveBusyOwner = archivePreviewBusyOwner
+                true
+            } else {
+                false
+            }
+        }
+        if (owns) _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+        return owns
     }
 
     /**
@@ -735,10 +772,13 @@ class PreviewViewModel(
                 archivePreviewFileId = file.id,
                 archiveVideoQueue = pagerIndices,
                 archiveVideoQueuePosition = pagerPosition,
-                archiveEntryBusyIndex = null,
                 archivePreviewLoading = false
             )
         }
+        // MF-1: release only the preview side's own busy claim — a running
+        // download's busy mark (its own owner token) survives publishing a
+        // placeholder over it.
+        clearArchiveBusy(archivePreviewBusyOwner)
         if (previous != null && previous.entryIndex != entryIndex) {
             deleteArchivePreviewTemp(previous)
         }
@@ -797,6 +837,18 @@ class PreviewViewModel(
         // the gate and the replacement's lock() then proceeds — preview vs
         // preview serialisation stays the existing job-cancellation one.
         val gateOwner = Any()
+        // MF-1 (second pass): register this load's busy/loading state NOW,
+        // before the job starts — not inside the job after lock acquisition.
+        // A load that must wait on the gate behind a running download is
+        // therefore visible while it waits (archivePreviewLoading, and the
+        // busy index whenever the preview side owns it) instead of sitting
+        // invisible and popping in unprompted when the download finishes.
+        // The claim goes through the owner discipline: if a download owns
+        // the busy index, the claim leaves it untouched (the load still gets
+        // its loading state), and this load's teardown will only ever clear
+        // a preview-owned mark.
+        claimArchivePreviewBusy(entryIndex)
+        _uiState.update { it.copy(archivePreviewLoading = previous != null) }
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             // If this job is cancelled while waiting for the gate, lock()
             // throws before the try is entered and nothing is held. The gate
@@ -809,12 +861,11 @@ class PreviewViewModel(
             val isCurrentLoad = {
                 archivePreviewLoadMayPublish(archivePreviewJob === myJob)
             }
-            _uiState.update {
-                it.copy(
-                    archiveEntryBusyIndex = entryIndex,
-                    archivePreviewLoading = previous != null
-                )
-            }
+            // Re-claim the busy mark now that the gate is held: while this
+            // load waited, a download may have owned and then released the
+            // index, so the extraction that is actually starting re-marks
+            // its own entry (a no-op if the registration claim still holds).
+            if (isCurrentLoad()) claimArchivePreviewBusy(entryIndex)
             try {
                 if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
                     val tempDir = java.io.File(
@@ -945,9 +996,12 @@ class PreviewViewModel(
                 }
             } finally {
                 if (archivePreviewJob === currentCoroutineContext()[Job]) {
-                    _uiState.update {
-                        it.copy(archiveEntryBusyIndex = null, archivePreviewLoading = false)
-                    }
+                    // MF-1: clear the busy index only through the
+                    // owner-checked path (this load's claim is the preview
+                    // token; a download's mark is never cleared here), and
+                    // always drop the preview loading state.
+                    clearArchiveBusy(archivePreviewBusyOwner)
+                    _uiState.update { it.copy(archivePreviewLoading = false) }
                 }
             }
             } finally {
@@ -971,9 +1025,11 @@ class PreviewViewModel(
             if (archivePreviewJob?.isActive == true) {
                 archivePreviewJob?.cancel()
                 archivePreviewJob = null
-                _uiState.update {
-                    it.copy(archiveEntryBusyIndex = null, archivePreviewLoading = false)
-                }
+                // MF-1: settling back abandons the in-flight preview load,
+                // so its preview-owned busy claim is released — but a busy
+                // mark owned by a running download is left untouched.
+                clearArchiveBusy(archivePreviewBusyOwner)
+                _uiState.update { it.copy(archivePreviewLoading = false) }
             }
             return
         }
@@ -1059,7 +1115,6 @@ class PreviewViewModel(
     /** Closes the in-archive preview and deletes its temp file (text previews hold no file). */
     fun dismissArchivePreview() {
         val preview = _uiState.value.archivePreview
-        val previewLoadInFlight = archivePreviewJob?.isActive == true
         archivePreviewJob?.cancel()
         archivePreviewJob = null
         _uiState.update {
@@ -1070,12 +1125,16 @@ class PreviewViewModel(
                 archivePreviewFileId = null,
                 archiveVideoQueue = emptyList(),
                 archiveVideoQueuePosition = -1,
-                archivePreviewLoading = false,
-                // Only the preview load's own busy claim is released here; a list-side
-                // download running behind the overlay keeps its busy state.
-                archiveEntryBusyIndex = if (previewLoadInFlight) null else it.archiveEntryBusyIndex
+                archivePreviewLoading = false
             )
         }
+        // MF-1: only the preview side's own busy claim is released here, via
+        // the owner-checked path. A list-side download running behind the
+        // overlay keeps its busy state — including when a preview load was
+        // in flight but merely WAITING on the extraction gate behind that
+        // download (the old raw `if (previewLoadInFlight) null` write wiped
+        // the download's mark in exactly that window).
+        clearArchiveBusy(archivePreviewBusyOwner)
         preview?.let(::deleteArchivePreviewTemp)
     }
 

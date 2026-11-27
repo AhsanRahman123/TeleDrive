@@ -512,10 +512,11 @@ class AndroidArchiveQueueTest {
     private fun buildViewModel(
         zipBytes: ByteArray,
         downloadWriter: DownloadWriter,
-        reporter: ArchiveDownloadReporter
+        reporter: ArchiveDownloadReporter,
+        telegram: com.drdisagree.teledrive.core.telegram.TelegramClient =
+            archiveFakeTelegram(zipBytes)
     ): Pair<PreviewViewModel, DriveFile> {
         val file = zipFile(zipBytes)
-        val telegram = archiveFakeTelegram(zipBytes)
         val settings = FakeSettingsRepository()
         val filePartDao = archiveTestProxy<FilePartDao> { method, _ ->
             when (method) {
@@ -653,6 +654,124 @@ class AndroidArchiveQueueTest {
         }
         // The dropped preview does not appear later either — it was a drop,
         // not a queue.
+        assertEquals(null, viewModel.uiState.value.archivePreview)
+    }
+
+    @Test
+    fun `dismiss while a preview load waits on the gate does not clear the running download busy mark`() {
+        // Second-pass MF-1 regression, at the ViewModel seam. Interleaving:
+        //  - preview load B holds the extraction gate, blocked mid-extraction
+        //    (gated Telegram reads);
+        //  - a download queues behind B (the queue processor waits on the
+        //    gate, first in the mutex queue);
+        //  - a step to page C supersedes B: load C registers (busy claim +
+        //    loading published at registration) and waits on the gate BEHIND
+        //    the download;
+        //  - B is released: the download acquires the gate, marks busy with
+        //    its own owner and runs (held in the gated writer), while C is
+        //    still waiting.
+        // In that window dismissing the preview must NOT wipe the download's
+        // busy mark (pre-fix, dismiss wrote archiveEntryBusyIndex = null
+        // whenever a preview load was in flight), the waiting load's state
+        // must have been visible (archivePreviewLoading), and the dismissed
+        // load must never pop in after the download finishes.
+        val entries = listOf(
+            "one.bin" to ByteArray(64) { 1 },
+            "pic.jpg" to ByteArray(64) { 9 },
+            "pic2.jpg" to ByteArray(64) { 8 },
+            "pic3.jpg" to ByteArray(64) { 7 }
+        )
+        val zipBytes = archiveZipBytes(entries)
+        val gateArmed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val readEntered = CountDownLatch(1)
+        val releaseReads = CountDownLatch(1)
+        val telegram = archiveFakeTelegram(zipBytes) {
+            if (gateArmed.get()) {
+                readEntered.countDown()
+                releaseReads.await(60, TimeUnit.SECONDS)
+            }
+        }
+        val downloadWriter = GatingDownloadWriter()
+        val transferDao = FakeTransferDao()
+        val tracker = ArchiveDownloadTracker(transferDao.dao, ArchiveExtractionJobs())
+        val (viewModel, file) = buildViewModel(zipBytes, downloadWriter, tracker, telegram)
+        rule.setContent { MaterialTheme { } }
+        awaitListing(viewModel, file)
+
+        // Open the first image so a preview (and its pager) is published.
+        viewModel.previewArchiveEntry(file, 1)
+        waitUntil("first image preview published") {
+            viewModel.uiState.value.archivePreview?.entryIndex == 1
+        }
+
+        // Step to pic2.jpg: load B takes the gate and blocks in its reads.
+        gateArmed.set(true)
+        viewModel.stepArchivePreview(1)
+        assertTrue(
+            "preview load B never reached a gated read",
+            readEntered.await(15, TimeUnit.SECONDS)
+        )
+        waitUntil("load B busy claim") {
+            viewModel.uiState.value.archiveEntryBusyIndex == 2
+        }
+
+        // Queue a download behind B; the processor waits on the gate.
+        viewModel.downloadArchiveEntry(file, 0)
+        waitUntil("download queued behind the preview") {
+            viewModel.uiState.value.archiveQueuedDownloads == 1
+        }
+        Thread.sleep(500)
+
+        // Step on to pic3.jpg: load C supersedes B and registers. Its busy
+        // claim and loading state are published NOW, before gate acquisition.
+        viewModel.stepArchivePreview(2)
+        waitUntil("load C registered its busy claim") {
+            viewModel.uiState.value.archiveEntryBusyIndex == 3
+        }
+        Thread.sleep(500)
+
+        // Release B: the download (ahead of C in the gate queue) acquires,
+        // marks busy=0 with its own owner, and runs, held in the writer.
+        // C is now a registered preview load WAITING on the gate behind a
+        // running download — the MF-1 window.
+        releaseReads.countDown()
+        assertTrue(
+            "download extraction never reached the writer",
+            downloadWriter.firstWriteEntered.await(15, TimeUnit.SECONDS)
+        )
+        waitUntil("download busy mark published") {
+            viewModel.uiState.value.archiveEntryBusyIndex == 0
+        }
+        assertEquals(
+            "waiting preview load must be visible while it waits on the gate",
+            true,
+            viewModel.uiState.value.archivePreviewLoading
+        )
+
+        // Dismiss: the download's busy mark survives, the preview closes.
+        viewModel.dismissArchivePreview()
+        assertEquals(null, viewModel.uiState.value.archivePreview)
+        assertEquals(false, viewModel.uiState.value.archivePreviewLoading)
+        assertEquals(
+            "dismiss wiped the running download's busy mark",
+            0,
+            viewModel.uiState.value.archiveEntryBusyIndex
+        )
+
+        // With the download's busy mark intact, a fresh preview tap is
+        // refused (not silently queued behind the download).
+        viewModel.previewArchiveEntry(file, 1)
+        Thread.sleep(300)
+        assertEquals(null, viewModel.uiState.value.archivePreview)
+
+        // The download finishes; the dismissed waiting load never pops in.
+        downloadWriter.releaseFirstWrite.countDown()
+        waitUntil("download completed and busy cleared") {
+            downloadWriter.writtenNames == listOf("one.bin") &&
+                viewModel.uiState.value.archiveEntryBusyIndex == null &&
+                viewModel.uiState.value.archiveQueuedDownloads == 0
+        }
+        Thread.sleep(300)
         assertEquals(null, viewModel.uiState.value.archivePreview)
     }
 }
