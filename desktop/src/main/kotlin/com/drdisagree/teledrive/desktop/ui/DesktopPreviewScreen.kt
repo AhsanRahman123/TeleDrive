@@ -3453,6 +3453,7 @@ internal fun DesktopArchivePane(
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
+                    }
                 }
                 if (infoOpen) {
                     ArchiveEntryInfoDialog(
