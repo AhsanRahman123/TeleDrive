@@ -72,7 +72,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Rotate90DegreesCw
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -181,6 +180,7 @@ import com.drdisagree.teledrive.presentation.preview.ArchiveBatchProgress
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntry
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
 import com.drdisagree.teledrive.presentation.preview.archiveImagePagerIndices
+import com.drdisagree.teledrive.presentation.preview.comicPageSequence
 import com.drdisagree.teledrive.presentation.preview.archiveImagePagerNeighbour
 import com.drdisagree.teledrive.presentation.preview.archiveBackStep
 import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
@@ -1293,11 +1293,11 @@ private fun PreviewPane(
                 )
             }
 
-            is PreviewContent.Pdf -> OpenExternallyState(
-                icon = Icons.Filled.PictureAsPdf,
-                file = file,
-                path = current.path,
-                snackbarHostState = snackbarHostState
+            is PreviewContent.Pdf -> DesktopPdfViewer(path = current.path)
+
+            is PreviewContent.Html -> DesktopHtmlViewer(
+                html = current.text,
+                truncated = current.truncated
             )
 
             is PreviewContent.StreamedMedia -> if (!VlcPlayback.available) {
@@ -1498,6 +1498,22 @@ private fun ZoomablePreviewImage(
     Box(modifier = Modifier.fillMaxSize()) {
         if (undecodable) {
             undecodableFallback()
+        } else if (isGifImageModel(model)) {
+            // GIF animation (1.6.25 item 5): Coil has no GIF decoder on
+            // desktop (coil-gif is Android-only), so GIFs play through the
+            // Skia-Codec frame player instead of the Coil painter. The
+            // telephoto zoom surface does not apply — rotate/mirror and the
+            // chrome toggle behave as in the regular viewer.
+            AnimatedGifImage(
+                model = model,
+                contentDescription = contentDescription,
+                imageRotationDegrees = imageRotationDegrees,
+                mirrorImageHorizontally = mirrorImageHorizontally,
+                mirrorImageVertically = mirrorImageVertically,
+                onToggleChrome = onToggleChrome,
+                onUndecodable = { undecodable = true },
+                modifier = Modifier.fillMaxSize()
+            )
         } else {
             // AsyncImage sizes the decoded bitmap to the viewport, which makes
             // zooming a low-resolution preview look blurred. The painter intentionally
@@ -2231,6 +2247,7 @@ internal fun DesktopArchivePane(
     modifier: Modifier = Modifier
 ) {
     val listing = archive.entries
+    val urlOpener = LocalUrlOpener.current
     var query by remember(file.id) { mutableStateOf("") }
     var expanded by remember(file.id) { mutableStateOf(emptySet<String>()) }
     val selection = remember(file.id) { ArchiveSelectionState() }
@@ -2606,8 +2623,14 @@ internal fun DesktopArchivePane(
         }
         // The in-zip photo pager's stops: the image entries among the rows as
         // currently displayed (tree + sort + filter applied), in display order.
-        val displayedImageIndices = remember(rows, listing) {
-            archiveImagePagerIndices(listing, rows.mapNotNull { it.node.entryIndex })
+        // A CBZ instead reads as a comic (1.6.25 item 5, Android parity): image
+        // pages only, in natural path order — not the archive list's sort.
+        val displayedImageIndices = remember(rows, listing, archive.format) {
+            if (archive.format == "CBZ") {
+                comicPageSequence(listing)
+            } else {
+                archiveImagePagerIndices(listing, rows.mapNotNull { it.node.entryIndex })
+            }
         }
         // In-archive preview overlay: image in the full desktop photo viewer
         // (note 7), audio AND video in the desktop player (notes 9 — video is
@@ -2710,26 +2733,64 @@ internal fun DesktopArchivePane(
                 }
             }
 
-            is ArchiveEntryPreview.Text -> {
-                val textScrollState = rememberScrollState()
+            is ArchiveEntryPreview.Pdf -> {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(textScrollState)
-                            .padding(24.dp)
+                    DesktopPdfViewer(path = preview.path)
+                    FilledIconButton(
+                        onClick = onDismissPreview,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
                     ) {
-                        Text(
-                            text = preview.text,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        Icon(Icons.Filled.Close, contentDescription = "Close")
+                    }
+                }
+            }
+
+            is ArchiveEntryPreview.Text -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                ) {
+                    if (preview.isHtml) {
+                        // The HTML viewer scrolls itself; it must not sit
+                        // inside the scrolling text column below.
+                        DesktopHtmlViewer(html = preview.text, truncated = preview.truncated)
+                    } else {
+                        val textScrollState = rememberScrollState()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(textScrollState)
+                                .padding(24.dp)
+                        ) {
+                            if (preview.isMarkdown) {
+                                MarkdownText(
+                                    text = preview.text,
+                                    onOpenUrl = { url -> urlOpener.open(url) }
+                                )
+                            } else {
+                                Text(
+                                    text = preview.text,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            if (preview.truncated) {
+                                Text(
+                                    text = stringResource(
+                                        Res.string.preview_truncated_download_view
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                     FilledIconButton(
                         onClick = onDismissPreview,

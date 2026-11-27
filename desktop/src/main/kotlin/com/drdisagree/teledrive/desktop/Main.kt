@@ -235,6 +235,12 @@ fun main() {
             setSingletonImageLoaderFactory { context ->
                 ImageLoader.Builder(context)
                     .components {
+                        // SVG decode (1.6.25 item 5): coil-svg is multiplatform
+                        // (Skiko SVGDOM on JVM), registered exactly as Android
+                        // registers it. GIF stays off Coil — coil-gif is
+                        // Android-only; desktop GIFs use the Skia-Codec frame
+                        // player in the preview surfaces (DesktopGifImage).
+                        add(coil3.svg.SvgDecoder.Factory())
                         add(ThumbnailFetcherFactory(getKoin().get<ThumbnailStore>()))
                         add(Keyer<ThumbnailModel> { data, _: Options ->
                             thumbnailCacheKey(data.fileId, data.revision)
