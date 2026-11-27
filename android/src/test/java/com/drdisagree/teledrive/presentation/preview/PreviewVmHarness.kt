@@ -277,17 +277,31 @@ internal fun buildPreviewViewModel(
 }
 
 /**
- * runBlocking that prints the full stack trace to stderr before rethrowing:
- * Gradle's console summary for these tests shows only the exception class
- * and first frame, which hides the actual cause of a construction failure.
+ * Throwables delivered to the default uncaught-exception handler during a
+ * VM test. The view model's scope is a supervisor: an exception in its init
+ * or content coroutines never reaches the test's runBlocking — it lands
+ * here instead, and [awaitPreviewCondition] turns the first one into an
+ * assertion failure whose message carries the full stack (Gradle's console
+ * summary otherwise shows only a recovered, message-less RuntimeException).
  */
+internal val uncaughtThrowables = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+
+internal fun installUncaughtRecorder() {
+    Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
+        uncaughtThrowables += throwable
+    }
+}
+
 internal fun runVmTest(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) {
+    uncaughtThrowables.clear()
+    installUncaughtRecorder()
     try {
         kotlinx.coroutines.runBlocking { block() }
     } catch (t: Throwable) {
-        System.err.println("VMTEST-FAILURE stack trace follows")
-        t.printStackTrace()
-        throw t
+        // Re-report with the full stack in the message: a bare rethrow is
+        // recovered by the coroutine machinery into a message-less
+        // RuntimeException in Gradle's console summary.
+        throw AssertionError("VM test body failed:\n" + t.stackTraceToString())
     }
 }
 
@@ -298,6 +312,14 @@ internal suspend fun awaitPreviewCondition(
     condition: () -> Boolean
 ) {
     withTimeout(timeoutMs) {
-        while (!condition()) delay(10)
+        while (!condition()) {
+            uncaughtThrowables.firstOrNull()?.let { throwable ->
+                throw AssertionError(
+                    "uncaught exception while waiting for '$description':\n" +
+                        throwable.stackTraceToString()
+                )
+            }
+            delay(10)
+        }
     }
 }
