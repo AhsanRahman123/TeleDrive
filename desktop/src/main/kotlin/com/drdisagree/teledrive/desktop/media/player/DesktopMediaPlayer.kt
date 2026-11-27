@@ -831,6 +831,38 @@ internal fun DesktopMediaPlayer(
             else -> player.submit { runCatching { player.controls().play() } }
         }
     }
+    // N8 (PC 1.6.27): Space is ALSO routed at the AWT level while this
+    // player is composed. The stage Box's onPreviewKeyEvent Spacebar
+    // branch below only fires when the stage is an ancestor of the
+    // focused node, and production focus routinely rests elsewhere —
+    // the in-zip overlay Box that wraps this player, a control the
+    // auto-hide timer then disposed, preview chrome outside the
+    // player — leaving Space intermittently dead. The dispatcher
+    // (see PlayerSpaceAwtDispatcher) is consulted before any component
+    // delivery, toggles exactly once, and consumes the press so this
+    // Compose branch never double-fires; the branch stays as a
+    // backstop for environments where the dispatcher is not installed.
+    // Suppression mirrors the states where Space is not the player's:
+    // the subtitle settings dialog (the Compose branch already
+    // declines every key while it is open) and any transient layer
+    // the controls bar pins open via onControlsKeepVisible — dropdown
+    // menus, the custom sleep-timer dialog's text fields, an actively
+    // dragged volume/brightness slider. controlsPinned is exactly
+    // that pin state.
+    val togglePlaybackForSpace = rememberUpdatedState {
+        togglePlayback()
+        interactionTick++
+    }
+    val spaceDispatcher = remember {
+        PlayerSpaceAwtDispatcher(
+            isSuppressed = { showSubtitleSettings || controlsPinned },
+            onTogglePlayback = { togglePlaybackForSpace.value() }
+        )
+    }
+    DisposableEffect(spaceDispatcher) {
+        spaceDispatcher.install()
+        onDispose { spaceDispatcher.dispose() }
+    }
     val toggleMute: () -> Unit = {
         muted = !muted
         player.submitAudioState(volume, muted)
@@ -1121,6 +1153,10 @@ internal fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
+                    // Primary Space route is the AWT dispatcher above
+                    // (N8): it consumes the press before delivery, so
+                    // this branch is the backstop for when it is not
+                    // installed — the two never both fire for one press.
                     key == Key.Spacebar && !ctrl && !alt && !shift -> {
                         togglePlayback()
                         interactionTick++
