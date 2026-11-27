@@ -99,6 +99,63 @@ class DesktopArchiveEntryThumbnailStore private constructor(
         decodePx: Int = ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX
     ): StateFlow<ArchiveThumbState> = stateFlow(keyFor(cacheKey, decodePx)).asStateFlow()
 
+    /**
+     * Settled-page priority (PC 1.6.27 N4): while a preview extraction for
+     * this archive is running, thumbnail fetches must not compete with it.
+     * Thumbnail sessions and preview extractions open separate byte sources
+     * but the SAME TDLib file, and TDLib keeps exactly one download window
+     * per file (report 52 §1b) — a thumbnail's ranged request re-targets
+     * that window and can starve the page the user is waiting on.
+     *
+     * Activating priority cancels in-flight fetches (a cancelled fetch
+     * leaves its row Placeholder, never Failed) and queues new requests;
+     * deactivating replays the queued requests. Requests for rows already
+     * Ready are unaffected.
+     */
+    @Volatile
+    private var previewPriorityActive = false
+
+    private data class PendingThumbRequest(
+        val cacheKey: String,
+        val archiveFile: DriveFile,
+        val entryIndex: Int,
+        val entryName: String,
+        val sizeBytes: Long,
+        val decodePx: Int
+    )
+
+    /** Guarded by [requestLock]. */
+    private val pendingRequests = mutableMapOf<String, PendingThumbRequest>()
+
+    fun setPreviewPriorityActive(active: Boolean) {
+        val toReplay: List<PendingThumbRequest>
+        synchronized(requestLock) {
+            previewPriorityActive = active
+            if (active) {
+                val running = inFlight.values.toList()
+                inFlight.clear()
+                running.forEach { it.cancel() }
+                toReplay = emptyList()
+            } else {
+                toReplay = pendingRequests.values.toList()
+                pendingRequests.clear()
+            }
+        }
+        // Replay outside the lock: dispatchRequest re-enters it.
+        toReplay.forEach { pending ->
+            dispatchRequest(
+                pending.cacheKey, pending.archiveFile, pending.entryIndex,
+                pending.entryName, pending.sizeBytes, pending.decodePx
+            )
+        }
+    }
+
+    /** Test seam: whether settled-page priority is currently holding fetches. */
+    internal fun isPreviewPriorityActive(): Boolean = previewPriorityActive
+
+    /** Test seam: how many thumbnail requests are queued behind priority. */
+    internal fun pendingRequestCount(): Int = synchronized(requestLock) { pendingRequests.size }
+
     fun request(
         cacheKey: String,
         archiveFile: DriveFile,
@@ -112,6 +169,19 @@ class DesktopArchiveEntryThumbnailStore private constructor(
         synchronized(requestLock) {
             waiters[key] = (waiters[key] ?: 0) + 1
         }
+        dispatchRequest(cacheKey, archiveFile, entryIndex, entryName, sizeBytes, decodePx)
+    }
+
+    private fun dispatchRequest(
+        cacheKey: String,
+        archiveFile: DriveFile,
+        entryIndex: Int,
+        entryName: String,
+        sizeBytes: Long,
+        decodePx: Int
+    ) {
+        val key = keyFor(cacheKey, decodePx)
+        val flow = stateFlow(key)
         if (flow.value is ArchiveThumbState.Ready) {
             val cached = cacheFile(key)
             if (cached.isFile && cached.length() > 0L) {
@@ -129,6 +199,15 @@ class DesktopArchiveEntryThumbnailStore private constructor(
             return
         }
         synchronized(requestLock) {
+            if (previewPriorityActive) {
+                // Queued behind the running preview extraction; replayed
+                // by setPreviewPriorityActive(false). The row stays
+                // Placeholder meanwhile — never Failed.
+                pendingRequests[key] = PendingThumbRequest(
+                    cacheKey, archiveFile, entryIndex, entryName, sizeBytes, decodePx
+                )
+                return
+            }
             val existing = inFlight[key]
             if (existing == null || existing.isCompleted) {
                 inFlight[key] = scope.async {
@@ -150,6 +229,7 @@ class DesktopArchiveEntryThumbnailStore private constructor(
                 return
             }
             waiters.remove(key)
+            pendingRequests.remove(key)
             inFlight.remove(key)?.cancel()
         }
     }

@@ -33,6 +33,7 @@ import com.drdisagree.teledrive.core.archive.ArchiveDownloadReporter
 import com.drdisagree.teledrive.core.archive.ArchiveException
 import com.drdisagree.teledrive.core.archive.LocalArchiveFormat
 import com.drdisagree.teledrive.core.archive.LocalArchiveService
+import com.drdisagree.teledrive.core.archive.ProgressiveStartDecision
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.files.formatPreviewText
 import com.drdisagree.teledrive.core.archive.archiveFailureDetail
@@ -74,6 +75,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+
+/** Throttle for progressive-video progress state updates (PC 1.6.27 N4). */
+private const val ARCHIVE_VIDEO_PROGRESS_STEP_BYTES: Long = 256L * 1024
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class PreviewViewModel(
@@ -356,6 +360,16 @@ class PreviewViewModel(
      */
     @Volatile
     private var archivePreviewGeneration = 0
+
+    /**
+     * The running progressive in-zip video load (PC 1.6.27 N4), if any.
+     * Kept so [dismissArchivePreview] can cancel the background fetch when
+     * the user leaves mid-load; while it runs it holds the extraction gate
+     * exactly as a classic extraction did, so the MF-1 single-window
+     * discipline and the busy-refusal of steps are unchanged.
+     */
+    private var archiveVideoLoadJob: Job? = null
+
     private var archiveBusyOwner: Any? = null
     private val archiveBusyLock = Any()
 
@@ -858,8 +872,20 @@ class PreviewViewModel(
     /** Closes the in-archive preview and deletes its temp file (text previews hold no file). */
     fun dismissArchivePreview() {
         archivePreviewGeneration++
+        // PC 1.6.27 N4: leaving mid-load cancels the progressive video
+        // fetch — its ranged reads share the file's single TDLib window,
+        // and a fetch nobody is watching must not hold that window (or the
+        // extraction gate) against the next open.
+        archiveVideoLoadJob?.cancel()
+        archiveVideoLoadJob = null
         val preview = _uiState.value.archivePreview
-        _uiState.update { it.copy(archivePreview = null, archivePreviewFileId = null) }
+        _uiState.update {
+            it.copy(
+                archivePreview = null,
+                archivePreviewFileId = null,
+                archivePreviewLoading = null
+            )
+        }
         deleteArchivePreviewTemp(preview)
     }
 
@@ -908,10 +934,13 @@ class PreviewViewModel(
     }
 
     /**
-     * Desktop-routed in-zip video playback (1.6.24 note 9): extracts the video
-     * entry at [entryIndex] to a verified temp file — the same extraction a
-     * download performs — and publishes it as an [ArchiveEntryPreview.Video]
-     * for the desktop player, exactly the pattern the audio branch uses. This
+     * Desktop-routed in-zip video playback (1.6.24 note 9; progressive start
+     * PC 1.6.27 N4): for a remote ZIP the entry is extracted progressively —
+     * the [ArchiveEntryPreview.Video] is published as soon as the produced
+     * prefix is playable and the fetch finishes (and CRC-verifies) in the
+     * background under the extraction gate; see
+     * [loadRemoteArchiveVideoProgressively] for the state contract. Local
+     * archives keep the classic whole-entry extraction. This
      * is deliberately NOT part of the shared tap routing: [archiveEntryTapAction]
      * keeps returning DOWNLOAD for video, so Android's tap behaviour is
      * unchanged; only the desktop pane calls this. The busy gate serialises it
@@ -961,26 +990,40 @@ class PreviewViewModel(
         if (!archiveExtractionMutex.tryLock(owner)) return false
         markArchiveBusy(owner, entryIndex)
         val generation = ++archivePreviewGeneration
-        viewModelScope.launch {
+        archiveVideoLoadJob = viewModelScope.launch {
             try {
                 val local = localArchives[file.id]
-                val temp = if (local != null) {
+                if (local != null) {
+                    // Local 7z/TAR copies read from disk at local speed; the
+                    // classic whole-entry extraction stays for them.
                     val service = localArchiveService ?: error(
                         "Local archive service unavailable"
                     )
-                    service.extractEntryToTempFile(
+                    val temp = service.extractEntryToTempFile(
                         local.path, local.format, entryIndex, entry.name
                     )
+                    val videoPreview =
+                        ArchiveEntryPreview.Video(displayName, temp.absolutePath, entryIndex)
+                    if (generation != archivePreviewGeneration) {
+                        deleteArchivePreviewTemp(videoPreview)
+                        return@launch
+                    }
+                    publishArchivePreview(videoPreview, file.id)
                 } else {
-                    remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
+                    // Remote ZIP (PC 1.6.27 N4): progressive start — the
+                    // preview is published the moment the produced prefix is
+                    // playable, while the fetch continues in this same job
+                    // under the extraction gate.
+                    loadRemoteArchiveVideoProgressively(
+                        file = file,
+                        entryName = entry.name,
+                        occurrence = occurrence,
+                        displayName = displayName,
+                        entryIndex = entryIndex,
+                        totalBytes = entry.sizeBytes,
+                        generation = generation
+                    )
                 }
-                val videoPreview = ArchiveEntryPreview.Video(displayName, temp.absolutePath, entryIndex)
-                if (generation != archivePreviewGeneration) {
-                    deleteArchivePreviewTemp(videoPreview)
-                    return@launch
-                }
-                publishArchivePreview(videoPreview, file.id)
-
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: ArchiveException) {
@@ -992,9 +1035,150 @@ class PreviewViewModel(
             } finally {
                 clearArchiveBusy(owner)
                 archiveExtractionMutex.unlock(owner)
+                if (generation == archivePreviewGeneration) {
+                    _uiState.update { it.copy(archivePreviewLoading = null) }
+                }
             }
         }
         return true
+    }
+
+    /**
+     * Progressive remote in-zip video load (PC 1.6.27 N4): publishes the
+     * [ArchiveEntryPreview.Video] as soon as the service's start policy
+     * accepts the produced prefix, then keeps fetching in the background
+     * (this coroutine) until the entry is complete and CRC-verified.
+     *
+     * States the UI can observe, all honest:
+     * - loading with growing [ArchivePreviewLoading.producedBytes] and no
+     *   preview yet (prefix not yet playable);
+     * - loading with `delayedUntilComplete` set (moov-at-end MP4: playback
+     *   genuinely cannot start before the whole entry is produced);
+     * - preview published while loading continues (playback has started;
+     *   the temp copy is still unverified and is never shown as a
+     *   completed download);
+     * - loading cleared when the fetch completes (copy now verified) or
+     *   fails. A failure AFTER an early publish unpublishes that preview:
+     *   its temp file has been deleted by the service, so leaving it on
+     *   screen would strand the user on a dead player.
+     */
+    private suspend fun loadRemoteArchiveVideoProgressively(
+        file: DriveFile,
+        entryName: String,
+        occurrence: Int,
+        displayName: String,
+        entryIndex: Int,
+        totalBytes: Long,
+        generation: Int
+    ) {
+        _uiState.update {
+            it.copy(
+                archivePreviewLoading = ArchivePreviewLoading(
+                    entryIndex = entryIndex,
+                    name = displayName,
+                    producedBytes = 0L,
+                    totalBytes = totalBytes
+                )
+            )
+        }
+        var publishedPath: String? = null
+        var lastReportedBytes = 0L
+        val temp = try {
+            remoteArchiveService.extractEntryProgressively(
+                file = file,
+                entryName = entryName,
+                occurrence = occurrence,
+                onStartDecision = { tempFile, decision ->
+                    when (decision) {
+                        ProgressiveStartDecision.StartNow -> {
+                            if (generation == archivePreviewGeneration &&
+                                publishedPath == null
+                            ) {
+                                publishedPath = tempFile.absolutePath
+                                publishArchivePreview(
+                                    ArchiveEntryPreview.Video(
+                                        displayName, tempFile.absolutePath, entryIndex
+                                    ),
+                                    file.id
+                                )
+                            }
+                        }
+                        is ProgressiveStartDecision.DelayedUntilComplete -> {
+                            if (generation == archivePreviewGeneration) {
+                                _uiState.update { state ->
+                                    val loading = state.archivePreviewLoading
+                                    if (loading != null &&
+                                        loading.entryIndex == entryIndex
+                                    ) {
+                                        state.copy(
+                                            archivePreviewLoading = loading.copy(
+                                                delayedUntilComplete = true,
+                                                note = decision.reason
+                                            )
+                                        )
+                                    } else {
+                                        state
+                                    }
+                                }
+                            }
+                        }
+                        ProgressiveStartDecision.WaitForMore -> Unit
+                    }
+                },
+                onProgress = { produced ->
+                    if (produced - lastReportedBytes >= ARCHIVE_VIDEO_PROGRESS_STEP_BYTES ||
+                        produced >= totalBytes
+                    ) {
+                        lastReportedBytes = produced
+                        if (generation == archivePreviewGeneration) {
+                            _uiState.update { state ->
+                                val loading = state.archivePreviewLoading
+                                if (loading != null && loading.entryIndex == entryIndex) {
+                                    state.copy(
+                                        archivePreviewLoading =
+                                            loading.copy(producedBytes = produced)
+                                    )
+                                } else {
+                                    state
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        } catch (failure: CancellationException) {
+            throw failure
+        } catch (failure: Exception) {
+            // A failure after an early publish: the service deleted the
+            // temp file, so unpublish the now-dead preview before the
+            // caller's message reports the failure.
+            val published = publishedPath
+            if (published != null && generation == archivePreviewGeneration) {
+                val current = _uiState.value.archivePreview
+                if (current is ArchiveEntryPreview.Video && current.path == published) {
+                    _uiState.update {
+                        it.copy(archivePreview = null, archivePreviewFileId = null)
+                    }
+                }
+            }
+            throw failure
+        }
+        if (generation != archivePreviewGeneration) {
+            // Superseded while fetching (dismiss bumps the generation and
+            // cancels this job, so this is the residual non-cancelled path):
+            // an unpublished verified temp is removed here; a published one
+            // was already replaced-and-deleted by the successor's publish.
+            if (publishedPath == null) runCatching { temp.delete() }
+            return
+        }
+        if (publishedPath == null) {
+            // No early start was possible (moov-at-end, or a very small
+            // entry): the now-complete, verified file is published whole.
+            publishArchivePreview(
+                ArchiveEntryPreview.Video(displayName, temp.absolutePath, entryIndex),
+                file.id
+            )
+        }
     }
 
     /**
