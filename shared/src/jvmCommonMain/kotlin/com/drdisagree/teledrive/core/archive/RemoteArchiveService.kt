@@ -59,9 +59,20 @@ class RemoteArchiveService(
             warnLog("stage=checkReadable failed file=${file.name}: ${describe(failure)}", failure)
             throw wrapFailure("checkReadable", failure)
         }
+        // Directory cache (PC 1.6.27 N4): a Telegram file's bytes are
+        // immutable, so a parsed central directory for the same
+        // (file id, remote id, size) stays valid for the process lifetime.
+        // A hit returns the identical listing without touching the byte
+        // source at all — re-reading the tail + directory on every in-zip
+        // switch was pure latency on the settled page's critical path.
+        cachedDirectory(file)?.let { entries ->
+            SafeLog.d(TAG, "stage=list ok (cached) entries=${entries.size} file=${file.name}")
+            return entries
+        }
         val source = openSource(file)
         try {
             val entries = ZipArchiveReader(source).entries()
+            storeDirectory(file, entries)
             SafeLog.d(TAG, "stage=list ok entries=${entries.size} file=${file.name}")
             return entries
         } catch (failure: Exception) {
@@ -148,7 +159,7 @@ class RemoteArchiveService(
             // Occurrence counts only non-directory entries with this name; the preview view
             // model counts the same way, so both sides pick the same entry.
             val matches = try {
-                reader.entries().filter { it.name == entryName && !it.isDirectory }
+                entriesFor(file, reader).filter { it.name == entryName && !it.isDirectory }
             } catch (failure: Exception) {
                 warnLog("stage=list failed file=${file.name}: ${describe(failure)}", failure)
                 throw wrapFailure("list", failure)
@@ -183,6 +194,197 @@ class RemoteArchiveService(
             return temp
         } finally {
             source.close()
+        }
+    }
+
+    /**
+     * Progressive variant of [extractEntryToTempFile] for in-zip VIEWING
+     * (PC 1.6.27 item N4, desktop video path).
+     *
+     * The entry is extracted exactly as before — same in-order ranged reads
+     * of this entry only, same produced-length + CRC-32 verification inside
+     * [ZipArchiveReader.extract] before this function returns — but the temp
+     * file is written UNBUFFERED and flushed after every produced chunk, and
+     * [onStartDecision] is invoked exactly once, the moment
+     * [ProgressiveStartPolicy] judges the produced prefix playable
+     * ([ProgressiveStartDecision.StartNow]) or judges that this entry cannot
+     * start early ([ProgressiveStartDecision.DelayedUntilComplete], an
+     * MP4 whose moov follows its mdat). The caller may hand the temp file to
+     * a player at that point while this function keeps fetching in the
+     * background of the same call.
+     *
+     * The bytes a player sees before this function returns are UNVERIFIED:
+     * verification completes only when [ZipArchiveReader.extract] returns.
+     * If verification (or any read) fails, the temp file is deleted and the
+     * failure propagates exactly as in [extractEntryToTempFile] — a caller
+     * that already published the file must treat that failure as "the
+     * preview died", never as a completed download. Nothing is ever written
+     * to Downloads here, and no code path falls back to fetching the whole
+     * ZIP: the only ranges requested are the directory (cached after the
+     * first parse), this entry's local header, and this entry's data in
+     * ascending order — the order TDLib's contiguous-prefix gate rewards
+     * (report 52).
+     */
+    suspend fun extractEntryProgressively(
+        file: DriveFile,
+        entryName: String,
+        occurrence: Int = 0,
+        onStartDecision: (tempFile: java.io.File, decision: ProgressiveStartDecision) -> Unit,
+        onProgress: ((transferredBytes: Long) -> Unit)? = null
+    ): java.io.File {
+        try {
+            checkReadable(file)
+        } catch (failure: Exception) {
+            warnLog("stage=checkReadable failed file=${file.name}: ${describe(failure)}", failure)
+            throw wrapFailure("checkReadable", failure)
+        }
+        val source = openSource(file)
+        try {
+            val reader = ZipArchiveReader(source)
+            val matches = try {
+                entriesFor(file, reader).filter { it.name == entryName && !it.isDirectory }
+            } catch (failure: Exception) {
+                warnLog("stage=list failed file=${file.name}: ${describe(failure)}", failure)
+                throw wrapFailure("list", failure)
+            }
+            val entry = matches.getOrNull(occurrence)
+                ?: throw ArchiveException(
+                    ArchiveErrorKind.ENTRY_NOT_FOUND,
+                    "\"$entryName\" is no longer in this archive. Reopen the ZIP and try again."
+                )
+            val fileName = entry.name.substringAfterLast('/').substringAfterLast('\\')
+                .ifBlank { "unnamed" }
+            val temp = createEntryTempFile(fileName)
+            try {
+                val tracker = ProgressiveStartTracker(entry.name, entry.sizeBytes)
+                var decisionSent = false
+                SafeLog.d(
+                    TAG,
+                    "stage=data-progressive start entry=${entry.name} " +
+                        "compressed=${entry.compressedBytes} size=${entry.sizeBytes}"
+                )
+                ProgressiveEntryOutputStream(
+                    delegate = java.io.FileOutputStream(temp),
+                    tracker = tracker,
+                    onDecision = { decision ->
+                        if (!decisionSent) {
+                            decisionSent = true
+                            onStartDecision(temp, decision)
+                        }
+                    },
+                    onProgress = onProgress
+                ).use { output ->
+                    reader.extract(entry, output)
+                }
+                // Verified (extract returned). A tiny entry can reach this
+                // point without a mid-stream verdict ever being evaluated
+                // against a growing prefix — deliver the completion verdict.
+                if (!decisionSent) {
+                    decisionSent = true
+                    onStartDecision(
+                        temp,
+                        tracker.evaluateNow() ?: ProgressiveStartDecision.StartNow
+                    )
+                }
+                SafeLog.d(TAG, "stage=writer-progressive ok entry=${entry.name} temp=${temp.name}")
+            } catch (failure: Exception) {
+                warnLog("stage=data/writer failed entry=${entry.name}: ${describe(failure)}", failure)
+                temp.delete()
+                throw wrapFailure("data", failure)
+            }
+            return temp
+        } finally {
+            source.close()
+        }
+    }
+
+    /**
+     * The parsed central directory for [file], from the directory cache when
+     * present, otherwise parsed through [reader] (tail + central directory
+     * ranges only) and cached. Results are identical either way.
+     */
+    private suspend fun entriesFor(
+        file: DriveFile,
+        reader: ZipArchiveReader
+    ): List<ZipEntryInfo> {
+        cachedDirectory(file)?.let { return it }
+        val entries = reader.entries()
+        storeDirectory(file, entries)
+        return entries
+    }
+
+    private data class CachedDirectory(
+        val remoteFileId: String?,
+        val sizeBytes: Long,
+        val entries: List<ZipEntryInfo>
+    )
+
+    private val directoryCacheLock = Any()
+
+    /** Access-ordered, bounded: the few archives a user browses in a session. */
+    private val directoryCache = LinkedHashMap<String, CachedDirectory>(8, 0.75f, true)
+
+    private fun cachedDirectory(file: DriveFile): List<ZipEntryInfo>? =
+        synchronized(directoryCacheLock) {
+            val hit = directoryCache[file.id] ?: return null
+            if (hit.remoteFileId != file.remoteFileId || hit.sizeBytes != file.sizeBytes) {
+                directoryCache.remove(file.id)
+                null
+            } else {
+                hit.entries
+            }
+        }
+
+    private fun storeDirectory(file: DriveFile, entries: List<ZipEntryInfo>) {
+        synchronized(directoryCacheLock) {
+            directoryCache[file.id] = CachedDirectory(file.remoteFileId, file.sizeBytes, entries)
+            while (directoryCache.size > MAX_CACHED_DIRECTORIES) {
+                val eldest = directoryCache.keys.firstOrNull() ?: break
+                directoryCache.remove(eldest)
+            }
+        }
+    }
+
+    /**
+     * Unbuffered, flush-per-write stream for the progressive path: every
+     * chunk the reader produces is on disk and visible to a player reading
+     * the same file before the next chunk is fetched, and the
+     * [ProgressiveStartTracker] sees each chunk in production order.
+     */
+    private class ProgressiveEntryOutputStream(
+        private val delegate: java.io.OutputStream,
+        private val tracker: ProgressiveStartTracker,
+        private val onDecision: (ProgressiveStartDecision) -> Unit,
+        private val onProgress: ((transferredBytes: Long) -> Unit)?
+    ) : java.io.OutputStream() {
+
+        private val singleByte = ByteArray(1)
+
+        override fun write(b: Int) {
+            singleByte[0] = b.toByte()
+            write(singleByte, 0, 1)
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            delegate.write(b, off, len)
+            // Flush per write: a player reading this file concurrently must
+            // see the produced prefix now, not when a buffer fills.
+            delegate.flush()
+            val decision = tracker.onChunk(b, off, len)
+            onProgress?.invoke(tracker.producedBytes)
+            if (decision != null) onDecision(decision)
+        }
+
+        override fun write(b: ByteArray) {
+            write(b, 0, b.size)
+        }
+
+        override fun flush() {
+            delegate.flush()
+        }
+
+        override fun close() {
+            delegate.close()
         }
     }
 
@@ -299,6 +501,7 @@ class RemoteArchiveService(
         const val TEMP_PREFIX = "zip-entry-"
         const val MAX_EXTENSION_LENGTH = 16
         const val MAX_TEMP_BASE_LENGTH = 48
+        const val MAX_CACHED_DIRECTORIES = 4
     }
 
     private fun openSource(file: DriveFile): MediaByteSource {
