@@ -158,10 +158,12 @@ class DesktopLocalPreviewScreenTest {
         rule.onNodeWithText("read me from the zip").assertIsDisplayed()
 
         // The top-bar Back button is the production press path available
-        // in the headless scene; the screen's Esc key runs through
-        // AppBackHandler, the same wrapper the mechanism test pins
-        // (AppBackHandlerEscapeTest) — the window layer performs the
-        // Escape-to-back-event conversion in the real app.
+        // in the headless scene. The screen's Esc key runs through
+        // AppBackHandler (the production back wrapper every screen uses);
+        // in the real window the scene layer performs the
+        // Escape-to-back-event conversion, which the headless test scene
+        // does not reproduce (verified on CI run 45981769717: a raw Escape
+        // key press there reaches key handlers only).
         rule.onNodeWithContentDescription("Back").performClick()
         rule.waitForIdle()
         assertEquals("the back action must leave the local preview", 1, backs.get())
