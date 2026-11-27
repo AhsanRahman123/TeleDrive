@@ -158,6 +158,8 @@ object MimeTypes {
         "otp" to "application/vnd.oasis.opendocument.presentation-template",
         "epub" to "application/epub+zip",
         "mobi" to "application/x-mobipocket-ebook",
+        "srt" to "application/x-subrip",
+        "vtt" to "text/vtt",
 
         // Source code, configuration and scripts are safe to render as bounded plain text.
         "js" to "text/javascript",
@@ -201,8 +203,13 @@ object MimeTypes {
         "diff" to "text/x-diff",
         "patch" to "text/x-diff",
 
+        // Junk/system files with no previewable type: pinned to GENERIC here so
+        // host unit tests never consult a platform MIME map for them.
+        "db" to GENERIC,
+
         // Archives and compressed files
         "zip" to "application/zip",
+        "cbz" to "application/vnd.comicbook+zip",
         "7z" to "application/x-7z-compressed",
         "rar" to "application/vnd.rar",
         "tar" to "application/x-tar",
