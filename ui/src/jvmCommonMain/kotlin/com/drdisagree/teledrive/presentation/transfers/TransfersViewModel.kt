@@ -6,8 +6,11 @@ import com.drdisagree.teledrive.domain.model.TransferSection
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.repository.TransferRepository
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -107,8 +110,47 @@ class TransfersViewModel(
     }
 
     fun retrySelected(ids: List<String>) = launch {
-        ids.forEach { transferRepository.retry(it) }
+        // Bulk retry goes through the repository's per-type dispatch (ported
+        // from PC 1.6.24, field note 3): engine rows re-queue; report-only
+        // ARCHIVE_DOWNLOAD rows are skipped and the skip is SHOWN, because a
+        // failed archive record retains no archive/entry identity to retry
+        // from — the user downloads the file again from its ZIP.
+        val outcome = transferRepository.retryFailedTransfers(ids)
+        if (outcome.skippedArchiveDownloads > 0) {
+            _userMessages.emit(archiveRetrySkipMessage(outcome.skippedArchiveDownloads))
+        }
     }
+
+    /** Removes the selected terminal records (field note 3: selected FAILED rows). */
+    fun removeSelected(ids: List<String>) = launch {
+        transferRepository.deleteTransfers(ids)
+    }
+
+    /** "Retry all" for the failed group: engine rows re-queue, archive rows are reported as skipped. */
+    fun retryAllFailed() = launch {
+        val outcome = transferRepository.retryAllFailed()
+        val message = retryAllFailedMessage(outcome.requeued, outcome.skippedArchiveDownloads)
+        if (message != null) _userMessages.emit(message)
+    }
+
+    /** "Remove all" for the failed group: every FAILED record is removed. */
+    fun removeAllFailed() = launch {
+        val removed = transferRepository.removeAllFailed()
+        if (removed > 0) {
+            _userMessages.emit(
+                if (removed == 1) "Removed 1 failed transfer."
+                else "Removed $removed failed transfers."
+            )
+        }
+    }
+
+    /**
+     * One-line outcomes the screen must SHOW, never swallow (field note 3):
+     * bulk-retry results and the archive-retry skip. The screen collects this
+     * into its snackbar.
+     */
+    private val _userMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val userMessages: SharedFlow<String> = _userMessages.asSharedFlow()
 
     fun pauseAll() = launch { transferRepository.pauseAll() }
 
@@ -121,6 +163,7 @@ class TransfersViewModel(
     private fun launch(block: suspend () -> Unit) {
         viewModelScope.launch { block() }
     }
+
 
     private companion object {
         /**
@@ -139,4 +182,28 @@ class TransfersViewModel(
         val FINISHED_ORDER: Comparator<TransferTask> =
             compareByDescending<TransferTask> { it.completedAt ?: it.updatedAt }
     }
+}
+
+/**
+ * The plain message for skipped archive downloads in a bulk retry (field
+ * note 3): a failed in-ZIP download retains no archive or entry identity, so
+ * it cannot be retried — the user downloads it again from its ZIP.
+ */
+internal fun archiveRetrySkipMessage(skipped: Int): String =
+    if (skipped == 1) {
+        "1 failed ZIP download can't be retried — download it again from its ZIP."
+    } else {
+        "$skipped failed ZIP downloads can't be retried — download them again from their ZIP."
+    }
+
+/** The one-line result of "Retry all failed"; null when there was nothing to report. */
+internal fun retryAllFailedMessage(requeued: Int, skippedArchiveDownloads: Int): String? {
+    val parts = mutableListOf<String>()
+    if (requeued > 0) {
+        parts += if (requeued == 1) "Retrying 1 failed transfer." else "Retrying $requeued failed transfers."
+    }
+    if (skippedArchiveDownloads > 0) {
+        parts += archiveRetrySkipMessage(skippedArchiveDownloads)
+    }
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" ")
 }

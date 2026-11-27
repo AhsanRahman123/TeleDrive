@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.domain.repository
 
 import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.domain.model.FailedRetryOutcome
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.model.TransferSection
 import kotlinx.coroutines.flow.Flow
@@ -56,6 +57,31 @@ interface TransferRepository {
 
     /** Promote one incoming transfer to the front of the persistent download queue. */
     suspend fun moveDownloadToTop(id: String) = Unit
+
+    /**
+     * Removes transfer RECORDS by id (ported from PC 1.6.24, field note 3):
+     * only terminal rows (COMPLETED / FAILED / CANCELLED) are deleted; live
+     * rows are left untouched — cancelling those stays [cancel]'s job. The
+     * files themselves are never deleted.
+     */
+    suspend fun deleteTransfers(ids: List<String>) = Unit
+
+    /**
+     * Retries the FAILED records among [ids] (ported from PC 1.6.24, field
+     * note 3). Engine-backed records are re-queued through the engine;
+     * report-only ARCHIVE_DOWNLOAD records cannot be retried (they retain no
+     * archive or entry identity) and are counted as skipped in the outcome
+     * instead of being silently re-failed.
+     */
+    suspend fun retryFailedTransfers(ids: List<String>): FailedRetryOutcome =
+        FailedRetryOutcome(requeued = 0, skippedArchiveDownloads = 0)
+
+    /** Retries every FAILED record in the table; see [retryFailedTransfers]. */
+    suspend fun retryAllFailed(): FailedRetryOutcome =
+        FailedRetryOutcome(requeued = 0, skippedArchiveDownloads = 0)
+
+    /** Removes every FAILED record; returns how many were removed. */
+    suspend fun removeAllFailed(): Int = 0
 
     suspend fun pauseAll()
 

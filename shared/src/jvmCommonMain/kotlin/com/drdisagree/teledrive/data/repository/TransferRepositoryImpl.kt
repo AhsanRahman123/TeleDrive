@@ -17,6 +17,7 @@ import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
 import com.drdisagree.teledrive.data.mapper.toDomain
 import com.drdisagree.teledrive.domain.model.BackupState
+import com.drdisagree.teledrive.domain.model.FailedRetryOutcome
 import com.drdisagree.teledrive.domain.model.TransferSection
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferTask
@@ -657,6 +658,58 @@ class TransferRepositoryImpl(
             transferScheduler.resume(prefs.allowMeteredTransfers)
         }
     }
+
+    override suspend fun deleteTransfers(ids: List<String>) {
+        if (ids.isEmpty()) return
+        // Only terminal records are removed: a live row in the id list (a
+        // selection made just before the row started running again) is left
+        // for cancel(), never deleted out from under the engine.
+        val terminalIds = ids.distinct().chunked(SQL_BATCH).flatMap { chunk ->
+            chunk.mapNotNull { transferDao.byId(it) }
+        }.filter { it.state.isTerminal }.map { it.id }
+        if (terminalIds.isEmpty()) return
+        terminalIds.chunked(SQL_BATCH).forEach { transferDao.deleteByIds(it) }
+        syncFileStates()
+    }
+
+    override suspend fun retryFailedTransfers(ids: List<String>): FailedRetryOutcome {
+        var requeued = 0
+        var skippedArchiveDownloads = 0
+        for (id in ids.distinct()) {
+            val row = transferDao.byId(id) ?: continue
+            if (row.state != TransferState.FAILED) continue
+            if (row.type.isReportOnly) {
+                // A failed ARCHIVE_DOWNLOAD row retains only its display name
+                // and size (fileId/chatId/messageId/remoteFileId are all null
+                // by design, report 49): there is no archive or entry identity
+                // an extraction could be re-run from, so the record is skipped
+                // and reported, never re-queued or silently re-failed.
+                skippedArchiveDownloads++
+            } else {
+                retry(id)
+                requeued++
+            }
+        }
+        return FailedRetryOutcome(
+            requeued = requeued,
+            skippedArchiveDownloads = skippedArchiveDownloads
+        )
+    }
+
+    override suspend fun retryAllFailed(): FailedRetryOutcome =
+        retryFailedTransfers(allFailedIds())
+
+    override suspend fun removeAllFailed(): Int {
+        val failedIds = allFailedIds()
+        if (failedIds.isEmpty()) return 0
+        failedIds.chunked(SQL_BATCH).forEach { transferDao.deleteByIds(it) }
+        syncFileStates()
+        return failedIds.size
+    }
+
+    /** Every FAILED record's id, read through the section flow the UI already uses. */
+    private suspend fun allFailedIds(): List<String> =
+        transferDao.observeFailed(Int.MAX_VALUE).first().map { it.id }
 
     override suspend fun clearFinished() {
         transferDao.clearFinished()
