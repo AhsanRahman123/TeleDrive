@@ -289,7 +289,7 @@ class PreviewContentResolver(
         PreviewDispatch.AUDIO -> PreviewContent.LocalMedia(path, isAudio = true)
         PreviewDispatch.PDF -> PreviewContent.Pdf(path)
         PreviewDispatch.HTML -> readHtml(path)
-        PreviewDispatch.DOCUMENT -> readDocumentText(path)
+        PreviewDispatch.DOCUMENT -> readDocumentText(path, mimeType, fileName)
         PreviewDispatch.TEXT -> readText(path, mimeType)
         PreviewDispatch.ARCHIVE -> readArchive(mimeType, path)
         PreviewDispatch.APK -> readApk(path)
@@ -336,9 +336,21 @@ class PreviewContentResolver(
      * EPUB (Tier 1) and OOXML files extract to plain text on this IO flow. A DRM'd
      * EPUB gets its own honest message; an unparseable document keeps "Open with…".
      * Legacy .doc/.xls/.ppt never reach here — they are not OOXML and stay Unsupported.
+     *
+     * vc184 A1: the extraction receives the SAME [mimeType]/[fileName] pair the
+     * dispatch above classified on. It previously re-derived the format from
+     * the on-disk path's extension alone, so a correctly classified document
+     * whose byte source carried a different (or no) extension — a synthesised
+     * preview-cache name, a producer-named local copy — extracted as Failed
+     * and landed on "No preview for this file type" even though the dispatch
+     * had reached the document branch.
      */
-    private fun readDocumentText(path: String): PreviewContent =
-        when (val extraction = extractDocumentText(File(path))) {
+    private fun readDocumentText(
+        path: String,
+        mimeType: String,
+        fileName: String
+    ): PreviewContent =
+        when (val extraction = extractDocumentText(File(path), mimeType, fileName)) {
             is DocumentExtraction.Text ->
                 PreviewContent.PlainText(extraction.text, extraction.truncated)
             DocumentExtraction.DrmProtected ->

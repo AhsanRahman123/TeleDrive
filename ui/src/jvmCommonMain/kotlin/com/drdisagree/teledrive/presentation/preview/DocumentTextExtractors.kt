@@ -1,5 +1,6 @@
 package com.drdisagree.teledrive.presentation.preview
 
+import com.drdisagree.teledrive.core.files.MimeTypes
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import org.w3c.dom.Node
@@ -304,20 +305,28 @@ fun documentTextIsContentless(text: String): Boolean =
     }
 
 /** Extracts readable text from an OOXML file on disk (DOCX/XLSX/PPTX). */
-fun extractOfficeText(file: File): DocumentExtraction {
+fun extractOfficeText(file: File): DocumentExtraction =
+    when (val kind = documentKindForExtension(file.name.substringAfterLast('.', ""))) {
+        DocumentKind.DOCX, DocumentKind.XLSX, DocumentKind.PPTX ->
+            extractOfficeText(file, kind)
+        else -> DocumentExtraction.Failed
+    }
+
+/** Extracts readable text from an OOXML file on disk as the given [kind]. */
+fun extractOfficeText(file: File, kind: DocumentKind): DocumentExtraction {
     return runCatching {
         ZipFile(file).use { zip ->
             fun entryBytes(name: String): ByteArray? =
                 zip.getEntry(name)?.let { entry -> zip.getInputStream(entry).readBytes() }
-            when (file.name.substringAfterLast('.', "").lowercase()) {
-                "docx" -> {
+            when (kind) {
+                DocumentKind.DOCX -> {
                     val xml = entryBytes("word/document.xml")
                         ?: return DocumentExtraction.Failed
                     val text = docxToText(xml)
                     if (documentTextIsContentless(text)) return DocumentExtraction.Failed
                     truncateText(text, DOCUMENT_TEXT_MAX_CHARS)
                 }
-                "xlsx" -> {
+                DocumentKind.XLSX -> {
                     val sheetEntries = zip.entries().toList()
                         .filter {
                             Regex("""xl/worksheets/sheet\d+\.xml""").matches(it.name)
@@ -340,7 +349,7 @@ fun extractOfficeText(file: File): DocumentExtraction {
                     if (documentTextIsContentless(text)) return DocumentExtraction.Failed
                     truncateText(text, DOCUMENT_TEXT_MAX_CHARS)
                 }
-                "pptx" -> {
+                DocumentKind.PPTX -> {
                     val slides = zip.entries().toList()
                         .mapNotNull { entry ->
                             val match = Regex("""ppt/slides/slide(\d+)\.xml""")
@@ -353,7 +362,7 @@ fun extractOfficeText(file: File): DocumentExtraction {
                     if (documentTextIsContentless(text)) return DocumentExtraction.Failed
                     truncateText(text, DOCUMENT_TEXT_MAX_CHARS)
                 }
-                else -> DocumentExtraction.Failed
+                DocumentKind.EPUB -> DocumentExtraction.Failed
             }
         }
     }.getOrElse { DocumentExtraction.Failed }
@@ -396,10 +405,86 @@ fun extractEpubText(file: File): DocumentExtraction {
     }.getOrElse { DocumentExtraction.Failed }
 }
 
-/** The one dispatch for extracted/local document files: EPUB vs OOXML by extension. */
+/** The document formats the preview extractors support. */
+enum class DocumentKind { EPUB, DOCX, XLSX, PPTX }
+
+fun documentKindForExtension(extension: String): DocumentKind? =
+    when (extension.lowercase()) {
+        "epub" -> DocumentKind.EPUB
+        "docx" -> DocumentKind.DOCX
+        "xlsx" -> DocumentKind.XLSX
+        "pptx" -> DocumentKind.PPTX
+        else -> null
+    }
+
+fun documentKindForMimeType(mimeType: String): DocumentKind? = when (mimeType) {
+    "application/epub+zip" -> DocumentKind.EPUB
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ->
+        DocumentKind.DOCX
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ->
+        DocumentKind.XLSX
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation" ->
+        DocumentKind.PPTX
+    else -> null
+}
+
+/**
+ * Last-resort format detection from the ZIP's own table of contents: each
+ * supported format has a marker entry no plain ZIP carries. Only consulted
+ * when neither the MIME type nor any file name identifies the format, and a
+ * plain ZIP (no marker entry) still resolves to null — never to a document.
+ */
+fun documentKindByContent(file: File): DocumentKind? = runCatching {
+    ZipFile(file).use { zip ->
+        fun has(name: String) = zip.getEntry(name) != null
+        when {
+            has("META-INF/container.xml") -> DocumentKind.EPUB
+            has("word/document.xml") -> DocumentKind.DOCX
+            has("xl/workbook.xml") -> DocumentKind.XLSX
+            has("ppt/presentation.xml") -> DocumentKind.PPTX
+            else -> null
+        }
+    }
+}.getOrNull()
+
+/**
+ * Resolves which document format [file] is, in trust order: the caller's
+ * declared [mimeType], the caller's [displayName] extension, the on-disk
+ * file's own extension, and finally the ZIP content markers.
+ *
+ * vc184 A1: the production Files-pager route classifies by the DriveFile's
+ * stored MIME and name (see `previewDispatch`), but until now extraction
+ * re-derived the format from the ON-DISK file's extension alone and the
+ * caller classification was dropped at this seam. The byte source the
+ * resolver hands over is not always named after the DriveFile — the preview
+ * cache synthesises its name, and local copies keep whatever name their
+ * producer (managed import, MediaStore, TDLib, staging) gave them — so a
+ * file the route had correctly classified as EPUB/OOXML could still extract
+ * as [DocumentExtraction.Failed] here and render "No preview for this file
+ * type". The classification the route already computed now decides; the
+ * on-disk name is only a fallback, exactly as it was the sole signal before.
+ */
+fun resolveDocumentKind(file: File, mimeType: String, displayName: String): DocumentKind? =
+    documentKindForMimeType(mimeType)
+        ?: documentKindForExtension(displayName.substringAfterLast('.', ""))
+        ?: documentKindForExtension(file.name.substringAfterLast('.', ""))
+        ?: documentKindByContent(file)
+
+/** The one dispatch for extracted/local document files whose name is trusted. */
 fun extractDocumentText(file: File): DocumentExtraction =
-    when (file.name.substringAfterLast('.', "").lowercase()) {
-        "epub" -> extractEpubText(file)
-        "docx", "xlsx", "pptx" -> extractOfficeText(file)
-        else -> DocumentExtraction.Failed
+    extractDocumentText(file, MimeTypes.fromFileName(file.name), file.name)
+
+/**
+ * Extracts readable text from a document [file] the caller has already
+ * classified: [mimeType] and [displayName] are the DriveFile's stored MIME
+ * and name on the normal route (the same pair `previewDispatch` dispatched
+ * on), so extraction can never disagree with the dispatch that sent the
+ * file here.
+ */
+fun extractDocumentText(file: File, mimeType: String, displayName: String): DocumentExtraction =
+    when (val kind = resolveDocumentKind(file, mimeType, displayName)) {
+        DocumentKind.EPUB -> extractEpubText(file)
+        DocumentKind.DOCX, DocumentKind.XLSX, DocumentKind.PPTX ->
+            extractOfficeText(file, kind)
+        null -> DocumentExtraction.Failed
     }
