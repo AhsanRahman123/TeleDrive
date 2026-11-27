@@ -65,10 +65,14 @@ class EnqueueDownloadRepairTest {
     private class RecordingScheduler : TransferScheduler {
         var kicks = 0
         var resumes = 0
+
+        /** Mirrors the production schedulers' latch: resume() clears it. */
+        var pauseHeld = false
         override fun kick(allowMetered: Boolean) { kicks++ }
         override fun rekick(allowMetered: Boolean) { resumes++ }
-        override suspend fun pause() = Unit
-        override fun resume(allowMetered: Boolean) { resumes++ }
+        override suspend fun pause() { pauseHeld = true }
+        override fun resume(allowMetered: Boolean) { resumes++; pauseHeld = false }
+        override fun isPauseHeld(): Boolean = pauseHeld
     }
 
     private class CountingSessionTracker : BackupSessionTracker {
@@ -150,6 +154,26 @@ class EnqueueDownloadRepairTest {
         assertEquals(TransferState.QUEUED, dao.byId("existing")!!.state)
         assertTrue("scheduler must be resumed for the revived row", scheduler.resumes >= 1)
     }
+
+    @Test
+    fun `a paused existing download during the pause hold is re-queued without releasing the hold`() =
+        runBlocking {
+            insertExisting(TransferState.PAUSED)
+            scheduler.pauseHeld = true
+            val repository = repository()
+
+            val result = repository.enqueueDownload("file-1")
+
+            assertEquals(AppResult.Success("existing"), result)
+            // The A3 repair still happened: the row is runnable again...
+            assertEquals(TransferState.QUEUED, dao.byId("existing")!!.state)
+            // ...but the global resume was never reached, so the Pause-all
+            // hold (MF-1) is untouched; the wake is a kick, which production
+            // schedulers drop while held.
+            assertEquals(0, scheduler.resumes)
+            assertTrue("re-queue must kick (dropped while held in production)", scheduler.kicks >= 1)
+            assertTrue(scheduler.pauseHeld)
+        }
 
     @Test
     fun `a queued existing download re-kicks the worker`() = runBlocking {

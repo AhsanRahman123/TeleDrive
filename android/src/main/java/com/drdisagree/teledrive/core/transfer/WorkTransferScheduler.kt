@@ -74,6 +74,8 @@ class WorkTransferScheduler(
         rekick(allowMetered)
     }
 
+    override fun isPauseHeld(): Boolean = drainer.isPauseHeld()
+
     private fun enqueue(
         allowMetered: Boolean,
         policy: ExistingWorkPolicy,
