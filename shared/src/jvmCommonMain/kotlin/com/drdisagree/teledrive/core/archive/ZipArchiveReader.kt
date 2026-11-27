@@ -5,6 +5,7 @@ import java.io.OutputStream
 import java.nio.charset.Charset
 import java.util.zip.CRC32
 import java.util.zip.Inflater
+import kotlinx.coroutines.CancellationException
 
 /** One central-directory record of a ZIP archive. Sizes and offsets are the true (ZIP64-resolved) values. */
 data class ZipEntryInfo(
@@ -239,6 +240,16 @@ class ZipArchiveReader(
                     throw corrupt("The compressed data of \"${entry.name}\" is truncated or damaged.")
                 }
             }
+        } catch (failure: CancellationException) {
+            // Genuine cancellation (a Transfers stop, teardown) is NOT
+            // corruption (vc183): rethrow untouched. Wrapping it as
+            // ArchiveException made a user stop look like archive damage to
+            // every caller, bypassed every CancellationException branch
+            // downstream, and — for a batch step running as an async child —
+            // delivered the ArchiveException to the parent scope's uncaught
+            // handler, which on Android kills the process (the vc182 field
+            // force-close on repeated Cancel).
+            throw failure
         } catch (failure: ArchiveException) {
             throw failure
         } catch (failure: Exception) {

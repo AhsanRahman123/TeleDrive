@@ -434,8 +434,13 @@ class TransferRepositoryImpl(
         }
     }
 
-    override suspend fun cancel(id: String) {
-        val transfer = transferDao.byId(id) ?: return
+    override suspend fun cancel(id: String) = workerControlLock.withLock {
+        // Serialized with pause/resume (vc183): repeated or concurrent Cancel
+        // taps re-read the row under the lock, so a tap that lands after the
+        // record already terminated takes the terminal path (history delete,
+        // then absent no-op) instead of racing the first tap's state write
+        // and job cancel.
+        val transfer = transferDao.byId(id) ?: return@withLock
         if (transfer.type.isReportOnly) {
             // Terminal report-only rows are removed from history like any other record;
             // live ones are cancelled and their extraction job stopped. There is no
@@ -446,7 +451,7 @@ class TransferRepositoryImpl(
                 transferDao.setState(id, TransferState.CANCELLED, System.currentTimeMillis())
                 archiveExtractionJobs.cancel(id)
             }
-            return
+            return@withLock
         }
         if (transfer.state.isTerminal) {
             transferDao.deleteByIds(listOf(id))

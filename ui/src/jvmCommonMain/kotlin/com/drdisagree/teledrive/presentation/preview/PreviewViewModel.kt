@@ -361,7 +361,7 @@ class PreviewViewModel(
             } catch (failure: CancellationException) {
                 // The finally block clears the busy state, so a cancelled download cannot wedge
                 // later ones; cancellation itself must keep propagating.
-                archiveDownloadReporter.ownerStopped(recordId)
+                archiveDownloadReporter.ownerStopped(recordId, failure)
                 throw failure
             } catch (failure: ArchiveException) {
                 archiveDownloadReporter.fail(recordId, failure.message)
@@ -920,7 +920,7 @@ class PreviewViewModel(
                         archiveDownloadReporter.complete(recordId, savedPath)
                         saved++
                     } catch (failure: CancellationException) {
-                        archiveDownloadReporter.ownerStopped(recordId)
+                        archiveDownloadReporter.ownerStopped(recordId, failure)
                         if (currentCoroutineContext().isActive) {
                             // Per-record stop from Transfers: the repository already wrote
                             // CANCELLED or PAUSED for this record. No failure message, not

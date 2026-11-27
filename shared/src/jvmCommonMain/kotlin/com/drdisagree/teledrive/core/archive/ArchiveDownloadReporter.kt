@@ -10,10 +10,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Reports in-ZIP downloads into Transfers history as report-only
@@ -43,9 +46,18 @@ interface ArchiveDownloadReporter {
     /**
      * The extraction's owner stopped (its coroutine was cancelled). The transfer
      * repository may already have written PAUSED/CANCELLED for this record; only
-     * a row that is still RUNNING becomes CANCELLED here.
+     * a row that is still RUNNING is terminated here.
+     *
+     * [cause] distinguishes WHY the extraction stopped (vc183): a stop initiated
+     * through [ArchiveExtractionJobs] (the user pausing/cancelling from
+     * Transfers) keeps the CANCELLED outcome, as does an ordinary owner
+     * cancellation (teardown). An internal
+     * [kotlinx.coroutines.TimeoutCancellationException] from the byte source —
+     * a stop nobody asked for — is a delivery failure and lands FAILED. A null
+     * [cause] keeps the historical CANCELLED outcome for callers that cannot
+     * say why they stopped.
      */
-    suspend fun ownerStopped(recordId: String?)
+    suspend fun ownerStopped(recordId: String?, cause: CancellationException? = null)
 }
 
 /** Reporter for surfaces that do not write Transfers history (desktop this round). */
@@ -55,7 +67,7 @@ object NoOpArchiveDownloadReporter : ArchiveDownloadReporter {
     override fun progress(recordId: String?, transferredBytes: Long) = Unit
     override suspend fun complete(recordId: String?, localPath: String) = Unit
     override suspend fun fail(recordId: String?, message: String?) = Unit
-    override suspend fun ownerStopped(recordId: String?) = Unit
+    override suspend fun ownerStopped(recordId: String?, cause: CancellationException?) = Unit
 }
 
 /**
@@ -196,71 +208,104 @@ class ArchiveDownloadTracker(
 
     override suspend fun complete(recordId: String?, localPath: String) {
         if (recordId == null) return
-        try {
-            val row = transferDao.byId(recordId)
-            if (row != null && row.state == TransferState.RUNNING) {
-                transferDao.setLocalPath(recordId, localPath)
-                transferDao.setCompleted(recordId, nowMillis())
+        // Terminal writes are cancellation-proof (vc183): they are usually
+        // invoked from the extraction coroutine, and when that coroutine has
+        // been cancelled a plain suspend DAO call throws CancellationException
+        // before writing, leaving the row RUNNING forever ("No recent
+        // progress") — the stop then appears to have done nothing.
+        // NonCancellable lets the write land; the RUNNING guard below still
+        // leaves any state the transfer repository wrote first untouched.
+        withContext(NonCancellable) {
+            try {
+                val row = transferDao.byId(recordId)
+                if (row != null && row.state == TransferState.RUNNING) {
+                    transferDao.setLocalPath(recordId, localPath)
+                    transferDao.setCompleted(recordId, nowMillis())
+                }
+                // Any other state was written by the transfer repository first
+                // (pause/cancel from Transfers) and is left untouched.
+            } catch (failure: Exception) {
+                // Best-effort: the file is saved either way.
+            } finally {
+                jobs.unregister(recordId)
+                jobs.consumeRegistryCancel(recordId)
+                samples.remove(recordId)
+                writeMutexes.remove(recordId)
             }
-            // Any other state was written by the transfer repository first
-            // (pause/cancel from Transfers) and is left untouched.
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Exception) {
-            // Best-effort: the file is saved either way.
-        } finally {
-            jobs.unregister(recordId)
-            samples.remove(recordId)
-            writeMutexes.remove(recordId)
         }
     }
 
     override suspend fun fail(recordId: String?, message: String?) {
         if (recordId == null) return
-        try {
-            val row = transferDao.byId(recordId)
-            if (row != null && row.state == TransferState.RUNNING) {
-                transferDao.setFailed(
-                    recordId,
-                    TransferState.FAILED,
-                    message,
-                    nowMillis()
-                )
+        // Cancellation-proof, like complete(): a failure reported from an
+        // already-cancelled extraction coroutine must still land (vc183).
+        withContext(NonCancellable) {
+            try {
+                val row = transferDao.byId(recordId)
+                if (row != null && row.state == TransferState.RUNNING) {
+                    transferDao.setFailed(
+                        recordId,
+                        TransferState.FAILED,
+                        message,
+                        nowMillis()
+                    )
+                }
+                // Any other state was written by the transfer repository first
+                // (pause/cancel from Transfers) and is left untouched.
+            } catch (failure: Exception) {
+                // Best-effort history write.
+            } finally {
+                jobs.unregister(recordId)
+                jobs.consumeRegistryCancel(recordId)
+                samples.remove(recordId)
+                writeMutexes.remove(recordId)
             }
-            // Any other state was written by the transfer repository first
-            // (pause/cancel from Transfers) and is left untouched.
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Exception) {
-            // Best-effort history write.
-        } finally {
-            jobs.unregister(recordId)
-            samples.remove(recordId)
-            writeMutexes.remove(recordId)
         }
     }
 
-    override suspend fun ownerStopped(recordId: String?) {
+    override suspend fun ownerStopped(recordId: String?, cause: CancellationException?) {
         if (recordId == null) return
-        try {
-            val row = transferDao.byId(recordId)
-            if (row != null && row.state == TransferState.RUNNING) {
-                transferDao.setState(
-                    recordId,
-                    TransferState.CANCELLED,
-                    nowMillis()
-                )
+        // Cancellation-proof, like complete(): this is normally called from
+        // the extraction coroutine's own CancellationException catch, i.e.
+        // from a context that is already cancelled (vc183).
+        withContext(NonCancellable) {
+            try {
+                val row = transferDao.byId(recordId)
+                if (row != null && row.state == TransferState.RUNNING) {
+                    val registryStop = jobs.wasCancelledViaRegistry(recordId)
+                    when {
+                        // A Transfers stop (the repository normally already
+                        // wrote PAUSED/CANCELLED; a still-RUNNING row becomes
+                        // CANCELLED), a caller that cannot name its cause, and
+                        // ordinary owner teardown all keep the historical
+                        // CANCELLED outcome.
+                        registryStop || cause == null || cause !is TimeoutCancellationException ->
+                            transferDao.setState(
+                                recordId,
+                                TransferState.CANCELLED,
+                                nowMillis()
+                            )
+                        // Nobody asked for this stop: the byte source's own
+                        // delivery deadline fired. That is a failure, not a
+                        // user cancellation.
+                        else -> transferDao.setFailed(
+                            recordId,
+                            TransferState.FAILED,
+                            "Telegram did not deliver the file in time. Try again.",
+                            nowMillis()
+                        )
+                    }
+                }
+                // Any other state was written by the transfer repository first
+                // (pause/cancel from Transfers) and is left untouched.
+            } catch (failure: Exception) {
+                // Best-effort history write.
+            } finally {
+                jobs.unregister(recordId)
+                jobs.consumeRegistryCancel(recordId)
+                samples.remove(recordId)
+                writeMutexes.remove(recordId)
             }
-            // Any other state was written by the transfer repository first
-            // (pause/cancel from Transfers) and is left untouched.
-        } catch (failure: CancellationException) {
-            throw failure
-        } catch (failure: Exception) {
-            // Best-effort history write.
-        } finally {
-            jobs.unregister(recordId)
-            samples.remove(recordId)
-            writeMutexes.remove(recordId)
         }
     }
 
