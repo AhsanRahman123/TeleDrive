@@ -183,6 +183,7 @@ import com.drdisagree.teledrive.presentation.preview.ArchiveBatchProgress
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntry
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
 import com.drdisagree.teledrive.presentation.preview.archiveImagePagerIndices
+import com.drdisagree.teledrive.presentation.preview.archiveUnifiedPreviewIndices
 import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
 import com.drdisagree.teledrive.desktop.media.ArchiveThumbState
 import com.drdisagree.teledrive.desktop.media.DesktopArchiveEntryThumbnailStore
@@ -643,6 +644,22 @@ fun DesktopPreviewScreen(
                                 Icons.Filled.DeleteOutline,
                                 contentDescription = stringResource(Res.string.common_move_trash)
                             )
+                        }
+                        // PC 1.6.25 item 8: top-bar Download beside Info for the
+                        // normal photo/video viewers (previously only inside the
+                        // overflow menu), routing through the existing normal
+                        // download path. Shown under the same condition the
+                        // overflow uses: a remote copy not yet downloaded.
+                        if (currentFile.hasRemoteCopy && !currentFile.hasLocalCopy) {
+                            TooltipIconButton(
+                                tooltip = stringResource(Res.string.common_download),
+                                onClick = { viewModel.download(currentFile) }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Download,
+                                    contentDescription = stringResource(Res.string.common_download)
+                                )
+                            }
                         }
                         TooltipIconButton(tooltip = stringResource(Res.string.preview_file_info), onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
@@ -1389,6 +1406,10 @@ private fun PreviewPane(
                         )
                     },
                     onDismissPreview = { viewModel.dismissArchivePreview() },
+                    onStepArchivePreview = { delta, sequence ->
+                        viewModel.stepArchivePreview(displayedFile, delta, sequence)
+                    },
+                    onDownloadCurrentEntry = { viewModel.downloadCurrentArchiveEntry() },
                     preferredAudioLanguage = preferredAudioLanguage,
                     preferredSubtitleLanguage = preferredSubtitleLanguage,
                     onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
@@ -1814,6 +1835,7 @@ private fun ArchiveImagePreview(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onDismiss: () -> Unit,
+    onDownload: () -> Unit = {},
     snackbarHostState: SnackbarHostState
 ) {
     var rotationDegrees by remember(preview.path) { mutableIntStateOf(0) }
@@ -1939,6 +1961,16 @@ private fun ArchiveImagePreview(
                     onClick = { if (!openExternally(preview.path)) openFailed = true }
                 ) {
                     Icon(Icons.Filled.Edit, contentDescription = "Edit")
+                }
+                TooltipIconButton(
+                    tooltip = stringResource(Res.string.common_download),
+                    onClick = onDownload,
+                    enabled = !busy
+                ) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = stringResource(Res.string.common_download)
+                    )
                 }
                 TooltipIconButton(
                     tooltip = stringResource(Res.string.preview_file_info),
@@ -2229,6 +2261,10 @@ internal fun DesktopArchivePane(
     onEntryDownload: (Int) -> Unit,
     onDownloadSelection: (Set<Int>, Set<String>) -> Unit,
     onDismissPreview: () -> Unit,
+    /** Unified in-zip stepping (item 7): (delta, unified sequence) -> step. */
+    onStepArchivePreview: (Int, List<Int>) -> Unit = { _, _ -> },
+    /** Download-while-viewing for the open in-zip preview (item 8). */
+    onDownloadCurrentEntry: () -> Unit = {},
     preferredAudioLanguage: String,
     preferredSubtitleLanguage: String,
     onPreferredAudioLanguage: (String) -> Unit,
@@ -2614,10 +2650,16 @@ internal fun DesktopArchivePane(
                 }
             }
         }
-        // The in-zip photo pager's stops: the image entries among the rows as
-        // currently displayed (tree + sort + filter applied), in display order.
-        val displayedImageIndices = remember(rows, listing) {
-            archiveImagePagerIndices(listing, rows.mapNotNull { it.node.entryIndex })
+        // The UNIFIED in-zip stepping sequence (PC 1.6.25 item 7): ALL
+        // previewable entries among the rows as currently displayed (tree +
+        // sort + filter applied), in display order, across types — stepping
+        // from any in-zip preview (photo / video / audio / text) moves to the
+        // neighbouring previewable entry and opens its own surface. Desktop
+        // has no touch swipe: the keyboard arrows / W-E keys and the on-screen
+        // prev/next controls (image arrows, player Skip buttons, overlay
+        // buttons) are the desktop equivalent and drive this same sequence.
+        val unifiedPreviewIndices = remember(rows, listing) {
+            archiveUnifiedPreviewIndices(listing, rows.mapNotNull { it.node.entryIndex })
         }
         // In-archive preview overlay: image in the full desktop photo viewer
         // (note 7), audio AND video in the desktop player (notes 9 — video is
@@ -2625,30 +2667,28 @@ internal fun DesktopArchivePane(
         // text read-only.
         when (val preview = archivePreview) {
             is ArchiveEntryPreview.Image -> {
-                val pagerPosition = displayedImageIndices.indexOf(preview.entryIndex)
+                val pagerPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
                 ArchiveImagePreview(
                     preview = preview,
                     entry = listing.getOrNull(preview.entryIndex),
                     hasPrevious = pagerPosition > 0,
                     hasNext = pagerPosition >= 0 &&
-                        pagerPosition < displayedImageIndices.lastIndex,
+                        pagerPosition < unifiedPreviewIndices.lastIndex,
                     busy = busyEntryIndex != null,
-                    onPrevious = {
-                        archiveImagePagerNeighbour(
-                            displayedImageIndices, preview.entryIndex, -1
-                        )?.let(onPreviewEntry)
-                    },
-                    onNext = {
-                        archiveImagePagerNeighbour(
-                            displayedImageIndices, preview.entryIndex, +1
-                        )?.let(onPreviewEntry)
-                    },
+                    onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                    onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
                     onDismiss = onDismissPreview,
+                    onDownload = onDownloadCurrentEntry,
                     snackbarHostState = snackbarHostState
                 )
             }
 
             is ArchiveEntryPreview.Video -> {
+                val stepPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
+                val stepHasPrevious = stepPosition > 0
+                val stepHasNext = stepPosition >= 0 &&
+                    stepPosition < unifiedPreviewIndices.lastIndex
+                var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -2664,6 +2704,14 @@ internal fun DesktopArchivePane(
                             preferredSubtitleLanguage = preferredSubtitleLanguage,
                             onPreferredAudioLanguage = onPreferredAudioLanguage,
                             onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
+                            // Item 7: the player's own SkipPrevious/SkipNext
+                            // buttons step the UNIFIED sequence (a step can
+                            // land on an image/audio/text entry, which then
+                            // opens its own surface instead of this player).
+                            onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                            onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                            hasPrevious = stepHasPrevious && busyEntryIndex == null,
+                            hasNext = stepHasNext && busyEntryIndex == null,
                             backgroundPlayback = backgroundPlayback,
                             onBackgroundPlaybackChange = onBackgroundPlaybackChange
                         )
@@ -2675,16 +2723,34 @@ internal fun DesktopArchivePane(
                             snackbarHostState = snackbarHostState
                         )
                     }
-                    FilledIconButton(
-                        onClick = onDismissPreview,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
-                    }
+                    ArchiveOverlayBar(
+                        name = preview.name,
+                        busy = busyEntryIndex != null,
+                        hasPrevious = stepHasPrevious,
+                        hasNext = stepHasNext,
+                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                        onDownload = onDownloadCurrentEntry,
+                        onInfo = { infoOpen = true },
+                        onDismiss = onDismissPreview,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+                if (infoOpen) {
+                    ArchiveEntryInfoDialog(
+                        previewName = preview.name,
+                        entry = listing.getOrNull(preview.entryIndex),
+                        onDismiss = { infoOpen = false }
+                    )
                 }
             }
 
             is ArchiveEntryPreview.Audio -> {
+                val stepPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
+                val stepHasPrevious = stepPosition > 0
+                val stepHasNext = stepPosition >= 0 &&
+                    stepPosition < unifiedPreviewIndices.lastIndex
+                var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -2700,6 +2766,10 @@ internal fun DesktopArchivePane(
                             preferredSubtitleLanguage = preferredSubtitleLanguage,
                             onPreferredAudioLanguage = onPreferredAudioLanguage,
                             onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
+                            onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                            onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                            hasPrevious = stepHasPrevious && busyEntryIndex == null,
+                            hasNext = stepHasNext && busyEntryIndex == null,
                             backgroundPlayback = backgroundPlayback,
                             onBackgroundPlaybackChange = onBackgroundPlaybackChange
                         )
@@ -2711,17 +2781,35 @@ internal fun DesktopArchivePane(
                             snackbarHostState = snackbarHostState
                         )
                     }
-                    FilledIconButton(
-                        onClick = onDismissPreview,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
-                    }
+                    ArchiveOverlayBar(
+                        name = preview.name,
+                        busy = busyEntryIndex != null,
+                        hasPrevious = stepHasPrevious,
+                        hasNext = stepHasNext,
+                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                        onDownload = onDownloadCurrentEntry,
+                        onInfo = { infoOpen = true },
+                        onDismiss = onDismissPreview,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+                if (infoOpen) {
+                    ArchiveEntryInfoDialog(
+                        previewName = preview.name,
+                        entry = listing.getOrNull(preview.entryIndex),
+                        onDismiss = { infoOpen = false }
+                    )
                 }
             }
 
             is ArchiveEntryPreview.Text -> {
                 val textScrollState = rememberScrollState()
+                val stepPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
+                val stepHasPrevious = stepPosition > 0
+                val stepHasNext = stepPosition >= 0 &&
+                    stepPosition < unifiedPreviewIndices.lastIndex
+                var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -2731,7 +2819,7 @@ internal fun DesktopArchivePane(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(textScrollState)
-                            .padding(24.dp)
+                            .padding(start = 24.dp, end = 24.dp, top = 64.dp, bottom = 24.dp)
                     ) {
                         Text(
                             text = preview.text,
@@ -2741,16 +2829,108 @@ internal fun DesktopArchivePane(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
-                    FilledIconButton(
-                        onClick = onDismissPreview,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
-                    }
+                    ArchiveOverlayBar(
+                        name = preview.name,
+                        busy = busyEntryIndex != null,
+                        hasPrevious = stepHasPrevious,
+                        hasNext = stepHasNext,
+                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                        onDownload = onDownloadCurrentEntry,
+                        onInfo = { infoOpen = true },
+                        onDismiss = onDismissPreview,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+                if (infoOpen) {
+                    ArchiveEntryInfoDialog(
+                        previewName = preview.name,
+                        entry = listing.getOrNull(preview.entryIndex),
+                        onDismiss = { infoOpen = false }
+                    )
                 }
             }
 
             null -> Unit
+        }
+    }
+}
+
+/**
+ * Top bar for the non-image in-zip overlays (video / audio / text), PC 1.6.25
+ * items 7+8: title, unified-sequence prev/next, Download-while-viewing and
+ * Info — the actions the image overlay's toolbar already had — plus Close.
+ * The image overlay keeps its own richer toolbar (rotate/flip/Edit) and gains
+ * the same Download button there.
+ */
+@Composable
+private fun ArchiveOverlayBar(
+    name: String,
+    busy: Boolean,
+    hasPrevious: Boolean,
+    hasNext: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onDownload: () -> Unit,
+    onInfo: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(start = 8.dp)
+        )
+        TooltipIconButton(
+            tooltip = stringResource(Res.string.preview_previous),
+            onClick = onPrevious,
+            enabled = hasPrevious && !busy
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = stringResource(Res.string.preview_previous)
+            )
+        }
+        TooltipIconButton(
+            tooltip = stringResource(Res.string.preview_next),
+            onClick = onNext,
+            enabled = hasNext && !busy
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = stringResource(Res.string.preview_next)
+            )
+        }
+        TooltipIconButton(
+            tooltip = stringResource(Res.string.common_download),
+            onClick = onDownload,
+            enabled = !busy
+        ) {
+            Icon(
+                Icons.Filled.Download,
+                contentDescription = stringResource(Res.string.common_download)
+            )
+        }
+        TooltipIconButton(
+            tooltip = stringResource(Res.string.preview_file_info),
+            onClick = onInfo
+        ) {
+            Icon(
+                Icons.Filled.Info,
+                contentDescription = stringResource(Res.string.preview_file_info)
+            )
+        }
+        TooltipIconButton(tooltip = "Close", onClick = onDismiss) {
+            Icon(Icons.Filled.Close, contentDescription = "Close")
         }
     }
 }

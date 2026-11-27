@@ -72,6 +72,66 @@ fun archiveImagePagerNeighbour(
     return pagerIndices.getOrNull(position + step)
 }
 
+/** Headroom kept free beyond an in-archive video's own temp file. */
+const val ARCHIVE_VIDEO_SPACE_MARGIN_BYTES: Long = 16L * 1024 * 1024
+
+/**
+ * The free-space preflight for in-archive video (Android vc181/vc182): the
+ * entry's exact uncompressed size plus a fixed margin must fit in [freeBytes]
+ * BEFORE extraction starts, so a disk-full mid-extraction is never misreported
+ * as archive corruption. Subtraction-first so no size can overflow it.
+ */
+fun archiveVideoFitsInFreeSpace(entrySizeBytes: Long, freeBytes: Long): Boolean =
+    entrySizeBytes >= 0 &&
+        freeBytes - entrySizeBytes >= ARCHIVE_VIDEO_SPACE_MARGIN_BYTES
+
+/**
+ * Whether [entry] can be stepped to in the UNIFIED in-zip preview sequence
+ * (PC 1.6.25 item 7): every type the desktop in-zip viewer can open in place —
+ * image, audio, text within its preview cap, and video (extract-then-play with
+ * the free-space preflight). Download-only entries are skipped, never shown as
+ * placeholders. Identity is the listing index throughout.
+ */
+fun archiveEntryUnifiedPreviewable(entry: ArchiveEntry): Boolean {
+    if (entry.isDirectory) return false
+    return when (archiveEntryTapAction(entry)) {
+        ArchiveEntryTapAction.PREVIEW_IMAGE,
+        ArchiveEntryTapAction.PLAY_AUDIO -> true
+        ArchiveEntryTapAction.PREVIEW_TEXT -> archiveEntryTextPreviewable(entry)
+        ArchiveEntryTapAction.DOWNLOAD ->
+            // Video is DOWNLOAD in the shared tap routing (the desktop pane
+            // intercepts it for its player); it IS a unified-sequence stop.
+            com.drdisagree.teledrive.core.files.MimeTypes.isVideo(
+                com.drdisagree.teledrive.core.files.MimeTypes.fromFileName(entry.name)
+            )
+    }
+}
+
+/**
+ * The unified in-zip stepping sequence: the previewable entries among
+ * [displayedIndices] (listing indices in the order the viewer currently
+ * displays them — tree, sort and filter already applied by the caller), in
+ * display order, across ALL previewable types. Stepping never leaves the
+ * displayed set.
+ */
+fun archiveUnifiedPreviewIndices(
+    listing: List<ArchiveEntry>,
+    displayedIndices: List<Int>
+): List<Int> = displayedIndices.filter { index ->
+    val entry = listing.getOrNull(index)
+    entry != null && archiveEntryUnifiedPreviewable(entry)
+}
+
+/**
+ * The unified-sequence neighbour of [currentIndex] for [step] (-1/+1), or null
+ * at either end / when the current entry is not a sequence stop. No wrap.
+ */
+fun archiveUnifiedPreviewNeighbour(
+    sequence: List<Int>,
+    currentIndex: Int,
+    step: Int
+): Int? = archiveImagePagerNeighbour(sequence, currentIndex, step)
+
 /** True when [entry] may be previewed as text: right type AND within the size cap. */
 fun archiveEntryTextPreviewable(entry: ArchiveEntry): Boolean =
     archiveEntryTapAction(entry) == ArchiveEntryTapAction.PREVIEW_TEXT &&

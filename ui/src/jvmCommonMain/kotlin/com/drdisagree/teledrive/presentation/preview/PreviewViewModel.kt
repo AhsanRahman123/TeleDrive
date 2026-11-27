@@ -316,6 +316,15 @@ class PreviewViewModel(
      * teardown can no longer wipe the other's busy mark.
      */
     private val archiveExtractionMutex = Mutex()
+
+    /**
+     * Monotonic token for in-zip preview loads (PC 1.6.25 item 7): every new
+     * load/step/dismiss bumps it, and a load publishes ONLY if its token is
+     * still current at publish time — a superseded step publishes nothing and
+     * its temp file is deleted instead.
+     */
+    @Volatile
+    private var archivePreviewGeneration = 0
     private var archiveBusyOwner: Any? = null
     private val archiveBusyLock = Any()
 
@@ -583,6 +592,7 @@ class PreviewViewModel(
         val owner = Any()
         if (!archiveExtractionMutex.tryLock(owner)) return
         markArchiveBusy(owner, entryIndex)
+        val generation = ++archivePreviewGeneration
         viewModelScope.launch {
             try {
                 val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
@@ -590,17 +600,22 @@ class PreviewViewModel(
                     ArchiveEntryTapAction.PREVIEW_IMAGE ->
                         ArchiveEntryPreview.Image(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PLAY_AUDIO ->
-                        ArchiveEntryPreview.Audio(displayName, temp.absolutePath)
+                        ArchiveEntryPreview.Audio(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PREVIEW_TEXT -> {
                         // String decoding with the UTF-8 charset replaces malformed input
                         // instead of failing, so a non-UTF-8 text file still shows sanely.
                         val text = temp.readBytes().toString(Charsets.UTF_8)
                         temp.delete()
-                        ArchiveEntryPreview.Text(displayName, text)
+                        ArchiveEntryPreview.Text(displayName, text, entryIndex)
                     }
                     ArchiveEntryTapAction.DOWNLOAD -> error("unreachable")
                 }
-                publishArchivePreview(preview)
+                if (generation != archivePreviewGeneration) {
+                    // Superseded while extracting: publish nothing.
+                    deleteArchivePreviewTemp(preview)
+                    return@launch
+                }
+                publishArchivePreview(preview, file.id)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: ArchiveException) {
@@ -623,9 +638,14 @@ class PreviewViewModel(
      * failed extraction never reaches this point and the current preview (and
      * its temp) stays exactly as it was.
      */
-    private fun publishArchivePreview(preview: ArchiveEntryPreview) {
+    private fun publishArchivePreview(preview: ArchiveEntryPreview, fileId: String? = null) {
         val replaced = _uiState.value.archivePreview
-        _uiState.update { it.copy(archivePreview = preview) }
+        _uiState.update {
+            it.copy(
+                archivePreview = preview,
+                archivePreviewFileId = fileId ?: it.archivePreviewFileId
+            )
+        }
         if (replaced != null && replaced != preview) deleteArchivePreviewTemp(replaced)
     }
 
@@ -647,9 +667,51 @@ class PreviewViewModel(
 
     /** Closes the in-archive preview and deletes its temp file (text previews hold no file). */
     fun dismissArchivePreview() {
+        archivePreviewGeneration++
         val preview = _uiState.value.archivePreview
-        _uiState.update { it.copy(archivePreview = null) }
+        _uiState.update { it.copy(archivePreview = null, archivePreviewFileId = null) }
         deleteArchivePreviewTemp(preview)
+    }
+
+    /**
+     * Download-while-viewing for the in-zip viewer (PC 1.6.25 item 8): resolves
+     * the open preview's owning archive file and entry index, then delegates to
+     * the EXISTING list-row path [downloadArchiveEntry] — same report-only
+     * Transfers record and instant View snackbar, no new download logic.
+     */
+    fun downloadCurrentArchiveEntry() {
+        val state = _uiState.value
+        val fileId = state.archivePreviewFileId ?: return
+        val entryIndex = state.archivePreview?.entryIndex ?: return
+        if (entryIndex < 0) return
+        val file = state.files.firstOrNull { it.id == fileId } ?: return
+        downloadArchiveEntry(file, entryIndex)
+    }
+
+    /**
+     * One step in the UNIFIED in-zip preview sequence (PC 1.6.25 item 7):
+     * [sequence] is the displayed previewable listing indices across ALL types
+     * (built by the pane via archiveUnifiedPreviewIndices). Stepping from any
+     * in-zip preview — photo, video, audio or text — moves to the neighbouring
+     * previewable entry in display order and opens it through the same load
+     * path as an individual tap, so the correct surface per type is chosen by
+     * the entry itself, switch failures report exactly like an individual open
+     * (no false corruption verdicts), and a failed/refused step never moves
+     * the published preview. Video targets run the free-space preflight inside
+     * the load path before any extraction. No neighbour pre-extraction, ever.
+     * Returns false when there is no neighbour (either end / no preview open).
+     */
+    fun stepArchivePreview(file: DriveFile, delta: Int, sequence: List<Int>): Boolean {
+        val current = _uiState.value.archivePreview ?: return false
+        val target = archiveUnifiedPreviewNeighbour(sequence, current.entryIndex, delta)
+            ?: return false
+        val entry = _uiState.value.archiveListings[file.id]?.getOrNull(target) ?: return false
+        if (MimeTypes.isVideo(MimeTypes.fromFileName(entry.name))) {
+            previewArchiveVideoEntry(file, target)
+        } else {
+            previewArchiveEntry(file, target)
+        }
+        return true
     }
 
     /**
@@ -678,13 +740,38 @@ class PreviewViewModel(
         if (occurrence < 0) return
         val displayName = archiveEntryDisplayName(entry)
         // MF-1: same synchronous gate claim as previewArchiveEntry.
+        // Free-space preflight (Android vc181/vc182 semantics): the entry
+        // extracts WHOLE to a temp file, so refuse up front when the temp dir
+        // cannot hold it — a disk-full mid-extraction must not read as
+        // archive corruption. The current preview stays untouched on refusal.
+        val tempDir = java.io.File(System.getProperty("java.io.tmpdir") ?: ".")
+        val freeBytes = tempDir.usableSpace
+        if (!archiveVideoFitsInFreeSpace(entry.sizeBytes, freeBytes)) {
+            _messages.tryEmit(
+                UiText.Plain(
+                    "There is not enough free space to play this video here. " +
+                        "It needs about " +
+                        com.drdisagree.teledrive.presentation.common.Formatters.bytes(entry.sizeBytes) +
+                        " but only " +
+                        com.drdisagree.teledrive.presentation.common.Formatters.bytes(freeBytes) +
+                        " is free. Download it instead."
+                )
+            )
+            return
+        }
         val owner = Any()
         if (!archiveExtractionMutex.tryLock(owner)) return
         markArchiveBusy(owner, entryIndex)
+        val generation = ++archivePreviewGeneration
         viewModelScope.launch {
             try {
                 val temp = remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
-                publishArchivePreview(ArchiveEntryPreview.Video(displayName, temp.absolutePath))
+                val videoPreview = ArchiveEntryPreview.Video(displayName, temp.absolutePath, entryIndex)
+                if (generation != archivePreviewGeneration) {
+                    deleteArchivePreviewTemp(videoPreview)
+                    return@launch
+                }
+                publishArchivePreview(videoPreview, file.id)
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: ArchiveException) {
