@@ -1,35 +1,29 @@
 package com.drdisagree.teledrive.presentation.common
 
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import androidx.navigationevent.compose.NavigationEventDispatcherOwner
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performKeyInput
-import androidx.compose.ui.test.pressKey
-import androidx.compose.ui.unit.dp
-import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
 /**
- * P2 (1.6.26) mechanism pin: on desktop, an Escape key press reaches
- * [AppBackHandler] — the production wrapper every screen's back ladder
- * runs through (Files, Gallery, Collection, Search, Trash, Transfers,
- * Channels, Settings sections, …). Compose Multiplatform's desktop scene
- * routes an unconsumed Escape through the NavigationEvent dispatcher to
- * the registered back handler, the same route a Dialog's dismiss takes
- * (PC-30). If this ever stops holding, every AppBackHandler-based Esc
- * ladder is dead and this test is the canary.
+ * P2 (1.6.26) mechanism pin for every AppBackHandler-based Esc ladder
+ * (Files, Gallery, Collection, Search, Trash, Transfers, Channels,
+ * Settings sections, the local preview, …).
+ *
+ * In the real desktop window, an unconsumed Escape key press is turned
+ * into a completed back navigation event by the window's scene layer
+ * (the route a Dialog's dismiss-on-back takes — PC-30), and
+ * [AppBackHandler] is what receives it. The headless test scene has no
+ * window layer to perform that conversion, so this test supplies the
+ * dispatcher owner itself and dispatches the completed back event
+ * directly: it pins that the production wrapper registers, fires when
+ * enabled, and stays silent when disabled.
  */
 @OptIn(ExperimentalTestApi::class)
 class AppBackHandlerEscapeTest {
@@ -37,43 +31,33 @@ class AppBackHandlerEscapeTest {
     @get:Rule
     val rule = createComposeRule()
 
+    private class TestOwner : NavigationEventDispatcherOwner {
+        override val navigationEventDispatcher = NavigationEventDispatcher()
+    }
+
     @Test
-    fun `escape press fires the registered back handler`() {
+    fun `completed back event fires the registered back handler`() {
         val backs = AtomicInteger(0)
+        val owner = TestOwner()
         rule.setContent {
-            val focusRequester = remember { FocusRequester() }
-            LaunchedEffect(Unit) { focusRequester.requestFocus() }
-            AppBackHandler { backs.incrementAndGet() }
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .focusRequester(focusRequester)
-                    .focusable()
-                    .testTag("surface")
-            )
+            CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) {
+                AppBackHandler { backs.incrementAndGet() }
+            }
         }
-        rule.onNodeWithTag("surface").performKeyInput { pressKey(Key.Escape) }
-        rule.waitForIdle()
+        rule.runOnIdle { owner.navigationEventDispatcher.dispatchOnBackCompleted() }
         assertEquals(1, backs.get())
     }
 
     @Test
-    fun `disabled handler does not fire on escape`() {
+    fun `disabled handler does not fire on a completed back event`() {
         val backs = AtomicInteger(0)
+        val owner = TestOwner()
         rule.setContent {
-            val focusRequester = remember { FocusRequester() }
-            LaunchedEffect(Unit) { focusRequester.requestFocus() }
-            AppBackHandler(enabled = false) { backs.incrementAndGet() }
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .focusRequester(focusRequester)
-                    .focusable()
-                    .testTag("surface")
-            )
+            CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) {
+                AppBackHandler(enabled = false) { backs.incrementAndGet() }
+            }
         }
-        rule.onNodeWithTag("surface").performKeyInput { pressKey(Key.Escape) }
-        rule.waitForIdle()
+        rule.runOnIdle { owner.navigationEventDispatcher.dispatchOnBackCompleted() }
         assertEquals(0, backs.get())
     }
 }

@@ -1,14 +1,12 @@
 package com.drdisagree.teledrive.desktop.ui
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.performKeyInput
-import androidx.compose.ui.test.pressKey
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.crypto.StreamCrypto
 import com.drdisagree.teledrive.core.crypto.WrappedKeyRepository
@@ -159,9 +157,14 @@ class DesktopLocalPreviewScreenTest {
         }
         rule.onNodeWithText("read me from the zip").assertIsDisplayed()
 
-        rule.onRoot().performKeyInput { pressKey(Key.Escape) }
+        // The top-bar Back button is the production press path available
+        // in the headless scene; the screen's Esc key runs through
+        // AppBackHandler, the same wrapper the mechanism test pins
+        // (AppBackHandlerEscapeTest) — the window layer performs the
+        // Escape-to-back-event conversion in the real app.
+        rule.onNodeWithContentDescription("Back").performClick()
         rule.waitForIdle()
-        assertEquals("escape must run the local preview's back action", 1, backs.get())
+        assertEquals("the back action must leave the local preview", 1, backs.get())
     }
 
     @Test

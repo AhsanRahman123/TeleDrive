@@ -6,7 +6,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
@@ -26,6 +25,12 @@ import org.junit.Test
  * straight to dismiss and closed the whole picker from any depth (the
  * PC-30 lesson). Exercised against the REAL dialogs with desktop
  * platform capabilities provided, the configuration the PC app runs.
+ *
+ * Key delivery follows the DesktopUploadPickerDialogTest pattern: key
+ * input goes to the focused element of the dialog's scene, so the
+ * confirm button is clicked once to place focus inside the dialog (the
+ * fakes' onConfirm is a no-op record) and then serves as the stable
+ * handle for every Escape.
  */
 @OptIn(ExperimentalTestApi::class)
 class FolderPickerEscapeBackTest {
@@ -55,8 +60,8 @@ class FolderPickerEscapeBackTest {
         modifiedAt = 0
     )
 
-    private fun pressEscapeOnRoot() {
-        rule.onRoot().performKeyInput { pressKey(Key.Escape) }
+    private fun pressEscape(confirmLabel: String) {
+        rule.onNodeWithText(confirmLabel).performKeyInput { pressKey(Key.Escape) }
         rule.waitForIdle()
     }
 
@@ -85,16 +90,18 @@ class FolderPickerEscapeBackTest {
             }
         }
         rule.onNodeWithText("Alpha").assertIsDisplayed()
+        // Focus inside the dialog scene (see class doc), then descend.
+        rule.onNodeWithText("Select").performClick()
         rule.onNodeWithText("Alpha").performClick()
         rule.onNodeWithText("Beta").assertIsDisplayed()
 
         // One Escape: up exactly one level, dialog still open.
-        pressEscapeOnRoot()
+        pressEscape("Select")
         rule.onNodeWithText("Alpha").assertIsDisplayed()
         assertFalse("one Escape inside a folder must not dismiss", dismissed.get())
 
         // Escape at the root: dismiss.
-        pressEscapeOnRoot()
+        pressEscape("Select")
         assertTrue("Escape at the root dismisses", dismissed.get())
     }
 
@@ -119,16 +126,18 @@ class FolderPickerEscapeBackTest {
             }
         }
         rule.onNodeWithText("Sub").assertIsDisplayed()
+        // Focus inside the dialog scene (see class doc), then descend.
+        rule.onNodeWithText("Select this folder").performClick()
         rule.onNodeWithText("Sub").performClick()
         rule.waitForIdle()
 
         // One Escape: back up to the root listing, dialog still open.
-        pressEscapeOnRoot()
+        pressEscape("Select this folder")
         rule.onNodeWithText("Sub").assertIsDisplayed()
         assertFalse("one Escape inside a folder must not dismiss", dismissed.get())
 
         // Escape at the root: dismiss.
-        pressEscapeOnRoot()
+        pressEscape("Select this folder")
         assertTrue("Escape at the root dismisses", dismissed.get())
     }
 }
