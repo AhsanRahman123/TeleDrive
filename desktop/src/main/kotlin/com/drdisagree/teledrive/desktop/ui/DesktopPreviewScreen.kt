@@ -2,6 +2,8 @@ package com.drdisagree.teledrive.desktop.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -180,8 +182,10 @@ import com.drdisagree.teledrive.presentation.preview.ArchiveBackStep
 import com.drdisagree.teledrive.presentation.preview.ArchiveBatchProgress
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntry
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
-import com.drdisagree.teledrive.presentation.preview.archiveImagePagerIndices
-import com.drdisagree.teledrive.presentation.preview.archiveImagePagerNeighbour
+import com.drdisagree.teledrive.presentation.preview.archiveUnifiedPreviewIndices
+import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
+import com.drdisagree.teledrive.desktop.media.ArchiveThumbState
+import com.drdisagree.teledrive.desktop.media.DesktopArchiveEntryThumbnailStore
 import com.drdisagree.teledrive.presentation.preview.archiveBackStep
 import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
 import com.drdisagree.teledrive.presentation.preview.ArchiveRowState
@@ -638,6 +642,22 @@ fun DesktopPreviewScreen(
                                 Icons.Filled.DeleteOutline,
                                 contentDescription = stringResource(Res.string.common_move_trash)
                             )
+                        }
+                        // PC 1.6.25 item 8: top-bar Download beside Info for the
+                        // normal photo/video viewers (previously only inside the
+                        // overflow menu), routing through the existing normal
+                        // download path. Shown under the same condition the
+                        // overflow uses: a remote copy not yet downloaded.
+                        if (currentFile.hasRemoteCopy && !currentFile.hasLocalCopy) {
+                            TooltipIconButton(
+                                tooltip = stringResource(Res.string.common_download),
+                                onClick = { viewModel.download(currentFile) }
+                            ) {
+                                Icon(
+                                    Icons.Filled.Download,
+                                    contentDescription = stringResource(Res.string.common_download)
+                                )
+                            }
                         }
                         TooltipIconButton(tooltip = stringResource(Res.string.preview_file_info), onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
@@ -1152,6 +1172,7 @@ private fun PreviewPane(
     // Resolve local and streamed sources before the content branch so the native VLC player
     // remains at one stable composition call site while moving between cached and streamed files.
     val streamServer = koinInject<MediaStreamServer>()
+    val archiveThumbnailStore = koinInject<DesktopArchiveEntryThumbnailStore>()
     val telegramClient = koinInject<TelegramClient>()
     val streamCrypto = koinInject<StreamCrypto>()
     val wrappedKeyRepository = koinInject<WrappedKeyRepository>()
@@ -1357,6 +1378,7 @@ private fun PreviewPane(
                     batchProgress = previewUiState.archiveBatchProgress,
                     queuedDownloads = previewUiState.archiveQueuedDownloads,
                     archivePreview = previewUiState.archivePreview,
+                    thumbnailStore = if (current.remote) archiveThumbnailStore else null,
                     onRegisterBackStep = onRegisterArchiveBackStep,
                     onExitViewer = onExitViewer,
                     sortField = archiveSortField,
@@ -1382,6 +1404,10 @@ private fun PreviewPane(
                         )
                     },
                     onDismissPreview = { viewModel.dismissArchivePreview() },
+                    onStepArchivePreview = { delta, sequence ->
+                        viewModel.stepArchivePreview(displayedFile, delta, sequence)
+                    },
+                    onDownloadCurrentEntry = { viewModel.downloadCurrentArchiveEntry() },
                     preferredAudioLanguage = preferredAudioLanguage,
                     preferredSubtitleLanguage = preferredSubtitleLanguage,
                     onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
@@ -1807,6 +1833,7 @@ private fun ArchiveImagePreview(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onDismiss: () -> Unit,
+    onDownload: () -> Unit = {},
     snackbarHostState: SnackbarHostState
 ) {
     var rotationDegrees by remember(preview.path) { mutableIntStateOf(0) }
@@ -1932,6 +1959,16 @@ private fun ArchiveImagePreview(
                     onClick = { if (!openExternally(preview.path)) openFailed = true }
                 ) {
                     Icon(Icons.Filled.Edit, contentDescription = "Edit")
+                }
+                TooltipIconButton(
+                    tooltip = stringResource(Res.string.common_download),
+                    onClick = onDownload,
+                    enabled = !busy
+                ) {
+                    Icon(
+                        Icons.Filled.Download,
+                        contentDescription = stringResource(Res.string.common_download)
+                    )
                 }
                 TooltipIconButton(
                     tooltip = stringResource(Res.string.preview_file_info),
@@ -2204,6 +2241,7 @@ internal fun DesktopArchivePane(
     batchProgress: ArchiveBatchProgress?,
     queuedDownloads: Int = 0,
     archivePreview: ArchiveEntryPreview?,
+    thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
     onRegisterBackStep: ((() -> Boolean)?) -> Unit = {},
     onExitViewer: () -> Unit = {},
     sortField: FileSortField,
@@ -2221,6 +2259,10 @@ internal fun DesktopArchivePane(
     onEntryDownload: (Int) -> Unit,
     onDownloadSelection: (Set<Int>, Set<String>) -> Unit,
     onDismissPreview: () -> Unit,
+    /** Unified in-zip stepping (item 7): (delta, unified sequence) -> step. */
+    onStepArchivePreview: (Int, List<Int>) -> Unit = { _, _ -> },
+    /** Download-while-viewing for the open in-zip preview (item 8). */
+    onDownloadCurrentEntry: () -> Unit = {},
     preferredAudioLanguage: String,
     preferredSubtitleLanguage: String,
     onPreferredAudioLanguage: (String) -> Unit,
@@ -2510,6 +2552,8 @@ internal fun DesktopArchivePane(
                             selectionMode = selectionMode,
                             isBusy = busyEntryIndex != null && busyEntryIndex == entryIndex,
                             canDownload = archive.remote && !row.node.isDirectory,
+                            thumbnailStore = thumbnailStore,
+                            archiveFile = file,
                             onRowClick = {
                                 when {
                                     selectionMode -> toggleRow(row)
@@ -2604,10 +2648,16 @@ internal fun DesktopArchivePane(
                 }
             }
         }
-        // The in-zip photo pager's stops: the image entries among the rows as
-        // currently displayed (tree + sort + filter applied), in display order.
-        val displayedImageIndices = remember(rows, listing) {
-            archiveImagePagerIndices(listing, rows.mapNotNull { it.node.entryIndex })
+        // The UNIFIED in-zip stepping sequence (PC 1.6.25 item 7): ALL
+        // previewable entries among the rows as currently displayed (tree +
+        // sort + filter applied), in display order, across types — stepping
+        // from any in-zip preview (photo / video / audio / text) moves to the
+        // neighbouring previewable entry and opens its own surface. Desktop
+        // has no touch swipe: the keyboard arrows / W-E keys and the on-screen
+        // prev/next controls (image arrows, player Skip buttons, overlay
+        // buttons) are the desktop equivalent and drive this same sequence.
+        val unifiedPreviewIndices = remember(rows, listing) {
+            archiveUnifiedPreviewIndices(listing, rows.mapNotNull { it.node.entryIndex })
         }
         // In-archive preview overlay: image in the full desktop photo viewer
         // (note 7), audio AND video in the desktop player (notes 9 — video is
@@ -2615,30 +2665,28 @@ internal fun DesktopArchivePane(
         // text read-only.
         when (val preview = archivePreview) {
             is ArchiveEntryPreview.Image -> {
-                val pagerPosition = displayedImageIndices.indexOf(preview.entryIndex)
+                val pagerPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
                 ArchiveImagePreview(
                     preview = preview,
                     entry = listing.getOrNull(preview.entryIndex),
                     hasPrevious = pagerPosition > 0,
                     hasNext = pagerPosition >= 0 &&
-                        pagerPosition < displayedImageIndices.lastIndex,
+                        pagerPosition < unifiedPreviewIndices.lastIndex,
                     busy = busyEntryIndex != null,
-                    onPrevious = {
-                        archiveImagePagerNeighbour(
-                            displayedImageIndices, preview.entryIndex, -1
-                        )?.let(onPreviewEntry)
-                    },
-                    onNext = {
-                        archiveImagePagerNeighbour(
-                            displayedImageIndices, preview.entryIndex, +1
-                        )?.let(onPreviewEntry)
-                    },
+                    onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                    onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
                     onDismiss = onDismissPreview,
+                    onDownload = onDownloadCurrentEntry,
                     snackbarHostState = snackbarHostState
                 )
             }
 
             is ArchiveEntryPreview.Video -> {
+                val stepPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
+                val stepHasPrevious = stepPosition > 0
+                val stepHasNext = stepPosition >= 0 &&
+                    stepPosition < unifiedPreviewIndices.lastIndex
+                var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -2654,6 +2702,14 @@ internal fun DesktopArchivePane(
                             preferredSubtitleLanguage = preferredSubtitleLanguage,
                             onPreferredAudioLanguage = onPreferredAudioLanguage,
                             onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
+                            // Item 7: the player's own SkipPrevious/SkipNext
+                            // buttons step the UNIFIED sequence (a step can
+                            // land on an image/audio/text entry, which then
+                            // opens its own surface instead of this player).
+                            onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                            onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                            hasPrevious = stepHasPrevious && busyEntryIndex == null,
+                            hasNext = stepHasNext && busyEntryIndex == null,
                             backgroundPlayback = backgroundPlayback,
                             onBackgroundPlaybackChange = onBackgroundPlaybackChange
                         )
@@ -2665,16 +2721,34 @@ internal fun DesktopArchivePane(
                             snackbarHostState = snackbarHostState
                         )
                     }
-                    FilledIconButton(
-                        onClick = onDismissPreview,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
-                    }
+                    ArchiveOverlayBar(
+                        name = preview.name,
+                        busy = busyEntryIndex != null,
+                        hasPrevious = stepHasPrevious,
+                        hasNext = stepHasNext,
+                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                        onDownload = onDownloadCurrentEntry,
+                        onInfo = { infoOpen = true },
+                        onDismiss = onDismissPreview,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+                if (infoOpen) {
+                    ArchiveEntryInfoDialog(
+                        previewName = preview.name,
+                        entry = listing.getOrNull(preview.entryIndex),
+                        onDismiss = { infoOpen = false }
+                    )
                 }
             }
 
             is ArchiveEntryPreview.Audio -> {
+                val stepPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
+                val stepHasPrevious = stepPosition > 0
+                val stepHasNext = stepPosition >= 0 &&
+                    stepPosition < unifiedPreviewIndices.lastIndex
+                var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -2690,6 +2764,10 @@ internal fun DesktopArchivePane(
                             preferredSubtitleLanguage = preferredSubtitleLanguage,
                             onPreferredAudioLanguage = onPreferredAudioLanguage,
                             onPreferredSubtitleLanguage = onPreferredSubtitleLanguage,
+                            onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                            onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                            hasPrevious = stepHasPrevious && busyEntryIndex == null,
+                            hasNext = stepHasNext && busyEntryIndex == null,
                             backgroundPlayback = backgroundPlayback,
                             onBackgroundPlaybackChange = onBackgroundPlaybackChange
                         )
@@ -2701,17 +2779,35 @@ internal fun DesktopArchivePane(
                             snackbarHostState = snackbarHostState
                         )
                     }
-                    FilledIconButton(
-                        onClick = onDismissPreview,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
-                    }
+                    ArchiveOverlayBar(
+                        name = preview.name,
+                        busy = busyEntryIndex != null,
+                        hasPrevious = stepHasPrevious,
+                        hasNext = stepHasNext,
+                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                        onDownload = onDownloadCurrentEntry,
+                        onInfo = { infoOpen = true },
+                        onDismiss = onDismissPreview,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+                if (infoOpen) {
+                    ArchiveEntryInfoDialog(
+                        previewName = preview.name,
+                        entry = listing.getOrNull(preview.entryIndex),
+                        onDismiss = { infoOpen = false }
+                    )
                 }
             }
 
             is ArchiveEntryPreview.Text -> {
                 val textScrollState = rememberScrollState()
+                val stepPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
+                val stepHasPrevious = stepPosition > 0
+                val stepHasNext = stepPosition >= 0 &&
+                    stepPosition < unifiedPreviewIndices.lastIndex
+                var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -2721,7 +2817,7 @@ internal fun DesktopArchivePane(
                         modifier = Modifier
                             .fillMaxSize()
                             .verticalScroll(textScrollState)
-                            .padding(24.dp)
+                            .padding(start = 24.dp, end = 24.dp, top = 64.dp, bottom = 24.dp)
                     ) {
                         Text(
                             text = preview.text,
@@ -2731,16 +2827,108 @@ internal fun DesktopArchivePane(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
-                    FilledIconButton(
-                        onClick = onDismissPreview,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
-                    ) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close")
-                    }
+                    ArchiveOverlayBar(
+                        name = preview.name,
+                        busy = busyEntryIndex != null,
+                        hasPrevious = stepHasPrevious,
+                        hasNext = stepHasNext,
+                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                        onDownload = onDownloadCurrentEntry,
+                        onInfo = { infoOpen = true },
+                        onDismiss = onDismissPreview,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+                if (infoOpen) {
+                    ArchiveEntryInfoDialog(
+                        previewName = preview.name,
+                        entry = listing.getOrNull(preview.entryIndex),
+                        onDismiss = { infoOpen = false }
+                    )
                 }
             }
 
             null -> Unit
+        }
+    }
+}
+
+/**
+ * Top bar for the non-image in-zip overlays (video / audio / text), PC 1.6.25
+ * items 7+8: title, unified-sequence prev/next, Download-while-viewing and
+ * Info — the actions the image overlay's toolbar already had — plus Close.
+ * The image overlay keeps its own richer toolbar (rotate/flip/Edit) and gains
+ * the same Download button there.
+ */
+@Composable
+private fun ArchiveOverlayBar(
+    name: String,
+    busy: Boolean,
+    hasPrevious: Boolean,
+    hasNext: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onDownload: () -> Unit,
+    onInfo: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(start = 8.dp)
+        )
+        TooltipIconButton(
+            tooltip = stringResource(Res.string.preview_previous),
+            onClick = onPrevious,
+            enabled = hasPrevious && !busy
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = stringResource(Res.string.preview_previous)
+            )
+        }
+        TooltipIconButton(
+            tooltip = stringResource(Res.string.preview_next),
+            onClick = onNext,
+            enabled = hasNext && !busy
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = stringResource(Res.string.preview_next)
+            )
+        }
+        TooltipIconButton(
+            tooltip = stringResource(Res.string.common_download),
+            onClick = onDownload,
+            enabled = !busy
+        ) {
+            Icon(
+                Icons.Filled.Download,
+                contentDescription = stringResource(Res.string.common_download)
+            )
+        }
+        TooltipIconButton(
+            tooltip = stringResource(Res.string.preview_file_info),
+            onClick = onInfo
+        ) {
+            Icon(
+                Icons.Filled.Info,
+                contentDescription = stringResource(Res.string.preview_file_info)
+            )
+        }
+        TooltipIconButton(tooltip = "Close", onClick = onDismiss) {
+            Icon(Icons.Filled.Close, contentDescription = "Close")
         }
     }
 }
@@ -2758,6 +2946,8 @@ private fun DesktopArchiveRow(
     selectionMode: Boolean,
     isBusy: Boolean,
     canDownload: Boolean,
+    thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
+    archiveFile: DriveFile? = null,
     onRowClick: () -> Unit,
     onToggleSelection: () -> Unit,
     onDownloadClick: () -> Unit,
@@ -2793,16 +2983,67 @@ private fun DesktopArchiveRow(
                 modifier = Modifier.padding(end = 4.dp)
             )
         }
-        Icon(
-            imageVector = if (node.isDirectory) {
-                Icons.Filled.Folder
+        // PC 1.6.25 item 6 (Android vc182 design, report 55 §6): for image
+        // entries of a remote archive, the 56 dp slot shows a real thumbnail
+        // once the store has one; until then (and on any failure) it shows
+        // exactly the generic icon it always showed. The key derives from
+        // this row's own listing identity only — no list-level state, and
+        // only rows actually composed (visible) ever request a fetch.
+        val thumbnailKey = remember(
+            archiveFile?.id, node.entryIndex, node.sizeBytes, node.compressedBytes,
+            node.modifiedAtMillis
+        ) {
+            val owner = archiveFile
+            val idx = node.entryIndex
+            if (owner != null && idx != null && !node.isDirectory &&
+                ArchiveEntryThumbnailPolicy.isImageEntryName(node.name)
+            ) {
+                ArchiveEntryThumbnailPolicy.cacheKey(
+                    archiveFileId = owner.id,
+                    entryIndex = idx,
+                    sizeBytes = node.sizeBytes,
+                    compressedBytes = node.compressedBytes,
+                    modifiedAtMillis = node.modifiedAtMillis
+                )
             } else {
-                Icons.AutoMirrored.Filled.InsertDriveFile
-            },
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+                null
+            }
+        }
+        val genericIcon: @Composable () -> Unit = {
+            Icon(
+                imageVector = if (node.isDirectory) {
+                    Icons.Filled.Folder
+                } else {
+                    Icons.AutoMirrored.Filled.InsertDriveFile
+                },
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        ) {
+            if (thumbnailKey != null && thumbnailStore != null && archiveFile != null &&
+                node.entryIndex != null
+            ) {
+                DesktopArchiveEntryThumbnail(
+                    store = thumbnailStore,
+                    archiveFile = archiveFile,
+                    entryIndex = node.entryIndex!!,
+                    entryName = node.name,
+                    sizeBytes = node.sizeBytes,
+                    cacheKey = thumbnailKey,
+                    placeholder = genericIcon
+                )
+            } else {
+                genericIcon()
+            }
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -2854,5 +3095,51 @@ private fun DesktopArchiveRow(
                 Icon(Icons.Filled.Download, contentDescription = "Download")
             }
         }
+    }
+}
+
+
+/**
+ * One archive row's thumbnail (PC 1.6.25 item 6): asks
+ * [DesktopArchiveEntryThumbnailStore] for this entry's thumbnail while composed
+ * and releases the request on dispose, so a row that scrolls off cancels its
+ * fetch if nobody else waits on it. Shows [placeholder] (the row's generic
+ * icon) until the thumbnail is ready, and keeps showing it on failure. No
+ * crossfade: per-row fades during a fling read as flicker.
+ */
+@Composable
+private fun DesktopArchiveEntryThumbnail(
+    store: DesktopArchiveEntryThumbnailStore,
+    archiveFile: DriveFile,
+    entryIndex: Int,
+    entryName: String,
+    sizeBytes: Long,
+    cacheKey: String,
+    placeholder: @Composable () -> Unit
+) {
+    val state by store.state(cacheKey).collectAsState()
+    var loadFailed by remember(cacheKey) { mutableStateOf(false) }
+    LaunchedEffect(cacheKey) {
+        store.request(cacheKey, archiveFile, entryIndex, entryName, sizeBytes)
+    }
+    DisposableEffect(cacheKey) {
+        onDispose { store.release(cacheKey) }
+    }
+    val readyFile = (state as? ArchiveThumbState.Ready)?.file
+    if (readyFile != null && !loadFailed) {
+        val painter = rememberAsyncImagePainter(
+            model = readyFile,
+            onState = { imageState ->
+                if (imageState is AsyncImagePainter.State.Error) loadFailed = true
+            }
+        )
+        Image(
+            painter = painter,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+    } else {
+        placeholder()
     }
 }

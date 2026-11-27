@@ -13,6 +13,8 @@ data class PreviewUiState(
     val archiveListings: Map<String, List<ArchiveEntry>> = emptyMap(),
     /** An extracted archive entry being viewed/played/read in place, if any. */
     val archivePreview: ArchiveEntryPreview? = null,
+    /** The ZIP file (DriveFile id) the open in-zip preview belongs to (PC 1.6.25 items 7/8). */
+    val archivePreviewFileId: String? = null,
     /** Progress of a multi-entry archive download: finished steps out of the plan total. */
     val archiveBatchProgress: ArchiveBatchProgress? = null,
     /**
@@ -27,6 +29,9 @@ data class PreviewUiState(
 sealed interface ArchiveEntryPreview {
     val name: String
 
+    /** Listing index of the entry this preview was extracted from (its unified-sequence identity). */
+    val entryIndex: Int
+
     /**
      * [entryIndex] is the entry's position in the archive listing (-1 when unknown), so a
      * viewer can resolve the entry's own metadata and page to neighbouring entries.
@@ -34,10 +39,14 @@ sealed interface ArchiveEntryPreview {
     data class Image(
         override val name: String,
         val path: String,
-        val entryIndex: Int = -1
+        override val entryIndex: Int = -1
     ) : ArchiveEntryPreview
 
-    data class Audio(override val name: String, val path: String) : ArchiveEntryPreview
+    data class Audio(
+        override val name: String,
+        val path: String,
+        override val entryIndex: Int = -1
+    ) : ArchiveEntryPreview
 
     /**
      * A video entry extracted to a temp file for the platform's own media player
@@ -47,8 +56,16 @@ sealed interface ArchiveEntryPreview {
      * renders this variant through the same LocalMedia player branch it already
      * uses for audio if a future Android caller ever publishes one.
      */
-    data class Video(override val name: String, val path: String) : ArchiveEntryPreview
-    data class Text(override val name: String, val text: String) : ArchiveEntryPreview
+    data class Video(
+        override val name: String,
+        val path: String,
+        override val entryIndex: Int = -1
+    ) : ArchiveEntryPreview
+    data class Text(
+        override val name: String,
+        val text: String,
+        override val entryIndex: Int = -1
+    ) : ArchiveEntryPreview
 }
 
 data class ArchiveBatchProgress(val done: Int, val total: Int)
