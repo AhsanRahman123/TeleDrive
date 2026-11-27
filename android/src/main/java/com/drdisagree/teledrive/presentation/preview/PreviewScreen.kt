@@ -1628,35 +1628,49 @@ private fun ArchiveList(
                         // same in every archive and on the next visit. Only
                         // the row slot changes — thumbnail decode stays at
                         // the policy's fixed bounded target.
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(top = 12.dp)
-                        ) {
+                        // vc185: the label gets its own line and the three
+                        // chips share the card's full width by weight. The
+                        // old single Row measured the chips in order with
+                        // only the leftover width, so on phone widths the
+                        // last chip (Big) was starved to a sliver and its
+                        // label wrapped vertically ("B"/"i"/"g").
+                        Column(modifier = Modifier.padding(top = 12.dp)) {
                             Text(
                                 text = stringResource(Res.string.preview_thumbnail_size),
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            for (size in ThumbnailSize.entries) {
-                                FilterChip(
-                                    selected = thumbnailSize == size,
-                                    onClick = { onThumbnailSizeChange(size) },
-                                    label = {
-                                        Text(
-                                            stringResource(
-                                                when (size) {
-                                                    ThumbnailSize.SMALL ->
-                                                        Res.string.preview_thumbnail_small
-                                                    ThumbnailSize.MEDIUM ->
-                                                        Res.string.preview_thumbnail_medium
-                                                    ThumbnailSize.BIG ->
-                                                        Res.string.preview_thumbnail_big
-                                                }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp)
+                            ) {
+                                for (size in ThumbnailSize.entries) {
+                                    FilterChip(
+                                        selected = thumbnailSize == size,
+                                        onClick = { onThumbnailSizeChange(size) },
+                                        modifier = Modifier.weight(1f),
+                                        label = {
+                                            Text(
+                                                text = stringResource(
+                                                    when (size) {
+                                                        ThumbnailSize.SMALL ->
+                                                            Res.string.preview_thumbnail_small
+                                                        ThumbnailSize.MEDIUM ->
+                                                            Res.string.preview_thumbnail_medium
+                                                        ThumbnailSize.BIG ->
+                                                            Res.string.preview_thumbnail_big
+                                                    }
+                                                ),
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.fillMaxWidth()
                                             )
-                                        )
-                                    }
-                                )
+                                        }
+                                    )
+                                }
                             }
                         }
                         if (batchProgress != null) {
