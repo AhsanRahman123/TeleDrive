@@ -400,7 +400,21 @@ class DesktopTwoLevelSwitchingTest {
 
         // Folder level: E moves to the NEXT folder file after the zip.
         press(Key.E)
-        waitDisplayed("LAST FILE BODY")
+        try {
+            waitDisplayed("LAST FILE BODY")
+        } catch (failure: AssertionError) {
+            // DIAGNOSTIC PROBE (temporary): establish window focus the way a
+            // mouse user does — a press on the top-bar title — and retry.
+            rule.onNodeWithText("bundle.zip").performClick()
+            rule.waitForIdle()
+            press(Key.E)
+            try {
+                waitDisplayed("LAST FILE BODY")
+            } catch (retryFailure: AssertionError) {
+                throw AssertionError("PROBE: folder E failed even after focus click")
+            }
+            throw AssertionError("PROBE: folder E worked only after focus click")
+        }
         assertEquals("folder-level E must not exit the viewer", 0, exits.get())
 
         // W returns to the zip, and its contents list is what shows again.
@@ -444,7 +458,21 @@ class DesktopTwoLevelSwitchingTest {
         waitDisplayed("DELTA ENTRY BODY")
 
         press(Key.E)
-        waitPreview(3)
+        try {
+            waitPreview(3)
+        } catch (failure: AssertionError) {
+            // DIAGNOSTIC PROBE (temporary): if the overlay's own Next button
+            // steps to the audio entry, the VM step works and the E key
+            // press is what got lost; if the button also fails, the step
+            // itself is broken.
+            rule.onNodeWithContentDescription("Next file").performClick()
+            try {
+                waitPreview(3)
+            } catch (buttonFailure: AssertionError) {
+                throw AssertionError("PROBE: button step ALSO failed: ${buttonFailure.message}")
+            }
+            throw AssertionError("PROBE: key step failed but button step worked")
+        }
         assertTrue(
             viewModel.uiState.value.archivePreview is ArchiveEntryPreview.Audio
         )

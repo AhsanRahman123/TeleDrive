@@ -114,7 +114,9 @@ class DesktopArchiveThumbnailSizeTest {
     }
 
     private fun thumbnailWidth(): Float =
-        rule.onNodeWithTag("archive-thumbnail-0")
+        // The slot lives inside the row's merged semantics (combinedClickable
+        // merges the row), so it only exists in the unmerged tree.
+        rule.onNodeWithTag("archive-thumbnail-0", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot.width
 
     private fun pickSize(name: String) {
