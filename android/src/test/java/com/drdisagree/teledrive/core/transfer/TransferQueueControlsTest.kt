@@ -44,6 +44,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flow
@@ -310,7 +311,7 @@ class TransferQueueControlsTest {
         val dao = FakeTransferDao()
         val fileDao = FakeFileDao()
         val telegram = ScriptedTelegram()
-        val settings = FakeSettings(
+        val settings = QueueFakeSettings(
             UserPreferences(transferRetryCount = 0, transferConcurrency = concurrency)
         )
         val drainer: TransferQueueDrainer
@@ -325,7 +326,7 @@ class TransferQueueControlsTest {
         init {
             val codec = ManifestCodec(StreamCrypto(), unused())
             val executor = TransferExecutor(
-                messages = namedErrorMessages(),
+                messages = queueNamedErrorMessages(),
                 storagePaths = unused(),
                 telegramClient = telegram,
                 transferDao = dao,
@@ -358,11 +359,11 @@ class TransferQueueControlsTest {
                 transferDao = dao,
                 fileDao = fileDao,
                 transferExecutor = executor,
-                backupSessionTracker = NoOpBackupSessionTracker(),
+                backupSessionTracker = QueueNoOpSessionTracker(),
                 settingsRepository = settings,
-                networkMonitor = FakeNetworkMonitor(NetworkStatus.UNMETERED),
-                powerMonitor = FakePowerMonitor(true),
-                backupResumeScheduler = RecordingBackupResumeScheduler()
+                networkMonitor = QueueFakeNetworkMonitor(NetworkStatus.UNMETERED),
+                powerMonitor = QueueFakePowerMonitor(true),
+                backupResumeScheduler = QueueRecordingResumeScheduler()
             )
             scheduler = WorkerScheduler(drainer, scope)
             val paths = object : AppStoragePaths by unused() {
@@ -376,7 +377,7 @@ class TransferQueueControlsTest {
                 settingsRepository = settings,
                 validateUpload = ValidateUploadUseCase(),
                 storageInspector = StorageInspector(paths),
-                backupSessionTracker = NoOpBackupSessionTracker(),
+                backupSessionTracker = QueueNoOpSessionTracker(),
                 archiveExtractionJobs = ArchiveExtractionJobs()
             )
         }
@@ -561,12 +562,12 @@ class TransferQueueControlsTest {
     }
 }
 
-private fun namedErrorMessages(): TransferErrorMessages = Proxy.newProxyInstance(
+private fun queueNamedErrorMessages(): TransferErrorMessages = Proxy.newProxyInstance(
     TransferErrorMessages::class.java.classLoader,
     arrayOf(TransferErrorMessages::class.java)
 ) { _, method, _ -> method.name } as TransferErrorMessages
 
-private class FakeSettings(initial: UserPreferences) : SettingsRepository by unused() {
+private class QueueFakeSettings(initial: UserPreferences) : SettingsRepository by unused() {
     private val state = MutableStateFlow(initial)
     override val preferences: Flow<UserPreferences> = state
 
@@ -575,24 +576,24 @@ private class FakeSettings(initial: UserPreferences) : SettingsRepository by unu
     }
 }
 
-private class FakeNetworkMonitor(initial: NetworkStatus) : NetworkMonitor {
+private class QueueFakeNetworkMonitor(initial: NetworkStatus) : NetworkMonitor {
     private val state = MutableStateFlow(initial)
     override val status: Flow<NetworkStatus> = state
     override fun currentStatus(): NetworkStatus = state.value
 }
 
-private class FakePowerMonitor(initial: Boolean) : PowerMonitor {
+private class QueueFakePowerMonitor(initial: Boolean) : PowerMonitor {
     private val state = MutableStateFlow(initial)
     override val charging: Flow<Boolean> = state
     override fun isCharging(): Boolean = state.value
 }
 
-private class NoOpBackupSessionTracker : BackupSessionTracker {
+private class QueueNoOpSessionTracker : BackupSessionTracker {
     override suspend fun refreshActive() = Unit
     override suspend fun refresh(sessionId: String?) = Unit
 }
 
-private class RecordingBackupResumeScheduler : BackupResumeScheduler {
+private class QueueRecordingResumeScheduler : BackupResumeScheduler {
     val requests = mutableListOf<Pair<Boolean, Boolean>>()
 
     override fun resumeWhen(chargingOnly: Boolean, wifiOnly: Boolean) {
