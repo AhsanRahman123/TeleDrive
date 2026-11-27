@@ -498,6 +498,20 @@ fun DesktopPreviewScreen(
     val viewerFocusRequester = remember { FocusRequester() }
     val windowInfo = LocalWindowInfo.current
     var imageHKeyPressed by remember { mutableStateOf(false) }
+    // Reclaim the Scaffold's focus whenever an in-zip entry preview closes
+    // (PC 1.6.26 item P3): the overlay that held focus is disposed by the
+    // close, and without a deterministic new focus owner the next W/E
+    // press can land nowhere — folder-level switching after exiting an
+    // entry was intermittent for exactly this reason (the same class of
+    // focus loss the overlay focus requesters fix for the open state).
+    // Steps between entries (preview stays non-null) do not trigger this;
+    // the incoming overlay's own requester owns those.
+    val screenPreviewUiState by viewModel.uiState.collectAsState()
+    LaunchedEffect(screenPreviewUiState.archivePreview) {
+        if (screenPreviewUiState.archivePreview == null && mediaCategory == null) {
+            viewerFocusRequester.requestFocus()
+        }
+    }
     LaunchedEffect(file?.id, mediaCategory) {
         // Images/documents use this preview shortcut target. The VLC surface owns focus
         // for audio/video and must not have its keyboard controls stolen by the parent.
