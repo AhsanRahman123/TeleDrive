@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.lifecycle.SavedStateHandle
 import com.drdisagree.teledrive.core.archive.ArchiveDownloadTracker
@@ -75,11 +76,23 @@ import org.koin.dsl.module
  * `PreviewPane` inside `DesktopPreviewScreen`'s AnimatedContent, the handler
  * is stored in the SCREEN's `archiveBackHandler` state, and the press arrives
  * either as a click on the screen's top-bar back button or as a real key event
- * through the screen's focus tree. Pranto's 1.6.24 field test showed one Back
- * press from inside a zip folder still exiting the whole viewer, so the seam
- * the old test pins is not the seam that fails. This test composes the REAL
+ * through the screen's focus tree. This test composes the REAL
  * `DesktopPreviewScreen` (with a real PreviewViewModel over fakes) and drives
  * both production press paths.
+ *
+ * Proven root cause of the 1.6.24 field failure (CI run 45941886885, this
+ * test's first run): the top-bar path was already correct, but the KEYBOARD
+ * path was dead after mouse use — the pre-fix run failed the backspace test
+ * with exits == 0 AND deep.txt still displayed (the press did nothing at
+ * all). The pane's only Backspace/Alt+Left handler lived in the list's
+ * keyboard collection, which requires a focused row; the production screen
+ * requests focus for its Scaffold root on entry and reclaims it on every
+ * pointer press, so a mouse user's key press never reaches the collection.
+ * The 1.6.24 test focus-walked a row before pressing Backspace — a state
+ * production never reaches. Fix: DesktopPreviewScreen's Scaffold key handler
+ * (the node focus actually rests on) routes Backspace / Alt+Left through the
+ * same stepBack() as the top-bar button, guarded by the pane's search-field
+ * focus so Backspace still deletes text there.
  */
 @OptIn(ExperimentalTestApi::class)
 class DesktopArchiveProductionBackStepTest {
@@ -348,11 +361,70 @@ class DesktopArchiveProductionBackStepTest {
 
         // The mouse path a real user takes: folders were opened by clicking,
         // then Backspace is pressed on the window's focused node (the root,
-        // wherever focus actually sits after mouse use).
+        // wherever focus actually sits after mouse use). On 1.6.24 this press
+        // was DEAD — not an exit, not a collapse: the only Backspace handler
+        // lived in the list's keyboard collection, which requires a focused
+        // row, and the production screen reclaims focus to its Scaffold root
+        // on every pointer press (proven by this test failing pre-fix with
+        // exits == 0 and deep.txt still displayed).
         rule.onRoot().performKeyInput { pressKey(Key.Backspace) }
         rule.waitForIdle()
         assertEquals("backspace inside the zip must not exit the viewer", 0, exits.get())
         assertFalse("deep.txt must be hidden after backspace", displayed("deep.txt"))
         assertTrue("mid.txt must still show after backspace", displayed("mid.txt"))
+
+        // And at the zip root, the same press leaves the viewer.
+        rule.onRoot().performKeyInput { pressKey(Key.Backspace) }
+        rule.waitForIdle()
+        rule.onRoot().performKeyInput { pressKey(Key.Backspace) }
+        rule.waitForIdle()
+        assertEquals(0, exits.get())
+        rule.onRoot().performKeyInput { pressKey(Key.Backspace) }
+        rule.waitForIdle()
+        assertEquals(1, exits.get())
+    }
+
+    @Test
+    fun `production alt-left after mouse use steps up one folder level`() {
+        setProductionScreen()
+        descend()
+
+        rule.onRoot().performKeyInput {
+            keyEvent(
+                androidx.compose.ui.input.key.KeyEvent(
+                    Key.DirectionLeft,
+                    androidx.compose.ui.input.key.KeyEventType.KeyDown,
+                    isAltPressed = true
+                )
+            )
+        }
+        rule.waitForIdle()
+        assertEquals("alt-left inside the zip must not exit the viewer", 0, exits.get())
+        assertFalse("deep.txt must be hidden after alt-left", displayed("deep.txt"))
+        assertTrue("mid.txt must still show after alt-left", displayed("mid.txt"))
+    }
+
+    @Test
+    fun `production backspace in the zip search field deletes text instead of stepping back`() {
+        setProductionScreen()
+        waitDisplayed("root.txt")
+
+        // Focus the search field the way a mouse user does and type a query:
+        // the list filters to the matching entry only.
+        rule.onNodeWithText("Search inside this zip").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithText("Search inside this zip")
+            .performTextInput("deep")
+        rule.waitForIdle()
+        assertTrue(displayed("deep.txt"))
+        assertFalse("filter must hide root.txt", displayed("root.txt"))
+
+        // Backspace while editing must delete a character (query "dee",
+        // still filtering), NOT run the back ladder's clear-search step.
+        rule.onRoot().performKeyInput { pressKey(Key.Backspace) }
+        rule.waitForIdle()
+        assertEquals(0, exits.get())
+        assertTrue("deep.txt must still show (query still active)", displayed("deep.txt"))
+        assertFalse("root.txt must stay hidden (search not cleared)", displayed("root.txt"))
     }
 }

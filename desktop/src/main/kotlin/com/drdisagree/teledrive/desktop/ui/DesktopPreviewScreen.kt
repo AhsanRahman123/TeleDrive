@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -282,6 +283,11 @@ fun DesktopPreviewScreen(
     // deepest expanded in-zip folder — and only leaves the viewer at the zip root.
     var archiveBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
 
+    // True while the archive pane's search field holds focus, reported by the
+    // pane (1.6.25 item 3): Backspace there must keep deleting text, so the
+    // screen-level keyboard back below stays out of its way.
+    var archiveTextInputFocused by remember { mutableStateOf(false) }
+
     fun stepBack() {
         if (archiveBackHandler?.invoke() != true) leavePreview()
     }
@@ -473,6 +479,32 @@ fun DesktopPreviewScreen(
         modifier = Modifier
             .focusRequester(viewerFocusRequester)
             .onPreviewKeyEvent { event ->
+                // Keyboard back for the archive pane (1.6.25 item 3). This
+                // Scaffold node is where focus actually rests during mouse
+                // use: the screen requests focus for it on entry and reclaims
+                // it on every pointer press (see the pointerInput below), so
+                // a Backspace / Alt+Left press after clicking through zip
+                // folders lands HERE — never on the archive list, whose
+                // keyboard-collection back handler only fires while a list
+                // row holds focus. On 1.6.24 the press therefore did nothing
+                // at all for a mouse user (the old test focus-walked a row
+                // first, a state production never reaches). Route the press
+                // through the SAME stepBack() as the top-bar button, but only
+                // while an archive pane is composed and its search field is
+                // not being edited (Backspace must delete text there).
+                if (event.type == KeyEventType.KeyDown &&
+                    archiveBackHandler != null &&
+                    !archiveTextInputFocused
+                ) {
+                    val plainBackspace = event.key == Key.Backspace &&
+                        !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                    val altLeft = event.key == Key.DirectionLeft &&
+                        event.isAltPressed && !event.isCtrlPressed && !event.isShiftPressed
+                    if (plainBackspace || altLeft) {
+                        stepBack()
+                        return@onPreviewKeyEvent true
+                    }
+                }
                 // Match the video player's key lifecycle: consume H key-up to reset the
                 // repeat guard, and toggle only once for a physical key press.
                 if (event.key == Key.H && event.type == KeyEventType.KeyUp) {
@@ -720,6 +752,9 @@ fun DesktopPreviewScreen(
                 onToggleImageChrome = { imageChromeVisible = !imageChromeVisible },
                 onPlayerControlsVisibilityChange = { playerChromeVisible = it },
                 onRegisterArchiveBackStep = { handler -> archiveBackHandler = handler },
+                onArchiveTextInputFocusChanged = { focused ->
+                    archiveTextInputFocused = focused
+                },
                 onExitViewer = ::leavePreview
             )
         }
@@ -1122,6 +1157,7 @@ private fun PreviewPane(
     onToggleImageChrome: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit,
     onRegisterArchiveBackStep: ((() -> Boolean)?) -> Unit = {},
+    onArchiveTextInputFocusChanged: (Boolean) -> Unit = {},
     onExitViewer: () -> Unit = {}
 ) {
     val content by viewModel.contentFor(file).collectAsState()
@@ -1358,6 +1394,7 @@ private fun PreviewPane(
                     queuedDownloads = previewUiState.archiveQueuedDownloads,
                     archivePreview = previewUiState.archivePreview,
                     onRegisterBackStep = onRegisterArchiveBackStep,
+                    onTextInputFocusChanged = onArchiveTextInputFocusChanged,
                     onExitViewer = onExitViewer,
                     sortField = archiveSortField,
                     sortDirection = archiveSortDirection,
@@ -2205,6 +2242,8 @@ internal fun DesktopArchivePane(
     queuedDownloads: Int = 0,
     archivePreview: ArchiveEntryPreview?,
     onRegisterBackStep: ((() -> Boolean)?) -> Unit = {},
+    /** Reports whether the pane's search field holds focus (1.6.25 item 3). */
+    onTextInputFocusChanged: (Boolean) -> Unit = {},
     onExitViewer: () -> Unit = {},
     sortField: FileSortField,
     sortDirection: SortDirection,
@@ -2429,6 +2468,12 @@ internal fun DesktopArchivePane(
                                     modifier = Modifier
                                         .weight(1f)
                                         .trackTextInputFocus(textInputTracker)
+                                        // 1.6.25 item 3: the screen-level
+                                        // keyboard back must not steal
+                                        // Backspace from this field.
+                                        .onFocusChanged {
+                                            onTextInputFocusChanged(it.isFocused)
+                                        }
                                 )
                                 Box {
                                     TooltipIconButton(
