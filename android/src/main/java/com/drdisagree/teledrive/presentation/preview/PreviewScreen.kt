@@ -510,6 +510,31 @@ fun PreviewScreen(
                                 )
                             }
                         }
+                        // vc183 item 8: a top-bar Download beside Info, matching
+                        // the in-zip viewer's Download+Info pair (vc182 item 3).
+                        // This top bar is the ONE viewer chrome for photos and
+                        // videos alike — the same PreviewScreen serves files
+                        // opened from Files and from Gallery, and the video
+                        // player's own control row sits directly under this bar —
+                        // so this single button covers every viewer surface.
+                        // It routes through viewModel.download, the exact path
+                        // the overflow menu's Download item and the Files list's
+                        // download action use (enqueueDownload: a real transfer
+                        // with a Transfers record and the download-queued
+                        // snackbar with its View action). Like the list action
+                        // (SelectionCapabilities.canDownload), it is offered
+                        // whenever the file is an image or a video, even when a
+                        // local copy already exists: enqueueDownload then queues
+                        // a fresh download of the remote copy (deduplicated
+                        // against an unfinished transfer for the same file).
+                        if (showsViewerDownloadButton(currentFile.category)) {
+                            IconButton(onClick = { viewModel.download(currentFile) }) {
+                                Icon(
+                                    Icons.Filled.Download,
+                                    contentDescription = stringResource(Res.string.common_download)
+                                )
+                            }
+                        }
                         IconButton(onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
                                 Icons.Filled.Info,
@@ -1931,6 +1956,15 @@ private fun shareFile(context: Context, file: DriveFile, chooserTitle: String) {
 }
 
 val PreviewTopBarHeight = 64.dp
+
+/**
+ * vc183 item 8: which viewer pages carry the top-bar Download button — photos
+ * and videos only, the two surfaces the field ask names. Every other preview
+ * type keeps its chrome exactly as before (its Download stays where it already
+ * lives: the overflow menu, the RequiresDownload empty state, and so on).
+ */
+internal fun showsViewerDownloadButton(category: FileCategory): Boolean =
+    category == FileCategory.IMAGE || category == FileCategory.VIDEO
 
 private fun openUrl(context: Context, url: String) {
     runCatching {
