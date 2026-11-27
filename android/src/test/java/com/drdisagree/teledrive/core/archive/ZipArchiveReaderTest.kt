@@ -7,6 +7,17 @@ import java.io.ByteArrayOutputStream
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -78,6 +89,89 @@ class ZipArchiveReaderTest {
             assertEquals(kind, failure.kind)
         }
     }
+
+    /** A source whose every read takes [delayMs] — time for a cancel to land mid-extraction. */
+    private class SlowSource(
+        private val bytes: ByteArray,
+        private val delayMs: Long
+    ) : MediaByteSource {
+        override suspend fun size(): Long = bytes.size.toLong()
+        override suspend fun read(position: Long, count: Int): ByteArray {
+            delay(delayMs)
+            if (position >= bytes.size) return ByteArray(0)
+            val end = minOf(position + count, bytes.size.toLong()).toInt()
+            return bytes.copyOfRange(position.toInt(), end)
+        }
+        override fun close() = Unit
+    }
+
+    @Test(timeout = 15_000)
+    fun `extract cancelled mid-read surfaces CancellationException, never ArchiveException`() =
+        runBlocking {
+            // vc183: extract's catch-all used to rewrap CancellationException as
+            // ArchiveException(CORRUPT), so a user stop looked like archive
+            // damage to every caller and bypassed every CancellationException
+            // branch downstream.
+            val data = ByteArray(3 * 1024 * 1024) { (it % 251).toByte() }
+            val bytes = zipOf(listOf(Triple("big.bin", data, ZipEntry.STORED)))
+            val slowReader = ZipArchiveReader(SlowSource(bytes, 150))
+            val entry = slowReader.entries().single()
+            val seen = CompletableDeferred<String>()
+            val job = launch {
+                try {
+                    slowReader.extract(entry, ByteArrayOutputStream())
+                    seen.complete("completed")
+                } catch (failure: CancellationException) {
+                    seen.complete("cancellation")
+                    throw failure
+                } catch (failure: ArchiveException) {
+                    seen.complete("archive")
+                }
+            }
+            delay(400)
+            job.cancel()
+            job.join()
+            assertEquals("cancellation", seen.await())
+        }
+
+    @Test(timeout = 15_000)
+    fun `cancelling a batch-style async extraction step delivers no uncaught exception`() =
+        runBlocking {
+            // vc183 crash repro (the vc182 field force-close): a batch step is
+            // an async child of the batch coroutine. Pre-fix, cancelling it
+            // mid-extraction let the reader rewrap the CancellationException as
+            // ArchiveException; a coroutine that is cancelled but completes
+            // with a non-CancellationException has that exception delivered to
+            // the parent scope's uncaught handler — on Android the default
+            // handler kills the process.
+            val data = ByteArray(3 * 1024 * 1024) { (it % 251).toByte() }
+            val bytes = zipOf(listOf(Triple("big.bin", data, ZipEntry.STORED)))
+            val slowReader = ZipArchiveReader(SlowSource(bytes, 150))
+            val entry = slowReader.entries().single()
+            val uncaught = CopyOnWriteArrayList<Throwable>()
+            val scope = CoroutineScope(
+                SupervisorJob() + Dispatchers.Default +
+                    CoroutineExceptionHandler { _, failure -> uncaught += failure }
+            )
+            val stepSawCancellation = CompletableDeferred<Boolean>()
+            scope.launch {
+                val step = async { slowReader.extract(entry, ByteArrayOutputStream()) }
+                delay(400)
+                step.cancel()
+                stepSawCancellation.complete(
+                    try {
+                        step.await()
+                        false
+                    } catch (failure: CancellationException) {
+                        true
+                    }
+                )
+            }
+            assertTrue(stepSawCancellation.await())
+            delay(300)
+            assertTrue("uncaught exceptions: $uncaught", uncaught.isEmpty())
+            scope.cancel()
+        }
 
     @Test
     fun `listing reports stored and deflated entries`() = runBlocking {
