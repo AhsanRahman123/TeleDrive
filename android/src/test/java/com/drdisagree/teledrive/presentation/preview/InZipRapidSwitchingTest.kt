@@ -94,7 +94,7 @@ class InZipRapidSwitchingTest {
 
     @Test
     fun `rapid switching across mixed types always lands the settled page rendered`() =
-        runBlocking {
+        runVmTest {
             val zipBytes = buildZipBytes(zipEntries())
             val zipFile = previewDriveFile(
                 id = "zip-1",

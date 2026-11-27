@@ -54,7 +54,7 @@ class ViewerBackgroundDownloadTest {
 
     @Test
     fun `download while a video plays starts a background transfer and playback content never changes`() =
-        runBlocking {
+        runVmTest {
             val file = videoFile()
             val transfers = PreviewFakeTransferRepository()
             val viewModel = buildPreviewViewModel(
@@ -101,7 +101,7 @@ class ViewerBackgroundDownloadTest {
         }
 
     @Test
-    fun `the download-to-view gate still follows its transfer to completion`() = runBlocking {
+    fun `the download-to-view gate still follows its transfer to completion`() = runVmTest {
         val file = videoFile()
         val transfers = PreviewFakeTransferRepository()
         // Streaming off: the resolver gates the video behind RequiresDownload,

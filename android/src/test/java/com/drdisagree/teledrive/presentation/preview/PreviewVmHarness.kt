@@ -276,6 +276,21 @@ internal fun buildPreviewViewModel(
     )
 }
 
+/**
+ * runBlocking that prints the full stack trace to stderr before rethrowing:
+ * Gradle's console summary for these tests shows only the exception class
+ * and first frame, which hides the actual cause of a construction failure.
+ */
+internal fun runVmTest(block: suspend () -> Unit) {
+    try {
+        kotlinx.coroutines.runBlocking { block() }
+    } catch (t: Throwable) {
+        System.err.println("VMTEST-FAILURE stack trace follows")
+        t.printStackTrace()
+        throw t
+    }
+}
+
 /** Polls [condition] until it holds; fails the test with [description] on timeout. */
 internal suspend fun awaitPreviewCondition(
     description: String,
