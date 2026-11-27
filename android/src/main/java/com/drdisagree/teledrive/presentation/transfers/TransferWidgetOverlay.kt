@@ -262,28 +262,36 @@ private fun Modifier.bubbleGestures(
         var longPressed = false
         var upChange: PointerInputChange? = null
         var cancelled = false
-        // Long-press: a motionless hold past the platform timeout hides the
-        // widget (SF-1). The first wait is bounded by the long-press
-        // timeout: if it expires with the pointer still down and no drag
-        // has begun, the long-press fires; a fired long-press swallows the
-        // release (no click). Any event ends the bounded wait.
-        var awaitingLongPress = true
+        // Long-press: a hold past the platform timeout hides the widget
+        // (SF-1). The deadline is anchored at the down event and every
+        // wait is re-armed with the time REMAINING to that deadline, so
+        // sub-slop jitter events cannot disarm it (delta-review must-fix);
+        // a drag or a fired long-press ends the bounded waits. A fired
+        // long-press swallows the release (no click).
+        val longPressDeadline =
+            down.uptimeMillis + viewConfiguration.longPressTimeoutMillis
+        var lastEventMillis = down.uptimeMillis
         while (true) {
-            val event = if (awaitingLongPress) {
-                awaitingLongPress = false
-                withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+            val event = if (!dragged && !longPressed) {
+                val remaining = longPressDeadline - lastEventMillis
+                if (remaining <= 0L) {
+                    longPressed = true
+                    onLongPress()
                     awaitPointerEvent()
-                } ?: run {
-                    if (!dragged) {
+                } else {
+                    withTimeoutOrNull(remaining) { awaitPointerEvent() } ?: run {
                         longPressed = true
                         onLongPress()
+                        continue
                     }
-                    continue
                 }
             } else {
                 awaitPointerEvent()
             }
             val change = event.changes.firstOrNull { it.id == down.id }
+            if (change != null) {
+                lastEventMillis = change.uptimeMillis
+            }
             if (change == null) {
                 // The tracked pointer vanished without an up: a cancellation.
                 cancelled = true
