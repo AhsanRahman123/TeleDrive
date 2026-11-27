@@ -443,8 +443,9 @@ class ArchiveSelectionTest {
         assertTrue(archiveEntryPreviewable(entry("notes.txt", size = ARCHIVE_TEXT_PREVIEW_MAX_BYTES)))
         // An oversized text entry has no page: on tap it only shows the too-large message.
         assertFalse(archiveEntryPreviewable(entry("notes.txt", size = ARCHIVE_TEXT_PREVIEW_MAX_BYTES + 1)))
-        // Download-only types are skipped, never shown as placeholder pages.
-        assertFalse(archiveEntryPreviewable(entry("movie.mp4")))
+        // vc183: video IS previewable (as a placeholder page in the unified
+        // sequence — settling on it extracts nothing; see InZipVideoTest).
+        assertTrue(archiveEntryPreviewable(entry("movie.mp4")))
         assertFalse(archiveEntryPreviewable(entry("blob.zip")))
         assertFalse(archiveEntryPreviewable(entry("dir/", isDirectory = true)))
     }
@@ -454,7 +455,7 @@ class ArchiveSelectionTest {
         val listing = listOf(
             entry("b/photo2.png", 1),                                        // 0 image
             entry("a/song.mp3", 2),                                          // 1 audio
-            entry("b/movie.mp4", 3),                                         // 2 video: skipped
+            entry("b/movie.mp4", 3),                                         // 2 video: unified page (vc183)
             entry("a/notes.txt", 4),                                         // 3 text
             entry("root.gif", 5),                                            // 4 image
             entry("big.txt", ARCHIVE_TEXT_PREVIEW_MAX_BYTES + 1),            // 5 oversized text: skipped
@@ -462,7 +463,9 @@ class ArchiveSelectionTest {
         )
         // Fully expanded NAME-ascending rows: a/notes(3), a/song(1), b/movie(2),
         // b/photo2(0), big(5), root(4) — folders first per level, files by name.
-        assertEquals(listOf(3, 1, 0, 4), archivePreviewPagerIndices(listing))
+        // vc183 unified sequence: the video (2) keeps its display-order page;
+        // only the oversized text (5) and the directory (6) have no page.
+        assertEquals(listOf(3, 1, 2, 0, 4), archivePreviewPagerIndices(listing))
     }
 
     @Test
@@ -495,8 +498,10 @@ class ArchiveSelectionTest {
         assertEquals(emptyList<Int>(), archivePreviewPagerIndices(emptyList()))
         assertEquals(
             emptyList<Int>(),
-            archivePreviewPagerIndices(listOf(entry("movie.mp4"), entry("blob.zip")))
+            archivePreviewPagerIndices(listOf(entry("blob.zip"), entry("data.bin")))
         )
+        // vc183: a lone video is a (placeholder) page of its own.
+        assertEquals(listOf(0), archivePreviewPagerIndices(listOf(entry("movie.mp4"))))
         // A download-only entry has no position in the sequence.
         assertEquals(-1, archivePreviewPagerPosition(listOf(0, 2), 1))
     }

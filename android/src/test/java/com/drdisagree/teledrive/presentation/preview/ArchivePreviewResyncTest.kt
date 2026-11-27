@@ -1,6 +1,8 @@
 package com.drdisagree.teledrive.presentation.preview
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertSame
 import org.junit.Test
 
@@ -56,5 +58,29 @@ class ArchivePreviewResyncTest {
 
         assertEquals(3, afterThree.archivePreviewResyncCount)
         assertEquals(1, afterThree.archivePreviewPosition)
+    }
+
+    // ---- Superseded loads publish nothing (vc183 false-corruption fix) ----
+
+    @Test
+    fun `a superseded load may not publish a failure or success`() {
+        // The view model guards every publish (preview swap, step-failure
+        // resync + corruption message) on archivePreviewLoadMayPublish with
+        // the load's job identity: a load cancelled by a newer step is no
+        // longer current, so its failure — including a corruption verdict
+        // its cancellation produced — publishes nothing.
+        assertFalse(archivePreviewLoadMayPublish(isCurrentLoad = false))
+        assertTrue(archivePreviewLoadMayPublish(isCurrentLoad = true))
+    }
+
+    @Test
+    fun `a current load's genuine failure still resyncs as before`() {
+        // The guard does not weaken the vc180 MF-1 contract for the load
+        // that is still current: its failure advances the resync count and
+        // keeps the published preview.
+        val state = publishedState()
+        val after = state.withArchivePreviewStepFailure()
+        assertEquals(1, after.archivePreviewResyncCount)
+        assertSame(state.archivePreview, after.archivePreview)
     }
 }
