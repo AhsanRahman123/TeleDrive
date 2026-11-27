@@ -33,10 +33,12 @@ import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
-import org.koin.compose.KoinApplication
+import org.koin.core.context.startKoin
+import org.koin.core.context.stopKoin
 import org.koin.dsl.module
 
 /**
@@ -51,6 +53,20 @@ class DesktopLocalPreviewScreenTest {
 
     @get:Rule
     val rule = createComposeRule()
+
+    @After
+    fun tearDown() {
+        runCatching { stopKoin() }
+    }
+
+    /** See DesktopPreviewEscapeBackTest: explicit global Koin, never the
+     *  KoinApplication composable, so contexts cannot leak across classes. */
+    private fun startResolverKoin(resolver: PreviewContentResolver) {
+        runCatching { stopKoin() }
+        startKoin {
+            modules(module { single<PreviewContentResolver> { resolver } })
+        }
+    }
 
     private class FakeSettingsRepository : SettingsRepository {
         private val prefs = MutableStateFlow(UserPreferences())
@@ -140,11 +156,9 @@ class DesktopLocalPreviewScreenTest {
         }
         val backs = AtomicInteger(0)
         val resolver = resolver()
+        startResolverKoin(resolver)
         rule.setContent {
             MaterialTheme {
-                KoinApplication(application = {
-                    modules(module { single<PreviewContentResolver> { resolver } })
-                }) {
                   ArchiveTestProviders {
                     DesktopLocalPreviewScreen(
                         localPath = saved.absolutePath,
@@ -152,7 +166,6 @@ class DesktopLocalPreviewScreenTest {
                         onBack = { backs.incrementAndGet() }
                     )
                   }
-                }
             }
         }
         rule.onNodeWithText("read me from the zip").assertIsDisplayed()
@@ -176,11 +189,9 @@ class DesktopLocalPreviewScreenTest {
             "teledrive-missing-${System.nanoTime()}.txt"
         )
         val resolver = resolver()
+        startResolverKoin(resolver)
         rule.setContent {
             MaterialTheme {
-                KoinApplication(application = {
-                    modules(module { single<PreviewContentResolver> { resolver } })
-                }) {
                   ArchiveTestProviders {
                     DesktopLocalPreviewScreen(
                         localPath = missing.absolutePath,
@@ -188,7 +199,6 @@ class DesktopLocalPreviewScreenTest {
                         onBack = {}
                     )
                   }
-                }
             }
         }
         // The resolver's no-copy failure state renders (its exact wording

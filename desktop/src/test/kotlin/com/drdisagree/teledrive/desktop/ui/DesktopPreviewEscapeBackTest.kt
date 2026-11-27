@@ -58,12 +58,14 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
-import org.koin.compose.KoinApplication
+import org.koin.core.context.startKoin
+import org.koin.core.context.stopKoin
 import org.koin.dsl.module
 
 /**
@@ -85,6 +87,11 @@ class DesktopPreviewEscapeBackTest {
     val rule = createComposeRule()
 
     private val exits = AtomicInteger(0)
+
+    @After
+    fun tearDown() {
+        runCatching { stopKoin() }
+    }
 
     private class FakeSettingsRepository : SettingsRepository {
         private val prefs = MutableStateFlow(UserPreferences())
@@ -263,18 +270,26 @@ class DesktopPreviewEscapeBackTest {
                 }
             }
         }
+        // Global startKoin/stopKoin instead of the KoinApplication
+        // composable: with several KoinApplication test classes in one
+        // JVM, a previous class's context can still be the active one
+        // when the next class composes (async disposal), and injections
+        // then resolve against the wrong module set — the first test of
+        // each such class failed with NoDefinitionFoundException on CI
+        // run 45988092455 while its sibling passed. An explicit stop in
+        // @After (and a defensive one here) keeps the slate clean.
+        runCatching { stopKoin() }
+        startKoin { modules(koinModule) }
         rule.setContent {
             MaterialTheme {
-                KoinApplication(application = { modules(koinModule) }) {
-                    ArchiveTestProviders {
-                        CompositionLocalProvider(
-                            LocalUrlOpener provides UrlOpener { }
-                        ) {
-                            DesktopPreviewScreen(
-                                onBack = { exits.incrementAndGet() },
-                                viewModel = viewModel
-                            )
-                        }
+                ArchiveTestProviders {
+                    CompositionLocalProvider(
+                        LocalUrlOpener provides UrlOpener { }
+                    ) {
+                        DesktopPreviewScreen(
+                            onBack = { exits.incrementAndGet() },
+                            viewModel = viewModel
+                        )
                     }
                 }
             }
