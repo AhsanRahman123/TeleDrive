@@ -16,7 +16,6 @@ import com.drdisagree.teledrive.domain.model.BackupState
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.repository.SettingsRepository
-import com.drdisagree.teledrive.testing.unused
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -41,6 +40,14 @@ import org.junit.Test
  * eligible fetch decodes (ImageIO works on the JVM) to a Ready JPEG under the
  * policy cache key, and an externally deleted Ready file refetches (MF-2).
  */
+
+/** Local copy of the shared-test `unused()` proxy (the shared jvmCommonTest
+ * version is module-internal, so desktop tests cannot import it). */
+private inline fun <reified T : Any> unused(): T = Proxy.newProxyInstance(
+    T::class.java.classLoader,
+    arrayOf(T::class.java)
+) { _, method, _ -> throw UnsupportedOperationException(method.name) } as T
+
 class DesktopArchiveEntryThumbnailStoreTest {
 
     private class FakeFilePartDao : FilePartDao {
