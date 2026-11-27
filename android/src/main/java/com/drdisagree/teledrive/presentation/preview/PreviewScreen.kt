@@ -186,6 +186,7 @@ import com.drdisagree.teledrive.resources.folder_count
 import com.drdisagree.teledrive.resources.item_count
 import com.drdisagree.teledrive.resources.note_edit_action
 import com.drdisagree.teledrive.resources.preview_add_favorites
+import com.drdisagree.teledrive.resources.player_play
 import com.drdisagree.teledrive.resources.preview_archive
 import com.drdisagree.teledrive.resources.preview_archive_format_title
 import com.drdisagree.teledrive.resources.preview_archive_packed_summary
@@ -651,6 +652,7 @@ fun PreviewScreen(
                     onStepVideo = viewModel::stepArchiveVideo,
                     videoQueuePosition = state.archiveVideoQueuePosition,
                     videoQueueLastIndex = state.archiveVideoQueue.lastIndex,
+                    onPlayVideo = viewModel::playCurrentArchiveVideo,
                     onDownload = viewModel::downloadCurrentArchiveEntry,
                     onInfo = viewModel::showArchiveEntryInfo,
                     downloadBusy = state.archiveEntryBusyIndex != null,
@@ -1008,6 +1010,7 @@ private fun ArchiveEntryPreviewOverlay(
     onStepVideo: (Int) -> Unit = {},
     videoQueuePosition: Int = -1,
     videoQueueLastIndex: Int = -1,
+    onPlayVideo: () -> Unit = {},
     onDownload: () -> Unit = {},
     onInfo: () -> Unit = {},
     downloadBusy: Boolean = false,
@@ -1082,10 +1085,43 @@ private fun ArchiveEntryPreviewOverlay(
                         // a video does not auto-advance.
                         onPreviousFile = { onStepVideo(-1) },
                         onNextFile = { onStepVideo(+1) },
-                        hasPreviousFile = videoQueuePosition > 0,
-                        hasNextFile = videoQueuePosition < videoQueueLastIndex,
+                        // vc183: prev/next follow the unified sequence, so
+                        // availability is the pager position/count, not the
+                        // old video-only queue (kept in state only as a
+                        // synced mirror).
+                        hasPreviousFile = pagerPosition > 0,
+                        hasNextFile = pagerPosition < pagerCount - 1,
                         session = overlaySession
                     )
+
+                    is ArchiveEntryPreview.VideoPlaceholder -> Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(previewContentPadding()),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // vc183: a swiped-to video page extracts nothing yet.
+                        // Play is the deliberate tap that pays the whole-file
+                        // extraction (with the free-space preflight).
+                        Text(
+                            text = preview.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = Formatters.bytes(preview.sizeBytes),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 20.dp)
+                        )
+                        Button(onClick = onPlayVideo) {
+                            Text(text = stringResource(Res.string.player_play))
+                        }
+                    }
 
                     is ArchiveEntryPreview.Text -> if (preview.isHtml) {
                         // The WebView scrolls itself; it must not sit inside the

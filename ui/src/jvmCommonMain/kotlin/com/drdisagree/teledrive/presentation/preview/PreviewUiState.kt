@@ -19,9 +19,15 @@ data class PreviewUiState(
     val archivePreviewPosition: Int = -1,
     /** The ZIP file (DriveFile id) the open in-zip preview belongs to, so a swipe can extract the next entry from the same archive. */
     val archivePreviewFileId: String? = null,
-    /** Listing indices of the archive's video entries in display order, for the open in-zip video's SkipPrevious/SkipNext stepping (vc182); empty unless a video preview is open. */
+    /**
+     * Legacy vc182 video-queue fields, kept in sync with the unified sequence
+     * in vc183: while any in-zip preview is open this holds the unified
+     * sequence ([archivePreviewEntries]) and the position below holds
+     * [archivePreviewPosition], so existing readers of the pair keep working.
+     * New code should read [archivePreviewEntries]/[archivePreviewPosition].
+     */
     val archiveVideoQueue: List<Int> = emptyList(),
-    /** Position of the open in-zip video within [archiveVideoQueue]; -1 when no video preview is open. */
+    /** Position within [archiveVideoQueue]; mirrors [archivePreviewPosition] in vc183. */
     val archiveVideoQueuePosition: Int = -1,
     /** A pager step is extracting its entry; the current page stays up (or shows loading) until it lands. */
     val archivePreviewLoading: Boolean = false,
@@ -60,6 +66,21 @@ sealed interface ArchiveEntryPreview {
         override val name: String,
         val path: String,
         override val entryIndex: Int
+    ) : ArchiveEntryPreview
+
+    /**
+     * A video page the pager has settled on but that has NOT been extracted
+     * (vc183): settling/swiping publishes only this state — no extraction, no
+     * free-space preflight, no temp file. Extraction (with the vc181
+     * preflight) runs only when the user taps Play on this page, which is the
+     * deliberate path a direct list tap also takes. [sizeBytes] is the
+     * listing's exact uncompressed size, shown so the cost is visible before
+     * the tap.
+     */
+    data class VideoPlaceholder(
+        override val name: String,
+        override val entryIndex: Int,
+        val sizeBytes: Long
     ) : ArchiveEntryPreview
 
     data class Text(
@@ -105,3 +126,18 @@ data class ArchiveEntryInfo(
  */
 fun PreviewUiState.withArchivePreviewStepFailure(): PreviewUiState =
     copy(archivePreviewResyncCount = archivePreviewResyncCount + 1)
+
+/**
+ * Whether a finished/failed in-zip preview load may publish anything at all
+ * (vc183, false-corruption fix): only the load still registered as the
+ * current one may. A superseded load — cancelled because a newer step, a
+ * swipe back to the published page, or dismissal replaced it — publishes
+ * NOTHING: no preview, no step-failure resync, and no error message. Before
+ * this guard, a superseded extraction whose cancellation had been re-wrapped
+ * as an ArchiveException(CORRUPT) by the archive reader landed in the view
+ * model's unconditional ArchiveException branch and reported "archive is
+ * corrupted" (plus a pager snap-back) for an entry that opens fine when
+ * tapped individually — individual open has no predecessor to supersede, so
+ * it never produced that verdict. Pure, so the contract is host-testable.
+ */
+fun archivePreviewLoadMayPublish(isCurrentLoad: Boolean): Boolean = isCurrentLoad
