@@ -73,14 +73,33 @@ fun parseXmlHardened(bytes: ByteArray): Document? = runCatching {
     builder.parse(ByteArrayInputStream(bytes))
 }.getOrNull()
 
-private fun Element.descendantsByTag(tag: String): List<Element> {
-    val nodes = getElementsByTagName(tag)
-    return (0 until nodes.length).map { nodes.item(it) as Element }
+/**
+ * The local (prefix-free) name of a node: `w:p` → `p`, `a:t` → `t`, `row` → `row`.
+ * Namespace-aware DOM implementations are only required to match
+ * `getElementsByTagName` against the qualified name as written, and Android's
+ * Harmony-derived DOM does not reliably match prefixed lookups such as
+ * `getElementsByTagName("w:p")` — such a lookup silently returns an empty list,
+ * which turned a normal-route DOCX into extracted "" text (a blank viewer)
+ * while the same file's unprefixed EPUB lookups behaved differently. Every
+ * extractor below therefore matches by LOCAL name, which is identical on the
+ * host JVM and on Android whatever prefix (or default namespace) a document
+ * uses.
+ */
+fun localNameOf(node: Node): String =
+    node.localName ?: node.nodeName.substringAfterLast(':')
+
+private fun Element.descendantsByLocalName(local: String): List<Element> {
+    val nodes = getElementsByTagName("*")
+    return (0 until nodes.length)
+        .map { nodes.item(it) as Element }
+        .filter { localNameOf(it) == local }
 }
 
-private fun Document.elementsByTag(tag: String): List<Element> {
-    val nodes = getElementsByTagName(tag)
-    return (0 until nodes.length).map { nodes.item(it) as Element }
+private fun Document.elementsByLocalName(local: String): List<Element> {
+    val nodes = getElementsByTagName("*")
+    return (0 until nodes.length)
+        .map { nodes.item(it) as Element }
+        .filter { localNameOf(it) == local }
 }
 
 // --------------------------------------------------------------------------- DOCX
@@ -88,14 +107,14 @@ private fun Document.elementsByTag(tag: String): List<Element> {
 /** DOCX `word/document.xml` → text: `w:t` runs concatenated, one line per `w:p`. */
 fun docxToText(documentXml: ByteArray): String {
     val document = parseXmlHardened(documentXml) ?: return ""
-    val paragraphs = document.elementsByTag("w:p")
+    val paragraphs = document.elementsByLocalName("p")
     return paragraphs.joinToString("\n") { paragraph ->
         buildString {
             fun walk(node: Node) {
-                when (node.nodeName) {
-                    "w:t" -> append(node.textContent)
-                    "w:tab" -> append('\t')
-                    "w:br" -> append('\n')
+                when (localNameOf(node)) {
+                    "t" -> append(node.textContent)
+                    "tab" -> append('\t')
+                    "br" -> append('\n')
                 }
                 val children = node.childNodes
                 for (i in 0 until children.length) walk(children.item(i))
@@ -111,21 +130,21 @@ fun docxToText(documentXml: ByteArray): String {
 fun xlsxSharedStrings(sharedStringsXml: ByteArray?): List<String> {
     if (sharedStringsXml == null) return emptyList()
     val document = parseXmlHardened(sharedStringsXml) ?: return emptyList()
-    return document.elementsByTag("si").map { si ->
-        si.descendantsByTag("t").joinToString("") { it.textContent }
+    return document.elementsByLocalName("si").map { si ->
+        si.descendantsByLocalName("t").joinToString("") { it.textContent }
     }
 }
 
 /** One XLSX sheet → one line per row, cells tab-separated, shared strings resolved. */
 fun xlsxSheetToLines(sheetXml: ByteArray, sharedStrings: List<String>): List<String> {
     val document = parseXmlHardened(sheetXml) ?: return emptyList()
-    return document.elementsByTag("row").mapNotNull { row ->
-        val cells = row.descendantsByTag("c").map { cell ->
+    return document.elementsByLocalName("row").mapNotNull { row ->
+        val cells = row.descendantsByLocalName("c").map { cell ->
             val type = cell.getAttribute("t")
-            val value = cell.descendantsByTag("v").firstOrNull()?.textContent.orEmpty()
+            val value = cell.descendantsByLocalName("v").firstOrNull()?.textContent.orEmpty()
             when (type) {
                 "s" -> value.toIntOrNull()?.let { sharedStrings.getOrNull(it) } ?: value
-                "inlineStr" -> cell.descendantsByTag("t").joinToString("") { it.textContent }
+                "inlineStr" -> cell.descendantsByLocalName("t").joinToString("") { it.textContent }
                 else -> value
             }
         }
@@ -153,8 +172,8 @@ fun xlsxToText(
 /** One PPTX slide → its `a:t` runs, one line per `a:p` paragraph. */
 fun pptxSlideToText(slideXml: ByteArray): String {
     val document = parseXmlHardened(slideXml) ?: return ""
-    return document.elementsByTag("a:p").joinToString("\n") { paragraph ->
-        paragraph.descendantsByTag("a:t").joinToString("") { it.textContent }
+    return document.elementsByLocalName("p").joinToString("\n") { paragraph ->
+        paragraph.descendantsByLocalName("t").joinToString("") { it.textContent }
     }
 }
 
@@ -169,7 +188,7 @@ fun pptxToText(slides: List<Pair<Int, ByteArray>>): String =
 /** EPUB `META-INF/container.xml` → the OPF package document's full path. */
 fun epubRootFilePath(containerXml: ByteArray): String? {
     val document = parseXmlHardened(containerXml) ?: return null
-    return document.elementsByTag("rootfile")
+    return document.elementsByLocalName("rootfile")
         .firstOrNull()?.getAttribute("full-path")?.takeIf { it.isNotBlank() }
 }
 
@@ -180,13 +199,13 @@ fun epubRootFilePath(containerXml: ByteArray): String? {
 fun epubSpinePaths(opfXml: ByteArray, opfPath: String): List<String> {
     val document = parseXmlHardened(opfXml) ?: return emptyList()
     val manifest = HashMap<String, String>()
-    document.elementsByTag("item").forEach { item ->
+    document.elementsByLocalName("item").forEach { item ->
         val id = item.getAttribute("id")
         val href = item.getAttribute("href")
         if (id.isNotBlank() && href.isNotBlank()) manifest[id] = href
     }
     val opfDir = opfPath.substringBeforeLast('/', "")
-    return document.elementsByTag("itemref").mapNotNull { ref ->
+    return document.elementsByLocalName("itemref").mapNotNull { ref ->
         val href = manifest[ref.getAttribute("idref")] ?: return@mapNotNull null
         resolveZipPath(opfDir, href)
     }
@@ -268,6 +287,22 @@ private fun truncateText(text: String, maxChars: Int): DocumentExtraction.Text =
         DocumentExtraction.Text(text, truncated = false)
     }
 
+/**
+ * True when [text] carries no readable content: blank, or — for the XLSX/PPTX
+ * formats whose converters always emit a `— name —` header line per sheet /
+ * slide — only those header lines. An extraction that yields no readable
+ * content is a FAILURE, never a successful empty text: before vc183 the DOCX
+ * branch wrapped a parse failure's "" in [DocumentExtraction.Text], so the
+ * normal-route viewer opened to a blank screen instead of the honest
+ * "No preview for this file type" fallback the EPUB branch already produced
+ * for the same failure.
+ */
+fun documentTextIsContentless(text: String): Boolean =
+    text.lines().all { line ->
+        val trimmed = line.trim()
+        trimmed.isEmpty() || (trimmed.startsWith("— ") && trimmed.endsWith(" —"))
+    }
+
 /** Extracts readable text from an OOXML file on disk (DOCX/XLSX/PPTX). */
 fun extractOfficeText(file: File): DocumentExtraction {
     return runCatching {
@@ -278,7 +313,9 @@ fun extractOfficeText(file: File): DocumentExtraction {
                 "docx" -> {
                     val xml = entryBytes("word/document.xml")
                         ?: return DocumentExtraction.Failed
-                    truncateText(docxToText(xml), DOCUMENT_TEXT_MAX_CHARS)
+                    val text = docxToText(xml)
+                    if (documentTextIsContentless(text)) return DocumentExtraction.Failed
+                    truncateText(text, DOCUMENT_TEXT_MAX_CHARS)
                 }
                 "xlsx" -> {
                     val sheetEntries = zip.entries().toList()
@@ -291,7 +328,7 @@ fun extractOfficeText(file: File): DocumentExtraction {
                         }
                     if (sheetEntries.isEmpty()) return DocumentExtraction.Failed
                     val sheetNames = entryBytes("xl/workbook.xml")?.let { workbook ->
-                        parseXmlHardened(workbook)?.elementsByTag("sheet")
+                        parseXmlHardened(workbook)?.elementsByLocalName("sheet")
                             ?.map { it.getAttribute("name") }.orEmpty()
                     }.orEmpty()
                     val sheets = sheetEntries.mapIndexed { index, entry ->
@@ -299,10 +336,9 @@ fun extractOfficeText(file: File): DocumentExtraction {
                             ?: "Sheet ${index + 1}") to
                             zip.getInputStream(entry).readBytes()
                     }
-                    truncateText(
-                        xlsxToText(entryBytes("xl/sharedStrings.xml"), sheets),
-                        DOCUMENT_TEXT_MAX_CHARS
-                    )
+                    val text = xlsxToText(entryBytes("xl/sharedStrings.xml"), sheets)
+                    if (documentTextIsContentless(text)) return DocumentExtraction.Failed
+                    truncateText(text, DOCUMENT_TEXT_MAX_CHARS)
                 }
                 "pptx" -> {
                     val slides = zip.entries().toList()
@@ -313,7 +349,9 @@ fun extractOfficeText(file: File): DocumentExtraction {
                                 zip.getInputStream(entry).readBytes()
                         }
                     if (slides.isEmpty()) return DocumentExtraction.Failed
-                    truncateText(pptxToText(slides), DOCUMENT_TEXT_MAX_CHARS)
+                    val text = pptxToText(slides)
+                    if (documentTextIsContentless(text)) return DocumentExtraction.Failed
+                    truncateText(text, DOCUMENT_TEXT_MAX_CHARS)
                 }
                 else -> DocumentExtraction.Failed
             }
