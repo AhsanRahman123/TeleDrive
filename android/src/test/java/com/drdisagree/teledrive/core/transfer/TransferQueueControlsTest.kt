@@ -270,6 +270,60 @@ class TransferQueueControlsTest {
         Unit
     }
 
+    // ------------------------------------------------------- MF-1 (A3 x A2)
+
+    @Test
+    fun `enqueue onto a paused row during pause all keeps the hold and drains only on resume all`() =
+        runBlocking {
+            val h = Harness(concurrency = 1)
+            h.addFile("f1", size = 10_000); h.addRow("first", "f1", TransferState.QUEUED, createdAt = 1)
+            h.addFile("f2", size = 10_000); h.addRow("second", "f2", TransferState.QUEUED, createdAt = 2)
+            h.telegram.script = { remote -> h.hangingFlow(remote) }
+
+            h.scheduler.kick(true)
+            awaitTrue { h.dao.byId("first")!!.state == TransferState.RUNNING }
+
+            h.repository.pauseAll()
+            assertTrue(h.drainer.isPauseHeld())
+            assertEquals(TransferState.PAUSED, h.dao.byId("first")!!.state)
+            assertEquals(TransferState.PAUSED, h.dao.byId("second")!!.state)
+
+            // Another download enqueued during the hold: a fresh QUEUED row
+            // that must wait with the rest of the queue.
+            h.addFile("f4", size = 10_000)
+            val fresh = h.repository.enqueueDownload("f4")
+            assertTrue(fresh is AppResult.Success)
+            val freshId = (fresh as AppResult.Success).value
+            assertEquals(TransferState.QUEUED, h.dao.byId(freshId)!!.state)
+
+            // The A3 dedupe repair, on the PAUSED "second" row, during the
+            // hold: before MF-1 this called resume(), whose scheduler resume
+            // cleared the global hold and restarted the whole queue.
+            val repaired = h.repository.enqueueDownload("f2")
+            assertEquals(AppResult.Success("second"), repaired)
+
+            // The target row is re-queued (the A3 repair still happened)...
+            assertEquals(TransferState.QUEUED, h.dao.byId("second")!!.state)
+            // ...but the hold is still set, and nothing starts: not the
+            // target row, and not the other QUEUED row.
+            assertTrue("pause hold must survive the enqueue repair", h.drainer.isPauseHeld())
+            delay(1_500)
+            assertTrue("pause hold must still be set after a wait", h.drainer.isPauseHeld())
+            assertFalse("target row started during pause hold", h.telegram.started.contains("r-f2"))
+            assertFalse("other queued row started during pause hold", h.telegram.started.contains("r-f4"))
+            assertEquals(TransferState.QUEUED, h.dao.byId("second")!!.state)
+            assertEquals(TransferState.QUEUED, h.dao.byId(freshId)!!.state)
+
+            // Resume all releases the hold and everything drains.
+            h.telegram.completing = true
+            h.repository.resumeAll()
+            assertFalse(h.drainer.isPauseHeld())
+            awaitTrue(20_000) { h.dao.byId("first")!!.state == TransferState.COMPLETED }
+            awaitTrue(20_000) { h.dao.byId("second")!!.state == TransferState.COMPLETED }
+            awaitTrue(20_000) { h.dao.byId(freshId)!!.state == TransferState.COMPLETED }
+            Unit
+        }
+
     // ---------------------------------------------------------------- (d)
 
     @Test
@@ -533,6 +587,8 @@ class TransferQueueControlsTest {
             drainer.setPauseHold(false)
             rekick(allowMetered)
         }
+
+        override fun isPauseHeld(): Boolean = drainer.isPauseHeld()
     }
 
     private class FakeFileDao : FileDao by unused() {

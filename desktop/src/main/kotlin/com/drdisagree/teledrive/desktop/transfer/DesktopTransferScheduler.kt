@@ -80,6 +80,8 @@ class DesktopTransferScheduler(
         kick(allowMetered)
     }
 
+    override fun isPauseHeld(): Boolean = globallyPaused
+
     private companion object {
         const val RETRY_DELAY_SECONDS = 15
     }
