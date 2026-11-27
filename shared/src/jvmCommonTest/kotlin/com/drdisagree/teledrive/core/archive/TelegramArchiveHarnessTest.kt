@@ -403,6 +403,172 @@ class TelegramArchiveHarnessTest {
             }
         }
 
+    // ----- 1.6.25 field-failure reproduction (report 55, English.zip) -----
+    //
+    // The node reports FULLY downloaded (downloadOffset=0,
+    // downloadedPrefixSize=size, isDownloadingCompleted=true) yet every
+    // ReadFilePart — including the zip TAIL read at list/open time — throws
+    // 400 "File is not inside the cache" (findings §2(a).6: the Full local
+    // path fails the cache-dir check, or no readable file exists there).
+    // DownloadFile on a completed file is a no-op, so the 1.6.24 coverage
+    // recovery burns its 3 attempts and gives up with the field message:
+    // "Telegram could not deliver the requested data at offset <tail>
+    // (65600 bytes requested) after 3 download requests: downloadOffset=0
+    // downloadedPrefixSize=<size> isDownloadingActive=false
+    // isDownloadingCompleted=true lastReadError=400: File is not inside
+    // the cache".
+
+    @Test
+    fun `field sequence - completed file outside the cache is read via its verified local path`() =
+        runBlocking {
+            val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+            val writer = HarnessDownloadWriter()
+            val service = service(fake, writer)
+            val file = driveFile()
+
+            val listing = service.listEntries(file)
+            assertEquals(4, listing.count { !it.isDirectory })
+
+            // The file lives at a real path outside the TDLib cache (e.g. the
+            // original this copy was uploaded from); the node is Full there.
+            val outside = java.io.File.createTempFile("english-outside-cache", ".zip")
+            outside.writeBytes(zipBytes)
+            outside.deleteOnExit()
+            fake.completeOutsideCache(outside.absolutePath)
+            val requestsBefore = fake.rangeRequests
+
+            val temp = service.extractEntryToTempFile(file, "c-middle.txt")
+            try {
+                assertArrayEquals(middleData, temp.readBytes())
+            } finally {
+                temp.delete()
+            }
+            service.extractEntry(file, "a-start.bin")
+            assertArrayEquals(startData, writer.bytes)
+            assertEquals(
+                "a verified local file must never be cache-deleted",
+                0, fake.deleteCalls
+            )
+            assertEquals(
+                "a completed file must not be re-downloaded; its verified path is read instead",
+                requestsBefore, fake.rangeRequests
+            )
+        }
+
+    @Test
+    fun `field sequence - completed node whose local file is gone is reset and re-downloaded`() =
+        runBlocking {
+            val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+            val writer = HarnessDownloadWriter()
+            val service = service(fake, writer)
+            val file = driveFile()
+
+            val listing = service.listEntries(file)
+            assertEquals(4, listing.count { !it.isDirectory })
+
+            // Stale Full node: it still reports completed at a path whose file
+            // was removed (the state DesktopTelegramClient.readyPath guards
+            // against). Only DeleteFile + a genuine re-download can fix it.
+            val gone = java.io.File(
+                System.getProperty("java.io.tmpdir"),
+                "english-vanished-${System.nanoTime()}.zip"
+            )
+            assertFalse(gone.exists())
+            fake.completeOutsideCache(gone.absolutePath)
+            val requestsBefore = fake.rangeRequests
+
+            val temp = service.extractEntryToTempFile(file, "c-middle.txt")
+            try {
+                assertArrayEquals(middleData, temp.readBytes())
+            } finally {
+                temp.delete()
+            }
+            assertEquals(
+                "the stale node must be cache-deleted exactly once",
+                1, fake.deleteCalls
+            )
+            assertTrue(
+                "after the reset the range must be genuinely re-downloaded",
+                fake.rangeRequests > requestsBefore
+            )
+        }
+
+    @Test
+    fun `byte source - unverifiable completed local path is neither read nor deleted and the failure names it`() =
+        runBlocking {
+            // The file at the completed node's path exists but is NOT this file
+            // (length mismatch): reading it would hand the zip layer wrong
+            // bytes, and deleting it could destroy a file that is not a cache
+            // copy. The read must fail — with the local-path state in the
+            // message, per the failure-visibility contract.
+            val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+            val wrong = java.io.File.createTempFile("english-wrong-file", ".bin")
+            wrong.writeBytes(ByteArray(10))
+            wrong.deleteOnExit()
+            fake.completeOutsideCache(wrong.absolutePath)
+            val source = TelegramMediaByteSource(
+                fake.client, "remote-1", 100L, 200L, primeFromStart = false
+            )
+            try {
+                source.read(0, 4_096)
+                fail("an unverifiable local path must not satisfy the read")
+            } catch (expected: TelegramException) {
+                assertEquals(400, expected.code)
+                assertTrue(
+                    "failure must carry the local-path state, was: ${expected.message}",
+                    expected.message.contains("localPath=${wrong.absolutePath}")
+                )
+            } finally {
+                source.close()
+            }
+            assertEquals(
+                "an existing file of the wrong length must never be cache-deleted",
+                0, fake.deleteCalls
+            )
+        }
+
+    @Test
+    fun `fake - completed outside-cache node reports full yet rejects every read and ignores DownloadFile`() =
+        runBlocking {
+            val fake = FakeTdLibTelegramClient(zipBytes, growth = FakeGrowth.INSTANT)
+            fake.completeOutsideCache("/somewhere/else/English.zip")
+            val info = fake.client.getFileInfo(FakeTdLibTelegramClient.FILE_ID)
+            assertTrue(info.isDownloadingCompleted)
+            assertFalse(info.isDownloadingActive)
+            assertEquals(0L, info.downloadOffset)
+            assertEquals(zipBytes.size.toLong(), info.downloadedPrefixSize)
+            assertEquals("/somewhere/else/English.zip", info.localPath)
+            // The zip tail read (list/open time) fails exactly as in the field.
+            val tailStart = zipBytes.size - 65_600L
+            try {
+                fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, tailStart, 65_600)
+                fail("a completed outside-cache node must reject the tail read")
+            } catch (expected: TelegramException) {
+                assertEquals(400, expected.code)
+                assertEquals("File is not inside the cache", expected.message)
+            }
+            // DownloadFile changes nothing on a completed file.
+            fake.client.requestFileRange(FakeTdLibTelegramClient.FILE_ID, tailStart, 65_600)
+            val after = fake.client.getFileInfo(FakeTdLibTelegramClient.FILE_ID)
+            assertTrue(after.isDownloadingCompleted)
+            assertEquals(zipBytes.size.toLong(), after.downloadedPrefixSize)
+            try {
+                fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, tailStart, 65_600)
+                fail("the read must still fail after a DownloadFile on the completed file")
+            } catch (expected: TelegramException) {
+                assertEquals(400, expected.code)
+            }
+            // DeleteFile drops the stale local location; downloads work again.
+            fake.client.deleteLocalCopy("remote-1")
+            assertEquals(1, fake.deleteCalls)
+            val cleared = fake.client.getFileInfo(FakeTdLibTelegramClient.FILE_ID)
+            assertFalse(cleared.isDownloadingCompleted)
+            fake.client.requestFileRange(FakeTdLibTelegramClient.FILE_ID, 0, 100)
+            assertEquals(
+                100, fake.client.readFilePart(FakeTdLibTelegramClient.FILE_ID, 0, 100).size
+            )
+        }
+
     // ----- fake-level pins of the source semantics themselves -----
 
     @Test

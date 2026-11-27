@@ -97,6 +97,24 @@ class FakeTdLibTelegramClient(
      */
     private var competitorHeld = false
 
+    /**
+     * 1.6.25 mode (English.zip): the node is FULL — every part ready,
+     * isDownloadingCompleted=true, downloadOffset=0, downloadedPrefixSize=size —
+     * yet ReadFilePart throws 400 "File is not inside the cache" for every range,
+     * because the Full local path does not begin with the file type's cache dir
+     * (findings §2(a).6), or the file at that path is gone while the node still
+     * reports Full (the stale-node state DesktopTelegramClient.readyPath guards
+     * against). A DownloadFile on a completed file is a no-op: it neither
+     * relocates nor re-fetches the file, so requests are counted but change
+     * nothing. Set via [completeOutsideCache]; cleared only by a DeleteFile
+     * ([deleteLocalCopy] dispatch), which drops the node's local location.
+     */
+    private var completedOutsideCache = false
+    private var reportedLocalPath: String? = null
+
+    var deleteCalls = 0
+        private set
+
     var competingRequests = 0
         private set
 
@@ -125,7 +143,7 @@ class FakeTdLibTelegramClient(
     private fun info(): TelegramFileInfo = TelegramFileInfo(
         fileId = FILE_ID,
         sizeBytes = bytes.size.toLong(),
-        localPath = null,
+        localPath = reportedLocalPath,
         isDownloadingCompleted = completed,
         isDownloadingActive = active,
         downloadOffset = windowOffset,
@@ -170,6 +188,39 @@ class FakeTdLibTelegramClient(
         cacheMissing = true
     }
 
+    /**
+     * The node becomes (or already was) FULL with its local path at [localPath] —
+     * a path outside the TDLib cache dir (e.g. the original file this copy was
+     * uploaded from), or a path whose file has since been removed. Whether the
+     * file exists at [localPath] is the caller's business: the fake never looks
+     * at the disk; the byte source under test does.
+     */
+    @Synchronized
+    fun completeOutsideCache(localPath: String) {
+        ready.fill(true)
+        active = false
+        competitorHeld = false
+        cacheMissing = false
+        windowOffset = 0L
+        windowLimit = 0L
+        completedOutsideCache = true
+        reportedLocalPath = localPath
+    }
+
+    /** DeleteFile: the node drops its local location; nothing is downloaded. */
+    @Synchronized
+    private fun deleteLocal() {
+        deleteCalls++
+        ready.fill(false)
+        active = false
+        competitorHeld = false
+        cacheMissing = false
+        completedOutsideCache = false
+        reportedLocalPath = null
+        windowOffset = 0L
+        windowLimit = 0L
+    }
+
     /** Another issuer re-targets the single window to its own range and holds it. */
     @Synchronized
     fun simulateCompetingDownload(offset: Long, limit: Long) {
@@ -212,6 +263,9 @@ class FakeTdLibTelegramClient(
     private fun requestRange(offset: Long, limit: Long) {
         rangeRequests++
         rangeRequestList += offset to limit
+        // A DownloadFile on a completed file is a no-op (1.6.25 mode): the node
+        // stays Full at its outside-cache path and reads keep failing.
+        if (completedOutsideCache) return
         // Re-target: the single window moves; already-downloaded parts are kept, the
         // reported prefix re-bases to the new offset automatically via [info].
         // A DownloadFile also re-establishes a readable partial file (clears the
@@ -236,6 +290,10 @@ class FakeTdLibTelegramClient(
         // surfacing from the read; the node's bitmask state in that instant is not
         // observable from the app.
         if (cacheMissing) throw TelegramException(400, "File is not inside the cache")
+        // 1.6.25 mode (findings §2(a).6): a Full node whose path fails the
+        // cache-dir check rejects EVERY read with this exact 400, however
+        // complete the node reports itself.
+        if (completedOutsideCache) throw TelegramException(400, "File is not inside the cache")
         if (offset < 0) throw TelegramException(400, "Parameter offset must be non-negative")
         if (count < 0) throw TelegramException(400, "Parameter count must be non-negative")
         if (count == 0L) {
@@ -295,6 +353,10 @@ class FakeTdLibTelegramClient(
                 )
                 "cancelFileDownload" -> {
                     cancel()
+                    Unit
+                }
+                "deleteLocalCopy" -> {
+                    deleteLocal()
                     Unit
                 }
                 "fileUpdates" -> if (emitUpdatesOnlyOnChange) {
