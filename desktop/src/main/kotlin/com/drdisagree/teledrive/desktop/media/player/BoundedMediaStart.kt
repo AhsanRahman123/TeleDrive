@@ -32,7 +32,9 @@ internal const val MEDIA_START_TIMEOUT_MS = 10_000L
  * blocks all later switches).
  *
  * This helper plays the media and waits on [MediaStartLatch] for at most
- * [timeoutMs]. The wait is the only thing that changed: playback itself
+ * [timeoutMs]. The optional [beforePlay] hook runs immediately before the
+ * play call, on the same executor thread — see [boundedStartSequence].
+ * The wait is the only thing that changed: playback itself
  * starts with the same `play()` call, immediately — landing on a video
  * still ends in playback with no extra action (A5). On timeout the start
  * reports failure, the caller's existing failure branch surfaces it
@@ -42,16 +44,52 @@ internal const val MEDIA_START_TIMEOUT_MS = 10_000L
 internal fun startMediaBounded(
     player: MediaPlayer,
     mrl: String,
-    timeoutMs: Long = MEDIA_START_TIMEOUT_MS
+    timeoutMs: Long = MEDIA_START_TIMEOUT_MS,
+    beforePlay: (MediaPlayer) -> Unit = {}
 ): Boolean {
     val latch = MediaStartLatch()
     player.events().addMediaPlayerEventListener(latch)
     return try {
-        val playCalled = runCatching { player.media().play(mrl) }.getOrDefault(false)
-        playCalled && latch.await(timeoutMs)
+        boundedStartSequence(
+            beforePlay = { runCatching { beforePlay(player) } },
+            play = { runCatching { player.media().play(mrl) }.getOrDefault(false) },
+            awaitStarted = { latch.await(it) },
+            timeoutMs = timeoutMs
+        )
     } finally {
         runCatching { player.events().removeMediaPlayerEventListener(latch) }
     }
+}
+
+/**
+ * The ordering core of [startMediaBounded], separated so it is
+ * unit-testable without a native player.
+ *
+ * [beforePlay] runs FIRST, on the caller's thread (the session's serial
+ * command executor), immediately before [play] is invoked. That ordering
+ * is the PC 1.6.27 N2 fix: state applied in [beforePlay] — the viewer
+ * applies the user's stored volume/mute there — is already in force on
+ * the native player when its audio output is created for the new media,
+ * so the first audible moment plays at the user's volume. Before this
+ * hook existed, the volume was only applied by a Compose effect that ran
+ * after the playing event (plus a 250 ms delay, plus a queue wait behind
+ * this very start command on the same executor), so every start played
+ * its opening at libVLC's default volume and then jumped when the effect
+ * landed — the longstanding "starts low, full volume suddenly arrives"
+ * field note.
+ *
+ * A failing [beforePlay] never blocks the start: the bounded await still
+ * decides the outcome exactly as the pre-N2 code did.
+ */
+internal fun boundedStartSequence(
+    beforePlay: () -> Unit,
+    play: () -> Boolean,
+    awaitStarted: (Long) -> Boolean,
+    timeoutMs: Long
+): Boolean {
+    runCatching { beforePlay() }
+    if (!play()) return false
+    return awaitStarted(timeoutMs)
 }
 
 /**

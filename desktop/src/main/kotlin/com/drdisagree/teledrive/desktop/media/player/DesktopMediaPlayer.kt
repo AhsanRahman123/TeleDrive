@@ -615,7 +615,30 @@ internal fun DesktopMediaPlayer(
                     // no extra action) but caps the proof wait; a timeout
                     // lands in the failure branch below, which surfaces the
                     // failure and keeps this generation retryable via Play.
-                    val started = startMediaBounded(nativePlayer, mrl)
+                    // N2 (PC 1.6.27): the user's volume/mute is applied in
+                    // the beforePlay hook — on this executor thread,
+                    // immediately before play() — so it is in force when
+                    // the new media's audio output is created and the
+                    // first audible moment already plays at the stored
+                    // volume. Previously the ONLY application was the
+                    // post-playing reapply effect below (playing event +
+                    // 250 ms delay + a submit queued behind this start),
+                    // so every start opened at libVLC's default volume
+                    // and jumped when the effect landed. That effect is
+                    // kept unchanged as the audio-device hot-plug
+                    // backstop; it now re-applies the same value, so it
+                    // is no longer audible. The values are read at
+                    // execution time: a newer selection that superseded
+                    // this command is rejected by the generation checks
+                    // around this call, never started with stale volume.
+                    val started = startMediaBounded(nativePlayer, mrl) { startingPlayer ->
+                        val startVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
+                        runCatching { startingPlayer.audio().setVolume(startVolume) }
+                        runCatching {
+                            startingPlayer.audio().isMute =
+                                latestMuted.value || startVolume <= 0
+                        }
+                    }
                     val stillCurrent = eventGate.generation() == mediaGeneration
                     if (!started || !stillCurrent) {
                         if (!stillCurrent) {
