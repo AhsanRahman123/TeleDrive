@@ -606,9 +606,16 @@ internal fun DesktopMediaPlayer(
                     // stop() has completed the outgoing native transition; only now allow
                     // this source's render callbacks into the generation-tagged frame channel.
                     eventGate.setAcceptsFrames(true)
-                    val started = runCatching {
-                        nativePlayer.media().start(mrl)
-                    }.getOrDefault(false)
+                    // Bounded start (PC 1.6.26 P4): MediaApi.start() waits
+                    // with no timeout for the playing/error report, and this
+                    // command runs on the session's single-thread executor —
+                    // one source that never reports would wedge every later
+                    // switch and control behind it forever. startMediaBounded
+                    // plays identically (playback still starts on landing,
+                    // no extra action) but caps the proof wait; a timeout
+                    // lands in the failure branch below, which surfaces the
+                    // failure and keeps this generation retryable via Play.
+                    val started = startMediaBounded(nativePlayer, mrl)
                     val stillCurrent = eventGate.generation() == mediaGeneration
                     if (!started || !stillCurrent) {
                         if (!stillCurrent) {
@@ -1384,6 +1391,7 @@ internal fun DesktopMediaPlayer(
         if (isAudio) {
             AudioStage(
                 player = player,
+                mrl = mrl,
                 mediaId = mediaId,
                 fallbackTitle = mediaTitle.ifBlank {
                     queueItems.firstOrNull { it.id == currentQueueItemId }?.name
@@ -2602,30 +2610,50 @@ private val THUMB_HEIGHT = 26.dp
 @Composable
 private fun AudioStage(
     player: PlayerSession,
+    mrl: String,
     mediaId: String,
     fallbackTitle: String
 ) {
-    var metaTitle by remember(mediaId) { mutableStateOf("") }
-    var artist by remember(mediaId) { mutableStateOf("") }
-    var album by remember(mediaId) { mutableStateOf("") }
-    LaunchedEffect(player, mediaId) {
+    // Keyed on the loaded mrl, NOT mediaId: the in-zip mediaId is name-based
+    // ("archive-audio-<name>"), so two same-named entries in different
+    // folders would otherwise share this state and never reset between them.
+    var metaTitle by remember(mrl) { mutableStateOf("") }
+    var artist by remember(mrl) { mutableStateOf("") }
+    var album by remember(mrl) { mutableStateOf("") }
+    LaunchedEffect(player, mrl) {
         // Metadata lands shortly after playback starts; poll briefly for it.
-        repeat(12) {
-            val meta = runCatching { player.media().meta() }.getOrNull()
-            if (meta != null) {
-                // vlcj hands libvlc's UTF-8 meta through JNA's default
-                // (OS-native, windows-1252) string decoding, so non-English
-                // tags arrive as mojibake; repair at this seam — see
-                // MetaTextRepair. No-op for clean text.
-                metaTitle = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.TITLE) }
-                    .getOrNull().orEmpty().let(::repairMetaText)
-                artist = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.ARTIST) }
-                    .getOrNull().orEmpty().let(::repairMetaText)
-                album = runCatching { meta.get(uk.co.caprica.vlcj.media.Meta.ALBUM) }
-                    .getOrNull().orEmpty().let(::repairMetaText)
-                if (metaTitle.isNotBlank() || artist.isNotBlank()) return@LaunchedEffect
-            }
-            delay(500)
+        // PC 1.6.26 P1: the poll must only accept meta from the media this
+        // stage was loaded with. player.media() reports whatever media the
+        // native player currently holds, and on a switch the start command
+        // is still queued behind stop+start on the session's serial
+        // executor while this effect starts polling — an ungated poll read
+        // the PREVIOUS track's tags, saw them non-blank, and stopped,
+        // leaving the display exactly one entry behind playback.
+        // AudioMetaLoader gates acceptance on the current media's own mrl
+        // and applies repairMetaText to accepted fields (the vlcj/JNA
+        // mojibake seam — see MetaTextRepair; no-op for clean text).
+        val loaded = AudioMetaLoader(expectedMrl = mrl, snapshot = {
+            runCatching {
+                val media = player.media()
+                val meta = media.meta()
+                MediaMetaSnapshot(
+                    currentMrl = media.info()?.mrl(),
+                    title = runCatching {
+                        meta.get(uk.co.caprica.vlcj.media.Meta.TITLE)
+                    }.getOrNull().orEmpty(),
+                    artist = runCatching {
+                        meta.get(uk.co.caprica.vlcj.media.Meta.ARTIST)
+                    }.getOrNull().orEmpty(),
+                    album = runCatching {
+                        meta.get(uk.co.caprica.vlcj.media.Meta.ALBUM)
+                    }.getOrNull().orEmpty()
+                )
+            }.getOrNull()
+        }).load()
+        if (loaded != null) {
+            metaTitle = loaded.title
+            artist = loaded.artist
+            album = loaded.album
         }
     }
     var artworkFailed by remember(mediaId) { mutableStateOf(false) }
