@@ -511,6 +511,31 @@ fun PreviewScreen(
                                 )
                             }
                         }
+                        // vc183 item 8: a top-bar Download beside Info, matching
+                        // the in-zip viewer's Download+Info pair (vc182 item 3).
+                        // This top bar is the ONE viewer chrome for photos and
+                        // videos alike — the same PreviewScreen serves files
+                        // opened from Files and from Gallery, and the video
+                        // player's own control row sits directly under this bar —
+                        // so this single button covers every viewer surface.
+                        // It routes through viewModel.download, the exact path
+                        // the overflow menu's Download item and the Files list's
+                        // download action use (enqueueDownload: a real transfer
+                        // with a Transfers record and the download-queued
+                        // snackbar with its View action). Like the list action
+                        // (SelectionCapabilities.canDownload), it is offered
+                        // whenever the file is an image or a video, even when a
+                        // local copy already exists: enqueueDownload then queues
+                        // a fresh download of the remote copy (deduplicated
+                        // against an unfinished transfer for the same file).
+                        if (showsViewerDownloadButton(currentFile.category)) {
+                            IconButton(onClick = { viewModel.download(currentFile) }) {
+                                Icon(
+                                    Icons.Filled.Download,
+                                    contentDescription = stringResource(Res.string.common_download)
+                                )
+                            }
+                        }
                         IconButton(onClick = { viewModel.showInfo(currentFile) }) {
                             Icon(
                                 Icons.Filled.Info,
@@ -1744,10 +1769,16 @@ private fun ArchiveRow(
                 modifier = Modifier.padding(end = 4.dp)
             )
         }
-        // vc182 item 6: for image entries of a remote archive, the 40dp slot shows
+        // vc182 item 6: for image entries of a remote archive, the slot shows
         // a real thumbnail once the store has one; until then (and on any failure)
         // it shows exactly the generic icon it always showed. The key is derived
         // from this row's own listing identity only — no list-level state.
+        // vc183 item 6: the slot grows 40dp -> 56dp (field request: the vc182
+        // thumbnails were right, just small). Nothing else in the row moves —
+        // same paddings, same text column, same trailing size/download column;
+        // the taller slot simply sets the row height instead of the text
+        // column's 48dp minimum. ZIP and CBZ rows share this code path, so
+        // both get the bigger slot.
         val entryIndex = node.entryIndex
         val thumbnailKey = remember(
             archiveFile?.id, entryIndex, node.sizeBytes, node.compressedBytes, node.modifiedAtMillis
@@ -1782,7 +1813,7 @@ private fun ArchiveRow(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(40.dp)
+                .size(56.dp)
                 .clip(CircleShape)
                 .background(
                     if (node.isDirectory) {
@@ -1967,6 +1998,15 @@ private fun shareFile(context: Context, file: DriveFile, chooserTitle: String) {
 }
 
 val PreviewTopBarHeight = 64.dp
+
+/**
+ * vc183 item 8: which viewer pages carry the top-bar Download button — photos
+ * and videos only, the two surfaces the field ask names. Every other preview
+ * type keeps its chrome exactly as before (its Download stays where it already
+ * lives: the overflow menu, the RequiresDownload empty state, and so on).
+ */
+internal fun showsViewerDownloadButton(category: FileCategory): Boolean =
+    category == FileCategory.IMAGE || category == FileCategory.VIDEO
 
 private fun openUrl(context: Context, url: String) {
     runCatching {

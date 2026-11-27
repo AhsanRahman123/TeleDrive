@@ -81,6 +81,16 @@ class ArchiveEntryThumbnailTest {
         assertFalse(ArchiveEntryThumbnailPolicy.isEligible(info(method = 14))) // LZMA
     }
 
+    // ---- decode size (vc183 item 6) ----
+
+    @Test
+    fun `decode target is pinned at 256 pixels for the bigger slot`() {
+        // The rendered slot grew 40dp -> 56dp in vc183; the decode target grew
+        // with it but stays at this small end so decode cost (and fling-scroll
+        // smoothness, the praised vc182 baseline) does not regress.
+        assertEquals(256, ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX)
+    }
+
     // ---- cache keys ----
 
     @Test
