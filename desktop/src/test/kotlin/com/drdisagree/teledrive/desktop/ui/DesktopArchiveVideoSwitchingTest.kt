@@ -352,4 +352,73 @@ class DesktopArchiveVideoSwitchingTest {
         await("preview dismissed") { viewModel.uiState.value.archivePreview == null }
         assertFalse("dismiss leaked the last video temp", currentTemp.exists())
     }
+
+    /**
+     * PC 1.6.26 P1, ViewModel half: stepping through THREE in-zip audio
+     * entries via the production unified-sequence step must publish each
+     * entry's OWN Audio preview (its own display name and extracted temp
+     * bytes) — the identity the AudioStage meta loader is keyed to. The
+     * tag-display half of P1 (previous track's VLC meta) is covered by
+     * AudioMetaLoaderTest at the loader seam.
+     */
+    @Test
+    fun `three in-zip audio entries step through with their own identity`() {
+        val audioBytes = listOf(
+            ByteArray(96) { 11 },
+            ByteArray(96) { 12 },
+            ByteArray(96) { 13 }
+        )
+        val audioData = listOf(
+            "music/first.mp3" to audioBytes[0],
+            "music/second.mp3" to audioBytes[1],
+            "music/third.mp3" to audioBytes[2]
+        )
+        val zipBytes = archiveZipBytes(audioData)
+        val file = zipFile("vm-audio-switch-zip")
+        val viewModel = buildViewModel(zipBytes, file)
+        val scope = CoroutineScope(Dispatchers.Default)
+        scope.launch { viewModel.contentFor(file).collect {} }
+        await("remote listing stored") { viewModel.uiState.value.archiveListings.containsKey(file.id) }
+        val listing = viewModel.uiState.value.archiveListings.getValue(file.id)
+        assertEquals(audioData.map { it.first }, listing.map { it.name })
+        val sequence = archiveUnifiedPreviewIndices(listing, listing.indices.toList())
+        assertEquals(listOf(0, 1, 2), sequence)
+
+        viewModel.previewArchiveEntry(file, 0)
+        await("first audio preview") {
+            (viewModel.uiState.value.archivePreview as? ArchiveEntryPreview.Audio)
+                ?.entryIndex == 0
+        }
+        await("busy cleared after open") { viewModel.uiState.value.archiveEntryBusyIndex == null }
+        var current = viewModel.uiState.value.archivePreview as ArchiveEntryPreview.Audio
+        assertEquals("first.mp3", current.name)
+        assertArrayEquals(audioBytes[0], File(current.path).readBytes())
+        var currentTemp = File(current.path)
+
+        val expectedNames = listOf("second.mp3", "third.mp3")
+        for (step in 1..2) {
+            assertTrue(
+                "audio step $step was refused",
+                viewModel.stepArchivePreview(file, +1, sequence)
+            )
+            await("audio preview at entry $step") {
+                (viewModel.uiState.value.archivePreview as? ArchiveEntryPreview.Audio)
+                    ?.entryIndex == step
+            }
+            await("busy cleared after audio step $step") {
+                viewModel.uiState.value.archiveEntryBusyIndex == null
+            }
+            current = viewModel.uiState.value.archivePreview as ArchiveEntryPreview.Audio
+            assertEquals(expectedNames[step - 1], current.name)
+            assertEquals(step, current.entryIndex)
+            assertArrayEquals(audioBytes[step], File(current.path).readBytes())
+            assertFalse("audio step $step leaked the previous temp", currentTemp.exists())
+            currentTemp = File(current.path)
+            assertTrue(currentTemp.exists())
+        }
+
+        viewModel.dismissArchivePreview()
+        await("audio preview dismissed") { viewModel.uiState.value.archivePreview == null }
+        assertFalse("dismiss leaked the last audio temp", currentTemp.exists())
+    }
 }
