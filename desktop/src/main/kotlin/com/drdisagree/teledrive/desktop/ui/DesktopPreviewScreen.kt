@@ -3726,12 +3726,14 @@ internal fun DesktopArchivePane(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            if (loading.delayedUntilComplete && loading.note != null) {
-                                Text(
-                                    text = loading.note,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            if (loading.delayedUntilComplete) {
+                                loading.note?.let { note ->
+                                    Text(
+                                        text = note,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                         ArchiveOverlayBar(
