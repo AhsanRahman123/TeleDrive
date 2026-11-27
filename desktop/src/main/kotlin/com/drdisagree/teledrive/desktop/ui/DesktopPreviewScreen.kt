@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.desktop.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -2936,8 +2937,10 @@ internal fun DesktopArchivePane(
                                     // the shared `archive_thumbnail_size`
                                     // preference — the Gallery layout
                                     // switcher's pattern applied to the ZIP
-                                    // list. Only the display slot changes;
-                                    // decode stays at the bounded 256 px.
+                                    // list. PC 1.6.27 (N6): Big is a wide
+                                    // 152x112 dp preview tile decoding at
+                                    // 512 px; Small / Medium keep the round
+                                    // slot and the bounded 256 px decode.
                                     TooltipIconButton(
                                         tooltip = "Thumbnail size",
                                         onClick = { thumbnailMenuOpen = true },
@@ -3046,7 +3049,7 @@ internal fun DesktopArchivePane(
                             selectionMode = selectionMode,
                             isBusy = busyEntryIndex != null && busyEntryIndex == entryIndex,
                             canDownload = archive.remote && !row.node.isDirectory,
-                            thumbnailSizeDp = thumbnailSize.dp,
+                            thumbnailSize = thumbnailSize,
                             thumbnailStore = thumbnailStore,
                             archiveFile = file,
                             onRowClick = {
@@ -3656,8 +3659,8 @@ private fun DesktopArchiveRow(
     selectionMode: Boolean,
     isBusy: Boolean,
     canDownload: Boolean,
-    /** The persisted thumbnail slot size in dp (PC 1.6.26 item P7); 56 = the pre-switcher size. */
-    thumbnailSizeDp: Int = 56,
+    /** The persisted thumbnail step (PC 1.6.26 item P7; PC steps re-mapped in 1.6.27 item N6). */
+    thumbnailSize: ArchiveThumbnailSize = ArchiveThumbnailSize.MEDIUM,
     thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
     archiveFile: DriveFile? = null,
     onRowClick: () -> Unit,
@@ -3721,6 +3724,7 @@ private fun DesktopArchiveRow(
                 null
             }
         }
+        val isBigThumbnail = thumbnailSize == ArchiveThumbnailSize.BIG
         val genericIcon: @Composable () -> Unit = {
             Icon(
                 imageVector = if (node.isDirectory) {
@@ -3729,18 +3733,23 @@ private fun DesktopArchiveRow(
                     Icons.AutoMirrored.Filled.InsertDriveFile
                 },
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(if (isBigThumbnail) 40.dp else 20.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                // The switchable slot (item P7): 40/56/80 dp from the
-                // persisted ArchiveThumbnailSize. The decoded bitmap behind
-                // it does NOT grow with the slot — the store still decodes
-                // at its bounded 256 px and the image is cropped to fill.
-                .size(thumbnailSizeDp.dp)
+                // The switchable slot (item P7; PC steps re-mapped by
+                // 1.6.27 item N6): Small / Medium keep the round slot at
+                // 40 / 56 dp; Big is a wide 152x112 dp rounded-rectangle
+                // preview tile, so the thumbnail — not empty row space —
+                // dominates the row, and the store decodes it at the
+                // step's own 512 px cap so the tile is actually sharp.
+                .size(
+                    width = thumbnailSize.widthDp.dp,
+                    height = thumbnailSize.dp.dp
+                )
                 .testTag(
                     if (node.entryIndex != null) {
                         "archive-thumbnail-${node.entryIndex}"
@@ -3748,7 +3757,13 @@ private fun DesktopArchiveRow(
                         "archive-thumbnail-folder"
                     }
                 )
-                .clip(CircleShape)
+                .clip(
+                    if (isBigThumbnail) {
+                        RoundedCornerShape(12.dp)
+                    } else {
+                        CircleShape
+                    }
+                )
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
         ) {
             if (thumbnailKey != null && thumbnailStore != null && archiveFile != null &&
@@ -3761,6 +3776,7 @@ private fun DesktopArchiveRow(
                     entryName = node.name,
                     sizeBytes = node.sizeBytes,
                     cacheKey = thumbnailKey,
+                    decodePx = thumbnailSize.decodePx,
                     placeholder = genericIcon
                 )
             } else {
@@ -3838,15 +3854,16 @@ private fun DesktopArchiveEntryThumbnail(
     entryName: String,
     sizeBytes: Long,
     cacheKey: String,
+    decodePx: Int = ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX,
     placeholder: @Composable () -> Unit
 ) {
-    val state by store.state(cacheKey).collectAsState()
-    var loadFailed by remember(cacheKey) { mutableStateOf(false) }
-    LaunchedEffect(cacheKey) {
-        store.request(cacheKey, archiveFile, entryIndex, entryName, sizeBytes)
+    val state by store.state(cacheKey, decodePx).collectAsState()
+    var loadFailed by remember(cacheKey, decodePx) { mutableStateOf(false) }
+    LaunchedEffect(cacheKey, decodePx) {
+        store.request(cacheKey, archiveFile, entryIndex, entryName, sizeBytes, decodePx)
     }
-    DisposableEffect(cacheKey) {
-        onDispose { store.release(cacheKey) }
+    DisposableEffect(cacheKey, decodePx) {
+        onDispose { store.release(cacheKey, decodePx) }
     }
     val readyFile = (state as? ArchiveThumbState.Ready)?.file
     if (readyFile != null && !loadFailed) {

@@ -16,6 +16,7 @@ import kotlinx.coroutines.runBlocking
 import okio.Path.Companion.toPath
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -24,6 +25,12 @@ import org.junit.Test
  * `archive_thumbnail_size` key (the enum name), defaults to MEDIUM
  * (56 dp — the size the lists shipped with before the switcher existed),
  * and the steps are genuinely ordered Small 40 < Medium 56 < Big 80.
+ *
+ * PC 1.6.27 item N6 re-mapped the PC steps (this is the PC line's enum
+ * copy; Android's steps are a separate copy and unchanged): Big's 80 dp
+ * round slot still read as small in a wide row, so Big is now a wide
+ * 152x112 dp preview tile and its decode cap rises to 512 px, while
+ * Small / Medium keep their slots and the 256 px decode.
  */
 class ArchiveThumbnailSizeSettingsTest {
 
@@ -46,11 +53,26 @@ class ArchiveThumbnailSizeSettingsTest {
     }
 
     @Test
-    fun `steps are small 40 medium 56 big 80 and the default is medium`() {
+    fun `steps are small 40 medium 56 big 112 high and the default is medium`() {
         assertEquals(40, ArchiveThumbnailSize.SMALL.dp)
         assertEquals(56, ArchiveThumbnailSize.MEDIUM.dp)
-        assertEquals(80, ArchiveThumbnailSize.BIG.dp)
+        assertEquals(112, ArchiveThumbnailSize.BIG.dp)
         assertEquals(ArchiveThumbnailSize.MEDIUM, UserPreferences().archiveThumbnailSize)
+    }
+
+    @Test
+    fun `big is a wide tile and only big raises the decode cap`() {
+        // Small / Medium are square round slots; Big's slot is wider than
+        // it is tall so the row's width is used by the thumbnail itself.
+        assertEquals(ArchiveThumbnailSize.SMALL.dp, ArchiveThumbnailSize.SMALL.widthDp)
+        assertEquals(ArchiveThumbnailSize.MEDIUM.dp, ArchiveThumbnailSize.MEDIUM.widthDp)
+        assertEquals(152, ArchiveThumbnailSize.BIG.widthDp)
+        assertTrue(ArchiveThumbnailSize.BIG.widthDp > ArchiveThumbnailSize.BIG.dp)
+        // Decode caps: the established 256 px policy for Small / Medium,
+        // 512 px for Big so the bigger tile is genuinely sharper.
+        assertEquals(256, ArchiveThumbnailSize.SMALL.decodePx)
+        assertEquals(256, ArchiveThumbnailSize.MEDIUM.decodePx)
+        assertEquals(512, ArchiveThumbnailSize.BIG.decodePx)
     }
 
     @Test

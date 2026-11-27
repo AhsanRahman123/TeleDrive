@@ -127,6 +127,27 @@ class DesktopArchiveEntryThumbnailStoreTest {
         return out.toByteArray()
     }
 
+    private fun largePngBytes(width: Int, height: Int): ByteArray {
+        val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val out = ByteArrayOutputStream()
+        ImageIO.write(image, "png", out)
+        return out.toByteArray()
+    }
+
+    private fun awaitState(
+        store: DesktopArchiveEntryThumbnailStore,
+        key: String,
+        decodePx: Int
+    ): ArchiveThumbState {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (System.currentTimeMillis() < deadline) {
+            val value = store.state(key, decodePx).value
+            if (value !is ArchiveThumbState.Placeholder) return value
+            Thread.sleep(25)
+        }
+        return store.state(key, decodePx).value
+    }
+
     private fun storedZip(entries: List<Pair<String, ByteArray>>): ByteArray {
         val out = ByteArrayOutputStream()
         ZipOutputStream(out).use { zip ->
@@ -182,6 +203,33 @@ class DesktopArchiveEntryThumbnailStoreTest {
         assertTrue(callsAfterFetch > 0)
         store.request(key, file, 0, "cat.png", png.size.toLong())
         assertEquals(callsAfterFetch, telegram.totalCalls.get())
+    }
+
+    @Test
+    fun `decode cap follows the requested size - big decodes at 512 and never reuses the 256 decode`() {
+        // PC 1.6.27 (N6): the ZIP list's Big step requests a 512 px decode.
+        // A 1200x900 source proves the cap: the default request must land
+        // at 256 px, the Big request at 512 px, in separate cache files.
+        val png = largePngBytes(1200, 900)
+        val telegram = CountingTelegram(storedZip(listOf("cat.png" to png)))
+        val dir = Files.createTempDirectory("thumbs-test").toFile()
+        val store = DesktopArchiveEntryThumbnailStore.forCacheDir(dir, service(telegram.client))
+        val file = driveFile()
+        val key = ArchiveEntryThumbnailPolicy.cacheKey(file.id, 0, png.size.toLong(), png.size.toLong(), 0)
+
+        store.request(key, file, 0, "cat.png", png.size.toLong())
+        val medium = awaitState(store, key) as ArchiveThumbState.Ready
+        val mediumImage = ImageIO.read(medium.file)
+        assertEquals(256, maxOf(mediumImage.width, mediumImage.height))
+
+        store.request(key, file, 0, "cat.png", png.size.toLong(), decodePx = 512)
+        val big = awaitState(store, key, 512) as ArchiveThumbState.Ready
+        assertTrue(
+            "Big must not be served the 256 px cache file",
+            big.file.absolutePath != medium.file.absolutePath
+        )
+        val bigImage = ImageIO.read(big.file)
+        assertEquals(512, maxOf(bigImage.width, bigImage.height))
     }
 
     @Test
