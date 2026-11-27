@@ -10,6 +10,7 @@ import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.data.local.dao.FilePartDao
 import com.drdisagree.teledrive.data.repository.FolderPathResolver
 import com.drdisagree.teledrive.domain.model.DriveFile
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Bounded, credential-free detail for a failure: exception class + TelegramException
@@ -40,6 +41,16 @@ class RemoteArchiveService(
     private val downloadWriter: DownloadWriter,
     private val folderPathResolver: FolderPathResolver
 ) {
+
+    /**
+     * Opens a thumbnail session over [file] (PC 1.6.25 item 6, ported from
+     * Android vc182): one byte source whose central directory is parsed once
+     * and shared by every per-row thumbnail extraction. Caller closes it.
+     */
+    suspend fun openThumbnailSession(file: DriveFile): ArchiveThumbnailSession {
+        checkReadable(file)
+        return ArchiveThumbnailSession(openSource(file))
+    }
 
     suspend fun listEntries(file: DriveFile): List<ZipEntryInfo> {
         try {
@@ -302,5 +313,52 @@ class RemoteArchiveService(
                 primeFromStart = false
             )
         )
+    }
+}
+
+/**
+ * One open byte source over a remote ZIP, shared by every thumbnail fetch for that
+ * archive (Android vc182 item 6, ported to PC 1.6.25). The central directory is
+ * parsed lazily on the first [entries] call and then cached for the session's
+ * lifetime, so N thumbnail extractions cost ONE directory parse — unlike
+ * [RemoteArchiveService.extractEntryToTempFile], which re-parses per call and is
+ * therefore forbidden on the per-row path.
+ *
+ * All reads are serialized on an internal mutex: the shared byte source keeps a
+ * single read buffer, so concurrent extractions must not interleave on it.
+ */
+class ArchiveThumbnailSession internal constructor(
+    private val source: MediaByteSource
+) : AutoCloseable {
+
+    private val reader = ZipArchiveReader(source)
+    private val mutex = kotlinx.coroutines.sync.Mutex()
+    private var cachedEntries: List<ZipEntryInfo>? = null
+
+    @Volatile
+    private var closed = false
+
+    /** The archive's entries, parsed from the central directory on first call only. */
+    suspend fun entries(): List<ZipEntryInfo> = mutex.withLock {
+        check(!closed) { "Archive thumbnail session is closed." }
+        cachedEntries ?: reader.entries().also { cachedEntries = it }
+    }
+
+    /**
+     * Extracts [info] (an entry previously returned by [entries]) to [out], with the
+     * reader's usual produced-length and CRC-32 verification. The caller owns [out].
+     */
+    suspend fun extractEntry(info: ZipEntryInfo, out: java.io.File) {
+        mutex.withLock {
+            check(!closed) { "Archive thumbnail session is closed." }
+            out.outputStream().buffered().use { output -> reader.extract(info, output) }
+        }
+    }
+
+    override fun close() {
+        if (!closed) {
+            closed = true
+            source.close()
+        }
     }
 }

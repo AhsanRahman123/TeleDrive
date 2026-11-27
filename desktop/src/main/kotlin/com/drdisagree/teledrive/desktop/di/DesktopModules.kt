@@ -82,6 +82,7 @@ import com.drdisagree.teledrive.desktop.files.DesktopPendingShare
 import com.drdisagree.teledrive.desktop.files.DesktopStandardFolderPaths
 import com.drdisagree.teledrive.desktop.files.DesktopStoragePaths
 import com.drdisagree.teledrive.desktop.media.DesktopMediaMetadataExtractor
+import com.drdisagree.teledrive.desktop.media.DesktopArchiveEntryThumbnailStore
 import com.drdisagree.teledrive.desktop.media.DesktopThumbnailStore
 import com.drdisagree.teledrive.desktop.media.ExternalMediaPlayer
 import com.drdisagree.teledrive.desktop.media.MediaStreamServer
@@ -154,6 +155,7 @@ val desktopModule = module {
     singleOf(::DesktopLocalCopyDeleter) bind LocalCopyDeleter::class
     singleOf(::DesktopMediaMetadataExtractor) bind MediaMetadataExtractor::class
     singleOf(::DesktopThumbnailStore) bind ThumbnailStore::class
+    singleOf(::DesktopArchiveEntryThumbnailStore)
     singleOf(::NoopThumbnailMemoryCache) bind ThumbnailMemoryCache::class
     singleOf(::DesktopNotifications)
     singleOf(::NotifyingDesktopBackupSessionTracker) bind BackupSessionTracker::class

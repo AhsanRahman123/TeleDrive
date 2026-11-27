@@ -2,6 +2,8 @@ package com.drdisagree.teledrive.desktop.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -181,6 +183,9 @@ import com.drdisagree.teledrive.presentation.preview.ArchiveBatchProgress
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntry
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
 import com.drdisagree.teledrive.presentation.preview.archiveImagePagerIndices
+import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
+import com.drdisagree.teledrive.desktop.media.ArchiveThumbState
+import com.drdisagree.teledrive.desktop.media.DesktopArchiveEntryThumbnailStore
 import com.drdisagree.teledrive.presentation.preview.archiveImagePagerNeighbour
 import com.drdisagree.teledrive.presentation.preview.archiveBackStep
 import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
@@ -1152,6 +1157,7 @@ private fun PreviewPane(
     // Resolve local and streamed sources before the content branch so the native VLC player
     // remains at one stable composition call site while moving between cached and streamed files.
     val streamServer = koinInject<MediaStreamServer>()
+    val archiveThumbnailStore = koinInject<DesktopArchiveEntryThumbnailStore>()
     val telegramClient = koinInject<TelegramClient>()
     val streamCrypto = koinInject<StreamCrypto>()
     val wrappedKeyRepository = koinInject<WrappedKeyRepository>()
@@ -1357,6 +1363,7 @@ private fun PreviewPane(
                     batchProgress = previewUiState.archiveBatchProgress,
                     queuedDownloads = previewUiState.archiveQueuedDownloads,
                     archivePreview = previewUiState.archivePreview,
+                    thumbnailStore = if (current.remote) archiveThumbnailStore else null,
                     onRegisterBackStep = onRegisterArchiveBackStep,
                     onExitViewer = onExitViewer,
                     sortField = archiveSortField,
@@ -2204,6 +2211,7 @@ internal fun DesktopArchivePane(
     batchProgress: ArchiveBatchProgress?,
     queuedDownloads: Int = 0,
     archivePreview: ArchiveEntryPreview?,
+    thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
     onRegisterBackStep: ((() -> Boolean)?) -> Unit = {},
     onExitViewer: () -> Unit = {},
     sortField: FileSortField,
@@ -2510,6 +2518,8 @@ internal fun DesktopArchivePane(
                             selectionMode = selectionMode,
                             isBusy = busyEntryIndex != null && busyEntryIndex == entryIndex,
                             canDownload = archive.remote && !row.node.isDirectory,
+                            thumbnailStore = thumbnailStore,
+                            archiveFile = file,
                             onRowClick = {
                                 when {
                                     selectionMode -> toggleRow(row)
@@ -2758,6 +2768,8 @@ private fun DesktopArchiveRow(
     selectionMode: Boolean,
     isBusy: Boolean,
     canDownload: Boolean,
+    thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
+    archiveFile: DriveFile? = null,
     onRowClick: () -> Unit,
     onToggleSelection: () -> Unit,
     onDownloadClick: () -> Unit,
@@ -2793,16 +2805,67 @@ private fun DesktopArchiveRow(
                 modifier = Modifier.padding(end = 4.dp)
             )
         }
-        Icon(
-            imageVector = if (node.isDirectory) {
-                Icons.Filled.Folder
+        // PC 1.6.25 item 6 (Android vc182 design, report 55 §6): for image
+        // entries of a remote archive, the 56 dp slot shows a real thumbnail
+        // once the store has one; until then (and on any failure) it shows
+        // exactly the generic icon it always showed. The key derives from
+        // this row's own listing identity only — no list-level state, and
+        // only rows actually composed (visible) ever request a fetch.
+        val thumbnailKey = remember(
+            archiveFile?.id, node.entryIndex, node.sizeBytes, node.compressedBytes,
+            node.modifiedAtMillis
+        ) {
+            val owner = archiveFile
+            val idx = node.entryIndex
+            if (owner != null && idx != null && !node.isDirectory &&
+                ArchiveEntryThumbnailPolicy.isImageEntryName(node.name)
+            ) {
+                ArchiveEntryThumbnailPolicy.cacheKey(
+                    archiveFileId = owner.id,
+                    entryIndex = idx,
+                    sizeBytes = node.sizeBytes,
+                    compressedBytes = node.compressedBytes,
+                    modifiedAtMillis = node.modifiedAtMillis
+                )
             } else {
-                Icons.AutoMirrored.Filled.InsertDriveFile
-            },
-            contentDescription = null,
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+                null
+            }
+        }
+        val genericIcon: @Composable () -> Unit = {
+            Icon(
+                imageVector = if (node.isDirectory) {
+                    Icons.Filled.Folder
+                } else {
+                    Icons.AutoMirrored.Filled.InsertDriveFile
+                },
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        ) {
+            if (thumbnailKey != null && thumbnailStore != null && archiveFile != null &&
+                node.entryIndex != null
+            ) {
+                DesktopArchiveEntryThumbnail(
+                    store = thumbnailStore,
+                    archiveFile = archiveFile,
+                    entryIndex = node.entryIndex!!,
+                    entryName = node.name,
+                    sizeBytes = node.sizeBytes,
+                    cacheKey = thumbnailKey,
+                    placeholder = genericIcon
+                )
+            } else {
+                genericIcon()
+            }
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -2854,5 +2917,51 @@ private fun DesktopArchiveRow(
                 Icon(Icons.Filled.Download, contentDescription = "Download")
             }
         }
+    }
+}
+
+
+/**
+ * One archive row's thumbnail (PC 1.6.25 item 6): asks
+ * [DesktopArchiveEntryThumbnailStore] for this entry's thumbnail while composed
+ * and releases the request on dispose, so a row that scrolls off cancels its
+ * fetch if nobody else waits on it. Shows [placeholder] (the row's generic
+ * icon) until the thumbnail is ready, and keeps showing it on failure. No
+ * crossfade: per-row fades during a fling read as flicker.
+ */
+@Composable
+private fun DesktopArchiveEntryThumbnail(
+    store: DesktopArchiveEntryThumbnailStore,
+    archiveFile: DriveFile,
+    entryIndex: Int,
+    entryName: String,
+    sizeBytes: Long,
+    cacheKey: String,
+    placeholder: @Composable () -> Unit
+) {
+    val state by store.state(cacheKey).collectAsState()
+    var loadFailed by remember(cacheKey) { mutableStateOf(false) }
+    LaunchedEffect(cacheKey) {
+        store.request(cacheKey, archiveFile, entryIndex, entryName, sizeBytes)
+    }
+    DisposableEffect(cacheKey) {
+        onDispose { store.release(cacheKey) }
+    }
+    val readyFile = (state as? ArchiveThumbState.Ready)?.file
+    if (readyFile != null && !loadFailed) {
+        val painter = rememberAsyncImagePainter(
+            model = readyFile,
+            onState = { imageState ->
+                if (imageState is AsyncImagePainter.State.Error) loadFailed = true
+            }
+        )
+        Image(
+            painter = painter,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+    } else {
+        placeholder()
     }
 }
