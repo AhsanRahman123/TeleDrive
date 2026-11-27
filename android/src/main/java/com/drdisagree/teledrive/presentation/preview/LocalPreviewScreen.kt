@@ -18,7 +18,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -70,6 +72,11 @@ fun LocalPreviewScreen(
     val content by remember(localPath, displayName) {
         resolver.resolveLocalPath(localPath, displayName)
     }.collectAsStateWithLifecycle(initialValue = PreviewContent.Loading)
+    // vc186 A3: same tap-to-toggle wiring as the other viewer routes. This
+    // screen previously called MediaPlayer / ZoomableImage with their
+    // default controlsVisible = true and a no-op change callback, so a tap
+    // here could never hide the player controls either.
+    var controlsVisible by remember { mutableStateOf(true) }
 
     Scaffold(
         topBar = {
@@ -105,7 +112,9 @@ fun LocalPreviewScreen(
                 is PreviewContent.Image -> ZoomableImage(
                     model = current.model,
                     contentDescription = displayName,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    controlsVisible = controlsVisible,
+                    onTap = { controlsVisible = toggledControlsVisible(controlsVisible) }
                 )
 
                 is PreviewContent.LocalMedia -> MediaPlayer(
@@ -114,6 +123,8 @@ fun LocalPreviewScreen(
                     fileId = "local-$displayName",
                     dataSourceFactory = dataSourceFactory,
                     isActivePage = true,
+                    controlsVisible = controlsVisible,
+                    onControlsVisibilityChanged = { controlsVisible = it },
                     session = playerSession
                 )
 
