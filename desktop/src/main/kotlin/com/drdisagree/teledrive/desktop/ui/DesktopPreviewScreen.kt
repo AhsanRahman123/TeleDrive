@@ -302,6 +302,17 @@ fun DesktopPreviewScreen(
     // deepest expanded in-zip folder — and only leaves the viewer at the zip root.
     var archiveBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
 
+    // True only while an in-zip MEDIA entry preview (video or audio) is
+    // open — the only archive state in which a media player is composed
+    // and can own an Escape press (MF-1 decline scope, delta re-review).
+    // Fullscreen is a window-level state also enterable via F11 with no
+    // player composed (zip contents list, image/text/PDF entry preview,
+    // VLC-unavailable fallback); in those states nothing benefits from
+    // declining, so Escape must run the back ladder exactly as baseline.
+    val archiveMediaPreviewOpen =
+        state.archivePreview is ArchiveEntryPreview.Video ||
+            state.archivePreview is ArchiveEntryPreview.Audio
+
     // The ZIP pane's unified in-zip step (PC 1.6.26 item P3 — the two-level
     // switching rule), registered the same way as the back step. While an
     // in-zip entry preview is open, the handler consumes W/E and steps
@@ -602,7 +613,14 @@ fun DesktopPreviewScreen(
                         // fullscreen is off. The bubble-phase handler
                         // below applies the same decline for the case
                         // where the player is not in the focus path.
-                        if (fullscreenController?.isFullscreen() == true) {
+                        // Scoped to an in-zip MEDIA preview actually
+                        // being open (archiveMediaPreviewOpen): with no
+                        // player composed there is nothing to own the
+                        // press, so the ladder runs even while the
+                        // window is fullscreen (e.g. via F11).
+                        if (archiveMediaPreviewOpen &&
+                            fullscreenController?.isFullscreen() == true
+                        ) {
                             return@onPreviewKeyEvent false
                         }
                         stepBack()
@@ -708,11 +726,16 @@ fun DesktopPreviewScreen(
                 // exact failure the preview-phase decline prevents when
                 // the player does hold focus — so decline here too.
                 // When fullscreen is off, the ladder runs exactly as
-                // before.
+                // before. The decline is scoped to an in-zip MEDIA
+                // preview actually being open (archiveMediaPreviewOpen):
+                // with no player composed (contents list, image/text/PDF
+                // preview, VLC-unavailable fallback) Escape runs the
+                // ladder even while the window is fullscreen.
                 if (event.type == KeyEventType.KeyDown &&
                     event.key == Key.Escape &&
                     !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
                     !(archiveBackHandler != null &&
+                        archiveMediaPreviewOpen &&
                         fullscreenController?.isFullscreen() == true)
                 ) {
                     stepBack()

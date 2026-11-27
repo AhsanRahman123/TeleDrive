@@ -88,6 +88,16 @@ import org.koin.dsl.module
  * test then flips the fake controller off — exactly what the player's
  * handler does when it consumes the press — and pins that the NEXT
  * Escape runs the ladder again.
+ *
+ * Delta re-review residual: the MF-1 decline must be scoped to an in-zip
+ * MEDIA preview actually being open. Fullscreen is a window-level state
+ * also enterable via F11 with no player composed (zip contents list, or
+ * a text entry preview — the VLC-unavailable fallback and image/PDF
+ * previews share the shape); there, declining left Escape completely
+ * inert. The two regression tests below pin that with the fake
+ * controller ON and NO media preview open, Escape runs the back ladder
+ * exactly as baseline: it closes an open entry preview, and at the zip
+ * root it leaves the viewer.
  */
 @OptIn(ExperimentalTestApi::class)
 class DesktopPreviewFullscreenEscapeTest {
@@ -410,6 +420,96 @@ class DesktopPreviewFullscreenEscapeTest {
         waitDisplayed("note.txt")
 
         // And at the zip root, Escape leaves the viewer as before.
+        pressEscape()
+        assertEquals(1, exits.get())
+    }
+
+    @Test
+    fun `escape while fullscreen with no preview open steps the ladder at the contents list`() {
+        // Residual regression: fullscreen entered via F11 (window-level)
+        // with NO in-zip preview open at all — no player exists to own
+        // the press, so Escape must run the ladder: at the zip root that
+        // leaves the viewer. On the unscoped MF-1 code both handlers
+        // decline and this Escape does nothing (exits stays 0).
+        val zipBytes = archiveZipBytes(
+            listOf(
+                "clip.mp4" to ByteArray(96) { 1 },
+                "note.txt" to "NOTE ENTRY BODY".toByteArray()
+            )
+        )
+        setScreen(
+            driveFile(
+                id = "fullscreen-zip-list",
+                name = "media.zip",
+                mimeType = "application/zip",
+                category = FileCategory.ARCHIVE,
+                sizeBytes = zipBytes.size.toLong(),
+                localPath = null
+            ),
+            zipBytes
+        )
+        waitDisplayed("clip.mp4")
+        assertEquals(null, viewModel.uiState.value.archivePreview)
+
+        fullscreen = true
+
+        pressEscape()
+        assertEquals(
+            "escape while fullscreen at the contents list must leave the viewer",
+            1,
+            exits.get()
+        )
+        assertTrue(
+            "the screen must not toggle fullscreen itself",
+            fullscreen
+        )
+    }
+
+    @Test
+    fun `escape while fullscreen with a text entry preview open closes the preview`() {
+        // Residual regression, entry-preview shape: a TEXT entry preview
+        // composes no media player, so even while the window is
+        // fullscreen (F11) Escape must run the ladder — closing the
+        // entry preview back to the contents list, then leaving the
+        // viewer at the root. On the unscoped MF-1 code both Escapes
+        // do nothing.
+        val zipBytes = archiveZipBytes(
+            listOf(
+                "clip.mp4" to ByteArray(96) { 1 },
+                "note.txt" to "NOTE ENTRY BODY".toByteArray()
+            )
+        )
+        setScreen(
+            driveFile(
+                id = "fullscreen-zip-text",
+                name = "media.zip",
+                mimeType = "application/zip",
+                category = FileCategory.ARCHIVE,
+                sizeBytes = zipBytes.size.toLong(),
+                localPath = null
+            ),
+            zipBytes
+        )
+        waitDisplayed("note.txt")
+
+        // Display order inside the zip is name order: clip.mp4 (0), note.txt (1).
+        rule.onNodeWithText("note.txt").performClick()
+        waitPreview(1)
+        assertTrue(
+            viewModel.uiState.value.archivePreview is ArchiveEntryPreview.Text
+        )
+
+        fullscreen = true
+
+        // Escape closes the text preview back to the contents list,
+        // without exiting the viewer and without toggling fullscreen.
+        pressEscape()
+        waitPreview(null)
+        assertEquals(0, exits.get())
+        assertTrue(fullscreen)
+        waitDisplayed("clip.mp4")
+
+        // And at the zip root, Escape leaves the viewer, still fullscreen.
         pressEscape()
         assertEquals(1, exits.get())
     }
