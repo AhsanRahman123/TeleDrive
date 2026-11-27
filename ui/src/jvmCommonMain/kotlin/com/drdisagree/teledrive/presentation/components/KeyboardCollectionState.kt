@@ -110,6 +110,9 @@ class KeyboardCollectionState internal constructor(
      */
     internal fun handlePreview(event: KeyEvent, shortcuts: CollectionShortcuts): Boolean {
         if (event.isPlainEnterKey()) return handle(event, shortcuts)
+        if (event.key == Key.PageDown || event.key == Key.PageUp) {
+            println("P9DIAG preview key=${event.key} type=${event.type} focusOnItem=$focusOnItem focusInItem=$focusInItem focusedIndex=$focusedIndex current=$current horizontal=$horizontal")
+        }
         if (event.type != KeyEventType.KeyDown || horizontal || !focusOnItem) return false
         val plain = !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
             !event.isShiftPressed
