@@ -105,6 +105,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.resources.Res
@@ -187,6 +188,15 @@ internal fun DesktopMediaPlayer(
     onClearSleepTimer: () -> Unit = {},
     onPlaybackFinished: () -> Unit = {},
     onControlsVisibilityChange: (Boolean) -> Unit = {},
+    /**
+     * External Space suppression (PC 1.6.27 item P8): true while a
+     * surface above the player owns the keyboard — the hosting screen's
+     * overflow menu or one of its dialogs (Compose popups, not AWT
+     * dialogs, so the AWT dispatcher's own guards cannot see them), or
+     * a focused text field outside the player. While true, the AWT
+     * Space dispatcher passes presses through untouched.
+     */
+    spaceSuppressed: Boolean = false,
     onDelete: () -> Unit = {},
     backgroundPlayback: Boolean = false,
     onBackgroundPlaybackChange: (Boolean) -> Unit = {},
@@ -615,7 +625,44 @@ internal fun DesktopMediaPlayer(
                     // no extra action) but caps the proof wait; a timeout
                     // lands in the failure branch below, which surfaces the
                     // failure and keeps this generation retryable via Play.
-                    val started = startMediaBounded(nativePlayer, mrl)
+                    // Item P3 diagnostics: one start line per MRL, tagged
+                    // with its route, immediately before this start's
+                    // negotiated-buffer lines from the video surface — so
+                    // a single field log capture attributes every
+                    // negotiation to the route (streamed / in-zip / local)
+                    // that produced it. All routes share this player,
+                    // session and surface, so this line is the only route
+                    // marker the diagnostics need.
+                    SafeLog.d(
+                        TAG,
+                        "Starting media route=${playbackRouteForMrl(mrl)} mrl=$mrl"
+                    )
+                    // Item P2: the user's volume/mute is applied in the
+                    // beforePlay hook — on this executor thread,
+                    // immediately before play() — so it is already set on
+                    // the native player when the new media's audio output
+                    // is created, and the first audible moment plays at
+                    // the user's volume. Previously the ONLY application
+                    // was the post-playing reapply effect below (playing
+                    // event + 250 ms delay per attempt + a submit queued
+                    // behind this start), so every start — first play and
+                    // every file switch — opened at libVLC's own volume
+                    // and jumped when the effect landed. That effect is
+                    // kept unchanged as the audio-device hot-plug
+                    // backstop; it now re-applies the same value, so it
+                    // is no longer audible. Values are read at execution
+                    // time from the updated-state holders: a command a
+                    // newer generation superseded is rejected by the
+                    // generation checks around this call and never starts
+                    // with a stale volume.
+                    val started = startMediaBounded(nativePlayer, mrl) { startingPlayer ->
+                        val startVolume = latestVolume.value.coerceIn(0, MAX_VOLUME)
+                        runCatching { startingPlayer.audio().setVolume(startVolume) }
+                        runCatching {
+                            startingPlayer.audio().isMute =
+                                latestMuted.value || startVolume <= 0
+                        }
+                    }
                     val stillCurrent = eventGate.generation() == mediaGeneration
                     if (!started || !stillCurrent) {
                         if (!stillCurrent) {
@@ -795,6 +842,45 @@ internal fun DesktopMediaPlayer(
             playing -> player.submit { runCatching { player.controls().pause() } }
             else -> player.submit { runCatching { player.controls().play() } }
         }
+    }
+    // Item P8 (PC 1.6.27): Space is ALSO routed at the AWT level while
+    // this player is composed. The stage Box's onPreviewKeyEvent
+    // Spacebar branch below only fires when the stage is an ancestor of
+    // the focused node, and production focus routinely rests elsewhere
+    // — the in-zip overlay Box that wraps this player, a control the
+    // auto-hide timer then disposed, preview chrome outside the player
+    // — leaving Space intermittently dead ("depends on what was clicked
+    // before"). The dispatcher (see PlayerSpaceAwtDispatcher) is
+    // consulted before any component delivery, toggles exactly once,
+    // and consumes the press, so the Compose branch never double-fires;
+    // the branch stays as a backstop for environments where the
+    // dispatcher is not installed. Suppression mirrors the states where
+    // Space is not the player's: the subtitle settings dialog (the
+    // Compose branch already declines every key while it is open), any
+    // transient layer the controls bar pins open via
+    // onControlsKeepVisible — dropdown menus, the custom sleep-timer
+    // dialog's text fields, an actively dragged slider — which is
+    // exactly the controlsPinned state, and the hosting screen's own
+    // surfaces (spaceSuppressed).
+    val latestSpaceSuppressed = rememberUpdatedState(spaceSuppressed)
+    val latestShowSubtitleSettings = rememberUpdatedState(showSubtitleSettings)
+    val latestControlsPinned = rememberUpdatedState(controlsPinned)
+    val togglePlaybackForSpace = rememberUpdatedState {
+        togglePlayback()
+        interactionTick++
+    }
+    val spaceDispatcher = remember {
+        PlayerSpaceAwtDispatcher(
+            isSuppressed = {
+                latestShowSubtitleSettings.value || latestControlsPinned.value ||
+                    latestSpaceSuppressed.value
+            },
+            onTogglePlayback = { togglePlaybackForSpace.value() }
+        )
+    }
+    DisposableEffect(spaceDispatcher) {
+        spaceDispatcher.install()
+        onDispose { spaceDispatcher.dispose() }
     }
     val toggleMute: () -> Unit = {
         muted = !muted
@@ -1086,6 +1172,10 @@ internal fun DesktopMediaPlayer(
                         interactionTick++
                         true
                     }
+                    // Primary Space route is the AWT dispatcher above
+                    // (item P8): it consumes the press before delivery,
+                    // so this branch is the backstop for when it is not
+                    // installed — the two never both fire for one press.
                     key == Key.Spacebar && !ctrl && !alt && !shift -> {
                         togglePlayback()
                         interactionTick++
@@ -2574,6 +2664,7 @@ private fun PlayerSession.submitAudioState(volume: Int, muted: Boolean) {
     }
 }
 
+private const val TAG = "DesktopMediaPlayer"
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
