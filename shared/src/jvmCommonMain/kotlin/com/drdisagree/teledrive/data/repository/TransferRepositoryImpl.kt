@@ -644,11 +644,20 @@ class TransferRepositoryImpl(
         }
     }
 
-    override suspend fun retry(id: String) = workerControlLock.withLock {
-        val transfer = transferDao.byId(id) ?: return@withLock
+    override suspend fun retry(id: String) {
+        workerControlLock.withLock { retryLocked(id) }
+    }
+
+    /**
+     * The retry itself, for callers already holding [workerControlLock];
+     * returns true only when the row was actually re-queued by this call, so
+     * bulk counting can never claim a requeue that did not take effect.
+     */
+    private suspend fun retryLocked(id: String): Boolean {
+        val transfer = transferDao.byId(id) ?: return false
         // Report-only rows can never be re-queued; retrying one is a no-op (the user
         // downloads the file again from its ZIP instead).
-        if (transfer.type.isReportOnly) return@withLock
+        if (transfer.type.isReportOnly) return false
         if (transfer.state == TransferState.FAILED || transfer.state == TransferState.CANCELLED) {
             transferDao.upsert(
                 transfer.copy(
@@ -661,26 +670,45 @@ class TransferRepositoryImpl(
             )
             val prefs = settingsRepository.preferences.first()
             transferScheduler.resume(prefs.allowMeteredTransfers)
+            return true
         }
+        return false
     }
 
     override suspend fun deleteTransfers(ids: List<String>) {
         if (ids.isEmpty()) return
-        // Only terminal records are removed: a live row in the id list (a
-        // selection made just before the row started running again) is left
-        // for cancel(), never deleted out from under the engine.
-        val terminalIds = ids.distinct().chunked(SQL_BATCH).flatMap { chunk ->
-            chunk.mapNotNull { transferDao.byId(it) }
-        }.filter { it.state.isTerminal }.map { it.id }
-        if (terminalIds.isEmpty()) return
-        terminalIds.chunked(SQL_BATCH).forEach { transferDao.deleteByIds(it) }
-        syncFileStates()
+        // MF-3 (second pass): the read-filter-delete sequence runs under
+        // workerControlLock, the same lock cancel()/retry() use. Bulk actions
+        // are launched in separate coroutines and can overlap (two quick taps:
+        // "Retry all" + "Remove all"), so a snapshot taken outside the lock
+        // could name a row that a concurrent retry has since re-queued — and
+        // the unconditional delete would remove a live record. Under the lock
+        // no retry can interleave, and each row is re-read immediately before
+        // it is deleted.
+        workerControlLock.withLock {
+            // Only terminal records are removed: a live row in the id list (a
+            // selection made just before the row started running again) is left
+            // for cancel(), never deleted out from under the engine.
+            val terminalIds = ids.distinct().chunked(SQL_BATCH).flatMap { chunk ->
+                chunk.mapNotNull { transferDao.byId(it) }
+            }.filter { it.state.isTerminal }.map { it.id }
+            if (terminalIds.isEmpty()) return@withLock
+            terminalIds.chunked(SQL_BATCH).forEach { transferDao.deleteByIds(it) }
+            syncFileStates()
+        }
     }
 
-    override suspend fun retryFailedTransfers(ids: List<String>): FailedRetryOutcome {
+    override suspend fun retryFailedTransfers(ids: List<String>): FailedRetryOutcome =
+        workerControlLock.withLock { retryFailedLocked(ids) }
+
+    /** [retryFailedTransfers] for callers already holding [workerControlLock]. */
+    private suspend fun retryFailedLocked(ids: List<String>): FailedRetryOutcome {
         var requeued = 0
         var skippedArchiveDownloads = 0
         for (id in ids.distinct()) {
+            // Re-read under the lock (MF-3): the row's state is confirmed at
+            // the moment of acting, not from a snapshot a concurrent bulk
+            // delete/retry could have invalidated.
             val row = transferDao.byId(id) ?: continue
             if (row.state != TransferState.FAILED) continue
             if (row.type.isReportOnly) {
@@ -690,8 +718,9 @@ class TransferRepositoryImpl(
                 // an extraction could be re-run from, so the record is skipped
                 // and reported, never re-queued or silently re-failed.
                 skippedArchiveDownloads++
-            } else {
-                retry(id)
+            } else if (retryLocked(id)) {
+                // Counted only on confirmed effect: retryLocked re-read the
+                // row under the same lock and actually re-queued it.
                 requeued++
             }
         }
@@ -702,14 +731,24 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun retryAllFailed(): FailedRetryOutcome =
-        retryFailedTransfers(allFailedIds())
+        // The FAILED snapshot is taken INSIDE the lock (MF-3), not as an
+        // argument evaluated before it.
+        workerControlLock.withLock { retryFailedLocked(allFailedIds()) }
 
-    override suspend fun removeAllFailed(): Int {
+    override suspend fun removeAllFailed(): Int = workerControlLock.withLock {
+        // MF-3: snapshot + re-check + delete are one locked sequence. A row
+        // a concurrent retry re-queued is re-read as QUEUED here and left
+        // alone — never deleted out from under the running engine — and the
+        // returned count is the number of rows actually deleted.
         val failedIds = allFailedIds()
-        if (failedIds.isEmpty()) return 0
-        failedIds.chunked(SQL_BATCH).forEach { transferDao.deleteByIds(it) }
+        if (failedIds.isEmpty()) return@withLock 0
+        val stillFailedIds = failedIds.chunked(SQL_BATCH).flatMap { chunk ->
+            chunk.mapNotNull { transferDao.byId(it) }
+        }.filter { it.state == TransferState.FAILED }.map { it.id }
+        if (stillFailedIds.isEmpty()) return@withLock 0
+        stillFailedIds.chunked(SQL_BATCH).forEach { transferDao.deleteByIds(it) }
         syncFileStates()
-        return failedIds.size
+        stillFailedIds.size
     }
 
     /** Every FAILED record's id, read through the section flow the UI already uses. */

@@ -13,13 +13,18 @@ import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.TransferSection
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferType
+import com.drdisagree.teledrive.data.local.dao.TransferDao
 import com.drdisagree.teledrive.domain.usecase.ValidateUploadUseCase
 import com.drdisagree.teledrive.testing.unused
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -51,8 +56,9 @@ class TransfersBulkFailedTest {
         harness.close()
     }
 
-    private fun repository() = TransferRepositoryImpl(
-        transferDao = database.transferDao(),
+    private fun repository(transferDao: TransferDao = database.transferDao()) =
+        TransferRepositoryImpl(
+        transferDao = transferDao,
         fileDao = database.fileDao(),
         telegramClient = object : TelegramClient by unused() {
             override suspend fun getLimits() = TelegramLimits.REGULAR
@@ -174,6 +180,84 @@ class TransfersBulkFailedTest {
         assertEquals(TransferState.FAILED, stateOf("failed-archive"))
         assertEquals(TransferState.COMPLETED, stateOf("completed"))
     }
+
+    /**
+     * MF-3 interposing DAO: models a concurrent retry that WINS the gap
+     * inside removeAllFailed — after the FAILED snapshot is read, the target
+     * row is re-queued (QUEUED, as retry() would leave it) before the delete
+     * runs. A remove-all that deletes from its stale snapshot removes a live
+     * record and fails this test; one that re-reads each row under
+     * workerControlLock before deleting leaves it alone.
+     */
+    private class RequeueAfterFailedSnapshotDao(
+        private val delegate: TransferDao,
+        private val targetId: String
+    ) : TransferDao by delegate {
+        override fun observeFailed(limit: Int): Flow<List<TransferEntity>> = flow {
+            val snapshot = delegate.observeFailed(limit).first()
+            delegate.byId(targetId)?.let { row ->
+                delegate.upsert(
+                    row.copy(
+                        state = TransferState.QUEUED,
+                        transferredBytes = 0,
+                        errorMessage = null,
+                        updatedAt = 2
+                    )
+                )
+            }
+            emit(snapshot)
+        }
+    }
+
+    @Test
+    fun `removeAllFailed does not delete a row re-queued after the failed snapshot`() =
+        runBlocking {
+            row("requeued-row", TransferType.DOWNLOAD, TransferState.FAILED)
+            row("still-failed", TransferType.DOWNLOAD, TransferState.FAILED)
+
+            val removed = repository(
+                RequeueAfterFailedSnapshotDao(database.transferDao(), "requeued-row")
+            ).removeAllFailed()
+
+            // The retry won: the re-queued record survives, still QUEUED, and
+            // the removed count covers only the row actually deleted.
+            assertEquals(1, removed)
+            assertEquals(TransferState.QUEUED, stateOf("requeued-row"))
+            assertNull(stateOf("still-failed"))
+        }
+
+    @Test
+    fun `racing retryAllFailed and removeAllFailed never delete a requeued row`() =
+        runBlocking {
+            // MF-3 overlap, launched as TransfersViewModel launches bulk
+            // actions — separate coroutines from two quick taps. Whichever
+            // order the lock serialises them in, the outcomes must partition
+            // the failed rows exactly: a row is re-queued XOR removed, never
+            // both (counted as requeued AND deleted while live).
+            row("race-1", TransferType.DOWNLOAD, TransferState.FAILED)
+            row("race-2", TransferType.UPLOAD, TransferState.FAILED)
+            val repo = repository()
+
+            val retryDeferred = async { repo.retryAllFailed() }
+            val removeDeferred = async { repo.removeAllFailed() }
+            val outcome = retryDeferred.await()
+            val removed = removeDeferred.await()
+
+            assertEquals(0, outcome.skippedArchiveDownloads)
+            assertEquals(2, outcome.requeued + removed)
+            listOf("race-1", "race-2").forEach { id ->
+                val state = stateOf(id)
+                assertTrue(
+                    "$id must be QUEUED (retry won) or deleted (remove won), was $state",
+                    state == TransferState.QUEUED || state == null
+                )
+            }
+            // The requeue count matches the rows that actually survived queued.
+            val survivedQueued = listOf("race-1", "race-2").count {
+                stateOf(it) == TransferState.QUEUED
+            }
+            assertEquals(outcome.requeued, survivedQueued)
+        }
 
     @Test
     fun `completed rows expose the saved path for Open with`() = runBlocking {
