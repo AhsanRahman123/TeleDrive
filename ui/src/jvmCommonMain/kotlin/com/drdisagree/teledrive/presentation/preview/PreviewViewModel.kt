@@ -70,7 +70,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -226,8 +225,13 @@ class PreviewViewModel(
     }
 
     /**
-     * Follows the row and transfer queue, so a started download shows progress and the viewer
-     * switches when it lands.
+     * Follows the row and transfer queue, so a download started from the
+     * Download-to-view gate shows progress and the viewer switches when it
+     * lands. A file that can already render or play is NEVER replaced by the
+     * transfer's progress (vc184 A3, [viewerContentDuringTransfer]): a
+     * background download runs behind the viewer, it does not hijack it —
+     * before this, tapping Download while a video played swapped the player
+     * for a "Preparing… 0 B" screen until the transfer ended.
      */
     fun contentFor(file: DriveFile): StateFlow<PreviewContent> =
         contentCache.getOrPut(file.id) {
@@ -240,15 +244,8 @@ class PreviewViewModel(
             }
                 .distinctUntilChanged()
                 .flatMapLatest { (latest, incoming) ->
-                    if (incoming != null) {
-                        flowOf(
-                            PreviewContent.DownloadProgress(
-                                transferred = incoming.transferredBytes,
-                                total = incoming.sizeBytes
-                            )
-                        )
-                    } else {
-                        contentResolver.resolve(latest)
+                    contentResolver.resolve(latest).map { resolved ->
+                        viewerContentDuringTransfer(resolved, incoming)
                     }
                 }
                 .onEach { content ->
