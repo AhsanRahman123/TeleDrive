@@ -205,8 +205,10 @@ object MimeTypes {
 
         // Junk/system files with no previewable type: pinned to GENERIC here so
         // host unit tests never consult the platform MimeTypeMap stub for them
-        // (on-device the platform map returns null for .db, i.e. GENERIC anyway).
+        // (on-device the platform map yields GENERIC for both anyway: null for
+        // .db, application/octet-stream for .bin).
         "db" to GENERIC,
+        "bin" to GENERIC,
 
         // Archives and compressed files
         "zip" to "application/zip",
