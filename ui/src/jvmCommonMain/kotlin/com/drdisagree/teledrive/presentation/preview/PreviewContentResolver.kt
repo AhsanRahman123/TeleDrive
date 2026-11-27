@@ -371,9 +371,20 @@ class PreviewContentResolver(
                 PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
         }
 
-    /** HTML goes to the safe viewer as a raw string — no formatting transform applies. */
+    /**
+     * HTML goes to the safe viewer as a raw string — no formatting transform applies.
+     *
+     * Round 3 A10: HTML gets its own read budget instead of the plain-text
+     * [TEXT_LIMIT]. A real-world HTML page carries its CSS and scripts inline, so
+     * 256 KiB cut a long checklist page off part-way down — the viewer faithfully
+     * rendered everything it was handed, and everything past the cap never existed
+     * as far as it was concerned. The budget is [HTML_PREVIEW_LIMIT] (10 MiB, the
+     * same value as the remote auto-fetch gate for text, so a remote HTML file is
+     * never fetched at one size and read at a smaller one); past it the viewer
+     * still shows the truncated notice via [PreviewContent.Html.truncated].
+     */
     private fun readHtml(path: String): PreviewContent = runCatching {
-        val (raw, truncated) = readTextBytes(path)
+        val (raw, truncated) = readTextBytes(path, HTML_LIMIT)
         PreviewContent.Html(raw, truncated)
     }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
 
@@ -528,6 +539,17 @@ class PreviewContentResolver(
         const val DOCUMENT_AUTO_PREVIEW_LIMIT = 20L * 1024 * 1024
 
         private const val TEXT_LIMIT = 256 * 1024
+
+        /**
+         * Largest HTML document read whole for the viewer: 10 MiB, deliberately
+         * equal to [AUTO_PREVIEW_LIMIT] (the remote auto-fetch cap that already
+         * applies to `text/html` through `MimeTypes.isText`) as a literal with
+         * this parity note, the same way [PDF_AUTO_PREVIEW_LIMIT] is defined.
+         * Public only so host tests can pin the value, like the other limits.
+         */
+        const val HTML_PREVIEW_LIMIT = 10L * 1024 * 1024
+
+        private const val HTML_LIMIT = 10 * 1024 * 1024
     }
 }
 
