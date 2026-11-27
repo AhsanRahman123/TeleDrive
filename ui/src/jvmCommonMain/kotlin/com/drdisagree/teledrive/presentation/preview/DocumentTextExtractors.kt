@@ -1,21 +1,27 @@
 package com.drdisagree.teledrive.presentation.preview
 
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.core.files.MimeTypes
-import org.w3c.dom.Document
-import org.w3c.dom.Element
-import org.w3c.dom.Node
-import org.xml.sax.InputSource
-import java.io.ByteArrayInputStream
 import java.io.File
 import java.util.zip.ZipFile
-import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * Text extraction for the document formats a preview can honestly support with no new
  * dependencies: OOXML Office files (DOCX/XLSX/PPTX) and EPUB Tier 1 (plain-text book
- * reading). All of them are ZIPs of XML, read here with [ZipFile]; every XML parse in
- * this file goes through the ONE XXE-hardened factory below, because these are
- * untrusted files — external entities and DTDs are disabled, always.
+ * reading). All of them are ZIPs of XML, read here with [ZipFile].
+ *
+ * The XML itself is parsed by the small self-contained parser in this file
+ * ([parseXmlToTree]) — deliberately NOT by `javax.xml.parsers` / `org.w3c.dom`.
+ * That platform stack is a different implementation on Android (a
+ * KXmlParser-based builder whose factory throws on every hardening feature
+ * and attribute this code used to set) than on the desktop JDK (Xerces), so
+ * the same bytes parsed on one platform and failed on the other, and every
+ * host-JVM test exercised only the JDK half. The parser below is pure
+ * Kotlin: identical behaviour on every platform, and XXE-safe by
+ * construction — DTDs are skipped wholesale and entities are never resolved
+ * against anything external; only the five predefined XML entities,
+ * numeric character references and a small fixed set of common HTML named
+ * entities are decoded.
  *
  * Legacy binary .doc/.xls/.ppt are deliberately NOT handled: there is no small honest
  * extractor for the OLE2 formats, so they keep the "Open with…" fallback.
@@ -27,6 +33,8 @@ const val DOCUMENT_TEXT_MAX_CHARS: Int = 1_000_000
 /** Own text budget for EPUB books: books are big, so Tier 1 allows 2M chars with a truncated flag. */
 const val EPUB_TEXT_MAX_CHARS: Int = 2_000_000
 
+private const val TAG = "DocumentExtract"
+
 sealed interface DocumentExtraction {
     data class Text(val text: String, val truncated: Boolean) : DocumentExtraction
     data object DrmProtected : DocumentExtraction
@@ -36,89 +44,388 @@ sealed interface DocumentExtraction {
 /** Raised inside the archive-preview flow when a document entry cannot be shown. */
 class DocumentPreviewException(message: String) : Exception(message)
 
+// ---------------------------------------------------------------------------
+// Self-contained XML tree parser (platform-independent replacement for DOM)
+// ---------------------------------------------------------------------------
+
+/** One node of the minimal XML tree the extractors run on. */
+sealed interface XmlNode
+
+/** A run of character data (entity-decoded; CDATA content verbatim). */
+class XmlTextNode(val text: String) : XmlNode
+
 /**
- * The single hardened [DocumentBuilderFactory] for ALL user-file XML in the app.
- * DOCTYPE is disallowed where the parser supports it; external entities/DTDs are off
- * regardless, XInclude is off and entity references are never expanded.
+ * One XML element: its namespace-free [localName] (`w:p` → `p`), its
+ * attributes (qualified names as written) and its child nodes in document
+ * order. Matching is by local name throughout, exactly as the extractors
+ * have always required — the prefix a document happens to use never
+ * matters, on any platform.
  */
-fun hardenedDocumentBuilderFactory(): DocumentBuilderFactory {
-    val factory = DocumentBuilderFactory.newInstance()
-    factory.isNamespaceAware = true
-    factory.isXIncludeAware = false
-    factory.isExpandEntityReferences = false
-    runCatching {
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-    }.onFailure {
-        runCatching {
-            factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+class XmlElementNode(
+    val localName: String,
+    private val attributes: List<Pair<String, String>>,
+    val children: List<XmlNode>
+) : XmlNode {
+
+    /** The attribute [name] (qualified match first, then local-name match), or "". */
+    fun attribute(name: String): String =
+        attributes.firstOrNull { it.first == name }?.second
+            ?: attributes.firstOrNull { it.first.substringAfterLast(':') == name }?.second
+            ?: ""
+
+    /** All descendant text in document order (the DOM `textContent` equivalent). */
+    val textContent: String
+        get() = buildString { appendTextOf(this@XmlElementNode) }
+
+    /** Descendant elements (self excluded) with the given local name, in document order. */
+    fun descendantsByLocalName(local: String): List<XmlElementNode> {
+        val out = mutableListOf<XmlElementNode>()
+        fun visit(element: XmlElementNode) {
+            for (child in element.children) {
+                if (child is XmlElementNode) {
+                    if (child.localName == local) out += child
+                    visit(child)
+                }
+            }
         }
-        runCatching {
-            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+        visit(this)
+        return out
+    }
+
+    /** This element (when it matches) plus its descendants with the given local name. */
+    fun allByLocalName(local: String): List<XmlElementNode> =
+        if (localName == local) {
+            listOf(this) + descendantsByLocalName(local)
+        } else {
+            descendantsByLocalName(local)
         }
-        runCatching {
-            factory.setFeature(
-                "http://apache.org/xml/features/nonvalidating/load-external-dtd", false
-            )
+}
+
+private fun StringBuilder.appendTextOf(element: XmlElementNode) {
+    for (child in element.children) {
+        when (child) {
+            is XmlTextNode -> append(child.text)
+            is XmlElementNode -> appendTextOf(child)
         }
     }
-    runCatching { factory.setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "") }
-    runCatching { factory.setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "") }
-    return factory
 }
 
-/** Parses [bytes] as XML through the hardened factory; null on any failure. */
-fun parseXmlHardened(bytes: ByteArray): Document? = runCatching {
-    val builder = hardenedDocumentBuilderFactory().newDocumentBuilder()
-    // Belt and braces: even if a DOCTYPE slipped through, no external entity is fetched.
-    builder.setEntityResolver { _, _ -> InputSource(ByteArrayInputStream(ByteArray(0))) }
-    builder.parse(ByteArrayInputStream(bytes))
-}.getOrNull()
+/** Named entities decoded beyond the five predefined XML ones (common HTML set). */
+private val NAMED_ENTITIES = mapOf(
+    "nbsp" to " ", "mdash" to "—", "ndash" to "–", "hellip" to "…",
+    "copy" to "©", "reg" to "®", "trade" to "™", "laquo" to "«",
+    "raquo" to "»", "middot" to "·", "bull" to "•", "deg" to "°",
+    "plusmn" to "±", "times" to "×", "divide" to "÷", "micro" to "µ",
+    "para" to "¶", "sect" to "§", "iexcl" to "¡", "iquest" to "¿",
+    "szlig" to "ß", "agrave" to "à", "aacute" to "á", "acirc" to "â",
+    "atilde" to "ã", "auml" to "ä", "aring" to "å", "aelig" to "æ",
+    "ccedil" to "ç", "egrave" to "è", "eacute" to "é", "ecirc" to "ê",
+    "euml" to "ë", "igrave" to "ì", "iacute" to "í", "icirc" to "î",
+    "iuml" to "ï", "ntilde" to "ñ", "ograve" to "ò", "oacute" to "ó",
+    "ocirc" to "ô", "otilde" to "õ", "ouml" to "ö", "ugrave" to "ù",
+    "uacute" to "ú", "ucirc" to "û", "uuml" to "ü", "yacute" to "ý",
+    "yuml" to "ÿ", "Agrave" to "À", "Aacute" to "Á", "Acirc" to "Â",
+    "Atilde" to "Ã", "Auml" to "Ä", "Aring" to "Å", "AElig" to "Æ",
+    "Ccedil" to "Ç", "Egrave" to "È", "Eacute" to "É", "Ecirc" to "Ê",
+    "Euml" to "Ë", "Igrave" to "Ì", "Iacute" to "Í", "Icirc" to "Î",
+    "Iuml" to "Ï", "Ntilde" to "Ñ", "Ograve" to "Ò", "Oacute" to "Ó",
+    "Ocirc" to "Ô", "Otilde" to "Õ", "Ouml" to "Ö", "Ugrave" to "Ù",
+    "Uacute" to "Ú", "Ucirc" to "Û", "Uuml" to "Ü", "Yacute" to "Ý"
+)
 
 /**
- * The local (prefix-free) name of a node: `w:p` → `p`, `a:t` → `t`, `row` → `row`.
- * Namespace-aware DOM implementations are only required to match
- * `getElementsByTagName` against the qualified name as written, and Android's
- * Harmony-derived DOM does not reliably match prefixed lookups such as
- * `getElementsByTagName("w:p")` — such a lookup silently returns an empty list,
- * which turned a normal-route DOCX into extracted "" text (a blank viewer)
- * while the same file's unprefixed EPUB lookups behaved differently. Every
- * extractor below therefore matches by LOCAL name, which is identical on the
- * host JVM and on Android whatever prefix (or default namespace) a document
- * uses.
+ * Decodes entity and character references in [value]. External entities are
+ * NEVER resolved (nothing is fetched or read); an unknown named entity is
+ * left as its literal `&name;` text, which is honest in extracted text and
+ * can never leak file or network content (the XXE contract).
  */
-fun localNameOf(node: Node): String =
-    node.localName ?: node.nodeName.substringAfterLast(':')
-
-private fun Element.descendantsByLocalName(local: String): List<Element> {
-    val nodes = getElementsByTagName("*")
-    return (0 until nodes.length)
-        .map { nodes.item(it) as Element }
-        .filter { localNameOf(it) == local }
+private fun decodeXmlEntities(value: String): String {
+    if (!value.contains('&')) return value
+    val out = StringBuilder(value.length)
+    var i = 0
+    while (i < value.length) {
+        val c = value[i]
+        if (c != '&') {
+            out.append(c)
+            i++
+            continue
+        }
+        val semi = value.indexOf(';', i + 1)
+        if (semi < 0 || semi - i > 12) {
+            out.append(c)
+            i++
+            continue
+        }
+        val body = value.substring(i + 1, semi)
+        val decoded: String? = when {
+            body == "amp" -> "&"
+            body == "lt" -> "<"
+            body == "gt" -> ">"
+            body == "quot" -> "\""
+            body == "apos" -> "'"
+            body.startsWith("#x") || body.startsWith("#X") ->
+                body.substring(2).toIntOrNull(16)
+                    ?.takeIf { it in 1..0x10FFFF && it !in 0xD800..0xDFFF }
+                    ?.let { String(Character.toChars(it)) }
+            body.startsWith("#") ->
+                body.substring(1).toIntOrNull()
+                    ?.takeIf { it in 1..0x10FFFF && it !in 0xD800..0xDFFF }
+                    ?.let { String(Character.toChars(it)) }
+            else -> NAMED_ENTITIES[body]
+        }
+        if (decoded == null) {
+            // Unknown (possibly DTD-defined) entity: keep it literal, resolve nothing.
+            out.append(value, i, semi + 1)
+        } else {
+            out.append(decoded)
+        }
+        i = semi + 1
+    }
+    return out.toString()
 }
 
-private fun Document.elementsByLocalName(local: String): List<Element> {
-    val nodes = getElementsByTagName("*")
-    return (0 until nodes.length)
-        .map { nodes.item(it) as Element }
-        .filter { localNameOf(it) == local }
+/** Decodes raw XML [bytes] to a string honouring the BOM / declared encoding. */
+private fun decodeXmlBytes(bytes: ByteArray): String {
+    if (bytes.size >= 3 &&
+        bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
+    ) {
+        return String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
+    }
+    if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) {
+        return String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+    }
+    if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) {
+        return String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+    }
+    if (bytes.size >= 2 && bytes[0] == '<'.code.toByte() && bytes[1] == 0.toByte()) {
+        return String(bytes, Charsets.UTF_16LE)
+    }
+    if (bytes.size >= 2 && bytes[0] == 0.toByte() && bytes[1] == '<'.code.toByte()) {
+        return String(bytes, Charsets.UTF_16BE)
+    }
+    // No BOM: sniff the encoding named by the XML declaration (ASCII-safe head).
+    val head = String(bytes, 0, minOf(bytes.size, 256), Charsets.ISO_8859_1)
+    val declared = Regex("""<\?xml[^>]*?encoding\s*=\s*["']([^"']+)["']""")
+        .find(head)?.groupValues?.get(1)?.lowercase()
+    val charset = when (declared) {
+        "utf-16", "utf-16le" -> Charsets.UTF_16LE
+        "utf-16be" -> Charsets.UTF_16BE
+        "iso-8859-1", "windows-1252" -> Charsets.ISO_8859_1
+        "us-ascii" -> Charsets.US_ASCII
+        else -> Charsets.UTF_8
+    }
+    return String(bytes, charset).removePrefix("\uFEFF")
+}
+
+private const val MAX_XML_DEPTH = 512
+private const val MAX_XML_ELEMENTS = 500_000
+
+private class XmlBuilder(
+    val qualifiedName: String,
+    val localName: String,
+    val attributes: List<Pair<String, String>>
+) {
+    val children = mutableListOf<XmlNode>()
+    fun build(): XmlElementNode = XmlElementNode(localName, attributes, children.toList())
+}
+
+/**
+ * Parses [bytes] as XML into the minimal [XmlElementNode] tree; null on any
+ * malformed input (the same contract the DOM parse had: unparseable XML is
+ * a failed extraction, never partial text). Pure Kotlin — the result does
+ * not depend on the platform's XML stack in any way.
+ */
+fun parseXmlToTree(bytes: ByteArray): XmlElementNode? {
+    val raw = decodeXmlBytes(bytes)
+    var pos = 0
+    val length = raw.length
+    val stack = ArrayDeque<XmlBuilder>()
+    var root: XmlElementNode? = null
+    var elementCount = 0
+
+    fun attach(node: XmlNode) {
+        val parent = stack.lastOrNull()
+        if (parent != null) {
+            parent.children += node
+        }
+        // Character data outside the root element carries no content; dropped.
+    }
+
+    fun completeElement(builder: XmlBuilder) {
+        val element = builder.build()
+        val parent = stack.lastOrNull()
+        if (parent != null) {
+            parent.children += element
+        } else if (root == null) {
+            root = element
+        }
+    }
+
+    while (pos < length) {
+        if (raw[pos] != '<') {
+            val next = raw.indexOf('<', pos)
+            val end = if (next < 0) length else next
+            if (stack.isNotEmpty()) {
+                attach(XmlTextNode(decodeXmlEntities(raw.substring(pos, end))))
+            }
+            pos = end
+            continue
+        }
+        when {
+            raw.startsWith("<!--", pos) -> {
+                val end = raw.indexOf("-->", pos + 4)
+                if (end < 0) return null
+                pos = end + 3
+            }
+            raw.startsWith("<![CDATA[", pos) -> {
+                val end = raw.indexOf("]]>", pos + 9)
+                if (end < 0) return null
+                if (stack.isNotEmpty()) {
+                    attach(XmlTextNode(raw.substring(pos + 9, end)))
+                }
+                pos = end + 3
+            }
+            raw.startsWith("<?", pos) -> {
+                val end = raw.indexOf("?>", pos + 2)
+                if (end < 0) return null
+                pos = end + 2
+            }
+            raw.startsWith("<!", pos) -> {
+                // DOCTYPE or another declaration: skipped wholesale (with
+                // internal-subset brackets balanced), so nothing it declares
+                // — entities included — is ever processed.
+                var i = pos + 2
+                var bracketDepth = 0
+                var quote: Char? = null
+                var closed = false
+                while (i < length) {
+                    val c = raw[i]
+                    when {
+                        quote != null -> if (c == quote) quote = null
+                        c == '"' || c == '\'' -> quote = c
+                        c == '[' -> bracketDepth++
+                        c == ']' -> bracketDepth--
+                        c == '>' && bracketDepth <= 0 -> {
+                            closed = true
+                            break
+                        }
+                    }
+                    i++
+                }
+                if (!closed) return null
+                pos = i + 1
+            }
+            raw.startsWith("</", pos) -> {
+                val end = raw.indexOf('>', pos + 2)
+                if (end < 0) return null
+                val name = raw.substring(pos + 2, end).trim()
+                // Close the matching open element; anything still open above
+                // it is closed with it (lenient toward hand-made files), and
+                // a stray end tag with no open match is ignored.
+                val matchIndex = stack.indexOfLast { it.qualifiedName == name }
+                if (matchIndex >= 0) {
+                    while (stack.size > matchIndex) {
+                        completeElement(stack.removeLast())
+                    }
+                }
+                pos = end + 1
+            }
+            else -> {
+                // Start tag: name, then attributes until '>' or '/>'.
+                var i = pos + 1
+                val nameStart = i
+                while (i < length && !raw[i].isWhitespace() && raw[i] != '>' && raw[i] != '/') i++
+                if (i == nameStart) return null
+                val qualifiedName = raw.substring(nameStart, i)
+                val attributes = mutableListOf<Pair<String, String>>()
+                var selfClosing = false
+                var tagClosed = false
+                while (i < length && !tagClosed) {
+                    while (i < length && raw[i].isWhitespace()) i++
+                    if (i >= length) break
+                    when {
+                        raw.startsWith("/>", i) -> {
+                            selfClosing = true
+                            tagClosed = true
+                            i += 2
+                        }
+                        raw[i] == '>' -> {
+                            tagClosed = true
+                            i += 1
+                        }
+                        else -> {
+                            val attrStart = i
+                            while (i < length && !raw[i].isWhitespace() &&
+                                raw[i] != '=' && raw[i] != '>' && raw[i] != '/'
+                            ) i++
+                            val attrName = raw.substring(attrStart, i)
+                            while (i < length && raw[i].isWhitespace()) i++
+                            var attrValue = ""
+                            if (i < length && raw[i] == '=') {
+                                i++
+                                while (i < length && raw[i].isWhitespace()) i++
+                                if (i < length && (raw[i] == '"' || raw[i] == '\'')) {
+                                    val quoteChar = raw[i]
+                                    val valueStart = ++i
+                                    val valueEnd = raw.indexOf(quoteChar, i)
+                                    if (valueEnd < 0) return null
+                                    attrValue = raw.substring(valueStart, valueEnd)
+                                    i = valueEnd + 1
+                                } else {
+                                    val valueStart = i
+                                    while (i < length && !raw[i].isWhitespace() && raw[i] != '>') i++
+                                    attrValue = raw.substring(valueStart, i)
+                                }
+                            }
+                            if (attrName.isNotEmpty()) {
+                                attributes += attrName to decodeXmlEntities(attrValue)
+                            }
+                        }
+                    }
+                }
+                if (!tagClosed) return null
+                elementCount++
+                if (elementCount > MAX_XML_ELEMENTS) return null
+                val builder = XmlBuilder(
+                    qualifiedName = qualifiedName,
+                    localName = qualifiedName.substringAfterLast(':'),
+                    attributes = attributes
+                )
+                if (stack.size >= MAX_XML_DEPTH) return null
+                if (selfClosing) {
+                    if (stack.isEmpty() && root != null) return null
+                    completeElement(builder)
+                } else {
+                    if (stack.isEmpty() && root != null) return null
+                    stack.addLast(builder)
+                }
+                pos = i
+            }
+        }
+    }
+    if (stack.isNotEmpty()) return null
+    return root
 }
 
 // --------------------------------------------------------------------------- DOCX
 
 /** DOCX `word/document.xml` → text: `w:t` runs concatenated, one line per `w:p`. */
 fun docxToText(documentXml: ByteArray): String {
-    val document = parseXmlHardened(documentXml) ?: return ""
-    val paragraphs = document.elementsByLocalName("p")
+    val document = parseXmlToTree(documentXml) ?: return ""
+    val paragraphs = document.allByLocalName("p")
     return paragraphs.joinToString("\n") { paragraph ->
         buildString {
-            fun walk(node: Node) {
-                when (localNameOf(node)) {
-                    "t" -> append(node.textContent)
+            fun walk(node: XmlNode) {
+                if (node !is XmlElementNode) return
+                when (node.localName) {
+                    "t" -> {
+                        append(node.textContent)
+                        return
+                    }
                     "tab" -> append('\t')
                     "br" -> append('\n')
                 }
-                val children = node.childNodes
-                for (i in 0 until children.length) walk(children.item(i))
+                node.children.forEach(::walk)
             }
             walk(paragraph)
         }
@@ -130,18 +437,18 @@ fun docxToText(documentXml: ByteArray): String {
 /** XLSX `xl/sharedStrings.xml` → the shared string table (`s:t` per `si`, runs joined). */
 fun xlsxSharedStrings(sharedStringsXml: ByteArray?): List<String> {
     if (sharedStringsXml == null) return emptyList()
-    val document = parseXmlHardened(sharedStringsXml) ?: return emptyList()
-    return document.elementsByLocalName("si").map { si ->
+    val document = parseXmlToTree(sharedStringsXml) ?: return emptyList()
+    return document.allByLocalName("si").map { si ->
         si.descendantsByLocalName("t").joinToString("") { it.textContent }
     }
 }
 
 /** One XLSX sheet → one line per row, cells tab-separated, shared strings resolved. */
 fun xlsxSheetToLines(sheetXml: ByteArray, sharedStrings: List<String>): List<String> {
-    val document = parseXmlHardened(sheetXml) ?: return emptyList()
-    return document.elementsByLocalName("row").mapNotNull { row ->
+    val document = parseXmlToTree(sheetXml) ?: return emptyList()
+    return document.allByLocalName("row").mapNotNull { row ->
         val cells = row.descendantsByLocalName("c").map { cell ->
-            val type = cell.getAttribute("t")
+            val type = cell.attribute("t")
             val value = cell.descendantsByLocalName("v").firstOrNull()?.textContent.orEmpty()
             when (type) {
                 "s" -> value.toIntOrNull()?.let { sharedStrings.getOrNull(it) } ?: value
@@ -172,8 +479,8 @@ fun xlsxToText(
 
 /** One PPTX slide → its `a:t` runs, one line per `a:p` paragraph. */
 fun pptxSlideToText(slideXml: ByteArray): String {
-    val document = parseXmlHardened(slideXml) ?: return ""
-    return document.elementsByLocalName("p").joinToString("\n") { paragraph ->
+    val document = parseXmlToTree(slideXml) ?: return ""
+    return document.allByLocalName("p").joinToString("\n") { paragraph ->
         paragraph.descendantsByLocalName("t").joinToString("") { it.textContent }
     }
 }
@@ -188,9 +495,9 @@ fun pptxToText(slides: List<Pair<Int, ByteArray>>): String =
 
 /** EPUB `META-INF/container.xml` → the OPF package document's full path. */
 fun epubRootFilePath(containerXml: ByteArray): String? {
-    val document = parseXmlHardened(containerXml) ?: return null
-    return document.elementsByLocalName("rootfile")
-        .firstOrNull()?.getAttribute("full-path")?.takeIf { it.isNotBlank() }
+    val document = parseXmlToTree(containerXml) ?: return null
+    return document.allByLocalName("rootfile")
+        .firstOrNull()?.attribute("full-path")?.takeIf { it.isNotBlank() }
 }
 
 /**
@@ -198,16 +505,16 @@ fun epubRootFilePath(containerXml: ByteArray): String? {
  * the spine's idrefs, hrefs resolved against the OPF's own directory inside the zip.
  */
 fun epubSpinePaths(opfXml: ByteArray, opfPath: String): List<String> {
-    val document = parseXmlHardened(opfXml) ?: return emptyList()
+    val document = parseXmlToTree(opfXml) ?: return emptyList()
     val manifest = HashMap<String, String>()
-    document.elementsByLocalName("item").forEach { item ->
-        val id = item.getAttribute("id")
-        val href = item.getAttribute("href")
+    document.allByLocalName("item").forEach { item ->
+        val id = item.attribute("id")
+        val href = item.attribute("href")
         if (id.isNotBlank() && href.isNotBlank()) manifest[id] = href
     }
     val opfDir = opfPath.substringBeforeLast('/', "")
-    return document.elementsByLocalName("itemref").mapNotNull { ref ->
-        val href = manifest[ref.getAttribute("idref")] ?: return@mapNotNull null
+    return document.allByLocalName("itemref").mapNotNull { ref ->
+        val href = manifest[ref.attribute("idref")] ?: return@mapNotNull null
         resolveZipPath(opfDir, href)
     }
 }
@@ -254,25 +561,25 @@ private val XHTML_BLOCK_TAGS = setOf(
 
 /** XHTML chapter → plain text: block elements become line breaks, all markup dropped. */
 fun xhtmlToPlainText(xhtml: ByteArray): String {
-    val document = parseXmlHardened(xhtml) ?: return ""
+    val document = parseXmlToTree(xhtml) ?: return ""
     val out = StringBuilder()
-    fun walk(node: Node) {
-        val local = node.localName ?: node.nodeName.substringAfterLast(':')
-        if (node.nodeType == Node.TEXT_NODE) {
-            out.append(node.nodeValue)
+    fun walk(node: XmlNode) {
+        if (node is XmlTextNode) {
+            out.append(node.text)
             return
         }
+        if (node !is XmlElementNode) return
+        val local = node.localName
         if (local == "br") {
             out.append('\n')
             return
         }
         val isBlock = local in XHTML_BLOCK_TAGS
         if (isBlock) out.append('\n')
-        val children = node.childNodes
-        for (i in 0 until children.length) walk(children.item(i))
+        node.children.forEach(::walk)
         if (isBlock) out.append('\n')
     }
-    walk(document.documentElement)
+    walk(document)
     return out.lines()
         .map { it.replace(Regex("[ \t]+"), " ").trim() }
         .filter { it.isNotEmpty() }
@@ -337,8 +644,8 @@ fun extractOfficeText(file: File, kind: DocumentKind): DocumentExtraction {
                         }
                     if (sheetEntries.isEmpty()) return DocumentExtraction.Failed
                     val sheetNames = entryBytes("xl/workbook.xml")?.let { workbook ->
-                        parseXmlHardened(workbook)?.elementsByLocalName("sheet")
-                            ?.map { it.getAttribute("name") }.orEmpty()
+                        parseXmlToTree(workbook)?.allByLocalName("sheet")
+                            ?.map { it.attribute("name") }.orEmpty()
                     }.orEmpty()
                     val sheets = sheetEntries.mapIndexed { index, entry ->
                         (sheetNames.getOrNull(index)?.takeIf { it.isNotBlank() }
@@ -365,7 +672,12 @@ fun extractOfficeText(file: File, kind: DocumentKind): DocumentExtraction {
                 DocumentKind.EPUB -> DocumentExtraction.Failed
             }
         }
-    }.getOrElse { DocumentExtraction.Failed }
+    }.getOrElse { failure ->
+        // Extraction failures used to be swallowed silently, which is why two
+        // field rounds could not see WHERE the reader failed. Log the cause.
+        SafeLog.w(TAG, "Office extraction failed for ${file.name}", failure)
+        DocumentExtraction.Failed
+    }
 }
 
 /** EPUB Tier 1: container → OPF → spine → chapter plain text, in reading order. */
@@ -402,7 +714,10 @@ fun extractEpubText(file: File): DocumentExtraction {
             if (out.isEmpty()) return DocumentExtraction.Failed
             DocumentExtraction.Text(out.toString(), truncated)
         }
-    }.getOrElse { DocumentExtraction.Failed }
+    }.getOrElse { failure ->
+        SafeLog.w(TAG, "EPUB extraction failed for ${file.name}", failure)
+        DocumentExtraction.Failed
+    }
 }
 
 /** The document formats the preview extractors support. */
