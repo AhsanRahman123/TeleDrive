@@ -51,6 +51,8 @@ data class UserPreferences(
     /** The ZIP viewer's own remembered sort, mirroring the gallery's per-view pair. */
     val archiveSortField: FileSortField = FileSortField.NAME,
     val archiveSortDirection: SortDirection = SortDirection.ASCENDING,
+    /** The ZIP viewer's remembered thumbnail size step (vc184 P7). */
+    val archiveThumbnailSize: ThumbnailSize = ThumbnailSize.MEDIUM,
 
     val backgroundPlayback: Boolean = false,
     val streamBeforeDownload: Boolean = true,

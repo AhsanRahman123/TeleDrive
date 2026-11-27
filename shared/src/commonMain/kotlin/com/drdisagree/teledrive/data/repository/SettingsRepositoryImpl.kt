@@ -156,6 +156,10 @@ class SettingsRepositoryImpl(
                 this[PreferenceKeys.GALLERY_SORT_DIRECTION],
                 defaults.gallerySortDirection
             ),
+            archiveThumbnailSize = enumOrDefault(
+                this[PreferenceKeys.ARCHIVE_THUMBNAIL_SIZE],
+                defaults.archiveThumbnailSize
+            ),
             archiveSortField = enumOrDefault(
                 this[PreferenceKeys.ARCHIVE_SORT_FIELD],
                 defaults.archiveSortField
@@ -239,6 +243,7 @@ class SettingsRepositoryImpl(
         this[PreferenceKeys.SORT_DIRECTION] = prefs.sortDirection.name
         this[PreferenceKeys.GALLERY_SORT_FIELD] = prefs.gallerySortField.name
         this[PreferenceKeys.GALLERY_SORT_DIRECTION] = prefs.gallerySortDirection.name
+        this[PreferenceKeys.ARCHIVE_THUMBNAIL_SIZE] = prefs.archiveThumbnailSize.name
         this[PreferenceKeys.ARCHIVE_SORT_FIELD] = prefs.archiveSortField.name
         this[PreferenceKeys.ARCHIVE_SORT_DIRECTION] = prefs.archiveSortDirection.name
         this[PreferenceKeys.BACKGROUND_PLAYBACK] = prefs.backgroundPlayback

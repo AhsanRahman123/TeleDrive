@@ -63,6 +63,7 @@ object PreferenceKeys {
     val SORT_DIRECTION = stringPreferencesKey("sort_direction")
     val GALLERY_SORT_FIELD = stringPreferencesKey("gallery_sort_field")
     val GALLERY_SORT_DIRECTION = stringPreferencesKey("gallery_sort_direction")
+    val ARCHIVE_THUMBNAIL_SIZE = stringPreferencesKey("archive_thumbnail_size")
     val ARCHIVE_SORT_FIELD = stringPreferencesKey("archive_sort_field")
     val ARCHIVE_SORT_DIRECTION = stringPreferencesKey("archive_sort_direction")
 

@@ -89,7 +89,10 @@ fun FileListItem(
                 file = file,
                 contentDescription = null,
                 modifier = Modifier
-                    .size(if (compact) 38.dp else if (prominent) 72.dp else 48.dp)
+                    // vc184 P7: list thumbnails get bigger (48dp -> 56dp plain,
+                    // 72dp -> 80dp prominent/Files). Grid items are untouched.
+                    // Decode stays bounded by the thumbnail store's fixed cap.
+                    .size(if (compact) 38.dp else if (prominent) 80.dp else 56.dp)
                     .clip(MaterialTheme.shapes.medium)
             )
         }
