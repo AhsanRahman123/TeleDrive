@@ -5,6 +5,7 @@ import com.drdisagree.teledrive.presentation.common.UiText
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -37,6 +38,12 @@ import org.junit.rules.TemporaryFolder
  * type for the entry, its extracted temp is on disk with the entry's exact
  * verified bytes (for text, its exact content), the published position
  * matches the settled page, and no false "corrupted" verdict appears.
+ *
+ * A5 (autoplay on settle) is pinned in the same script: a video page that is
+ * merely PASSED during a swipe never starts extracting (asserted after
+ * waiting past the settle delay), while a video page the user SETTLES on
+ * extracts and reaches the published Video state — the state the player
+ * auto-plays — with no Play tap anywhere in the script.
  */
 class InZipRapidSwitchingTest {
 
@@ -145,17 +152,49 @@ class InZipRapidSwitchingTest {
                 }
                 assertTempBytes(viewModel.uiState.value.archivePreview!!, img2)
 
-                // Swiping onto the video publishes only its placeholder; the
-                // deliberate Play tap extracts it and it must land playable
-                // (published Video with the verified temp on disk).
-                viewModel.onArchivePreviewPageSelected(2)
-                awaitPreviewCondition("video placeholder published") {
+                // A5 pass-through: the burst above PASSED the video page
+                // (position 2) without settling on it. Even after waiting
+                // well past the autoplay settle delay, the video must never
+                // have been extracted or published — the settled image page
+                // is still what is shown.
+                delay(1_000)
+                run {
                     val state = viewModel.uiState.value
-                    state.settledOn(2) &&
-                        state.archivePreview is ArchiveEntryPreview.VideoPlaceholder
+                    assertTrue(
+                        "a video page merely passed must never extract: ${state.archivePreview}",
+                        state.settledOn(1) &&
+                            state.archivePreview is ArchiveEntryPreview.Image
+                    )
                 }
-                viewModel.playCurrentArchiveVideo()
-                awaitPreviewCondition("video page rendered after Play") {
+
+                // A5 pass-through, second form: settle briefly toward the
+                // video and move on to the pdf BEFORE the settle delay
+                // elapses — the pending autoplay is superseded by the pdf
+                // load, and after the delay the pdf is still what is shown.
+                viewModel.onArchivePreviewPageSelected(2)
+                viewModel.onArchivePreviewPageSelected(3)
+                awaitPreviewCondition("pdf page rendered after passing the video") {
+                    val state = viewModel.uiState.value
+                    state.settledOn(3) &&
+                        (state.archivePreview as? ArchiveEntryPreview.Pdf)?.entryIndex == 3
+                }
+                assertTempBytes(viewModel.uiState.value.archivePreview!!, pdf)
+                delay(1_000)
+                run {
+                    val state = viewModel.uiState.value
+                    assertTrue(
+                        "passed video must not extract after the settle delay: ${state.archivePreview}",
+                        state.settledOn(3) &&
+                            state.archivePreview is ArchiveEntryPreview.Pdf
+                    )
+                }
+
+                // A5 settle: landing on the video page and STAYING there
+                // extracts it and starts playback with NO Play tap — the
+                // published Video preview is what the player auto-plays
+                // (playWhenReady), with the verified temp on disk.
+                viewModel.onArchivePreviewPageSelected(2)
+                awaitPreviewCondition("settled video autoplays without a Play tap") {
                     val state = viewModel.uiState.value
                     state.settledOn(2) &&
                         (state.archivePreview as? ArchiveEntryPreview.Video)?.entryIndex == 2

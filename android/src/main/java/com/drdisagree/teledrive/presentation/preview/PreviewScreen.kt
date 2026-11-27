@@ -1133,9 +1133,11 @@ private fun ArchiveEntryPreviewOverlay(
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // vc183: a swiped-to video page extracts nothing yet.
-                        // Play is the deliberate tap that pays the whole-file
-                        // extraction (with the free-space preflight).
+                        // vc183/vc184 A5: a settled-on video page shows this
+                        // placeholder as its loading state — extraction (with
+                        // the free-space preflight) starts on its own once
+                        // the page has stayed settled, and Play remains as
+                        // the tap that starts it immediately.
                         Text(
                             text = preview.name,
                             style = MaterialTheme.typography.titleMedium,

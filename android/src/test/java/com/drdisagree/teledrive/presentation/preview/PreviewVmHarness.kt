@@ -281,7 +281,7 @@ internal fun buildPreviewViewModel(
  * Gradle's console summary for these tests shows only the exception class
  * and first frame, which hides the actual cause of a construction failure.
  */
-internal fun runVmTest(block: suspend () -> Unit) {
+internal fun runVmTest(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) {
     try {
         kotlinx.coroutines.runBlocking { block() }
     } catch (t: Throwable) {
