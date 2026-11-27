@@ -5,6 +5,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import com.drdisagree.teledrive.desktop.DesktopPlatformCapabilities
 import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
+import com.drdisagree.teledrive.presentation.platform.LocalUrlOpener
+import com.drdisagree.teledrive.presentation.platform.UrlOpener
 import com.drdisagree.teledrive.core.telegram.TelegramFileInfo
 import java.io.ByteArrayOutputStream
 import java.lang.reflect.InvocationHandler
@@ -17,12 +19,16 @@ import kotlinx.coroutines.flow.flowOf
 /**
  * The platform locals the archive pane's shared components read (the app provides
  * them at its root via DesktopPlatformProviders). Tests composing the pane directly
- * must provide the capabilities local or composition fails.
+ * must provide the capabilities local or composition fails. The pane itself also
+ * reads LocalUrlOpener (1.6.25 item 5: in-zip Markdown links), whose local has an
+ * error default, so a no-op opener is provided here too — the same no-op the
+ * production back-step test installs for the full screen.
  */
 @Composable
 fun ArchiveTestProviders(content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalPlatformCapabilities provides DesktopPlatformCapabilities(),
+        LocalUrlOpener provides UrlOpener { },
         content = content
     )
 }

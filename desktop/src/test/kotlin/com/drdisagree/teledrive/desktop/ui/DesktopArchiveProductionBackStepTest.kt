@@ -38,6 +38,7 @@ import com.drdisagree.teledrive.data.local.entity.FilePartEntity
 import com.drdisagree.teledrive.data.local.entity.TransferEntity
 import com.drdisagree.teledrive.data.repository.ActiveChannel
 import com.drdisagree.teledrive.data.repository.FolderPathResolver
+import com.drdisagree.teledrive.desktop.media.DesktopArchiveEntryThumbnailStore
 import com.drdisagree.teledrive.desktop.media.MediaStreamServer
 import com.drdisagree.teledrive.domain.model.BackupState
 import com.drdisagree.teledrive.domain.model.DriveFile
@@ -273,6 +274,11 @@ class DesktopArchiveProductionBackStepTest {
         )
         val koinModule = module {
             single { MediaStreamServer() }
+            // PreviewPane injects the archive thumbnail store unconditionally
+            // (it is only *used* for remote archives); production registers it
+            // in desktopModule, so this subset module must register it too,
+            // built from this test's fakes exactly like remoteArchiveService.
+            single { DesktopArchiveEntryThumbnailStore(storagePaths, remoteArchiveService) }
             single<TelegramClient> { telegram }
             single { StreamCrypto() }
             single<WrappedKeyRepository> {
