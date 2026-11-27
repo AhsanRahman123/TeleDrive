@@ -165,6 +165,9 @@ import com.drdisagree.teledrive.resources.gallery_filter_not_backed_up
 import com.drdisagree.teledrive.resources.gallery_view_grid
 import com.drdisagree.teledrive.resources.gallery_view_list
 import com.drdisagree.teledrive.resources.gallery_search_hint
+import com.drdisagree.teledrive.resources.gallery_tab_all
+import com.drdisagree.teledrive.resources.gallery_tab_photos
+import com.drdisagree.teledrive.resources.gallery_tab_videos
 import com.drdisagree.teledrive.resources.gallery_clear_filters
 import com.drdisagree.teledrive.resources.gallery_clear_search
 import com.drdisagree.teledrive.resources.files_queued_for_download
@@ -1040,6 +1043,23 @@ fun GalleryScreen(
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (state.isAlbumView) {
+                        FilterChip(
+                            selected = state.filters.mediaType == GalleryMediaType.ALL,
+                            onClick = { viewModel.setMediaTypeFilter(GalleryMediaType.ALL) },
+                            label = { Text(stringResource(Res.string.gallery_tab_all)) }
+                        )
+                        FilterChip(
+                            selected = state.filters.mediaType == GalleryMediaType.PHOTOS,
+                            onClick = { viewModel.setMediaTypeFilter(GalleryMediaType.PHOTOS) },
+                            label = { Text(stringResource(Res.string.gallery_tab_photos)) }
+                        )
+                        FilterChip(
+                            selected = state.filters.mediaType == GalleryMediaType.VIDEOS,
+                            onClick = { viewModel.setMediaTypeFilter(GalleryMediaType.VIDEOS) },
+                            label = { Text(stringResource(Res.string.gallery_tab_videos)) }
+                        )
+                    }
                     FilterChip(
                         selected = state.filters.favoritesOnly,
                         onClick = { viewModel.setFavoritesFilter(!state.filters.favoritesOnly) },

@@ -6,7 +6,14 @@ import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.ViewMode
 import com.drdisagree.teledrive.presentation.components.SelectionCapabilities
 
+enum class GalleryMediaType {
+    ALL,
+    PHOTOS,
+    VIDEOS
+}
+
 data class GalleryFilters(
+    val mediaType: GalleryMediaType = GalleryMediaType.ALL,
     val searchQuery: String = "",
     val favoritesOnly: Boolean = false,
     val availableOfflineOnly: Boolean = false,
@@ -42,7 +49,8 @@ data class GalleryUiState(
     val allSelectedFavorite: Boolean get() = selectionMode && !capabilities.anyUnfavorited
     val allSelectedAvailableOffline: Boolean get() = selectionMode && !capabilities.anyNotAvailableOffline
     val hasActiveFilters: Boolean get() =
-        filters.searchQuery.isNotBlank() ||
+        filters.mediaType != GalleryMediaType.ALL ||
+                filters.searchQuery.isNotBlank() ||
                 filters.favoritesOnly ||
                 filters.availableOfflineOnly ||
                 filters.backedUpOnly ||
