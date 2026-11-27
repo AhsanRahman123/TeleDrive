@@ -192,6 +192,48 @@ class MediaStreamServerTest {
         }
     }
 
+    @Test
+    fun `sequential playback reads are coalesced into buffered fetches`() {
+        // PC 1.6.27 P4(b): the server must wrap the raw source in
+        // BufferedMediaByteSource (as Android's TelegramDataSource does),
+        // so a sequential 1 MiB playback costs two 512 KiB source fetches,
+        // not one TDLib round trip per 256 KiB server chunk.
+        val server = MediaStreamServer()
+        try {
+            val bytes = ByteArray(1024 * 1024) { (it % 251).toByte() }
+            val source = CountingMediaByteSource(bytes)
+            val url = server.serve("movie.mp4", "video/mp4") { source }
+
+            val connection = URL(url).openConnection() as HttpURLConnection
+            try {
+                assertEquals(HttpURLConnection.HTTP_OK, connection.responseCode)
+                assertArrayEquals(bytes, connection.inputStream.use { it.readBytes() })
+            } finally {
+                connection.disconnect()
+            }
+            assertEquals(2, source.readCalls)
+        } finally {
+            server.stop()
+        }
+    }
+
+    private class CountingMediaByteSource(private val bytes: ByteArray) : MediaByteSource {
+        @Volatile
+        var readCalls = 0
+            private set
+
+        override suspend fun size(): Long = bytes.size.toLong()
+
+        override suspend fun read(position: Long, count: Int): ByteArray {
+            readCalls++
+            val start = position.coerceIn(0, bytes.size.toLong()).toInt()
+            val end = (position + count).coerceIn(start.toLong(), bytes.size.toLong()).toInt()
+            return bytes.copyOfRange(start, end)
+        }
+
+        override fun close() = Unit
+    }
+
     private class FakeMediaByteSource(private val bytes: ByteArray) : MediaByteSource {
         override suspend fun size(): Long = bytes.size.toLong()
 

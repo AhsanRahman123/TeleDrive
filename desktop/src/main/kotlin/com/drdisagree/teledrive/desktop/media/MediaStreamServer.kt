@@ -1,6 +1,7 @@
 package com.drdisagree.teledrive.desktop.media
 
 import com.drdisagree.teledrive.core.common.SafeLog
+import com.drdisagree.teledrive.core.media.BufferedMediaByteSource
 import com.drdisagree.teledrive.core.media.MediaByteSource
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
@@ -41,7 +42,20 @@ class MediaStreamServer {
         // outgoing MRL while the incoming MRL is being attached; those requests must never be
         // allowed to read from the replacement file.
         val nextStreamId = UUID.randomUUID().toString().replace("-", "")
-        val nextStream = ActiveStream(factory(), fileMimeType.ifBlank { FALLBACK_MIME })
+        // PC 1.6.27 P4(b): buffer the source exactly as Android's player
+        // does (TelegramDataSource wraps its TelegramMediaByteSource in
+        // BufferedMediaByteSource). The desktop path previously handed the
+        // RAW source to this server, so every 256 KiB server chunk — and
+        // every smaller player probe that reached it — paid a full TDLib
+        // getFileInfo + ReadFilePart round trip, while Android coalesced
+        // sequential reads into 512 KiB fetches served from memory. All
+        // reads here are serialized on ActiveStream.readLock, so the
+        // single-buffer cache is race-free; a read at an unrelated offset
+        // simply refetches, never returns wrong bytes.
+        val nextStream = ActiveStream(
+            BufferedMediaByteSource(factory()),
+            fileMimeType.ifBlank { FALLBACK_MIME }
+        )
         val previous = active
         active = nextStream
         activeStreamId = nextStreamId
