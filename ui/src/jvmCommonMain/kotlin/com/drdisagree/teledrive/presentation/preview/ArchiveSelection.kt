@@ -21,7 +21,9 @@ import com.drdisagree.teledrive.domain.model.SortDirection
  * PreviewViewModel.previewArchiveVideoEntry); the per-entry Download action
  * stays available for video entries on both platforms.
  */
-enum class ArchiveEntryTapAction { PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, DOWNLOAD }
+enum class ArchiveEntryTapAction {
+    PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, PREVIEW_PDF, PREVIEW_DOCUMENT, DOWNLOAD
+}
 
 fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
     if (entry.isDirectory) return ArchiveEntryTapAction.DOWNLOAD
@@ -29,15 +31,116 @@ fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
     return when {
         MimeTypes.isImage(mimeType) -> ArchiveEntryTapAction.PREVIEW_IMAGE
         MimeTypes.isAudio(mimeType) -> ArchiveEntryTapAction.PLAY_AUDIO
+        MimeTypes.isPdf(mimeType) -> ArchiveEntryTapAction.PREVIEW_PDF
+        // EPUB and the OOXML trio extract to readable text from the extracted temp file.
+        MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType) ->
+            ArchiveEntryTapAction.PREVIEW_DOCUMENT
         // The app's own text classification (MimeTypes.isText) decides what counts as text.
         MimeTypes.isText(mimeType) -> ArchiveEntryTapAction.PREVIEW_TEXT
-        // Video and everything else stay download-only.
+        // Video and everything else stay download-only in this shared routing
+        // (the desktop pane intercepts video taps before it, as before).
         else -> ArchiveEntryTapAction.DOWNLOAD
     }
 }
 
 /** Largest entry offered an in-archive text preview: 2 MiB of extracted text. */
 const val ARCHIVE_TEXT_PREVIEW_MAX_BYTES: Long = 2L * 1024 * 1024
+
+/** Largest entry offered an in-archive PDF preview: 50 MiB of extracted PDF. */
+const val ARCHIVE_PDF_PREVIEW_MAX_BYTES: Long = 50L * 1024 * 1024
+
+/** True when [entry] may be previewed as a PDF: right type AND within the size cap. */
+fun archiveEntryPdfPreviewable(entry: ArchiveEntry): Boolean =
+    archiveEntryTapAction(entry) == ArchiveEntryTapAction.PREVIEW_PDF &&
+        entry.sizeBytes <= ARCHIVE_PDF_PREVIEW_MAX_BYTES
+
+/** Largest entry offered an in-archive document (EPUB/OOXML) text extraction: 20 MiB. */
+const val ARCHIVE_DOCUMENT_PREVIEW_MAX_BYTES: Long = 20L * 1024 * 1024
+
+/** True when [entry] may be extracted as document text: right type AND within the cap. */
+fun archiveEntryDocumentPreviewable(entry: ArchiveEntry): Boolean =
+    archiveEntryTapAction(entry) == ArchiveEntryTapAction.PREVIEW_DOCUMENT &&
+        entry.sizeBytes <= ARCHIVE_DOCUMENT_PREVIEW_MAX_BYTES
+
+/**
+ * Whether [entry] can be previewed in place at all under the caps: image and
+ * audio always; text, PDF and document entries only within their caps.
+ */
+fun archiveEntryPreviewable(entry: ArchiveEntry): Boolean =
+    when (archiveEntryTapAction(entry)) {
+        ArchiveEntryTapAction.PREVIEW_IMAGE,
+        ArchiveEntryTapAction.PLAY_AUDIO -> true
+        ArchiveEntryTapAction.PREVIEW_TEXT -> archiveEntryTextPreviewable(entry)
+        ArchiveEntryTapAction.PREVIEW_PDF -> archiveEntryPdfPreviewable(entry)
+        ArchiveEntryTapAction.PREVIEW_DOCUMENT -> archiveEntryDocumentPreviewable(entry)
+        ArchiveEntryTapAction.DOWNLOAD -> false
+    }
+
+/**
+ * Natural ordering for archive paths: digit runs compare by numeric value, so
+ * `page2.jpg` sorts before `page10.jpg` (the archive list's plain lexicographic
+ * NAME sort gives 1, 10, 11, 2, … — unusable for comic pages). Non-digit runs
+ * compare case-insensitively. Digit runs compare by stripped-of-leading-zeros
+ * length, then lexicographically, so absurdly long runs cannot overflow.
+ * Numerically equal runs (zero-padded variants like `001.jpg` vs `1.jpg`) fall
+ * through to the remaining characters; the caller adds a listing-index
+ * tie-break, so the overall order is always deterministic.
+ */
+fun compareNaturalPaths(a: String, b: String): Int {
+    var i = 0
+    var j = 0
+    while (i < a.length && j < b.length) {
+        val ca = a[i]
+        val cb = b[j]
+        if (ca.isDigit() && cb.isDigit()) {
+            var endA = i
+            while (endA < a.length && a[endA].isDigit()) endA++
+            var endB = j
+            while (endB < b.length && b[endB].isDigit()) endB++
+            val runA = a.substring(i, endA).trimStart('0')
+            val runB = b.substring(j, endB).trimStart('0')
+            if (runA.length != runB.length) return runA.length - runB.length
+            val byDigits = runA.compareTo(runB)
+            if (byDigits != 0) return byDigits
+            i = endA
+            j = endB
+        } else {
+            val byChar = ca.lowercaseChar().compareTo(cb.lowercaseChar())
+            if (byChar != 0) return byChar
+            i++
+            j++
+        }
+    }
+    return (a.length - i) - (b.length - j)
+}
+
+/**
+ * The CBZ comic pager sequence: the LISTING INDICES of the archive's page
+ * entries, in reading order. Pages are IMAGE entries only, filtered by image
+ * mime explicitly — a ZIP pager's text rule would turn `ComicInfo.xml` (XML
+ * counts as text) into a page, and `.txt`/`.nfo`/`Thumbs.db`/nested archives
+ * are not pages either. Order is the natural sort of the full normalized
+ * path, so flat books and one-folder books both read 1, 2, …, 10; ties (and
+ * duplicate names) break on the listing index, so every page keeps its own
+ * listing-index identity for extraction. Ported from Android unchanged.
+ */
+fun comicPageSequence(listing: List<ArchiveEntry>): List<Int> =
+    listing.indices
+        .filter { index ->
+            val entry = listing[index]
+            // macOS resource-fork junk carries real image extensions, so the
+            // mime filter alone cannot keep it out of the page sequence.
+            val segments = entry.name.replace('\\', '/').split('/')
+            !entry.isDirectory && "__MACOSX" !in segments &&
+                MimeTypes.isImage(MimeTypes.fromFileName(entry.name))
+        }
+        .sortedWith { first, second ->
+            val byPath = compareNaturalPaths(
+                listing[first].name.replace('\\', '/'),
+                listing[second].name.replace('\\', '/')
+            )
+            if (byPath != 0) byPath else first - second
+        }
 
 /**
  * The listing indices an in-zip photo pager steps through, in DISPLAYED order:
