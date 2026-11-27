@@ -61,6 +61,10 @@ class FolderPickerEscapeBackTest {
     )
 
     private fun pressEscape(confirmLabel: String) {
+        // Re-establish the focus target first: a navigation step recomposes
+        // the listing and the previously focused node can leave the tree —
+        // the upload picker test re-clicks its handle for the same reason.
+        rule.onNodeWithText(confirmLabel).performClick()
         rule.onNodeWithText(confirmLabel).performKeyInput { pressKey(Key.Escape) }
         rule.waitForIdle()
     }
