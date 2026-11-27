@@ -46,6 +46,7 @@ import com.drdisagree.teledrive.presentation.components.rememberCollectionComman
 import com.drdisagree.teledrive.presentation.components.galleryGridColumnsForWindow
 import com.drdisagree.teledrive.presentation.files.FolderPickerHost
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.presentation.platform.LocalDeleteConsentLauncher
 import com.drdisagree.teledrive.resources.files_move_to
 import com.drdisagree.teledrive.resources.files_move_here
@@ -283,6 +284,16 @@ private fun AlbumGrid(
         )
         return
     }
+    // Mirrors FilesScreen's touchRangeSelection: on touch platforms the
+    // container drag-select owns the long-press (it paints the range), so the
+    // card's own long-click must not also toggle; on desktop it toggles, like
+    // the Files rows. Either way the card's combinedClickable absorbs the
+    // long-press so no click fires on release — a plain clickable let the
+    // release click unselect the album the hold had just selected.
+    val touchRangeSelection = LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
+    val onAlbumLongClick: (MediaAlbum) -> Unit = { album ->
+        if (!touchRangeSelection) album.folderId?.let(onToggleAlbum)
+    }
     if (viewMode == ViewMode.LIST) {
         val listState = rememberLazyListState()
         val albumDragSelect = rememberDragSelect(
@@ -323,6 +334,7 @@ private fun AlbumGrid(
                         if (selectionMode && folderId != null) onToggleAlbum(folderId)
                         else onOpenAlbum(album)
                     },
+                    onLongClick = { onAlbumLongClick(album) },
                     selectionMode = selectionMode,
                     selected = album.folderId?.let(selectedAlbumIds::contains) == true,
                     onSelectionChange = album.folderId?.let { id -> { checked ->
@@ -386,6 +398,7 @@ private fun AlbumGrid(
                         if (selectionMode && folderId != null) onToggleAlbum(folderId)
                         else onOpenAlbum(album)
                     },
+                    onLongClick = { onAlbumLongClick(album) },
                     selectionMode = selectionMode,
                     selected = album.folderId?.let(selectedAlbumIds::contains) == true,
                     onSelectionChange = album.folderId?.let { id -> { checked ->
@@ -1141,6 +1154,12 @@ fun GalleryScreen(
                             placeholder = { Text("YYYY-MM-DD") }
                         )
                     }
+                    GallerySortControls(
+                        sortField = state.sortField,
+                        sortDirection = state.sortDirection,
+                        onSortSelected = viewModel::setSort,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     Text(
                         "Use a file extension, size range in MB, and dates in YYYY-MM-DD format.",
                         style = MaterialTheme.typography.bodySmall,

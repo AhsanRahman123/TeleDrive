@@ -114,6 +114,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -153,6 +154,7 @@ import com.drdisagree.teledrive.presentation.components.SelectionCheckbox
 import com.drdisagree.teledrive.presentation.components.SortMenu
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.components.RenameDialog
+import com.drdisagree.teledrive.presentation.components.FileTypePlaceholder
 import com.drdisagree.teledrive.presentation.components.iconFor
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
@@ -1990,16 +1992,25 @@ private fun ArchiveRow(
             }
         }
         val genericIcon: @Composable () -> Unit = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (node.isDirectory) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.size(20.dp)
-            )
+            if (node.isDirectory) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                // No thumbnail for this entry: the placeholder names the type
+                // (jpg, pdf, mp4, ...) under the category icon, like every
+                // other no-thumbnail placeholder in the app.
+                FileTypePlaceholder(
+                    name = node.name,
+                    mimeType = MimeTypes.fromFileName(node.name),
+                    category = FileCategory.fromMimeType(MimeTypes.fromFileName(node.name)),
+                    iconSize = 16.dp,
+                    labelSize = 8.sp
+                )
+            }
         }
         Box(
             contentAlignment = Alignment.Center,
