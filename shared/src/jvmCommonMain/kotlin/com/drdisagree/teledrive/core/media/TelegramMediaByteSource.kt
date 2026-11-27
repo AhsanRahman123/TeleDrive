@@ -141,6 +141,22 @@ class TelegramMediaByteSource(
      *   so the read re-issues its own DownloadFile instead of waiting on it. An active
      *   window at exactly this read's position is ours and is never re-issued while it
      *   runs (the report-52 second-pass rule, now keyed on the offset as well).
+     *
+     * 1.6.25 change (English.zip, report 55): a node can report FULLY downloaded
+     * (isDownloadingCompleted, prefix = size) while every ReadFilePart still fails
+     * with the §2(a).6 "File is not inside the cache" 400 — the Full local path
+     * fails TDLib's cache-dir check, or no readable file exists at it. DownloadFile
+     * cannot fix that state (on a completed file it is a no-op), so when the fresh
+     * poll shows completed + this exact 400, the loop recovers once per read from
+     * the node's own local path: read the range directly from it when the file
+     * there is verified (regular file, length exactly the resolved size), or
+     * DeleteFile the stale node when no file exists there and let the normal
+     * DownloadFile path genuinely re-download. An existing file of a different
+     * length is neither read nor deleted. This branch lives in the shared byte
+     * source, so Android takes it too: official TDLib implements the identical
+     * read_file_part gate (report 52 §4/§6), and both remedies are equally
+     * correct under those semantics — a verified-length local read of a
+     * completed file, and a cache reset only when the file is demonstrably gone.
      */
     private suspend fun readRangeOnly(position: Long, toRead: Long): ByteArray {
         var lastInfo: TelegramFileInfo? = null
@@ -148,6 +164,9 @@ class TelegramMediaByteSource(
         var downloadAttempts = 0
         var needRequest = true
         var shortReads = 0
+        // 1.6.25: the completed-outside-cache recovery (see the block after the
+        // getFileInfo poll below) runs at most once per read.
+        var localRecoveryDone = false
         // No-progress clock: [bestCoverageEnd] is the furthest contiguous coverage
         // toward [position, position+toRead) observed so far; the 408 fires only when
         // it has not advanced for [bufferTimeoutMs].
@@ -208,6 +227,82 @@ class TelegramMediaByteSource(
             val info = telegramClient.getFileInfo(fileId)
             lastInfo = info
             noteProgress(info)
+            // 1.6.25 recovery — the completed-but-not-inside-the-cache node
+            // (English.zip, report 55). The fresh poll says the file is FULLY
+            // downloaded (isDownloadingCompleted, prefix = size), yet
+            // ReadFilePart rejects every range with the §2(a).6 400: the Full
+            // local path fails TDLib's cache-dir check, or no readable file
+            // exists at it. A DownloadFile on a completed file is a no-op — it
+            // neither relocates nor re-fetches it — so the ordinary
+            // coverage recovery below would burn all attempts and give up
+            // exactly as the field showed. Instead, once per read:
+            // - If the reported local path holds a file whose length is
+            //   EXACTLY the resolved size, it demonstrably IS this file: read
+            //   the range from it directly (the same verification
+            //   DesktopTelegramClient.readyPath applies to completed paths;
+            //   the zip layer's own length/CRC checks still run on top).
+            // - If the path names no file at all (stale Full node — TDLib
+            //   keeps reporting completed after the cache file is removed),
+            //   or no path is reported, DeleteFile drops the stale local
+            //   location and the loop's normal DownloadFile then genuinely
+            //   re-downloads the range into the cache.
+            // - If a file exists at the path but its length differs, it is
+            //   NOT trusted and NOT deleted (it may be the user's own file,
+            //   not a cache copy): the read fails through the normal path,
+            //   and stateText now carries the local-path state that says why.
+            if (!localRecoveryDone && info.isDownloadingCompleted &&
+                isNotInsideCacheFailure(lastReadError)
+            ) {
+                localRecoveryDone = true
+                val localFile = info.localPath?.let { java.io.File(it) }
+                when {
+                    localFile != null && localFile.isFile &&
+                        totalSize > 0 && localFile.length() == totalSize -> {
+                        val direct = runCatching {
+                            readLocalRange(localFile, position, toRead)
+                        }.getOrNull()
+                        if (direct != null && direct.size.toLong() == toRead) {
+                            runCatching {
+                                SafeLog.d(
+                                    TAG,
+                                    "readFilePart rejected a completed file as not inside " +
+                                        "the cache; read $toRead bytes at $position from " +
+                                        "the verified local path ${info.localPath}"
+                                )
+                            }
+                            return direct
+                        }
+                    }
+                    localFile == null || !localFile.exists() -> {
+                        runCatching {
+                            SafeLog.w(
+                                TAG,
+                                "Completed file has no readable local file " +
+                                    "(path=${info.localPath}); deleting the stale cache " +
+                                    "entry so the range can be re-downloaded"
+                            )
+                        }
+                        // Not runCatching: a genuine cancellation must propagate,
+                        // not be swallowed as a failed cache reset.
+                        try {
+                            telegramClient.deleteLocalCopy(remoteFileId)
+                        } catch (ignored: TelegramException) {
+                            // The reset is best-effort: if DeleteFile itself is
+                            // refused, the loop continues and the give-up error
+                            // below still carries the local-path state.
+                        }
+                        needRequest = true
+                    }
+                    else -> runCatching {
+                        SafeLog.w(
+                            TAG,
+                            "Completed file's local path ${info.localPath} holds a file " +
+                                "of length ${localFile?.length()} != $totalSize; " +
+                                "not reading or deleting it"
+                        )
+                    }
+                }
+            }
             // Second pass (report 52): the catch above may have set needRequest from
             // the STALE pre-request snapshot in lastInfo (active=false was the reason
             // the request was issued). The freshly polled info is authoritative: OUR
@@ -273,6 +368,26 @@ class TelegramMediaByteSource(
             (failure.message.contains("not enough downloaded bytes", ignoreCase = true) ||
                 failure.message.contains("File is not inside the cache", ignoreCase = true))
 
+    /** The §2(a).6 sibling 400 alone: no readable local path for the node's location. */
+    private fun isNotInsideCacheFailure(failure: TelegramException?): Boolean =
+        failure != null && failure.code == 400 &&
+            failure.message.contains("File is not inside the cache", ignoreCase = true)
+
+    /**
+     * Positional read of [count] bytes at [position] from a local file already verified
+     * (by the caller) to be a regular file of exactly the resolved size. Used only for
+     * the 1.6.25 completed-outside-cache recovery; the returned array is length-checked
+     * by the caller before it is handed back.
+     */
+    private fun readLocalRange(localFile: java.io.File, position: Long, count: Long): ByteArray {
+        java.io.RandomAccessFile(localFile, "r").use { raf ->
+            raf.seek(position)
+            val buffer = ByteArray(count.toInt())
+            raf.readFully(buffer)
+            return buffer
+        }
+    }
+
     /** Hint only: whether [info] suggests ReadFilePart's gate could pass for the range. */
     private fun gateCouldPass(info: TelegramFileInfo, readPosition: Long, count: Long): Boolean {
         if (info.isDownloadingCompleted) return true
@@ -280,12 +395,25 @@ class TelegramMediaByteSource(
             info.downloadOffset + info.downloadedPrefixSize >= readPosition + count
     }
 
-    private fun stateText(info: TelegramFileInfo?, lastError: TelegramException?): String =
-        "downloadOffset=${info?.downloadOffset} " +
+    private fun stateText(info: TelegramFileInfo?, lastError: TelegramException?): String {
+        // 1.6.25: the local-path state is part of the failure contract — for the
+        // not-inside-the-cache class it is the detail that explains the failure
+        // (a path outside the cache dir, a vanished file, or no path at all),
+        // and the 1.6.24 field message could not distinguish those without it.
+        val localPath = info?.localPath
+        val localFileState = localPath?.let { path ->
+            runCatching {
+                val file = java.io.File(path)
+                "exists=${file.isFile} length=${if (file.isFile) file.length() else -1}"
+            }.getOrDefault("unknown")
+        }
+        return "downloadOffset=${info?.downloadOffset} " +
             "downloadedPrefixSize=${info?.downloadedPrefixSize} " +
             "isDownloadingActive=${info?.isDownloadingActive} " +
             "isDownloadingCompleted=${info?.isDownloadingCompleted} " +
+            "localPath=$localPath localFile=$localFileState " +
             "lastReadError=${lastError?.let { "${it.code}: ${it.message}" }}"
+    }
 
     private suspend fun resolve() {
         if (totalSize >= 0) return
