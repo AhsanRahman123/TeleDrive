@@ -96,6 +96,9 @@ class KeyboardCollectionState internal constructor(
     }
 
     internal fun handle(event: KeyEvent, shortcuts: CollectionShortcuts): Boolean {
+        if (event.key == Key.PageDown || event.key == Key.PageUp) {
+            println("P9DIAG handle key=${event.key} type=${event.type} containerTabStop=$containerTabStop containerFocused=$containerFocused focusInItem=$focusInItem focusOnItem=$focusOnItem current=$current")
+        }
         if (event.type == KeyEventType.KeyDown && containerTabStop && containerFocused) {
             return enterFromContainer(event)
         }
