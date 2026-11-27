@@ -88,8 +88,11 @@ import org.koin.dsl.module
  * invokes the handler only while the file it was registered for is the
  * currently displayed one. This test drives the REAL
  * [DesktopPreviewScreen]: open a CBZ entry preview, page the folder
- * with the edge Next button to a plain text file, then W/E must page
- * the folder — the dead CBZ preview must not move.
+ * with the edge Next button to a plain text file, then W must page the
+ * folder back — pre-fix the stale handler consumes the press (its
+ * captured preview is still the open one, even though the pane's
+ * dispose already dismissed the ViewModel's copy) and the folder
+ * never moves.
  */
 @OptIn(ExperimentalTestApi::class)
 class DesktopCbzStaleStepHandlerTest {
@@ -429,38 +432,40 @@ class DesktopCbzStaleStepHandlerTest {
         clickScreenNextPager()
         waitDisplayed("NEXT FILE BODY")
         // Let the page transition finish and the CBZ pane dispose; its
-        // step registration is what goes stale at this point.
+        // step registration is what goes stale at this point. (The
+        // pane's own dispose dismisses the ViewModel's preview copy —
+        // the stale HANDLER's captured preview stays open, which is
+        // exactly why it keeps consuming presses pre-fix.)
         Thread.sleep(600)
         rule.waitForIdle()
+        waitPreview(null)
 
-        // E at the folder's last file must do nothing to the folder —
-        // and, crucially, must NOT step the dead CBZ preview (pre-fix
-        // the stale handler consumed the press and moved the invisible
-        // preview from entry 0 to entry 1).
+        // E at the folder's last file moves nothing, and must not
+        // resurrect or step anything in the dead CBZ.
         press(Key.E)
         Thread.sleep(400)
         rule.waitForIdle()
-        assertEquals(
-            "E after paging away must not step the dead CBZ preview",
-            0,
-            viewModel.uiState.value.archivePreview?.entryIndex
-        )
         assertTrue("the folder must still show the text file", displayed("NEXT FILE BODY"))
+        assertEquals(
+            "no in-zip preview may be open on the text file",
+            null,
+            viewModel.uiState.value.archivePreview
+        )
 
-        // W must page the FOLDER back to the CBZ (pre-fix the stale
-        // handler consumed it too, and the folder never moved).
+        // W must page the FOLDER back to the CBZ. Pre-fix the stale
+        // handler consumed this press (returning true for its captured,
+        // still-open preview) and the folder never moved: NEXT FILE
+        // BODY would stay on screen and this wait would time out.
         press(Key.W)
         waitNotDisplayed("NEXT FILE BODY")
-        assertEquals(
-            "W must page the folder, not step the dead CBZ preview",
-            0,
-            viewModel.uiState.value.archivePreview?.entryIndex
-        )
+        waitDisplayed("page1.png")
         assertEquals("paging the folder must not exit the viewer", 0, exits.get())
 
         // Back on the CBZ, its own W/E routing is live again (the pane
-        // re-registered for the now-current file): E steps the preview
-        // that is actually on screen.
+        // re-registered for the now-current file): open the first page
+        // and E steps the preview that is actually on screen.
+        rule.onNodeWithText("page1.png").performClick()
+        waitPreview(0)
         press(Key.E)
         waitPreview(1)
     }
