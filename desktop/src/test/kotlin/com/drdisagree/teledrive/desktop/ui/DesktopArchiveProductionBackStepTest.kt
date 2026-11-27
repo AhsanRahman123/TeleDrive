@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.withKeyDown
 import androidx.lifecycle.SavedStateHandle
 import com.drdisagree.teledrive.core.archive.ArchiveDownloadTracker
 import com.drdisagree.teledrive.core.archive.ArchiveExtractionJobs
@@ -390,13 +391,7 @@ class DesktopArchiveProductionBackStepTest {
         descend()
 
         rule.onRoot().performKeyInput {
-            keyEvent(
-                androidx.compose.ui.input.key.KeyEvent(
-                    Key.DirectionLeft,
-                    androidx.compose.ui.input.key.KeyEventType.KeyDown,
-                    isAltPressed = true
-                )
-            )
+            withKeyDown(Key.AltLeft) { pressKey(Key.DirectionLeft) }
         }
         rule.waitForIdle()
         assertEquals("alt-left inside the zip must not exit the viewer", 0, exits.get())
