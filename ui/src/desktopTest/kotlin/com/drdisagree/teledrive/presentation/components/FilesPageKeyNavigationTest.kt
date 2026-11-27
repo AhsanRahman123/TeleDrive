@@ -20,7 +20,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
@@ -287,7 +289,9 @@ class FilesPageKeyNavigationTest {
         rule.onNodeWithTag("workspace").performKeyInput { pressKey(Key.PageDown) }
         rule.waitForIdle()
         rule.onNodeWithTag("item-12").assertIsFocused()
-        rule.onNodeWithTag("item-24").assertIsNotFocused()
+        // Exactly one page: item-24 is not even composed (no second page
+        // scrolled it into the viewport).
+        rule.onAllNodesWithTag("item-24").assertCountEquals(0)
 
         // And with a row focused, the same press still pages exactly once:
         // the preview-intercepting container consumes it before the row's
@@ -337,8 +341,9 @@ class FilesPageKeyNavigationTest {
         rule.onNodeWithTag("nested-editor").performKeyInput { pressKey(Key.PageDown) }
         rule.waitForIdle()
 
-        // The editor keeps focus and the collection does not page.
+        // The editor keeps focus and the collection does not page:
+        // row-4 was never scrolled into the viewport.
         rule.onNodeWithTag("nested-editor").assertIsFocused()
-        rule.onNodeWithTag("row-4").assertIsNotFocused()
+        rule.onAllNodesWithTag("row-4").assertCountEquals(0)
     }
 }

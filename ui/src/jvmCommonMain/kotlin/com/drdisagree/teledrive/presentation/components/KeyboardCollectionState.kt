@@ -302,6 +302,15 @@ class KeyboardCollectionState internal constructor(
         var target = index.coerceIn(0, totalCount() - 1)
         while (target > 0 && !isItem(target)) target--
         current = target
+        // Mark the target as the focus holder before revealing/requesting:
+        // canFocus() passes for the focused index, and an off-screen target
+        // composes during the reveal scroll while layoutInfo still shows
+        // the old viewport — without this mark its focus properties resolve
+        // canFocus=false (the anchor is still an old-layout item) and the
+        // request below silently no-ops (R3 item P9: paging to an
+        // off-screen item scrolled but never landed focus; the same race
+        // affected Home/End jumps to off-screen items).
+        focusedIndex = target
         if (cells().none { it.index == target }) reveal(target)
         repeat(FOCUS_ATTEMPTS) {
             runCatching { requester(target).requestFocus() }
