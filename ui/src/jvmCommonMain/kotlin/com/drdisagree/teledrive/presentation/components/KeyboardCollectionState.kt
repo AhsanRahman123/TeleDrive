@@ -312,12 +312,16 @@ class KeyboardCollectionState internal constructor(
         // affected Home/End jumps to off-screen items).
         focusedIndex = target
         if (cells().none { it.index == target }) reveal(target)
-        repeat(FOCUS_ATTEMPTS) {
+        println("P9DIAG focusNow target=$target afterReveal cells=${cells().map { it.index }} canFocus=${canFocus(target)} focusOnItem=$focusOnItem focusedIndex=$focusedIndex")
+        repeat(FOCUS_ATTEMPTS) { attempt ->
             runCatching { requester(target).requestFocus() }
+                .onFailure { println("P9DIAG attempt=$attempt requestFocus threw $it") }
             withFrameNanos { }
             withFrameNanos { }
+            println("P9DIAG attempt=$attempt focusOnItem=$focusOnItem current=$current focusedIndex=$focusedIndex canFocus=${canFocus(target)}")
             if (focusOnItem && current == target) return
         }
+        println("P9DIAG focusNow EXHAUSTED target=$target")
     }
 
     private companion object {
