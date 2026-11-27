@@ -51,6 +51,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -158,6 +160,9 @@ fun TransfersScreen(
     var concurrencyDraft by remember { mutableIntStateOf(transferConcurrency) }
     var confirmClearFinished by remember { mutableStateOf(false) }
     var confirmCancelAll by remember { mutableStateOf(false) }
+    var confirmRemoveAllFailed by remember { mutableStateOf(false) }
+    // Bulk-action outcomes (field note 3) are SHOWN here, never swallowed.
+    val snackbarHostState = remember { SnackbarHostState() }
     var showMenu by remember { mutableStateOf(false) }
     var showTransferSettings by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -175,6 +180,12 @@ fun TransfersScreen(
         while (true) {
             speedClock = System.currentTimeMillis()
             delay(1_000L)
+        }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.userMessages.collect { message ->
+            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -251,10 +262,26 @@ fun TransfersScreen(
         )
     }
 
+    if (confirmRemoveAllFailed) {
+        ConfirmDialog(
+            title = "Remove all failed transfers?",
+            message = "Every failed entry will be removed from Transfers. " +
+                "The files themselves are not deleted.",
+            confirmLabel = "Remove",
+            destructive = true,
+            onConfirm = {
+                confirmRemoveAllFailed = false
+                viewModel.removeAllFailed()
+            },
+            onDismiss = { confirmRemoveAllFailed = false }
+        )
+    }
+
     val listState = rememberLazyListState()
     val lifted by rememberToolbarLift(listState)
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 colors = liftedTopAppBarColors(lifted),
@@ -666,6 +693,22 @@ fun TransfersScreen(
                             }, enabled = selectedTransfers.any { !it.state.isTerminal }) {
                                 Text("Cancel")
                             }
+                            if (selectedTransfers.any { it.state.isTerminal }) {
+                                // Terminal records (FAILED above all) cannot be
+                                // cancelled — they are REMOVED (field note 3).
+                                // Until now a selection of only failed rows had
+                                // no working action at all.
+                                TextButton(onClick = {
+                                    val terminalIds = selectedTransfers
+                                        .filter { it.state.isTerminal }
+                                        .map { it.id }
+                                    viewModel.removeSelected(terminalIds)
+                                    selectedTransferIds =
+                                        selectedTransferIds - terminalIds.toSet()
+                                }) {
+                                    Text("Remove")
+                                }
+                            }
                             TextButton(onClick = { selectedTransferIds = emptySet() }) { Text("Clear") }
                         }
                     }
@@ -723,7 +766,20 @@ fun TransfersScreen(
                     modifier = itemModifier(transfer)
                 )
             }
-            section("failed", failedTitle, visibleFailed, failedTotal) { transfer ->
+            section(
+                "failed", failedTitle, visibleFailed, failedTotal,
+                headerActions = {
+                    // The failed group's bulk actions (field note 3): retry
+                    // every failed record, or remove them all. "Remove" is
+                    // what "cancel" means for a record that already failed.
+                    TextButton(onClick = { viewModel.retryAllFailed() }) {
+                        Text("Retry all")
+                    }
+                    TextButton(onClick = { confirmRemoveAllFailed = true }) {
+                        Text("Remove all")
+                    }
+                }
+            ) { transfer ->
                 TransferRow(
                     transfer = transfer,
                     primaryIcon = Icons.Filled.Refresh,
@@ -846,17 +902,25 @@ private fun LazyListScope.section(
     title: String,
     transfers: List<TransferTask>,
     total: Int,
+    headerActions: (@Composable () -> Unit)? = null,
     content: @Composable (TransferTask) -> Unit
 ) {
     if (transfers.isEmpty()) return
     item(key = "header-$sectionKey", contentType = "section-header") {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier
-                .padding(top = 8.dp, bottom = 2.dp)
-                .semantics { heading() }
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(top = 8.dp, bottom = 2.dp)
+                    .semantics { heading() }
+            )
+            headerActions?.invoke()
+        }
     }
     items(
         transfers,
@@ -1108,6 +1172,34 @@ private fun TransferRow(
                                     onClick = {
                                         showRowMenu = false
                                         onPriorityChange(transfer.priority - 1)
+                                    }
+                                )
+                            }
+                            onCancel?.let { cancel ->
+                                // This callback was passed by every section
+                                // but never rendered, so a row had no cancel
+                                // or remove action in its menu at all. For a
+                                // terminal row (FAILED above all) the same
+                                // repository call removes the record.
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (transfer.state.isTerminal) {
+                                                "Remove record"
+                                            } else {
+                                                "Cancel transfer"
+                                            }
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Filled.Cancel,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showRowMenu = false
+                                        cancel()
                                     }
                                 )
                             }
