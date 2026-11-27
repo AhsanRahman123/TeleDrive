@@ -157,6 +157,7 @@ import com.drdisagree.teledrive.presentation.components.onDesktopEmptySpaceConte
 import com.drdisagree.teledrive.presentation.components.SortMenu
 import com.drdisagree.teledrive.presentation.components.FileInfoSheet
 import com.drdisagree.teledrive.presentation.components.FileListItem
+import com.drdisagree.teledrive.presentation.components.LocalAndroidLayout
 import com.drdisagree.teledrive.presentation.components.FileDetailsItem
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
 import com.drdisagree.teledrive.presentation.components.DesktopScrollEdgeControls
@@ -1896,6 +1897,10 @@ private fun FilesContent(
                     prominentSelectionCheckbox = true,
                     selectionMode = selectionMode,
                     prominent = true,
+                    // Bigger list thumbnails on desktop (PC 1.6.26 item P7:
+                    // 72 dp prominent -> 80 dp, the BIG step). Android keeps
+                    // its existing size — this screen is shared.
+                    thumbnailSize = if (LocalAndroidLayout.current) null else 80.dp,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
                         if (selectionMode) {
@@ -1930,6 +1935,10 @@ private fun FilesContent(
                     selected = selected,
                     prominentSelectionCheckbox = true,
                     selectionMode = selectionMode,
+                    // Bigger details-view thumbnails on desktop (PC 1.6.26
+                    // item P7: 68 dp -> 80 dp, the BIG step). Android keeps
+                    // its existing size — this screen is shared.
+                    thumbnailSize = if (LocalAndroidLayout.current) null else 80.dp,
                     onToggleSelection = { viewModel.toggleSelection(file.id) },
                     onClick = {
                         if (selectionMode) {

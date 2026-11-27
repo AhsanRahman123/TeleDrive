@@ -166,6 +166,10 @@ class SettingsRepositoryImpl(
                 this[PreferenceKeys.ARCHIVE_SORT_DIRECTION],
                 defaults.archiveSortDirection
             ),
+            archiveThumbnailSize = enumOrDefault(
+                this[PreferenceKeys.ARCHIVE_THUMBNAIL_SIZE],
+                defaults.archiveThumbnailSize
+            ),
             backgroundPlayback = this[PreferenceKeys.BACKGROUND_PLAYBACK]
                 ?: defaults.backgroundPlayback,
             useNativeFilePicker = this[PreferenceKeys.USE_NATIVE_FILE_PICKER]
@@ -255,6 +259,7 @@ class SettingsRepositoryImpl(
         this[PreferenceKeys.GALLERY_SORT_DIRECTION] = prefs.gallerySortDirection.name
         this[PreferenceKeys.ARCHIVE_SORT_FIELD] = prefs.archiveSortField.name
         this[PreferenceKeys.ARCHIVE_SORT_DIRECTION] = prefs.archiveSortDirection.name
+        this[PreferenceKeys.ARCHIVE_THUMBNAIL_SIZE] = prefs.archiveThumbnailSize.name
         this[PreferenceKeys.BACKGROUND_PLAYBACK] = prefs.backgroundPlayback
         this[PreferenceKeys.USE_NATIVE_FILE_PICKER] = prefs.useNativeFilePicker
         this[PreferenceKeys.STREAM_BEFORE_DOWNLOAD] = prefs.streamBeforeDownload

@@ -45,6 +45,7 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.clickable
@@ -75,6 +76,10 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PhotoSizeSelectLarge
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Rotate90DegreesCw
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -147,6 +152,7 @@ import com.drdisagree.teledrive.desktop.media.player.VlcPlayback
 import com.drdisagree.teledrive.desktop.resources.preview_open_externally
 import com.drdisagree.teledrive.desktop.resources.preview_open_failed
 import com.drdisagree.teledrive.desktop.resources.preview_stream
+import com.drdisagree.teledrive.domain.model.ArchiveThumbnailSize
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.FileSortField
@@ -156,6 +162,7 @@ import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.LinkedText
 import com.drdisagree.teledrive.presentation.common.MarkdownText
 import com.drdisagree.teledrive.presentation.common.load
+import com.drdisagree.teledrive.presentation.common.scaledBy
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
 import com.drdisagree.teledrive.presentation.components.SelectionCheckbox
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
@@ -191,6 +198,10 @@ import com.drdisagree.teledrive.presentation.preview.archiveImagePagerNeighbour
 import com.drdisagree.teledrive.presentation.preview.comicPageSequence
 import com.drdisagree.teledrive.presentation.preview.archiveBackStep
 import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
+import com.drdisagree.teledrive.presentation.preview.TEXT_PREVIEW_SCALE_MAX
+import com.drdisagree.teledrive.presentation.preview.TEXT_PREVIEW_SCALE_MIN
+import com.drdisagree.teledrive.presentation.preview.textPreviewScaleZoomIn
+import com.drdisagree.teledrive.presentation.preview.textPreviewScaleZoomOut
 import com.drdisagree.teledrive.presentation.preview.ArchiveRowState
 import com.drdisagree.teledrive.presentation.preview.allFolderPaths
 import com.drdisagree.teledrive.presentation.preview.applyArchiveDragRange
@@ -240,6 +251,7 @@ import com.drdisagree.teledrive.resources.preview_zip_search_entries
 import com.drdisagree.teledrive.resources.preview_archive_downloads_queued
 import com.drdisagree.teledrive.resources.preview_archive_remote_hint
 import com.drdisagree.teledrive.resources.preview_extraction_supported_yet_download
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.getString
@@ -288,6 +300,27 @@ fun DesktopPreviewScreen(
     // closes an in-zip preview, clears search, exits selection, or collapses the
     // deepest expanded in-zip folder — and only leaves the viewer at the zip root.
     var archiveBackHandler by remember { mutableStateOf<(() -> Boolean)?>(null) }
+
+    // The ZIP pane's unified in-zip step (PC 1.6.26 item P3 — the two-level
+    // switching rule), registered the same way as the back step. While an
+    // in-zip entry preview is open, the handler consumes W/E and steps
+    // WITHIN the zip's entries; with no entry open it declines, and W/E
+    // keep paging the folder's files from the zip's own position. Before
+    // this routing existed, the Scaffold W/E handler below moved the OUTER
+    // folder index even while an entry preview was open — W/E inside a zip
+    // jumped zip-to-zip through the outer folder sequence.
+    var archiveStepHandler by remember { mutableStateOf<((Int) -> Boolean)?>(null) }
+
+    // True while a text/document viewer is composed (PC 1.6.26 item P5),
+    // reported by the pane: the normal PlainText/Html contents or an in-zip
+    // Text entry preview. The screen's Ctrl+plus/minus/0 routing steps the
+    // shared text scale only then, so those keys keep their existing
+    // meaning everywhere else. A plain visibility flag (not a handler) on
+    // purpose: AnimatedContent keeps the outgoing pane composed during the
+    // page transition, and a register/unregister handler pair would let
+    // the outgoing pane unregister the incoming pane's handler.
+    var textViewerShowing by remember { mutableStateOf(false) }
+    val textScale by viewModel.textScale.collectAsState()
 
     // True while the archive pane's search field holds focus, reported by the
     // pane (1.6.25 item 3): Backspace there must keep deleting text, so the
@@ -502,6 +535,19 @@ fun DesktopPreviewScreen(
                     archiveBackHandler != null &&
                     !archiveTextInputFocused
                 ) {
+                    // Escape runs the same ladder (PC 1.6.26 item P3): from
+                    // an open entry preview it exits to the ZIP's contents
+                    // list (folder level), and only at the zip root does it
+                    // leave the viewer — the Back/Esc pair the two-level
+                    // rule names. Before this, Escape reached only the
+                    // in-zip IMAGE overlay's own focus handler, which is
+                    // dead after mouse use for the same reason Backspace
+                    // was in 1.6.24; text/audio/video/PDF overlays had no
+                    // Escape at all.
+                    if (event.key == Key.Escape) {
+                        stepBack()
+                        return@onPreviewKeyEvent true
+                    }
                     val plainBackspace = event.key == Key.Backspace &&
                         !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
                     val altLeft = event.key == Key.DirectionLeft &&
@@ -510,6 +556,32 @@ fun DesktopPreviewScreen(
                         stepBack()
                         return@onPreviewKeyEvent true
                     }
+                }
+                // Text/document zoom keys (PC 1.6.26 item P5): Ctrl+plus /
+                // Ctrl+minus step the shared text scale, Ctrl+0 resets it —
+                // but only while a text viewer is composed (the pane reports
+                // that as textViewerShowing) and never while the archive
+                // search field is being edited.
+                if (event.type == KeyEventType.KeyDown &&
+                    event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
+                    !archiveTextInputFocused && textViewerShowing
+                ) {
+                    val zoomed = when (event.key) {
+                        Key.Equals, Key.NumPadAdd -> {
+                            viewModel.setTextScale(textPreviewScaleZoomIn(textScale))
+                            true
+                        }
+                        Key.Minus, Key.NumPadSubtract -> {
+                            viewModel.setTextScale(textPreviewScaleZoomOut(textScale))
+                            true
+                        }
+                        Key.Zero, Key.NumPad0 -> {
+                            viewModel.setTextScale(1f)
+                            true
+                        }
+                        else -> false
+                    }
+                    if (zoomed) return@onPreviewKeyEvent true
                 }
                 // Match the video player's key lifecycle: consume H key-up to reset the
                 // repeat guard, and toggle only once for a physical key press.
@@ -537,11 +609,21 @@ fun DesktopPreviewScreen(
                         true
                     }
                     event.key == Key.W -> {
-                        if (index > 0) index--
+                        // Two-level switching (PC 1.6.26 item P3): while an
+                        // in-zip entry preview is open, W steps INSIDE the
+                        // zip (the pane's handler returns true) and the outer
+                        // folder index — the zip's own position — does not
+                        // move; after Back/Esc closes the entry, W/E resume
+                        // the folder sequence from that position.
+                        val steppedInZip = !archiveTextInputFocused &&
+                            archiveStepHandler?.invoke(-1) == true
+                        if (!steppedInZip && index > 0) index--
                         true
                     }
                     event.key == Key.E -> {
-                        if (index < state.files.lastIndex) index++
+                        val steppedInZip = !archiveTextInputFocused &&
+                            archiveStepHandler?.invoke(1) == true
+                        if (!steppedInZip && index < state.files.lastIndex) index++
                         true
                     }
                     else -> false
@@ -774,6 +856,8 @@ fun DesktopPreviewScreen(
                 onToggleImageChrome = { imageChromeVisible = !imageChromeVisible },
                 onPlayerControlsVisibilityChange = { playerChromeVisible = it },
                 onRegisterArchiveBackStep = { handler -> archiveBackHandler = handler },
+                onRegisterArchiveStep = { handler -> archiveStepHandler = handler },
+                onTextViewerVisibilityChanged = { showing -> textViewerShowing = showing },
                 onArchiveTextInputFocusChanged = { focused ->
                     archiveTextInputFocused = focused
                 },
@@ -1121,6 +1205,97 @@ private fun VerticalZoomSlider(
     }
 }
 
+/** Test tag for the ZIP list's thumbnail-size switcher (PC 1.6.26 item P7). */
+const val ARCHIVE_THUMBNAIL_SIZE_TAG = "archive-thumbnail-size"
+
+/** Test tags for the text/document zoom controls (PC 1.6.26 item P5). */
+const val TEXT_ZOOM_IN_TAG = "text-zoom-in"
+const val TEXT_ZOOM_OUT_TAG = "text-zoom-out"
+const val TEXT_ZOOM_PERCENT_TAG = "text-zoom-percent"
+
+/**
+ * The text/document viewer's zoom controls (PC 1.6.26 item P5): zoom-out
+ * button, the current percentage (click resets to 100%), zoom-in button.
+ * Every text viewer — the normal PlainText/Html contents and the in-zip
+ * Text overlay — renders this same row over the one shared persisted
+ * scale, so the size never differs between viewers. No pinch anywhere
+ * (standing rule): buttons, Ctrl+wheel and Ctrl+plus/minus/0 are the
+ * complete input set.
+ */
+@Composable
+internal fun TextZoomControls(
+    scale: Float,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TooltipIconButton(
+            tooltip = "Zoom out",
+            onClick = onZoomOut,
+            enabled = scale > TEXT_PREVIEW_SCALE_MIN,
+            modifier = Modifier.testTag(TEXT_ZOOM_OUT_TAG)
+        ) {
+            Icon(Icons.Filled.ZoomOut, contentDescription = "Zoom out")
+        }
+        TextButton(
+            onClick = onReset,
+            modifier = Modifier.testTag(TEXT_ZOOM_PERCENT_TAG)
+        ) {
+            Text(text = "${(scale * 100).roundToInt()}%")
+        }
+        TooltipIconButton(
+            tooltip = "Zoom in",
+            onClick = onZoomIn,
+            enabled = scale < TEXT_PREVIEW_SCALE_MAX,
+            modifier = Modifier.testTag(TEXT_ZOOM_IN_TAG)
+        ) {
+            Icon(Icons.Filled.ZoomIn, contentDescription = "Zoom in")
+        }
+    }
+}
+
+/**
+ * Ctrl+mouse-wheel zoom for a text viewer surface (PC 1.6.26 item P5),
+ * following the shared grid zoom's proven Initial-pass pattern: a Ctrl
+ * scroll steps the scale one ladder step and is consumed (so the view
+ * does not also scroll); a plain scroll is left completely untouched for
+ * the view's own scrolling. NOT a pinch/touch gesture — desktop wheel
+ * only, per the standing no-pinch rule.
+ */
+@Composable
+internal fun Modifier.textZoomWheel(
+    scale: Float,
+    onScaleChange: (Float) -> Unit
+): Modifier {
+    val latestScale = rememberUpdatedState(scale)
+    val latestOnChange = rememberUpdatedState(onScaleChange)
+    return pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.type != PointerEventType.Scroll) continue
+                if (!event.keyboardModifiers.isCtrlPressed) continue
+                val delta = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+                when {
+                    delta < 0f -> latestOnChange.value(
+                        textPreviewScaleZoomIn(latestScale.value)
+                    )
+                    delta > 0f -> latestOnChange.value(
+                        textPreviewScaleZoomOut(latestScale.value)
+                    )
+                    else -> continue
+                }
+                event.changes.forEach { it.consume() }
+            }
+        }
+    }
+}
+
 @Composable
 private fun PreviewPagerButton(
     icon: ImageVector,
@@ -1179,6 +1354,8 @@ private fun PreviewPane(
     onToggleImageChrome: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit,
     onRegisterArchiveBackStep: ((() -> Boolean)?) -> Unit = {},
+    onRegisterArchiveStep: (((Int) -> Boolean)?) -> Unit = {},
+    onTextViewerVisibilityChanged: (Boolean) -> Unit = {},
     onArchiveTextInputFocusChanged: (Boolean) -> Unit = {},
     onExitViewer: () -> Unit = {}
 ) {
@@ -1187,6 +1364,12 @@ private fun PreviewPane(
     val previewUiState by viewModel.uiState.collectAsState()
     val archiveSort by viewModel.archiveSort.collectAsState()
     val (archiveSortField, archiveSortDirection) = archiveSort
+    // Text/document zoom (PC 1.6.26 item P5): the shared persisted scale —
+    // the same preference Android's viewer pinches. One value for every
+    // text viewer below (normal route and in-zip), so the size is
+    // consistent across viewers and files for the whole session.
+    val textScale by viewModel.textScale.collectAsState()
+    val archiveThumbnailSize by viewModel.archiveThumbnailSize.collectAsState()
     // Keep the old local media source mounted while the next queued video resolves. This
     // preserves the single VLC surface across the transient Loading state and prevents the
     // black flash that otherwise occurs between adjacent local videos.
@@ -1204,6 +1387,19 @@ private fun PreviewPane(
     val displayedFile = if (retainPreviousMedia) lastReadyMedia!!.first else file
     val displayedContent = if (retainPreviousMedia) lastReadyMedia!!.second else content
     val urlOpener = LocalUrlOpener.current
+
+    // Reports text-viewer visibility up to the screen's Ctrl+plus/minus/0
+    // routing (item P5): a text viewer is showing for the normal
+    // PlainText/Html contents, or while an in-zip Text entry preview is
+    // open over the archive list. Reported on change only — a pane being
+    // disposed during a page transition never reports again, so it cannot
+    // clobber the incoming pane's report.
+    val textViewerShowing = displayedContent is PreviewContent.PlainText ||
+        displayedContent is PreviewContent.Html ||
+        previewUiState.archivePreview is ArchiveEntryPreview.Text
+    LaunchedEffect(textViewerShowing) {
+        onTextViewerVisibilityChanged(textViewerShowing)
+    }
     val preferredAudioLanguage by viewModel.preferredAudioLanguage.collectAsState()
     val preferredSubtitleLanguage by viewModel.preferredSubtitleLanguage.collectAsState()
 
@@ -1356,7 +1552,9 @@ private fun PreviewPane(
 
             is PreviewContent.Html -> DesktopHtmlViewer(
                 html = current.text,
-                truncated = current.truncated
+                truncated = current.truncated,
+                textScale = textScale,
+                onTextScaleChange = viewModel::setTextScale
             )
 
             is PreviewContent.StreamedMedia -> if (!VlcPlayback.available) {
@@ -1369,42 +1567,72 @@ private fun PreviewPane(
             }
 
             is PreviewContent.PlainText -> {
+                // Every 1.6.25 text/document viewer lands here on the normal
+                // route — EPUB and OOXML extracted text, Markdown, plain
+                // text, subtitles and pretty-printed JSON/XML all publish
+                // PlainText — so this one branch carries the P5 zoom for all
+                // of them: buttons, Ctrl+wheel and Ctrl+plus/minus/0 all
+                // step the one shared scale (see TextPreviewZoom.kt).
                 val previewTextScrollState = rememberScrollState()
-                Box(modifier = Modifier.fillMaxSize()) {
-                    Column(
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .textZoomWheel(textScale, viewModel::setTextScale)
+                ) {
+                    TextZoomControls(
+                        scale = textScale,
+                        onZoomIn = {
+                            viewModel.setTextScale(textPreviewScaleZoomIn(textScale))
+                        },
+                        onZoomOut = {
+                            viewModel.setTextScale(textPreviewScaleZoomOut(textScale))
+                        },
+                        onReset = { viewModel.setTextScale(1f) },
                         modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(previewTextScrollState)
-                            .padding(end = 10.dp)
-                            .padding(24.dp)
-                    ) {
-                if (MimeTypes.isMarkdown(file.mimeType)) {
-                    MarkdownText(
-                        text = current.text,
-                        onOpenUrl = { url -> urlOpener.open(url) }
+                            .align(Alignment.End)
+                            .padding(end = 16.dp, top = 8.dp)
                     )
-                } else {
-                    LinkedText(
-                        text = current.text,
-                        style = MaterialTheme.typography.bodySmall
-                            .copy(fontFamily = FontFamily.Monospace)
-                            .copy(color = MaterialTheme.colorScheme.onSurface),
-                        linkColor = MaterialTheme.colorScheme.primary,
-                        onOpenUrl = { url -> urlOpener.open(url) }
-                    )
-                }
-                if (current.truncated) {
-                    Text(
-                        text = stringResource(Res.string.preview_truncated_download_view),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(previewTextScrollState)
+                                .padding(end = 10.dp)
+                                .padding(24.dp)
+                        ) {
+                            if (MimeTypes.isMarkdown(file.mimeType)) {
+                                MarkdownText(
+                                    text = current.text,
+                                    onOpenUrl = { url -> urlOpener.open(url) },
+                                    textScale = textScale
+                                )
+                            } else {
+                                LinkedText(
+                                    text = current.text,
+                                    style = MaterialTheme.typography.bodySmall
+                                        .copy(fontFamily = FontFamily.Monospace)
+                                        .copy(color = MaterialTheme.colorScheme.onSurface)
+                                        .scaledBy(textScale),
+                                    linkColor = MaterialTheme.colorScheme.primary,
+                                    onOpenUrl = { url -> urlOpener.open(url) }
+                                )
+                            }
+                            if (current.truncated) {
+                                Text(
+                                    text = stringResource(
+                                        Res.string.preview_truncated_download_view
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall
+                                        .copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        .scaledBy(textScale)
+                                )
+                            }
+                        }
+                        DesktopVerticalScrollbar(
+                            state = previewTextScrollState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                        )
                     }
-                    DesktopVerticalScrollbar(
-                        state = previewTextScrollState,
-                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
-                    )
                 }
             }
 
@@ -1418,6 +1646,11 @@ private fun PreviewPane(
                     archivePreview = previewUiState.archivePreview,
                     thumbnailStore = if (current.remote) archiveThumbnailStore else null,
                     onRegisterBackStep = onRegisterArchiveBackStep,
+                    onRegisterStepPreview = onRegisterArchiveStep,
+                    thumbnailSize = archiveThumbnailSize,
+                    onThumbnailSizeChange = viewModel::setArchiveThumbnailSize,
+                    textScale = textScale,
+                    onTextScaleChange = viewModel::setTextScale,
                     onTextInputFocusChanged = onArchiveTextInputFocusChanged,
                     onExitViewer = onExitViewer,
                     sortField = archiveSortField,
@@ -2298,6 +2531,20 @@ internal fun DesktopArchivePane(
     archivePreview: ArchiveEntryPreview?,
     thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
     onRegisterBackStep: ((() -> Boolean)?) -> Unit = {},
+    /**
+     * Registers the pane's unified in-zip step for the screen-level W/E
+     * routing (PC 1.6.26 item P3), mirroring [onRegisterBackStep]: the
+     * handler returns true while an entry preview is open (the press is
+     * consumed inside the zip, stepped or at the sequence end) and false
+     * when no preview is open, letting the press page the outer folder.
+     */
+    onRegisterStepPreview: (((Int) -> Boolean)?) -> Unit = {},
+    /** The persisted ZIP-list thumbnail size (PC 1.6.26 item P7). */
+    thumbnailSize: ArchiveThumbnailSize = ArchiveThumbnailSize.MEDIUM,
+    onThumbnailSizeChange: (ArchiveThumbnailSize) -> Unit = {},
+    /** The shared text zoom scale for the in-zip Text overlay (item P5). */
+    textScale: Float = 1f,
+    onTextScaleChange: (Float) -> Unit = {},
     /** Reports whether the pane's search field holds focus (1.6.25 item 3). */
     onTextInputFocusChanged: (Boolean) -> Unit = {},
     onExitViewer: () -> Unit = {},
@@ -2336,6 +2583,7 @@ internal fun DesktopArchivePane(
     val selection = remember(file.id) { ArchiveSelectionState() }
     var rangeBase by remember(file.id) { mutableStateOf<Pair<Set<Int>, Set<String>>?>(null) }
     var sortMenuOpen by remember { mutableStateOf(false) }
+    var thumbnailMenuOpen by remember { mutableStateOf(false) }
 
     val filtering = query.isNotBlank()
     val visibleIndices = remember(listing, query) {
@@ -2560,6 +2808,67 @@ internal fun DesktopArchivePane(
                                         )
                                     )
                                 }
+                                Box {
+                                    // Thumbnail size switcher (PC 1.6.26 item
+                                    // P7): Big / Medium / Small for this
+                                    // list's thumbnail slots, persisted via
+                                    // the shared `archive_thumbnail_size`
+                                    // preference — the Gallery layout
+                                    // switcher's pattern applied to the ZIP
+                                    // list. Only the display slot changes;
+                                    // decode stays at the bounded 256 px.
+                                    TooltipIconButton(
+                                        tooltip = "Thumbnail size",
+                                        onClick = { thumbnailMenuOpen = true },
+                                        modifier = Modifier.testTag(
+                                            ARCHIVE_THUMBNAIL_SIZE_TAG
+                                        )
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.PhotoSizeSelectLarge,
+                                            contentDescription = "Thumbnail size"
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = thumbnailMenuOpen,
+                                        onDismissRequest = { thumbnailMenuOpen = false }
+                                    ) {
+                                        ArchiveThumbnailSize.entries.forEach { size ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        when (size) {
+                                                            ArchiveThumbnailSize.SMALL ->
+                                                                "Small"
+                                                            ArchiveThumbnailSize.MEDIUM ->
+                                                                "Medium"
+                                                            ArchiveThumbnailSize.BIG ->
+                                                                "Big"
+                                                        }
+                                                    )
+                                                },
+                                                onClick = {
+                                                    thumbnailMenuOpen = false
+                                                    onThumbnailSizeChange(size)
+                                                },
+                                                trailingIcon = if (size == thumbnailSize) {
+                                                    {
+                                                        Icon(
+                                                            Icons.Filled.Check,
+                                                            contentDescription = null
+                                                        )
+                                                    }
+                                                } else {
+                                                    null
+                                                },
+                                                modifier = Modifier.testTag(
+                                                    "$ARCHIVE_THUMBNAIL_SIZE_TAG-" +
+                                                        size.name.lowercase()
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
                             }
                             if (batchProgress != null) {
                                 Text(
@@ -2616,6 +2925,7 @@ internal fun DesktopArchivePane(
                             selectionMode = selectionMode,
                             isBusy = busyEntryIndex != null && busyEntryIndex == entryIndex,
                             canDownload = archive.remote && !row.node.isDirectory,
+                            thumbnailSizeDp = thumbnailSize.dp,
                             thumbnailStore = thumbnailStore,
                             archiveFile = file,
                             onRowClick = {
@@ -2735,49 +3045,88 @@ internal fun DesktopArchivePane(
                 archiveImagePagerIndices(listing, rows.mapNotNull { it.node.entryIndex })
             }
         }
+        // The in-zip photo pager's sequence: CBZ pages step in comic
+        // (natural) order; all other archives step the unified
+        // display-order sequence. Hoisted out of the Image overlay (PC
+        // 1.6.26 item P3) so the screen-level W/E step handler below and
+        // the overlay's own arrows/buttons drive ONE stepping rule.
+        val imageSequence = if (archive.format == "CBZ") {
+            displayedImageIndices
+        } else {
+            unifiedPreviewIndices
+        }
+        // The photo pager steps through onPreviewEntry — the direct
+        // preview request this pane's parameter documents as "the in-zip
+        // photo pager's neighbour switch". A step that lands on a VIDEO
+        // entry (the unified sequence includes video) routes to
+        // onVideoEntryTap instead — the same desktop-only video routing
+        // the row tap uses, and the same split
+        // PreviewViewModel.stepArchivePreview applies — so a video stop
+        // opens the player, never the shared download routing.
+        val stepImagePager: (Int, Int) -> Unit = { currentEntryIndex, delta ->
+            archiveImagePagerNeighbour(
+                imageSequence, currentEntryIndex, delta
+            )?.let { targetIndex ->
+                val targetEntry = listing.getOrNull(targetIndex)
+                if (targetEntry != null &&
+                    MimeTypes.isVideo(
+                        MimeTypes.fromFileName(targetEntry.name)
+                    )
+                ) {
+                    onVideoEntryTap(targetIndex)
+                } else {
+                    onPreviewEntry(targetIndex)
+                }
+            }
+        }
+        // The two-level switching rule (PC 1.6.26 item P3): while an entry
+        // preview is open, the viewer is at ZIP level — a step moves ONLY
+        // within this zip's entries (the unified sequence, or the photo
+        // pager's sequence for an image preview) and the press is consumed
+        // even at the sequence ends and while a neighbour extracts, so it
+        // can never leak out and page the folder's files. With no preview
+        // open the handler declines and the press pages the folder, where
+        // this zip is one ordinary stop whose contents list is showing.
+        val handleArchiveStep: (Int) -> Boolean = { delta ->
+            val preview = archivePreview
+            if (preview == null) {
+                false
+            } else {
+                if (busyEntryIndex == null) {
+                    if (preview is ArchiveEntryPreview.Image) {
+                        stepImagePager(preview.entryIndex, delta)
+                    } else {
+                        onStepArchivePreview(delta, unifiedPreviewIndices)
+                    }
+                }
+                true
+            }
+        }
+        val currentArchiveStep by rememberUpdatedState(handleArchiveStep)
+        // Registered by effect, NOT by a dispose-clearing DisposableEffect:
+        // paging folder-level from one zip straight to another keeps both
+        // panes composed during the AnimatedContent transition, and the
+        // outgoing pane's dispose would null the incoming pane's handler
+        // (the back-step registration above predates this concern and is
+        // left exactly as field-passed). A stale registration left behind
+        // by a disposed pane is harmless: its preview is closed — paging
+        // away is only possible from the contents list — so it declines
+        // every step, and the next archive pane's effect overwrites it.
+        LaunchedEffect(currentArchiveStep) {
+            onRegisterStepPreview { delta -> currentArchiveStep(delta) }
+        }
         // In-archive preview overlay: image in the full desktop photo viewer
         // (note 7), audio AND video in the desktop player (notes 9 — video is
         // routed here by the desktop pane, never by the shared tap action),
         // text read-only.
         when (val preview = archivePreview) {
             is ArchiveEntryPreview.Image -> {
-                // CBZ pages step in comic (natural) order; all other archives
-                // step the unified display-order sequence.
-                val imageSequence = if (archive.format == "CBZ") {
-                    displayedImageIndices
-                } else {
-                    unifiedPreviewIndices
-                }
+                // The sequence and the stepping rule are the hoisted ones
+                // above (shared with the screen-level W/E handler, item P3):
+                // CBZ pages step in comic (natural) order; all other
+                // archives step the unified display-order sequence through
+                // onPreviewEntry, with video targets routed to the player.
                 val pagerPosition = imageSequence.indexOf(preview.entryIndex)
-                // The photo pager steps through onPreviewEntry — the direct
-                // preview request this pane's parameter documents as "the
-                // in-zip photo pager's neighbour switch" (the viewers-branch
-                // wiring). The c1ae8d71 merge resolution rerouted these two
-                // handlers through onStepArchivePreview, whose pane default
-                // is a no-op, leaving onPreviewEntry with no call site in the
-                // pane and the pager dead for any caller that wires only the
-                // documented preview callback. A step that lands on a VIDEO
-                // entry (the unified sequence includes video) routes to
-                // onVideoEntryTap instead — the same desktop-only video
-                // routing the row tap uses above, and the same split
-                // PreviewViewModel.stepArchivePreview applies — so a video
-                // stop opens the player, never the shared download routing.
-                val stepImagePager: (Int) -> Unit = { delta ->
-                    archiveImagePagerNeighbour(
-                        imageSequence, preview.entryIndex, delta
-                    )?.let { targetIndex ->
-                        val targetEntry = listing.getOrNull(targetIndex)
-                        if (targetEntry != null &&
-                            MimeTypes.isVideo(
-                                MimeTypes.fromFileName(targetEntry.name)
-                            )
-                        ) {
-                            onVideoEntryTap(targetIndex)
-                        } else {
-                            onPreviewEntry(targetIndex)
-                        }
-                    }
-                }
                 ArchiveImagePreview(
                     preview = preview,
                     entry = listing.getOrNull(preview.entryIndex),
@@ -2785,8 +3134,8 @@ internal fun DesktopArchivePane(
                     hasNext = pagerPosition >= 0 &&
                         pagerPosition < imageSequence.lastIndex,
                     busy = busyEntryIndex != null,
-                    onPrevious = { stepImagePager(-1) },
-                    onNext = { stepImagePager(+1) },
+                    onPrevious = { stepImagePager(preview.entryIndex, -1) },
+                    onNext = { stepImagePager(preview.entryIndex, +1) },
                     onDismiss = onDismissPreview,
                     onDownload = onDownloadCurrentEntry,
                     snackbarHostState = snackbarHostState
@@ -2957,11 +3306,25 @@ internal fun DesktopArchivePane(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
+                        // Ctrl+wheel zoom for the non-HTML text surface
+                        // (item P5); the HTML viewer below installs its own.
+                        .then(
+                            if (preview.isHtml) {
+                                Modifier
+                            } else {
+                                Modifier.textZoomWheel(textScale, onTextScaleChange)
+                            }
+                        )
                 ) {
                     if (preview.isHtml) {
                         // The HTML viewer scrolls itself; it must not sit
                         // inside the scrolling text column below.
-                        DesktopHtmlViewer(html = preview.text, truncated = preview.truncated)
+                        DesktopHtmlViewer(
+                            html = preview.text,
+                            truncated = preview.truncated,
+                            textScale = textScale,
+                            onTextScaleChange = onTextScaleChange
+                        )
                     } else {
                         val textScrollState = rememberScrollState()
                         Column(
@@ -2973,14 +3336,15 @@ internal fun DesktopArchivePane(
                             if (preview.isMarkdown) {
                                 MarkdownText(
                                     text = preview.text,
-                                    onOpenUrl = { url -> urlOpener.open(url) }
+                                    onOpenUrl = { url -> urlOpener.open(url) },
+                                    textScale = textScale
                                 )
                             } else {
                                 Text(
                                     text = preview.text,
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontFamily = FontFamily.Monospace
-                                    ),
+                                    ).scaledBy(textScale),
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
@@ -2994,6 +3358,26 @@ internal fun DesktopArchivePane(
                                 )
                             }
                         }
+                        // The same zoom controls as the normal text viewer
+                        // (item P5), over the same shared scale.
+                        TextZoomControls(
+                            scale = textScale,
+                            onZoomIn = {
+                                onTextScaleChange(textPreviewScaleZoomIn(textScale))
+                            },
+                            onZoomOut = {
+                                onTextScaleChange(textPreviewScaleZoomOut(textScale))
+                            },
+                            onReset = { onTextScaleChange(1f) },
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(16.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                                    MaterialTheme.shapes.medium
+                                )
+                                .padding(horizontal = 4.dp)
+                        )
                     }
                     ArchiveOverlayBar(
                         name = preview.name,
@@ -3114,6 +3498,8 @@ private fun DesktopArchiveRow(
     selectionMode: Boolean,
     isBusy: Boolean,
     canDownload: Boolean,
+    /** The persisted thumbnail slot size in dp (PC 1.6.26 item P7); 56 = the pre-switcher size. */
+    thumbnailSizeDp: Int = 56,
     thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
     archiveFile: DriveFile? = null,
     onRowClick: () -> Unit,
@@ -3192,7 +3578,18 @@ private fun DesktopArchiveRow(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(56.dp)
+                // The switchable slot (item P7): 40/56/80 dp from the
+                // persisted ArchiveThumbnailSize. The decoded bitmap behind
+                // it does NOT grow with the slot — the store still decodes
+                // at its bounded 256 px and the image is cropped to fill.
+                .size(thumbnailSizeDp.dp)
+                .testTag(
+                    if (node.entryIndex != null) {
+                        "archive-thumbnail-${node.entryIndex}"
+                    } else {
+                        "archive-thumbnail-folder"
+                    }
+                )
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
         ) {
