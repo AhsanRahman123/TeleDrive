@@ -619,8 +619,11 @@ class TransferExecutor(
         val sourceMessageId = entity.messageId ?: transfer.messageId
         val managedDownload = sourceChatId != null && sourceMessageId != null
 
-        val ticker = ProgressTicker()
-        var tickerStarted = false
+        // vc184 A2: honest download speed — a cumulative rate over this
+        // execution's own post-attach movement (DownloadRateMeter), never a
+        // windowed division of TDLib's replayed per-file counter.
+        val meter = DownloadRateMeter()
+        var meterStarted = false
 
         return try {
             var outcome: TransferOutcome =
@@ -643,24 +646,27 @@ class TransferExecutor(
                     when (event) {
                         is TelegramDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            if (!tickerStarted) {
-                                // TDLib may immediately report bytes already cached before this
-                                // worker attached. Seed the meter from that value so reattaching
-                                // cannot turn the whole saved file into a fake one-second speed burst.
-                                ticker.start(event.transferredBytes, now)
-                                tickerStarted = true
-                                transferDao.updateTransferredBytes(
-                                    transfer.id, event.transferredBytes, now
+                            if (!meterStarted) {
+                                // Seed the meter from the first value TDLib reports.
+                                // The write goes through updateProgress, whose MAX()
+                                // guard keeps the row's bytes monotonic: the old
+                                // absolute first write (updateTransferredBytes) let a
+                                // re-attached execution whose TDLib counter had
+                                // restarted drag the displayed percentage backwards.
+                                meter.start(event.transferredBytes, now)
+                                meterStarted = true
+                                transferDao.updateProgress(
+                                    transfer.id, event.transferredBytes, 0L, now
                                 )
                             } else {
-                                // Persist at most once per ticker window (P3), exactly
+                                // Persist at most once per meter publish (P3), exactly
                                 // like the upload paths: writing transferredBytes on
                                 // every TDLib event churned the transfers table and its
                                 // observers without changing what the UI can show —
                                 // its staleness threshold is 5s, far above this rate.
                                 // Completion and state changes still write immediately
                                 // in their own handlers.
-                                val speed = ticker.tick(event.transferredBytes, now)
+                                val speed = meter.speedAt(event.transferredBytes, now)
                                 if (speed != null) {
                                     transferDao.updateProgress(
                                         transfer.id, event.transferredBytes, speed, now
@@ -753,8 +759,9 @@ class TransferExecutor(
             return TransferOutcome.Failed(messages.cacheFull(cacheNeeded))
         }
 
-        val ticker = ProgressTicker()
-        var tickerStarted = false
+        // vc184 A2: same honest rate meter as the single-file download path.
+        val meter = DownloadRateMeter()
+        var meterStarted = false
         var outcome: TransferOutcome =
             TransferOutcome.Failed(messages.downloadEnded)
 
@@ -766,21 +773,23 @@ class TransferExecutor(
                     when (event) {
                         is PartDownloadEvent.Progress -> {
                             val now = System.currentTimeMillis()
-                            if (!tickerStarted) {
+                            if (!meterStarted) {
                                 // The first progress event includes any complete parts already
-                                // present in the resumable target. Seed the rate meter from it.
-                                ticker.start(event.transferredBytes, now)
-                                tickerStarted = true
+                                // present in the resumable target. Seed the rate meter from it;
+                                // the write is monotonic (updateProgress MAX guard), as on the
+                                // single-file path.
+                                meter.start(event.transferredBytes, now)
+                                meterStarted = true
                                 transferDao.setStage(transfer.id, null, now)
-                                transferDao.updateTransferredBytes(
-                                    transfer.id, event.transferredBytes, now
+                                transferDao.updateProgress(
+                                    transfer.id, event.transferredBytes, 0L, now
                                 )
                             } else {
-                                // Persist at most once per ticker window (P3): this
+                                // Persist at most once per meter publish (P3): this
                                 // branch previously wrote setStage + updateTransferredBytes
                                 // on every TDLib event. Stage transitions (Joining,
                                 // finish) and completion still write immediately.
-                                val speed = ticker.tick(event.transferredBytes, now)
+                                val speed = meter.speedAt(event.transferredBytes, now)
                                 if (speed != null) {
                                     transferDao.setStage(transfer.id, null, now)
                                     transferDao.updateProgress(

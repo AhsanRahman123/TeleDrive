@@ -38,14 +38,56 @@ class TransferQueueDrainer(
     private val claimLock = Mutex()
     private val executing = mutableMapOf<String, TransferType>()
 
+    /**
+     * The Pause-all hold (vc184 A2): while set, no drain claims new work. The
+     * repository writes the rows PAUSED first; the platform scheduler then sets
+     * this hold (and stops the current worker), and clears it only on an
+     * explicit resume. Without it, Pause all on Android was only a row write:
+     * the scheduler's pause() was a no-op, so the next kick — a new enqueue, a
+     * wake, a backup-resume — restarted the worker and the queue moved again
+     * behind the user's back. Desktop's scheduler has carried an equivalent
+     * latch (globallyPaused) since its bulk-control fix; this is the shared
+     * engine half of the same contract.
+     */
+    @Volatile
+    private var pauseHold = false
+
+    fun setPauseHold(hold: Boolean) {
+        pauseHold = hold
+    }
+
+    fun isPauseHeld(): Boolean = pauseHold
+
+    /**
+     * Serializes drains (vc184 A2): a replacement drain must not observe the
+     * previous drain's teardown window — executing entries already removed,
+     * claimed rows not yet requeued by the cancellation recovery — or it
+     * finds nothing to claim, exits, and the rows the recovery then requeues
+     * are stranded with no drain to run them. Holding this mutex for the
+     * whole drain (recovery included) means a new drain only ever starts
+     * from the recovered state.
+     */
+    private val drainMutex = Mutex()
+
     suspend fun drain(
         isStopped: () -> Boolean,
         onTerminalFailure: suspend (TransferEntity) -> Unit
     ): TransferDrainResult {
+        if (pauseHold) return TransferDrainResult.COMPLETED
+        return drainMutex.withLock { drainLocked(isStopped, onTerminalFailure) }
+    }
+
+    private suspend fun drainLocked(
+        isStopped: () -> Boolean,
+        onTerminalFailure: suspend (TransferEntity) -> Unit
+    ): TransferDrainResult {
+        if (pauseHold) return TransferDrainResult.COMPLETED
         var interrupted = false
         var backupsHeld = false
+        var scopeCompleted = false
 
-        coroutineScope {
+        try {
+            coroutineScope {
             List(MAX_CONCURRENCY) { slot ->
                 launch {
                     while (true) {
@@ -53,6 +95,7 @@ class TransferQueueDrainer(
                             interrupted = true
                             return@launch
                         }
+                        if (pauseHold) return@launch
                         val prefs = settingsRepository.preferences.first()
                         if (slot >= concurrencyOf(prefs)) {
                             if (!awaitSlot(slot)) return@launch
@@ -87,6 +130,23 @@ class TransferQueueDrainer(
                     }
                 }
             }.joinAll()
+            scopeCompleted = true
+            }
+        } finally {
+            if (!scopeCompleted) {
+                // The drain was cancelled rather than finishing: on Android this
+                // is what WorkManager does to the running worker whenever a
+                // resume/rekick REPLACEs it. Rows this drain had claimed stay
+                // RUNNING, and nothing else requeues them until the next process
+                // start — the transfer looks alive in the UI (stale-speed guard
+                // shows it as merely "waiting") but never moves again, which is
+                // how Resume could leave in-flight rows stranded (vc184 A2).
+                // Run the interrupted path's recovery here too.
+                withContext(NonCancellable) {
+                    transferDao.requeueRunning()
+                    transferDao.failInterruptedArchiveDownloads(System.currentTimeMillis())
+                }
+            }
         }
         if (backupsHeld) scheduleResume()
         if (interrupted) {
@@ -100,6 +160,7 @@ class TransferQueueDrainer(
     }
 
     suspend fun hasRunnableWork(): Boolean {
+        if (pauseHold) return false
         val prefs = settingsRepository.preferences.first()
         val hold = currentHold(prefs)
         if (nextClaimable(includeBackups = hold == null) != null) return true
