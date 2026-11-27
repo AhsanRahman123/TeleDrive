@@ -67,10 +67,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -236,19 +233,16 @@ class PreviewViewModel(
      */
     fun contentFor(file: DriveFile): StateFlow<PreviewContent> =
         contentCache.getOrPut(file.id) {
-            combine(
-                fileRepository.observeFile(file.id),
-                transferRepository.observeActiveForFile(file.id)
-            ) { latest, transfer ->
-                val incoming = transfer?.takeIf { it.type.isIncoming }
-                (latest ?: file) to incoming
-            }
-                .distinctUntilChanged()
-                .flatMapLatest { (latest, incoming) ->
-                    contentResolver.resolve(latest).map { resolved ->
-                        viewerContentDuringTransfer(resolved, incoming)
-                    }
-                }
+            // vc184 MF-2: resolution is keyed on the file only (see
+            // resolvedPreviewContentFlow) — a transfer progress tick must
+            // repaint the gate's DownloadProgress via the downstream
+            // overlay, never restart the uncached resolve (full EPUB/DOCX
+            // extraction / archive listing on every tick).
+            resolvedPreviewContentFlow(
+                fileFlow = fileRepository.observeFile(file.id).map { it ?: file },
+                incomingFlow = transferRepository.observeActiveForFile(file.id),
+                resolve = { latest -> contentResolver.resolve(latest) }
+            )
                 .onEach { content ->
                     if (content is PreviewContent.Archive && content.remote) {
                         _uiState.update {
