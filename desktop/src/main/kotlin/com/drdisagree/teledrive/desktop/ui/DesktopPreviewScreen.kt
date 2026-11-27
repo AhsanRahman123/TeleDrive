@@ -530,13 +530,29 @@ fun DesktopPreviewScreen(
     var copyTarget by remember { mutableStateOf<DriveFile?>(null) }
     var moveTarget by remember { mutableStateOf<DriveFile?>(null) }
     var playerChromeVisible by remember { mutableStateOf(true) }
+    // The in-zip media player's chrome (PC 1.6.27 N5), reported by the
+    // archive pane's player through the same onControlsVisibilityChange
+    // channel the route player uses for [playerChromeVisible]. Before
+    // this, the in-zip player reported nowhere, so while an in-zip video
+    // or audio entry played, the header fell through to the
+    // always-visible branch and stayed up when the player UI hid.
+    var archivePlayerChromeVisible by remember { mutableStateOf(true) }
     // Keep the image-toolbar preference for the whole preview session, including when
     // moving between image files. H restores hidden controls; the visible toolbar icon hides them.
     var imageChromeVisible by remember { mutableStateOf(true) }
-    val previewChromeVisible = when {
-        mediaCategory != null -> playerChromeVisible
-        file?.category == FileCategory.IMAGE -> imageChromeVisible
-        else -> true
+    val previewChromeVisible = previewHeaderVisible(
+        mediaCategory = mediaCategory,
+        archiveMediaPreviewOpen = archiveMediaPreviewOpen,
+        fileCategory = file?.category,
+        playerChromeVisible = playerChromeVisible,
+        archivePlayerChromeVisible = archivePlayerChromeVisible,
+        imageChromeVisible = imageChromeVisible
+    )
+    // Leaving the in-zip media preview (or stepping to a non-media
+    // entry) restores the header for the zip contents list / next
+    // surface: a hidden state must never outlive the player that set it.
+    LaunchedEffect(archiveMediaPreviewOpen) {
+        if (!archiveMediaPreviewOpen) archivePlayerChromeVisible = true
     }
     val viewerFocusRequester = remember { FocusRequester() }
     val windowInfo = LocalWindowInfo.current
@@ -879,8 +895,12 @@ fun DesktopPreviewScreen(
                         // normal photo/video viewers (previously only inside the
                         // overflow menu), routing through the existing normal
                         // download path. Shown under the same condition the
-                        // overflow uses: a remote copy not yet downloaded.
-                        if (currentFile.hasRemoteCopy && !currentFile.hasLocalCopy) {
+                        // overflow uses (viewerShowsDownloadAction, PC 1.6.27
+                        // N1): a photo/video offers Download whenever a remote
+                        // copy exists — the old `!hasLocalCopy` half of the
+                        // condition dropped the action entirely for a
+                        // Gallery-album video that already had a local copy.
+                        if (viewerShowsDownloadAction(currentFile)) {
                             TooltipIconButton(
                                 tooltip = stringResource(Res.string.common_download),
                                 onClick = { viewModel.download(currentFile) }
@@ -971,6 +991,7 @@ fun DesktopPreviewScreen(
                 onDelete = { if (trashTarget == null) trashTarget = pageFile },
                 onToggleImageChrome = { imageChromeVisible = !imageChromeVisible },
                 onPlayerControlsVisibilityChange = { playerChromeVisible = it },
+                onArchivePlayerControlsVisibilityChange = { archivePlayerChromeVisible = it },
                 onRegisterArchiveBackStep = { handler -> archiveBackHandler = handler },
                 onRegisterArchiveStep = { handler ->
                     // MF-2: bind the step registration to THIS pane's
@@ -1153,7 +1174,7 @@ private fun PreviewOverflowMenu(
                 }
             )
         }
-        if (file.hasRemoteCopy && !file.hasLocalCopy) {
+        if (viewerShowsDownloadAction(file)) {
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.common_download)) },
                 onClick = {
@@ -1475,6 +1496,7 @@ private fun PreviewPane(
     onDelete: () -> Unit,
     onToggleImageChrome: () -> Unit,
     onPlayerControlsVisibilityChange: (Boolean) -> Unit,
+    onArchivePlayerControlsVisibilityChange: (Boolean) -> Unit = {},
     onRegisterArchiveBackStep: ((() -> Boolean)?) -> Unit = {},
     onRegisterArchiveStep: (((Int) -> Boolean)?) -> Unit = {},
     onTextViewerVisibilityChanged: (Boolean) -> Unit = {},
@@ -1797,6 +1819,7 @@ private fun PreviewPane(
                             displayedFile, entryIndices, folderPaths
                         )
                     },
+                    onPlayerControlsVisibilityChange = onArchivePlayerControlsVisibilityChange,
                     onDismissPreview = { viewModel.dismissArchivePreview() },
                     onStepArchivePreview = { delta, sequence ->
                         viewModel.stepArchivePreview(displayedFile, delta, sequence)
@@ -2689,6 +2712,13 @@ internal fun DesktopArchivePane(
     onStepArchivePreview: (Int, List<Int>) -> Unit = { _, _ -> },
     /** Download-while-viewing for the open in-zip preview (item 8). */
     onDownloadCurrentEntry: () -> Unit = {},
+    /**
+     * The in-zip media player's chrome visibility (PC 1.6.27 N5),
+     * forwarded to the screen so its header hides and returns together
+     * with the player controls, exactly as the route player drives the
+     * same header through the pane's onPlayerControlsVisibilityChange.
+     */
+    onPlayerControlsVisibilityChange: (Boolean) -> Unit = {},
     preferredAudioLanguage: String,
     preferredSubtitleLanguage: String,
     onPreferredAudioLanguage: (String) -> Unit,
@@ -2706,6 +2736,20 @@ internal fun DesktopArchivePane(
     var rangeBase by remember(file.id) { mutableStateOf<Pair<Set<Int>, Set<String>>?>(null) }
     var sortMenuOpen by remember { mutableStateOf(false) }
     var thumbnailMenuOpen by remember { mutableStateOf(false) }
+    // The in-zip media player's chrome (PC 1.6.27 N5): the video/audio
+    // overlays' own ArchiveOverlayBar follows the same visibility the
+    // player reports, and every change is also forwarded to the screen
+    // (onPlayerControlsVisibilityChange) so the screen header follows
+    // too. A newly opened entry starts with chrome shown; the player's
+    // own visibility sync reports its real state as soon as it composes.
+    var overlayChromeVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(archivePreview) {
+        overlayChromeVisible = true
+    }
+    val reportPlayerChrome: (Boolean) -> Unit = { visible ->
+        overlayChromeVisible = visible
+        onPlayerControlsVisibilityChange(visible)
+    }
 
     val filtering = query.isNotBlank()
     val visibleIndices = remember(listing, query) {
@@ -3304,6 +3348,7 @@ internal fun DesktopArchivePane(
                             onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
                             hasPrevious = stepHasPrevious && busyEntryIndex == null,
                             hasNext = stepHasNext && busyEntryIndex == null,
+                            onControlsVisibilityChange = reportPlayerChrome,
                             backgroundPlayback = backgroundPlayback,
                             onBackgroundPlaybackChange = onBackgroundPlaybackChange
                         )
@@ -3315,18 +3360,24 @@ internal fun DesktopArchivePane(
                             snackbarHostState = snackbarHostState
                         )
                     }
-                    ArchiveOverlayBar(
-                        name = preview.name,
-                        busy = busyEntryIndex != null,
-                        hasPrevious = stepHasPrevious,
-                        hasNext = stepHasNext,
-                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
-                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
-                        onDownload = onDownloadCurrentEntry,
-                        onInfo = { infoOpen = true },
-                        onDismiss = onDismissPreview,
+                    AnimatedVisibility(
+                        visible = overlayChromeVisible,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
                         modifier = Modifier.align(Alignment.TopCenter)
-                    )
+                    ) {
+                        ArchiveOverlayBar(
+                            name = preview.name,
+                            busy = busyEntryIndex != null,
+                            hasPrevious = stepHasPrevious,
+                            hasNext = stepHasNext,
+                            onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                            onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                            onDownload = onDownloadCurrentEntry,
+                            onInfo = { infoOpen = true },
+                            onDismiss = onDismissPreview
+                        )
+                    }
                 }
                 if (infoOpen) {
                     ArchiveEntryInfoDialog(
@@ -3365,6 +3416,7 @@ internal fun DesktopArchivePane(
                             onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
                             hasPrevious = stepHasPrevious && busyEntryIndex == null,
                             hasNext = stepHasNext && busyEntryIndex == null,
+                            onControlsVisibilityChange = reportPlayerChrome,
                             backgroundPlayback = backgroundPlayback,
                             onBackgroundPlaybackChange = onBackgroundPlaybackChange
                         )
@@ -3376,18 +3428,24 @@ internal fun DesktopArchivePane(
                             snackbarHostState = snackbarHostState
                         )
                     }
-                    ArchiveOverlayBar(
-                        name = preview.name,
-                        busy = busyEntryIndex != null,
-                        hasPrevious = stepHasPrevious,
-                        hasNext = stepHasNext,
-                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
-                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
-                        onDownload = onDownloadCurrentEntry,
-                        onInfo = { infoOpen = true },
-                        onDismiss = onDismissPreview,
+                    AnimatedVisibility(
+                        visible = overlayChromeVisible,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
                         modifier = Modifier.align(Alignment.TopCenter)
-                    )
+                    ) {
+                        ArchiveOverlayBar(
+                            name = preview.name,
+                            busy = busyEntryIndex != null,
+                            hasPrevious = stepHasPrevious,
+                            hasNext = stepHasNext,
+                            onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                            onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                            onDownload = onDownloadCurrentEntry,
+                            onInfo = { infoOpen = true },
+                            onDismiss = onDismissPreview
+                        )
+                    }
                 }
                 if (infoOpen) {
                     ArchiveEntryInfoDialog(
