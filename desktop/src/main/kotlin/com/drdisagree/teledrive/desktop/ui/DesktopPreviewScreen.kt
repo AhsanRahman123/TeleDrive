@@ -190,6 +190,7 @@ import com.drdisagree.teledrive.presentation.preview.ArchiveBackStep
 import com.drdisagree.teledrive.presentation.preview.ArchiveBatchProgress
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntry
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
+import com.drdisagree.teledrive.presentation.preview.ArchivePreviewLoading
 import com.drdisagree.teledrive.presentation.preview.archiveUnifiedPreviewIndices
 import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
 import com.drdisagree.teledrive.desktop.media.ArchiveThumbState
@@ -1528,6 +1529,22 @@ private fun PreviewPane(
     // remains at one stable composition call site while moving between cached and streamed files.
     val streamServer = koinInject<MediaStreamServer>()
     val archiveThumbnailStore = koinInject<DesktopArchiveEntryThumbnailStore>()
+    // Settled-page priority (PC 1.6.27 N4): while an in-zip preview
+    // extraction is running, row thumbnail fetches pause. Both share the
+    // archive file's ONE TDLib download window (report 52 §1b): a
+    // thumbnail's ranged request re-targets that window, so an eager
+    // thumbnail could steal the window from the very page the user is
+    // waiting on and leave it blank behind a spinner.
+    LaunchedEffect(previewUiState.archiveEntryBusyIndex) {
+        archiveThumbnailStore.setPreviewPriorityActive(
+            previewUiState.archiveEntryBusyIndex != null
+        )
+    }
+    // Never leak the priority hold into the next archive view if this pane
+    // leaves composition while an extraction is still running.
+    DisposableEffect(archiveThumbnailStore) {
+        onDispose { archiveThumbnailStore.setPreviewPriorityActive(false) }
+    }
     val telegramClient = koinInject<TelegramClient>()
     val streamCrypto = koinInject<StreamCrypto>()
     val wrappedKeyRepository = koinInject<WrappedKeyRepository>()
@@ -1765,6 +1782,7 @@ private fun PreviewPane(
                     batchProgress = previewUiState.archiveBatchProgress,
                     queuedDownloads = previewUiState.archiveQueuedDownloads,
                     archivePreview = previewUiState.archivePreview,
+                    archivePreviewLoading = previewUiState.archivePreviewLoading,
                     thumbnailStore = if (current.remote) archiveThumbnailStore else null,
                     onRegisterBackStep = onRegisterArchiveBackStep,
                     onRegisterStepPreview = onRegisterArchiveStep,
@@ -2650,6 +2668,8 @@ internal fun DesktopArchivePane(
     batchProgress: ArchiveBatchProgress?,
     queuedDownloads: Int = 0,
     archivePreview: ArchiveEntryPreview?,
+    /** Progressive in-zip video start state (PC 1.6.27 N4); see PreviewUiState. */
+    archivePreviewLoading: ArchivePreviewLoading? = null,
     thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
     onRegisterBackStep: ((() -> Boolean)?) -> Unit = {},
     /**
@@ -3324,6 +3344,43 @@ internal fun DesktopArchivePane(
                         onDismiss = onDismissPreview,
                         modifier = Modifier.align(Alignment.TopCenter)
                     )
+                    // Background fetch still running behind playback
+                    // (PC 1.6.27 N4): a slim, honest progress line. The
+                    // copy being played is a growing temp file — not yet
+                    // complete and not yet integrity-checked — and this
+                    // label never presents it as a finished download.
+                    val videoLoading = archivePreviewLoading
+                    if (videoLoading != null &&
+                        videoLoading.entryIndex == preview.entryIndex &&
+                        videoLoading.totalBytes > 0L
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                                )
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Still loading in the background… " +
+                                    "${Formatters.bytes(videoLoading.producedBytes)} of " +
+                                    Formatters.bytes(videoLoading.totalBytes),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = {
+                                    (videoLoading.producedBytes.toFloat() /
+                                        videoLoading.totalBytes.toFloat())
+                                        .coerceIn(0f, 1f)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                 }
                 if (infoOpen) {
                     ArchiveEntryInfoDialog(
@@ -3540,7 +3597,66 @@ internal fun DesktopArchivePane(
                 }
             }
 
-            null -> Unit
+            null -> {
+                // Progressive video start (PC 1.6.27 N4): no preview is
+                // published yet, but the load is running — show its real
+                // state instead of the bare list behind a row spinner.
+                // The delayed case (moov-at-end MP4) says plainly why this
+                // one cannot start early; the numbers are produced bytes
+                // of THIS entry, never a fake percentage.
+                val loading = archivePreviewLoading
+                if (loading != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                text = loading.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (loading.totalBytes > 0L) {
+                                    "Loading… ${Formatters.bytes(loading.producedBytes)} of " +
+                                        Formatters.bytes(loading.totalBytes)
+                                } else {
+                                    "Loading…"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (loading.delayedUntilComplete && loading.note != null) {
+                                Text(
+                                    text = loading.note,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        ArchiveOverlayBar(
+                            name = loading.name,
+                            busy = true,
+                            hasPrevious = false,
+                            hasNext = false,
+                            onPrevious = {},
+                            onNext = {},
+                            onDownload = onDownloadCurrentEntry,
+                            onInfo = {},
+                            onDismiss = onDismissPreview,
+                            modifier = Modifier.align(Alignment.TopCenter)
+                        )
+                    }
+                }
+            }
         }
     }
 }

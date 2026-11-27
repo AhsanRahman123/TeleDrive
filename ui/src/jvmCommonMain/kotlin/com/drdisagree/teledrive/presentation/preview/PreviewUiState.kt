@@ -13,6 +13,16 @@ data class PreviewUiState(
     val archiveListings: Map<String, List<ArchiveEntry>> = emptyMap(),
     /** An extracted archive entry being viewed/played/read in place, if any. */
     val archivePreview: ArchiveEntryPreview? = null,
+    /**
+     * In-zip video start state (PC 1.6.27 N4): present from the moment a
+     * progressive video load begins until its background fetch finishes or
+     * fails. While no preview is published yet it drives the loading
+     * overlay; after an early publish it describes the still-running
+     * background fetch behind the playing video. [delayedUntilComplete]
+     * is the honest moov-at-end case: playback cannot start until the
+     * whole entry has been produced, and [note] says so in plain words.
+     */
+    val archivePreviewLoading: ArchivePreviewLoading? = null,
     /** The ZIP file (DriveFile id) the open in-zip preview belongs to (PC 1.6.25 items 7/8). */
     val archivePreviewFileId: String? = null,
     /** Progress of a multi-entry archive download: finished steps out of the plan total. */
@@ -83,3 +93,18 @@ sealed interface ArchiveEntryPreview {
 }
 
 data class ArchiveBatchProgress(val done: Int, val total: Int)
+
+/**
+ * Progress of one progressive in-zip video load (PC 1.6.27 N4).
+ * [producedBytes] counts the entry bytes produced (decompressed) so far
+ * out of [totalBytes]; the temp viewing copy is unverified until the load
+ * completes, and this state is never presented as a finished download.
+ */
+data class ArchivePreviewLoading(
+    val entryIndex: Int,
+    val name: String,
+    val producedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val delayedUntilComplete: Boolean = false,
+    val note: String? = null
+)
