@@ -560,7 +560,7 @@
     <string name="preview_share_chooser_title">Share</string>
     <string name="preview_share_copy">Share a copy</string>
     <string name="preview_truncated_download_view">\nPreview truncated. Download to view the full file.</string>
-    <string name="preview_html_safe_mode">Safe view: scripts and network are off, so interactive pages may look incomplete.</string>
+    <string name="preview_html_safe_mode">Safe view: the page runs on this device only — network and file access are off, so pages that need the internet may look incomplete.</string>
     <string name="preview_epub_drm">This book is DRM-protected and cannot be opened here.</string>
     <string name="preview_unarchive">Unarchive</string>
     <string name="preview_unarchived">Unarchived</string>

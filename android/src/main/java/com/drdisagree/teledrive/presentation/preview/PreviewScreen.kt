@@ -923,7 +923,7 @@ private fun PreviewPage(
             )
 
         is PreviewContent.Pdf -> PdfPreview(path = content.path)
-        is PreviewContent.Html -> HtmlPreview(html = content.text)
+        is PreviewContent.Html -> HtmlPreview(html = content.text, truncated = content.truncated)
         is PreviewContent.PlainText -> Box(modifier = Modifier.fillMaxSize()) {
             if (soleUrlOf(content.text) != null) {
             val url = normalizeUrl(soleUrlOf(content.text).orEmpty())
@@ -1250,7 +1250,7 @@ private fun ArchiveEntryPreviewOverlay(
                     is ArchiveEntryPreview.Text -> if (preview.isHtml) {
                         // The WebView scrolls itself; it must not sit inside the
                         // scrolling text column below.
-                        HtmlPreview(html = preview.text)
+                        HtmlPreview(html = preview.text, truncated = preview.truncated)
                     } else Column(
                         modifier = Modifier
                             .fillMaxSize()
