@@ -312,6 +312,23 @@ object MimeTypes {
 
     fun isMarkdown(mimeType: String): Boolean = mimeType == "text/markdown"
 
+    fun isEpub(mimeType: String): Boolean = mimeType == "application/epub+zip"
+
+    /** The OOXML trio with a text-extraction preview (legacy .doc/.xls/.ppt excluded). */
+    fun isOoxml(mimeType: String): Boolean = mimeType in setOf(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+
+    /** HTML documents, shown in the safe (script-free) HTML viewer, not as source. */
+    fun isHtml(mimeType: String): Boolean =
+        mimeType == "text/html" || mimeType == "application/xhtml+xml"
+
+    /** Standalone subtitle files (.srt / .vtt), shown as cleaned readable text. */
+    fun isSubtitle(mimeType: String): Boolean =
+        mimeType == "application/x-subrip" || mimeType == "text/vtt"
+
     fun isApk(mimeType: String, fileName: String? = null): Boolean =
         mimeType == "application/vnd.android.package-archive" ||
             fileName?.lowercase()?.endsWith(".apk") == true
@@ -321,6 +338,7 @@ object MimeTypes {
             mimeType == "application/json" ||
             mimeType == "application/jsonl" ||
             mimeType == "application/javascript" ||
+            mimeType == "application/x-subrip" ||
             mimeType == "application/toml" ||
             mimeType == "application/x-httpd-php" ||
             mimeType == "application/x-sh" ||
@@ -333,6 +351,7 @@ object MimeTypes {
 
     fun isArchive(mimeType: String): Boolean = mimeType in setOf(
         "application/zip",
+        "application/vnd.comicbook+zip",
         "application/x-7z-compressed",
         "application/vnd.rar",
         "application/x-tar",
