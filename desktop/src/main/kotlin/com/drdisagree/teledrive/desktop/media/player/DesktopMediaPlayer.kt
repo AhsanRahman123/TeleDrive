@@ -188,6 +188,14 @@ internal fun DesktopMediaPlayer(
     onClearSleepTimer: () -> Unit = {},
     onPlaybackFinished: () -> Unit = {},
     onControlsVisibilityChange: (Boolean) -> Unit = {},
+    /**
+     * External Space suppression (PC 1.6.27 N8 delta): true while a
+     * screen-level surface above the player owns the keyboard — an open
+     * overflow/dropdown menu (a Compose Popup, not an AWT Dialog, so the
+     * dispatcher's window guard cannot see it) or a focused text field.
+     * While true, the AWT Space dispatcher passes presses through.
+     */
+    spaceSuppressed: Boolean = false,
     onDelete: () -> Unit = {},
     backgroundPlayback: Boolean = false,
     onBackgroundPlaybackChange: (Boolean) -> Unit = {},
@@ -853,9 +861,10 @@ internal fun DesktopMediaPlayer(
         togglePlayback()
         interactionTick++
     }
+    val latestSpaceSuppressed by rememberUpdatedState(spaceSuppressed)
     val spaceDispatcher = remember {
         PlayerSpaceAwtDispatcher(
-            isSuppressed = { showSubtitleSettings || controlsPinned },
+            isSuppressed = { showSubtitleSettings || controlsPinned || latestSpaceSuppressed },
             onTogglePlayback = { togglePlaybackForSpace.value() }
         )
     }

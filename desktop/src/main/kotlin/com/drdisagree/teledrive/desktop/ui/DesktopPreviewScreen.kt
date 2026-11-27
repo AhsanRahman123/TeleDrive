@@ -1005,7 +1005,8 @@ fun DesktopPreviewScreen(
                 onArchiveTextInputFocusChanged = { focused ->
                     archiveTextInputFocused = focused
                 },
-                onExitViewer = ::leavePreview
+                onExitViewer = ::leavePreview,
+                playerSpaceSuppressed = showOverflow || archiveTextInputFocused
             )
         }
 
@@ -1502,7 +1503,9 @@ private fun PreviewPane(
     onRegisterArchiveStep: (((Int) -> Boolean)?) -> Unit = {},
     onTextViewerVisibilityChanged: (Boolean) -> Unit = {},
     onArchiveTextInputFocusChanged: (Boolean) -> Unit = {},
-    onExitViewer: () -> Unit = {}
+    onExitViewer: () -> Unit = {},
+    /** Screen-level Space suppression for the players (PC 1.6.27 N8 delta). */
+    playerSpaceSuppressed: Boolean = false
 ) {
     val content by viewModel.contentFor(file).collectAsState()
     val backgroundPlayback by viewModel.backgroundPlayback.collectAsState()
@@ -1810,6 +1813,7 @@ private fun PreviewPane(
                     onRegisterBackStep = onRegisterArchiveBackStep,
                     onRegisterStepPreview = onRegisterArchiveStep,
                     thumbnailSize = archiveThumbnailSize,
+                    playerSpaceSuppressed = playerSpaceSuppressed,
                     onThumbnailSizeChange = viewModel::setArchiveThumbnailSize,
                     textScale = textScale,
                     onTextScaleChange = viewModel::setTextScale,
@@ -1895,6 +1899,7 @@ private fun PreviewPane(
                 isAudio = mediaIsAudio,
                 mediaId = displayedFile.id,
                 mediaTitle = displayedFile.name,
+                spaceSuppressed = playerSpaceSuppressed,
                 preferredAudioLanguage = preferredAudioLanguage,
                 preferredSubtitleLanguage = preferredSubtitleLanguage,
                 onPreferredAudioLanguage = viewModel::setPreferredAudioLanguage,
@@ -2739,6 +2744,8 @@ internal fun DesktopArchivePane(
      * same header through the pane's onPlayerControlsVisibilityChange.
      */
     onPlayerControlsVisibilityChange: (Boolean) -> Unit = {},
+    /** Screen-level Space suppression, forwarded to the in-zip players (N8 delta). */
+    playerSpaceSuppressed: Boolean = false,
     preferredAudioLanguage: String,
     preferredSubtitleLanguage: String,
     onPreferredAudioLanguage: (String) -> Unit,
@@ -3356,6 +3363,7 @@ internal fun DesktopArchivePane(
                             isAudio = false,
                             mediaId = "archive-video-${preview.name}",
                             mediaTitle = preview.name,
+                            spaceSuppressed = playerSpaceSuppressed || sortMenuOpen || thumbnailMenuOpen,
                             preferredAudioLanguage = preferredAudioLanguage,
                             preferredSubtitleLanguage = preferredSubtitleLanguage,
                             onPreferredAudioLanguage = onPreferredAudioLanguage,
@@ -3465,6 +3473,7 @@ internal fun DesktopArchivePane(
                             isAudio = true,
                             mediaId = "archive-audio-${preview.name}",
                             mediaTitle = preview.name,
+                            spaceSuppressed = playerSpaceSuppressed || sortMenuOpen || thumbnailMenuOpen,
                             preferredAudioLanguage = preferredAudioLanguage,
                             preferredSubtitleLanguage = preferredSubtitleLanguage,
                             onPreferredAudioLanguage = onPreferredAudioLanguage,
