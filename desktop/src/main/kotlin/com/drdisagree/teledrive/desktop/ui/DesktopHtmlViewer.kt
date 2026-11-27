@@ -3,6 +3,8 @@ package com.drdisagree.teledrive.desktop.ui
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,7 +17,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.drdisagree.teledrive.presentation.common.scaledBy
 import com.drdisagree.teledrive.presentation.components.DesktopVerticalScrollbar
+import com.drdisagree.teledrive.presentation.preview.textPreviewScaleZoomIn
+import com.drdisagree.teledrive.presentation.preview.textPreviewScaleZoomOut
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.preview_html_safe_mode
 import com.drdisagree.teledrive.resources.preview_truncated_download_view
@@ -31,16 +36,46 @@ import org.jetbrains.compose.resources.stringResource
  * caption says so instead of leaving the user to discover it.
  */
 @Composable
-fun DesktopHtmlViewer(html: String, truncated: Boolean, modifier: Modifier = Modifier) {
+fun DesktopHtmlViewer(
+    html: String,
+    truncated: Boolean,
+    modifier: Modifier = Modifier,
+    // Text zoom (PC 1.6.26 item P5): the same shared scale and controls as
+    // every other PC text viewer, shown when a scale-change callback is
+    // wired (the preview screen always wires it; tests may omit it).
+    textScale: Float = 1f,
+    onTextScaleChange: ((Float) -> Unit)? = null
+) {
     val text = remember(html) { htmlToReadableText(html) }
     val scrollState = rememberScrollState()
-    Column(modifier = modifier.fillMaxSize()) {
-        Text(
-            text = stringResource(Res.string.preview_html_safe_mode),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-        )
+    val rootModifier = if (onTextScaleChange != null) {
+        modifier.fillMaxSize().textZoomWheel(textScale, onTextScaleChange)
+    } else {
+        modifier.fillMaxSize()
+    }
+    Column(modifier = rootModifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = stringResource(Res.string.preview_html_safe_mode),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+            if (onTextScaleChange != null) {
+                TextZoomControls(
+                    scale = textScale,
+                    onZoomIn = { onTextScaleChange(textPreviewScaleZoomIn(textScale)) },
+                    onZoomOut = { onTextScaleChange(textPreviewScaleZoomOut(textScale)) },
+                    onReset = { onTextScaleChange(1f) },
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
+        }
         Box(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
@@ -54,6 +89,7 @@ fun DesktopHtmlViewer(html: String, truncated: Boolean, modifier: Modifier = Mod
                     style = MaterialTheme.typography.bodySmall
                         .copy(fontFamily = FontFamily.Monospace)
                         .copy(color = MaterialTheme.colorScheme.onSurface)
+                        .scaledBy(textScale)
                 )
                 if (truncated) {
                     Text(

@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import com.drdisagree.teledrive.domain.model.DriveFile
@@ -52,7 +53,13 @@ fun FileListItem(
     location: String? = null,
     onToggleSelection: (() -> Unit)? = null,
     showSelectionCheckbox: Boolean = true,
-    prominentSelectionCheckbox: Boolean = false
+    prominentSelectionCheckbox: Boolean = false,
+    /**
+     * Explicit thumbnail slot size, overriding the built-in sizing when
+     * non-null (PC 1.6.26 item P7: the desktop Files list passes its bigger
+     * 80 dp). Null keeps the size every existing caller renders today.
+     */
+    thumbnailSize: Dp? = null
 ) {
     val compact = LocalCompactLayout.current
     val background = if (selected) {
@@ -89,7 +96,10 @@ fun FileListItem(
                 file = file,
                 contentDescription = null,
                 modifier = Modifier
-                    .size(if (compact) 38.dp else if (prominent) 72.dp else 48.dp)
+                    .size(
+                        thumbnailSize
+                            ?: if (compact) 38.dp else if (prominent) 72.dp else 48.dp
+                    )
                     .clip(MaterialTheme.shapes.medium)
             )
         }

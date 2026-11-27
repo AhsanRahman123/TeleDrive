@@ -37,6 +37,7 @@ import com.drdisagree.teledrive.core.archive.RemoteArchiveService
 import com.drdisagree.teledrive.core.files.formatPreviewText
 import com.drdisagree.teledrive.core.archive.archiveFailureDetail
 import com.drdisagree.teledrive.core.common.AppResult
+import com.drdisagree.teledrive.domain.model.ArchiveThumbnailSize
 import com.drdisagree.teledrive.domain.model.FileQuerySpec
 import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.DriveFolder
@@ -618,6 +619,27 @@ class PreviewViewModel(
             settingsRepository.update {
                 it.copy(archiveSortField = field, archiveSortDirection = direction)
             }
+        }
+    }
+
+    /**
+     * The ZIP contents list's thumbnail size (PC 1.6.26 item P7), persisted
+     * as `UserPreferences.archiveThumbnailSize` (DataStore key
+     * `archive_thumbnail_size`) so the Big/Medium/Small switcher choice
+     * survives restarts and is shared by every archive pane.
+     */
+    val archiveThumbnailSize: StateFlow<ArchiveThumbnailSize> =
+        settingsRepository.preferences
+            .map { it.archiveThumbnailSize }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                ArchiveThumbnailSize.MEDIUM
+            )
+
+    fun setArchiveThumbnailSize(size: ArchiveThumbnailSize) {
+        viewModelScope.launch {
+            settingsRepository.update { it.copy(archiveThumbnailSize = size) }
         }
     }
 
