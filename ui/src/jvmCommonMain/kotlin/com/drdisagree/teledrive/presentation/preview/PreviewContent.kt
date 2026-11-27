@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.presentation.preview
 
 import org.jetbrains.compose.resources.StringResource
 import com.drdisagree.teledrive.core.media.MediaPart
+import com.drdisagree.teledrive.domain.model.TransferTask
 
 sealed interface PreviewContent {
 
@@ -55,3 +56,32 @@ sealed interface PreviewContent {
         val messageText: String? = null
     ) : PreviewContent
 }
+
+/**
+ * What the viewer shows for a file while a background transfer for that same
+ * file is active (vc184 A3). The transfer overlay exists for ONE case: the
+ * Download-to-view gate — the file cannot render at all yet
+ * ([PreviewContent.RequiresDownload]), the user tapped Download on that gate,
+ * and the viewer follows the transfer's progress until the local copy lands
+ * and the resolved content replaces the gate.
+ *
+ * Every renderable content passes through UNCHANGED. Before vc184 the active
+ * transfer replaced the resolved content unconditionally, so tapping Download
+ * in the video viewer (vc183 item 8) swapped the playing video for a stuck
+ * "Preparing… 0 B" progress screen for the whole life of the transfer — the
+ * download hijacked the player it was supposed to run behind. A background
+ * download must never take over a viewer that can already show/play the file.
+ * Pure, so the contract is host-testable.
+ */
+fun viewerContentDuringTransfer(
+    resolved: PreviewContent,
+    incoming: TransferTask?
+): PreviewContent =
+    if (incoming != null && resolved is PreviewContent.RequiresDownload) {
+        PreviewContent.DownloadProgress(
+            transferred = incoming.transferredBytes,
+            total = incoming.sizeBytes
+        )
+    } else {
+        resolved
+    }

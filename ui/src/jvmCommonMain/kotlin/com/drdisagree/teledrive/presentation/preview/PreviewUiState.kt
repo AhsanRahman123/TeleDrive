@@ -76,12 +76,14 @@ sealed interface ArchiveEntryPreview {
 
     /**
      * A video page the pager has settled on but that has NOT been extracted
-     * (vc183): settling/swiping publishes only this state — no extraction, no
-     * free-space preflight, no temp file. Extraction (with the vc181
-     * preflight) runs only when the user taps Play on this page, which is the
-     * deliberate path a direct list tap also takes. [sizeBytes] is the
-     * listing's exact uncompressed size, shown so the cost is visible before
-     * the tap.
+     * yet (vc183): settling/stepping publishes only this state — no
+     * extraction, no free-space preflight, no temp file — and the page shows
+     * it as its loading state. Extraction (with the vc181 preflight) starts
+     * on its own once the page has stayed settled (vc184 A5 autoplay), or
+     * immediately when the user taps Play on this page; a direct list tap
+     * takes the same extraction path without the placeholder. [sizeBytes]
+     * is the listing's exact uncompressed size, shown so the cost is
+     * visible before playback starts.
      */
     data class VideoPlaceholder(
         override val name: String,

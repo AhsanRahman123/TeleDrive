@@ -70,11 +70,11 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -108,6 +108,25 @@ class PreviewViewModel(
 
     /** The in-flight in-zip preview extraction (initial open or a pager step), if any. */
     private var archivePreviewJob: Job? = null
+
+    /**
+     * The pager position the user last settled on, as reported by
+     * [onArchivePreviewPageSelected] (vc184 A4). The published preview's
+     * position ([PreviewUiState.archivePreviewPosition]) only moves when a
+     * load lands, so this is the record of where the user actually IS — the
+     * settled-page repair ([repairSettledArchivePage]) compares the two.
+     */
+    private var archivePagerSettledPosition: Int = -1
+
+    /**
+     * The pending video autoplay for a settled-on placeholder (vc184 A5):
+     * launched when a video placeholder is published, cancelled by ANY
+     * superseding publish/load/dismiss, and fires the ordinary Play path
+     * only if the same placeholder is still the published page when the
+     * settle delay elapses — a page merely passed during a swipe is gone
+     * long before that and never starts extracting.
+     */
+    private var archiveVideoAutoplayJob: Job? = null
 
     /** Archive format label ("ZIP", "CBZ", "7Z", …) per file id, as last resolved. */
     private val archiveFormats = mutableMapOf<String, String>()
@@ -223,8 +242,13 @@ class PreviewViewModel(
     }
 
     /**
-     * Follows the row and transfer queue, so a started download shows progress and the viewer
-     * switches when it lands.
+     * Follows the row and transfer queue, so a download started from the
+     * Download-to-view gate shows progress and the viewer switches when it
+     * lands. A file that can already render or play is NEVER replaced by the
+     * transfer's progress (vc184 A3, [viewerContentDuringTransfer]): a
+     * background download runs behind the viewer, it does not hijack it —
+     * before this, tapping Download while a video played swapped the player
+     * for a "Preparing… 0 B" screen until the transfer ended.
      */
     fun contentFor(file: DriveFile): StateFlow<PreviewContent> =
         contentCache.getOrPut(file.id) {
@@ -237,15 +261,8 @@ class PreviewViewModel(
             }
                 .distinctUntilChanged()
                 .flatMapLatest { (latest, incoming) ->
-                    if (incoming != null) {
-                        flowOf(
-                            PreviewContent.DownloadProgress(
-                                transferred = incoming.transferredBytes,
-                                total = incoming.sizeBytes
-                            )
-                        )
-                    } else {
-                        contentResolver.resolve(latest)
+                    contentResolver.resolve(latest).map { resolved ->
+                        viewerContentDuringTransfer(resolved, incoming)
                     }
                 }
                 .onEach { content ->
@@ -743,11 +760,14 @@ class PreviewViewModel(
 
     /**
      * Publishes a video placeholder page at [pagerPosition] in [pagerIndices]
-     * (vc183): no extraction, no preflight, no temp file. Used when a swipe or
-     * a prev/next step settles on a video — the deliberate Play tap on the
-     * placeholder ([playCurrentArchiveVideo]) is what extracts it. Any
-     * in-flight preview load is superseded (cancelled); the previous preview's
-     * temp is deleted only after the placeholder is published.
+     * (vc183): the publish itself extracts nothing — no preflight, no temp
+     * file. Used when a swipe or a prev/next step settles on a video. The
+     * extraction follows on its own once the page has stayed settled
+     * (vc184 A5, [scheduleArchiveVideoAutoplay]), or immediately on the
+     * placeholder's Play tap ([playCurrentArchiveVideo]) — both run the one
+     * extraction path. Any in-flight preview load is superseded
+     * (cancelled); the previous preview's temp is deleted only after the
+     * placeholder is published.
      */
     private fun publishArchiveVideoPlaceholder(
         file: DriveFile,
@@ -759,6 +779,8 @@ class PreviewViewModel(
         val entry = listing.getOrNull(entryIndex) ?: return
         archivePreviewJob?.cancel()
         archivePreviewJob = null
+        // vc184 A4: settling on a video page settles the repair record too.
+        archivePagerSettledPosition = pagerPosition
         val previous = _uiState.value.archivePreview
         _uiState.update {
             it.copy(
@@ -782,6 +804,44 @@ class PreviewViewModel(
         if (previous != null && previous.entryIndex != entryIndex) {
             deleteArchivePreviewTemp(previous)
         }
+        scheduleArchiveVideoAutoplay(entryIndex, pagerPosition)
+    }
+
+    /**
+     * vc184 A5 — autoplay on settle: when the pager settles on a video, the
+     * entry extracts and playback starts on its own (the published Video is
+     * played by the player with playWhenReady, exactly as after a Play tap).
+     * The placeholder stays up as the loading state while extraction runs.
+     *
+     * "Settles" is enforced by time + identity, through the SAME supersede
+     * seam as every other in-zip load (A4): the pending autoplay is a plain
+     * job that any superseding publish, load or dismissal cancels, and when
+     * the settle delay elapses it re-checks that the published page is still
+     * THIS placeholder at THIS position before delegating to
+     * [playCurrentArchiveVideo] — the one production extraction path, with
+     * its busy-slot refusal and free-space preflight intact. A video page
+     * merely passed during a fast swipe is superseded within a frame or
+     * two, far inside the delay, so it never starts extracting; swiping
+     * away while extraction runs is the ordinary load supersede.
+     */
+    private fun scheduleArchiveVideoAutoplay(entryIndex: Int, pagerPosition: Int) {
+        archiveVideoAutoplayJob?.cancel()
+        archiveVideoAutoplayJob = viewModelScope.launch {
+            delay(ARCHIVE_VIDEO_AUTOPLAY_SETTLE_MS)
+            val state = _uiState.value
+            val placeholder = state.archivePreview as? ArchiveEntryPreview.VideoPlaceholder
+                ?: return@launch
+            if (placeholder.entryIndex != entryIndex) return@launch
+            if (state.archivePreviewPosition != pagerPosition) return@launch
+            if (archivePagerSettledPosition != pagerPosition) return@launch
+            playCurrentArchiveVideo()
+        }
+    }
+
+    /** Cancels a pending settle autoplay; every superseding action calls this. */
+    private fun cancelArchiveVideoAutoplay() {
+        archiveVideoAutoplayJob?.cancel()
+        archiveVideoAutoplayJob = null
     }
 
     /** Deliberate Play on a video placeholder page: extract + play that entry. */
@@ -825,6 +885,13 @@ class PreviewViewModel(
         val entry = listing.getOrNull(entryIndex) ?: return
         val action = archiveEntryTapAction(entry)
         if (action == ArchiveEntryTapAction.DOWNLOAD) return
+        // vc184 A4: a load started for a page IS a settle on that page (list
+        // tap, pager step, placeholder Play, or the settled-page repair), so
+        // the repair's settled record follows it even when the pager's own
+        // emission for this position was already consumed.
+        archivePagerSettledPosition = pagerPosition
+        // vc184 A5: a real load supersedes any pending settle autoplay.
+        cancelArchiveVideoAutoplay()
         val occurrence = archiveEntryOccurrence(listing, entryIndex)
         if (occurrence < 0) return
         val displayName = archiveEntryDisplayName(entry)
@@ -1009,7 +1076,53 @@ class PreviewViewModel(
             }
         }
         archivePreviewJob = job
+        // vc184 A4: every load that ends — landed, failed, superseded or
+        // cancelled — re-checks the settled page. A load that was interrupted
+        // mid-flight (superseded by a later switch, or cancelled by a swipe
+        // back through the published page) used to be the settled page's ONLY
+        // chance: the pager's settle emission that started it was already
+        // consumed, so nothing ever re-asked for that page and it stayed on
+        // its loading/blank state forever. The repair restarts the settled
+        // page's load whenever no load is running and the settled page is
+        // not the published one. A genuinely FAILED load completes normally
+        // (no CancellationException) and is NOT retried here — its step
+        // failure already resynced the pager to the published page, whose
+        // position is by then the settled one, so the repair no-ops.
+        job.invokeOnCompletion { cause ->
+            if (cause is CancellationException) repairSettledArchivePage()
+        }
         job.start()
+    }
+
+    /**
+     * The settled-page guarantee (vc184 A4): if the user has settled on a
+     * pager page that is not the published preview, and no preview load is
+     * running, start that page's load now (a video page gets its placeholder,
+     * exactly as a fresh step would). Called when an interrupted load
+     * completes; the guards make it a no-op in every healthy state — preview
+     * closed, settled == published, a newer load already running, or the
+     * settled position outside the open sequence. The step itself keeps the
+     * existing busy-slot refusal, so a download-owned busy mark still resyncs
+     * instead of extracting.
+     */
+    private fun repairSettledArchivePage() {
+        val state = _uiState.value
+        if (state.archivePreview == null) return
+        val settled = archivePagerSettledPosition
+        if (settled < 0 || settled == state.archivePreviewPosition) return
+        if (settled !in state.archivePreviewEntries.indices) return
+        if (archivePreviewJob?.isActive == true) return
+        viewModelScope.launch {
+            // Re-check inside the launched step: state may have moved on
+            // (a fresh step, a publish, a dismissal) since the completion
+            // handler read it.
+            val current = _uiState.value
+            if (current.archivePreview == null) return@launch
+            if (archivePagerSettledPosition != settled) return@launch
+            if (settled == current.archivePreviewPosition) return@launch
+            if (archivePreviewJob?.isActive == true) return@launch
+            stepArchivePreview(settled - current.archivePreviewPosition)
+        }
     }
 
     /**
@@ -1021,6 +1134,11 @@ class PreviewViewModel(
     fun onArchivePreviewPageSelected(position: Int) {
         val state = _uiState.value
         if (state.archivePreview == null) return
+        // vc184 A4: record where the user settled BEFORE any branch — the
+        // settle-back branch below cancels the in-flight load, and the
+        // settled-page repair needs to know the user's final position was
+        // reported here even when this call starts no load itself.
+        archivePagerSettledPosition = position
         if (position == state.archivePreviewPosition) {
             if (archivePreviewJob?.isActive == true) {
                 archivePreviewJob?.cancel()
@@ -1030,6 +1148,15 @@ class PreviewViewModel(
                 // mark owned by a running download is left untouched.
                 clearArchiveBusy(archivePreviewBusyOwner)
                 _uiState.update { it.copy(archivePreviewLoading = false) }
+                // vc184 A5: if the abandoned load was the autoplay
+                // extraction of the placeholder the user has settled BACK
+                // onto, settling here is a fresh landing — re-arm the
+                // settle autoplay so the video still starts on its own.
+                val placeholder =
+                    state.archivePreview as? ArchiveEntryPreview.VideoPlaceholder
+                if (placeholder != null) {
+                    scheduleArchiveVideoAutoplay(placeholder.entryIndex, position)
+                }
             }
             return
         }
@@ -1059,10 +1186,11 @@ class PreviewViewModel(
         }
         val fileId = state.archivePreviewFileId ?: return
         val file = state.files.firstOrNull { it.id == fileId } ?: return
-        // vc183: settling/stepping onto a video page publishes only its
-        // placeholder — a swipe must never start a whole-file extraction.
-        // The extraction runs on the placeholder's deliberate Play tap, or
-        // when the entry is tapped directly in the list.
+        // vc183/vc184 A5: settling/stepping onto a video page publishes its
+        // placeholder first; the extraction starts once the page has stayed
+        // settled (autoplay) or on the placeholder's Play tap — a page
+        // merely passed during a swipe is superseded before either can run.
+        // A direct list tap extracts immediately, as before.
         val listing = state.archiveListings[fileId]
         if (listing != null &&
             archivePagerPageIsVideo(listing, state.archivePreviewEntries, target)
@@ -1117,6 +1245,8 @@ class PreviewViewModel(
         val preview = _uiState.value.archivePreview
         archivePreviewJob?.cancel()
         archivePreviewJob = null
+        archivePagerSettledPosition = -1
+        cancelArchiveVideoAutoplay()
         _uiState.update {
             it.copy(
                 archivePreview = null,
@@ -1497,3 +1627,11 @@ class PreviewViewModel(
 
     fun dismissInfo() = _infoTarget.update { null }
 }
+
+/**
+ * How long a video page must remain the settled, published page before its
+ * autoplay extraction starts (vc184 A5). A page passed during a fling is
+ * superseded within a frame or two; 450 ms of stillness is a landing, not a
+ * pass — and it is short enough that a deliberate landing starts promptly.
+ */
+private const val ARCHIVE_VIDEO_AUTOPLAY_SETTLE_MS = 450L
