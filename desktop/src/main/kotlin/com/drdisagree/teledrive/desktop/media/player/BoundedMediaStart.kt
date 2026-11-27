@@ -71,20 +71,37 @@ internal fun startMediaBounded(
 internal class MediaStartLatch : MediaPlayerEventAdapter() {
     private val result = CompletableFuture<Boolean>()
 
-    override fun playing(mediaPlayer: MediaPlayer) {
+    override fun playing(mediaPlayer: MediaPlayer) = onPlaying()
+
+    override fun paused(mediaPlayer: MediaPlayer) = onPaused()
+
+    override fun finished(mediaPlayer: MediaPlayer) = onFinished()
+
+    override fun error(mediaPlayer: MediaPlayer) = onError()
+
+    override fun stopped(mediaPlayer: MediaPlayer) = onStopped()
+
+    // The decision core, separated from the vlcj callbacks so it is
+    // unit-testable without a native player (MediaPlayer is a class, not
+    // an interface, so it cannot be faked with a proxy).
+    internal fun onPlaying() {
         result.complete(true)
     }
 
-    override fun paused(mediaPlayer: MediaPlayer) {
+    internal fun onPaused() {
         result.complete(true)
     }
 
-    override fun finished(mediaPlayer: MediaPlayer) {
+    internal fun onFinished() {
         result.complete(true)
     }
 
-    override fun error(mediaPlayer: MediaPlayer) {
+    internal fun onError() {
         result.complete(false)
+    }
+
+    internal fun onStopped() {
+        // Deliberately not terminal — see the class doc.
     }
 
     fun await(timeoutMs: Long): Boolean =

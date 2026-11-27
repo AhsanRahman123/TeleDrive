@@ -1,10 +1,8 @@
 package com.drdisagree.teledrive.desktop.media.player
 
-import java.lang.reflect.Proxy
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import uk.co.caprica.vlcj.player.base.MediaPlayer
 
 /**
  * PC 1.6.26 P4 — the bounded start's proof latch.
@@ -14,48 +12,36 @@ import uk.co.caprica.vlcj.player.base.MediaPlayer
  * start that never reports must fail within the timeout (freeing the
  * session's single-thread executor for later switches and controls),
  * while real start outcomes — playing, paused, finished, error — must be
- * reported exactly. The latch never calls methods on the player it is
- * handed, so a bare interface proxy stands in for it.
+ * reported exactly. Tests drive the latch's decision core directly
+ * (vlcj's MediaPlayer is a class and cannot be faked without natives).
  */
 class MediaStartLatchTest {
-
-    private val player: MediaPlayer = Proxy.newProxyInstance(
-        MediaPlayer::class.java.classLoader,
-        arrayOf(MediaPlayer::class.java)
-    ) { _, method, _ ->
-        when (method.returnType) {
-            java.lang.Boolean.TYPE -> false
-            java.lang.Integer.TYPE -> 0
-            java.lang.Long.TYPE -> 0L
-            else -> null
-        }
-    } as MediaPlayer
 
     @Test
     fun `playing proves the start`() {
         val latch = MediaStartLatch()
-        latch.playing(player)
+        latch.onPlaying()
         assertTrue(latch.await(1_000))
     }
 
     @Test
     fun `paused proves the start`() {
         val latch = MediaStartLatch()
-        latch.paused(player)
+        latch.onPaused()
         assertTrue(latch.await(1_000))
     }
 
     @Test
     fun `finished proves the start - a very short media did start`() {
         val latch = MediaStartLatch()
-        latch.finished(player)
+        latch.onFinished()
         assertTrue(latch.await(1_000))
     }
 
     @Test
     fun `error fails the start promptly`() {
         val latch = MediaStartLatch()
-        latch.error(player)
+        latch.onError()
         assertFalse(latch.await(1_000))
     }
 
@@ -74,23 +60,23 @@ class MediaStartLatchTest {
         // its asynchronous Stopped report can land inside this window and
         // must be ignored — the incoming media's own report still decides.
         val latch = MediaStartLatch()
-        latch.stopped(player)
-        latch.playing(player)
+        latch.onStopped()
+        latch.onPlaying()
         assertTrue(latch.await(1_000))
     }
 
     @Test
     fun `stopped alone never proves a start`() {
         val latch = MediaStartLatch()
-        latch.stopped(player)
+        latch.onStopped()
         assertFalse(latch.await(200))
     }
 
     @Test
     fun `the first terminal report wins`() {
         val latch = MediaStartLatch()
-        latch.error(player)
-        latch.playing(player)
+        latch.onError()
+        latch.onPlaying()
         assertFalse(latch.await(1_000))
     }
 }

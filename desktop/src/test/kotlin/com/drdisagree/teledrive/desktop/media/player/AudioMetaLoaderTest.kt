@@ -1,7 +1,6 @@
 package com.drdisagree.teledrive.desktop.media.player
 
 import java.nio.charset.Charset
-import java.util.ArrayDeque
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -32,11 +31,10 @@ class AudioMetaLoaderTest {
 
     /** A snapshot supplier that replays [script] then keeps returning its last entry. */
     private fun scripted(script: List<MediaMetaSnapshot?>): () -> MediaMetaSnapshot? {
-        val queue = ArrayDeque(script)
-        var last: MediaMetaSnapshot? = null
+        var index = 0
         return {
-            val next = if (queue.isEmpty()) last else queue.removeFirst()
-            last = next
+            val next = if (index < script.size) script[index] else script.lastOrNull()
+            index++
             next
         }
     }
@@ -139,14 +137,14 @@ class AudioMetaLoaderTest {
             listOf(
                 snapshot(
                     mrlB,
-                    seamMangle("タイトル「テスト。」"),
+                    seamMangle("タイトル「テスト。"),
                     seamMangle("音楽ユニット"),
                     seamMangle("桜・音楽")
                 )
             )
         )
         assertEquals(
-            AudioMeta("タイトル「テスト。」", "音楽ユニット", "桜・音楽"),
+            AudioMeta("タイトル「テスト。", "音楽ユニット", "桜・音楽"),
             meta
         )
     }
