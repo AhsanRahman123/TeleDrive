@@ -338,6 +338,9 @@ internal fun pdfZoomTarget(currentScale: Float, zoomChange: Float): Float =
     (currentScale * zoomChange).coerceIn(1f, MAX_SCALE)
 
 internal fun clampPdfOffset(target: Offset, scale: Float, viewport: IntSize): Offset {
+    // At (or below) 1x the layer cannot pan at all — return exact zero
+    // (a computed -0.0f bound would also fail Offset equality).
+    if (scale <= 1f) return Offset.Zero
     val maxX = viewport.width * (scale - 1f) / 2f
     val maxY = viewport.height * (scale - 1f) / 2f
     return Offset(

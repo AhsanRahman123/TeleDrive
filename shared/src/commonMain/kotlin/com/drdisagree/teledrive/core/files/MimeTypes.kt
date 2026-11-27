@@ -264,7 +264,7 @@ object MimeTypes {
         val extension = normalizedName.substringAfterLast('.', "")
         if (extension.isEmpty()) return GENERIC
         return knownExtensions[extension]
-            ?: platformMimeTypeFromExtension(extension)
+            ?: runCatching { platformMimeTypeFromExtension(extension) }.getOrNull()
                 ?.takeIf { it.isNotBlank() && it.lowercase() !in genericMimeTypes }
             ?: GENERIC
     }
