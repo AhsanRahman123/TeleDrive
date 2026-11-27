@@ -414,9 +414,38 @@ class PreviewViewModel(
         _uiState.update { it.copy(archiveQueuedDownloads = depth) }
     }
 
+    /**
+     * Drops every queued archive download request and stops the processor
+     * (1.6.25 item 1, bulk cancel): queued requests have no Transfers record
+     * yet by design, so dropping them here IS their cancellation — they never
+     * start and never create a record. The running request's record was
+     * already written CANCELLED by the repository's bulk cancel.
+     */
+    private fun dropArchiveDownloadQueue() {
+        synchronized(archiveDownloadQueue) {
+            archiveDownloadQueue.clear()
+            archiveDownloadProcessor = null
+        }
+        publishArchiveQueueDepth()
+    }
+
     /** Runs queued requests one at a time until the queue is empty. */
     private suspend fun drainArchiveDownloadQueue() {
         while (true) {
+            // Bulk controls (1.6.25 item 1): Transfers Pause all / Cancel all
+            // act on the shared registry, not on this queue directly, because
+            // queued requests have no Transfers record or registered job for
+            // the repository to reach. The epoch is captured BEFORE waiting
+            // out a bulk pause: a Cancel all that lands while this processor
+            // is parked releases the hold, and the epoch change below is what
+            // stops the parked processor from simply starting the next queued
+            // request afterwards.
+            val bulkEpoch = archiveDownloadReporter.bulkCancelEpoch()
+            archiveDownloadReporter.awaitArchiveQueueReleased()
+            if (archiveDownloadReporter.bulkCancelEpoch() != bulkEpoch) {
+                dropArchiveDownloadQueue()
+                return
+            }
             val request = synchronized(archiveDownloadQueue) {
                 val next = archiveDownloadQueue.removeFirstOrNull()
                 if (next == null) archiveDownloadProcessor = null
@@ -437,7 +466,8 @@ class PreviewViewModel(
                 try {
                     when (request) {
                         is ArchiveDownloadRequest.Single -> runArchiveSingleDownload(request, owner)
-                        is ArchiveDownloadRequest.Batch -> runArchiveBatchDownload(request, owner)
+                        is ArchiveDownloadRequest.Batch ->
+                            runArchiveBatchDownload(request, owner, bulkEpoch)
                     }
                 } finally {
                     archiveExtractionMutex.unlock(owner)
@@ -451,6 +481,14 @@ class PreviewViewModel(
                 _messages.tryEmit(
                     UiText.Plain("Could not open archive: ${archiveFailureDetail(failure)}")
                 )
+            }
+            // A Cancel all that landed while this request ran (its running
+            // step was stopped through the registry and its record already
+            // written CANCELLED by the repository) drops everything still
+            // queued instead of starting the next request.
+            if (archiveDownloadReporter.bulkCancelEpoch() != bulkEpoch) {
+                dropArchiveDownloadQueue()
+                return
             }
         }
     }
@@ -974,15 +1012,36 @@ class PreviewViewModel(
     /** Runs one queued Download-selected batch; see [downloadArchiveSelection]. */
     private suspend fun runArchiveBatchDownload(
         request: ArchiveDownloadRequest.Batch,
-        owner: Any
+        owner: Any,
+        bulkEpoch: Long
     ) {
         val file = request.file
         val listing = request.listing
         val plan = request.plan
         var saved = 0
+        // Set when a Transfers Cancel all lands mid-batch (1.6.25 item 1):
+        // the remaining steps never start (they have no records yet, so not
+        // starting IS their cancellation) and no completion message is
+        // emitted — Transfers already shows the running record CANCELLED.
+        var bulkAborted = false
         _uiState.update { it.copy(archiveBatchProgress = ArchiveBatchProgress(0, plan.size)) }
         try {
             for (step in plan) {
+                // Bulk controls per step (1.6.25 item 1): a per-record stop
+                // from Transfers still only skips its own step (the catches
+                // below), but a bulk CANCEL aborts the whole batch, and a
+                // bulk PAUSE parks the batch here — the next step does not
+                // start while the queue is held. The epoch is re-checked
+                // after the wait because Cancel all releases the hold.
+                if (archiveDownloadReporter.bulkCancelEpoch() != bulkEpoch) {
+                    bulkAborted = true
+                    break
+                }
+                archiveDownloadReporter.awaitArchiveQueueReleased()
+                if (archiveDownloadReporter.bulkCancelEpoch() != bulkEpoch) {
+                    bulkAborted = true
+                    break
+                }
                 markArchiveBusy(owner, step.entryIndex)
                 val stepEntry = listing[step.entryIndex]
                 // MF-2: begin() inside the per-step try, like the single path —
@@ -1076,6 +1135,8 @@ class PreviewViewModel(
             clearArchiveBusy(owner)
             _uiState.update { it.copy(archiveBatchProgress = null) }
         }
+        // A bulk-cancelled batch emits no completion message (see bulkAborted).
+        if (bulkAborted) return
         when {
             saved == 0 -> _messages.tryEmit(
                 UiText.Resource(Res.string.preview_archive_none_saved)

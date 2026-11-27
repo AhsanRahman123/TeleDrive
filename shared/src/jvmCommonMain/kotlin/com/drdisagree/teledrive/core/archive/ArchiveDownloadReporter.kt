@@ -54,6 +54,19 @@ interface ArchiveDownloadReporter {
      * CANCELLED outcome for callers that cannot say why they stopped.
      */
     suspend fun ownerStopped(recordId: String?, cause: CancellationException? = null)
+
+    /**
+     * Bulk queue control for the archive download queue (1.6.25, item 1):
+     * Transfers Pause all / Cancel all write this state through the transfer
+     * repository into the shared [ArchiveExtractionJobs] registry, and the
+     * archive viewer's queue processor reads it through here (the reporter is
+     * the one queue-adjacent surface the viewer already holds). Defaults suit
+     * reporters that track nothing: never held, epoch never changes.
+     */
+    fun bulkCancelEpoch(): Long = 0
+
+    /** Suspends while a bulk pause holds the archive download queue. */
+    suspend fun awaitArchiveQueueReleased() = Unit
 }
 
 /** Reporter for surfaces that do not write Transfers history (desktop this round). */
@@ -117,6 +130,10 @@ class ArchiveDownloadTracker(
         if (recordId == null) return
         jobs.register(recordId, job)
     }
+
+    override fun bulkCancelEpoch(): Long = jobs.bulkCancelEpoch()
+
+    override suspend fun awaitArchiveQueueReleased() = jobs.awaitQueueReleased()
 
     override fun progress(recordId: String?, transferredBytes: Long) {
         if (recordId == null) return

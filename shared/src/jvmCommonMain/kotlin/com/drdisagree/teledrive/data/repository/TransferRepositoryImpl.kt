@@ -502,6 +502,13 @@ class TransferRepositoryImpl(
         // Report-only archive rows are excluded from dao.pauseAll (they are not the
         // drainer's to pause): pause each live extraction's row, then stop its job.
         // The row is written first so the extraction's owner sees PAUSED, not RUNNING.
+        // 1.6.25 item 1: hold the archive download QUEUE first, before stopping
+        // the running job — queued in-ZIP requests have no row and no registered
+        // job, so this hold is the only thing that stops the viewer from simply
+        // starting the next queued extraction the moment this one stops. The
+        // hold is set before the cancel below so there is no gap for the queue
+        // processor to slip a start through.
+        archiveExtractionJobs.holdQueue()
         val now = System.currentTimeMillis()
         archiveExtractionJobs.activeIds().forEach { archiveId ->
             when (transferDao.byId(archiveId)?.state) {
@@ -516,6 +523,13 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun resumeAll() = workerControlLock.withLock {
+        // 1.6.25 item 1: release a bulk-pause hold on the archive download
+        // queue. The archive row that was running stays PAUSED (dao.resumeAll
+        // excludes report-only rows); resuming THAT row individually keeps the
+        // established can't-resume contract (see resume(id): it lands FAILED
+        // with the plain message). Only the queued, never-started requests
+        // proceed from here.
+        archiveExtractionJobs.releaseQueue()
         transferDao.resumeAll(System.currentTimeMillis())
         val prefs = settingsRepository.preferences.first()
         // Wake the worker pool immediately after the rows become QUEUED.
@@ -524,6 +538,14 @@ class TransferRepositoryImpl(
     }
 
     override suspend fun cancelAll() {
+        // 1.6.25 item 1: signal the archive download queue FIRST. Queued
+        // in-ZIP requests have no Transfers row and no registered job, so the
+        // DAO bulk cancels below cannot reach them; the epoch bump makes the
+        // viewer's queue processor drop every queued request and abort the
+        // running request's remaining steps, and it releases any bulk-pause
+        // hold so a parked processor wakes and observes the signal. Repeated
+        // presses are harmless (the epoch just bumps again).
+        archiveExtractionJobs.requestBulkCancel()
         val cancelled = enqueueLock.withLock {
             // Serialize cancellation against upload inserts. Any import batch holding an older
             // generation is rejected if it tries to enqueue after this block completes.
