@@ -82,10 +82,12 @@ fun decodeGifFrames(bytes: ByteArray, maxFrames: Int = MAX_GIF_FRAMES): GifFrame
             val frames = ArrayList<ImageBitmap>(count)
             val durations = ArrayList<Int>(count)
             val frameInfos = codec.framesInfo
+            // The encoded image's size is the GIF canvas every frame composites onto.
+            val canvas = Image.makeFromEncoded(bytes)
             for (index in 0 until count) {
                 val bitmap = Bitmap()
                 bitmap.allocPixels(
-                    ImageInfo.makeN32Premul(codec.imageInfo.width, codec.imageInfo.height)
+                    ImageInfo.makeN32Premul(canvas.width, canvas.height)
                 )
                 codec.readPixels(bitmap, index)
                 frames += Image.makeFromBitmap(bitmap).asComposeImageBitmap()
