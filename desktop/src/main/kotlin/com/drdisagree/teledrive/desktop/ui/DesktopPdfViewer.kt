@@ -33,8 +33,10 @@ import com.drdisagree.teledrive.presentation.components.LoadingState
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.preview_page_number
 import com.drdisagree.teledrive.resources.preview_pdf_open_failed
+import java.io.Closeable
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.PDDocument
@@ -49,6 +51,83 @@ private sealed interface PdfLoadState {
     data class Ready(val document: PDDocument) : PdfLoadState
 }
 
+/** Outcome of one [PdfDocumentSession.load] generation. */
+internal sealed interface PdfLoadResult<out T : Closeable> {
+    /** The load is the current generation; the session now owns [document]. */
+    data class Loaded<T : Closeable>(val document: T) : PdfLoadResult<T>
+
+    /** The loader failed while this generation was still current. */
+    data object Failed : PdfLoadResult<Nothing>
+
+    /**
+     * A newer load started (or the session was closed) before this load
+     * finished. A document produced by the stale load has already been
+     * closed by the session; the caller must publish nothing for it.
+     */
+    data object Stale : PdfLoadResult<Nothing>
+}
+
+/**
+ * Owns the document produced by a blocking PDF load end-to-end
+ * (1.6.25 second-pass MF-3).
+ *
+ * [Loader.loadPDF] is blocking and cannot be interrupted by coroutine
+ * cancellation, so tying the document's close to whatever a snapshot
+ * state happened to hold at dispose time leaked every load that
+ * finished after its viewer left (or after the path changed A→B), and
+ * let a late A load publish A's document over B's state. Here instead:
+ * every [load] takes a generation token, the blocking load runs under
+ * [NonCancellable] so its result is always received by this session
+ * (never discarded unseen by a cancelled continuation), and a result
+ * whose generation is no longer current is closed immediately and
+ * reported [PdfLoadResult.Stale]. The session owns the one current
+ * document and closes it when a newer load publishes over it or when
+ * [close] runs — each produced document is closed exactly here, exactly
+ * once.
+ */
+internal class PdfDocumentSession<T : Closeable>(private val loader: (String) -> T) {
+    private val lock = Any()
+    private var generation = 0
+    private var owned: T? = null
+
+    suspend fun load(path: String): PdfLoadResult<T> {
+        val token = synchronized(lock) { ++generation }
+        val document = try {
+            withContext(NonCancellable + Dispatchers.IO) { loader(path) }
+        } catch (t: Throwable) {
+            return if (isCurrent(token)) PdfLoadResult.Failed else PdfLoadResult.Stale
+        }
+        return if (publish(token, document)) {
+            PdfLoadResult.Loaded(document)
+        } else {
+            PdfLoadResult.Stale
+        }
+    }
+
+    private fun isCurrent(token: Int): Boolean = synchronized(lock) { token == generation }
+
+    /** Takes ownership of [document] iff [token] is still the current generation. */
+    private fun publish(token: Int, document: T): Boolean = synchronized(lock) {
+        if (token != generation) {
+            runCatching { document.close() }
+            false
+        } else {
+            owned?.let { previous -> runCatching { previous.close() } }
+            owned = document
+            true
+        }
+    }
+
+    /** Closes the owned document and makes every in-flight load stale. */
+    fun close() {
+        synchronized(lock) {
+            generation++
+            owned?.let { runCatching { it.close() } }
+            owned = null
+        }
+    }
+}
+
 /**
  * The in-app PDF viewer (1.6.25 item 5): Apache PDFBox renders each page on
  * demand as its row composes — no eager whole-document rasterisation — in a
@@ -60,19 +139,26 @@ private sealed interface PdfLoadState {
  */
 @Composable
 fun DesktopPdfViewer(path: String, modifier: Modifier = Modifier) {
+    // The session owns every document it loads for the viewer's whole
+    // lifetime: it closes the current document when the viewer leaves,
+    // and closes (without ever publishing) any load that finishes after
+    // its path has been superseded (MF-3).
+    val session = remember {
+        PdfDocumentSession<PDDocument> { loadPath -> Loader.loadPDF(File(loadPath)) }
+    }
+    DisposableEffect(session) {
+        onDispose { session.close() }
+    }
     var state by remember(path) { mutableStateOf<PdfLoadState>(PdfLoadState.Loading) }
     LaunchedEffect(path) {
-        state = withContext(Dispatchers.IO) {
-            runCatching { Loader.loadPDF(File(path)) }
-                .fold(
-                    onSuccess = { PdfLoadState.Ready(it) },
-                    onFailure = { PdfLoadState.Failed }
-                )
-        }
-    }
-    DisposableEffect(path) {
-        onDispose {
-            (state as? PdfLoadState.Ready)?.let { runCatching { it.document.close() } }
+        state = PdfLoadState.Loading
+        when (val result = session.load(path)) {
+            is PdfLoadResult.Loaded -> state = PdfLoadState.Ready(result.document)
+            PdfLoadResult.Failed -> state = PdfLoadState.Failed
+            // Superseded (or the viewer is gone): publish nothing — the
+            // newer generation owns the state, and the session already
+            // closed this load's document if it produced one.
+            PdfLoadResult.Stale -> Unit
         }
     }
     when (val current = state) {
