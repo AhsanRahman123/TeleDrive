@@ -44,8 +44,11 @@ sealed interface ArchiveThumbState {
  * Differences are platform-only: the cache lives under the desktop app's
  * existing cache dir (`AppStoragePaths.cacheDir/archive-thumbs/`, the same root
  * DesktopThumbnailStore uses), and decode/write uses ImageIO instead of
- * Android Bitmap APIs. Decode target is
- * [ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX] (256 px) for the 56 dp slot.
+ * Android Bitmap APIs. Decode target follows the caller's thumbnail step
+ * (R3 item P6): the default is
+ * [ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX] (256 px), and the ZIP
+ * list's Big step requests 512 px; each decode size is cached under its
+ * own key suffix so a 256 px decode is never served for the Big tile.
  * Video poster frames stay HELD (report 55 §6.1): not eligible here.
  */
 class DesktopArchiveEntryThumbnailStore private constructor(
@@ -91,7 +94,10 @@ class DesktopArchiveEntryThumbnailStore private constructor(
         }
     }
 
-    fun state(cacheKey: String): StateFlow<ArchiveThumbState> = stateFlow(cacheKey).asStateFlow()
+    fun state(
+        cacheKey: String,
+        decodePx: Int = ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX
+    ): StateFlow<ArchiveThumbState> = stateFlow(keyFor(cacheKey, decodePx)).asStateFlow()
 
     /**
      * Settled-page priority (PC 1.6.27 N4): while a preview extraction for
@@ -111,6 +117,7 @@ class DesktopArchiveEntryThumbnailStore private constructor(
 
     private data class PendingThumbRequest(
         val cacheKey: String,
+        val decodePx: Int,
         val archiveFile: DriveFile,
         val entryIndex: Int,
         val entryName: String,
@@ -137,8 +144,8 @@ class DesktopArchiveEntryThumbnailStore private constructor(
         // Replay outside the lock: dispatchRequest re-enters it.
         toReplay.forEach { pending ->
             dispatchRequest(
-                pending.cacheKey, pending.archiveFile, pending.entryIndex,
-                pending.entryName, pending.sizeBytes
+                pending.cacheKey, pending.decodePx, pending.archiveFile,
+                pending.entryIndex, pending.entryName, pending.sizeBytes
             )
         }
     }
@@ -154,35 +161,39 @@ class DesktopArchiveEntryThumbnailStore private constructor(
         archiveFile: DriveFile,
         entryIndex: Int,
         entryName: String,
-        sizeBytes: Long
+        sizeBytes: Long,
+        decodePx: Int = ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX
     ) {
+        val key = keyFor(cacheKey, decodePx)
         synchronized(requestLock) {
-            waiters[cacheKey] = (waiters[cacheKey] ?: 0) + 1
+            waiters[key] = (waiters[key] ?: 0) + 1
         }
-        dispatchRequest(cacheKey, archiveFile, entryIndex, entryName, sizeBytes)
+        dispatchRequest(cacheKey, decodePx, archiveFile, entryIndex, entryName, sizeBytes)
     }
 
     private fun dispatchRequest(
         cacheKey: String,
+        decodePx: Int,
         archiveFile: DriveFile,
         entryIndex: Int,
         entryName: String,
         sizeBytes: Long
     ) {
-        val flow = stateFlow(cacheKey)
+        val key = keyFor(cacheKey, decodePx)
+        val flow = stateFlow(key)
         if (flow.value is ArchiveThumbState.Ready) {
-            val cached = cacheFile(cacheKey)
+            val cached = cacheFile(key)
             if (cached.isFile && cached.length() > 0L) {
                 cached.setLastModified(System.currentTimeMillis())
                 return
             }
         }
-        if (cacheKey in failedKeys) {
+        if (key in failedKeys) {
             flow.value = ArchiveThumbState.Failed
             return
         }
         if (!ArchiveEntryThumbnailPolicy.isEligibleByListing(entryName, sizeBytes, isDirectory = false)) {
-            failedKeys += cacheKey
+            failedKeys += key
             flow.value = ArchiveThumbState.Failed
             return
         }
@@ -191,34 +202,57 @@ class DesktopArchiveEntryThumbnailStore private constructor(
                 // Queued behind the running preview extraction; replayed
                 // by setPreviewPriorityActive(false). The row stays
                 // Placeholder meanwhile — never Failed.
-                pendingRequests[cacheKey] = PendingThumbRequest(
-                    cacheKey, archiveFile, entryIndex, entryName, sizeBytes
+                pendingRequests[key] = PendingThumbRequest(
+                    cacheKey, decodePx, archiveFile, entryIndex, entryName, sizeBytes
                 )
                 return
             }
-            val existing = inFlight[cacheKey]
+            val existing = inFlight[key]
             if (existing == null || existing.isCompleted) {
-                inFlight[cacheKey] = scope.async {
-                    fetch(cacheKey, archiveFile, entryIndex)
+                inFlight[key] = scope.async {
+                    fetch(key, archiveFile, entryIndex, decodePx)
                 }
             }
         }
     }
 
-    fun release(cacheKey: String) {
+    fun release(
+        cacheKey: String,
+        decodePx: Int = ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX
+    ) {
+        val key = keyFor(cacheKey, decodePx)
         synchronized(requestLock) {
-            val remaining = (waiters[cacheKey] ?: 0) - 1
+            val remaining = (waiters[key] ?: 0) - 1
             if (remaining > 0) {
-                waiters[cacheKey] = remaining
+                waiters[key] = remaining
                 return
             }
-            waiters.remove(cacheKey)
-            pendingRequests.remove(cacheKey)
-            inFlight.remove(cacheKey)?.cancel()
+            waiters.remove(key)
+            pendingRequests.remove(key)
+            inFlight.remove(key)?.cancel()
         }
     }
 
-    private suspend fun fetch(cacheKey: String, archiveFile: DriveFile, entryIndex: Int) {
+    /**
+     * The state/cache identity for one entry at one decode size (R3 P6):
+     * the listing-derived [cacheKey] stays the base and the decode cap is
+     * suffixed, so steps never share a decode. The default 256 px keeps
+     * the historical unsuffixed name, so existing on-disk caches stay
+     * valid.
+     */
+    private fun keyFor(cacheKey: String, decodePx: Int): String =
+        if (decodePx == ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX) {
+            cacheKey
+        } else {
+            "$cacheKey@$decodePx"
+        }
+
+    private suspend fun fetch(
+        cacheKey: String,
+        archiveFile: DriveFile,
+        entryIndex: Int,
+        decodePx: Int
+    ) {
         val flow = stateFlow(cacheKey)
         val target = cacheFile(cacheKey)
         if (target.isFile && target.length() > 0L) {
@@ -240,7 +274,7 @@ class DesktopArchiveEntryThumbnailStore private constructor(
                 val temp = File(thumbsDir, "$TEMP_PREFIX$cacheKey.tmp")
                 try {
                     session.extractEntry(info, temp)
-                    val image = decodeThumbnail(temp)
+                    val image = decodeThumbnail(temp, decodePx)
                     if (image == null || !writeJpeg(image, target)) {
                         failedKeys += cacheKey
                         flow.value = ArchiveThumbState.Failed
@@ -293,11 +327,11 @@ class DesktopArchiveEntryThumbnailStore private constructor(
         }
     }
 
-    /** Decodes [file] and scales it to at most THUMBNAIL_SIZE_PX per side. */
-    private fun decodeThumbnail(file: File): BufferedImage? = runCatching {
+    /** Decodes [file] and scales it to at most [decodePx] per side. */
+    private fun decodeThumbnail(file: File, decodePx: Int): BufferedImage? = runCatching {
         val source = ImageIO.read(file) ?: return null
         val maxSide = maxOf(source.width, source.height)
-        val target = ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX
+        val target = decodePx.coerceAtLeast(1)
         if (maxSide <= target) return source
         val scale = target.toDouble() / maxSide
         val w = (source.width * scale).toInt().coerceAtLeast(1)

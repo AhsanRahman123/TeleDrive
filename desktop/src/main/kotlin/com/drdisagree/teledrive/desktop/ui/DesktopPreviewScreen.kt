@@ -3,6 +3,7 @@ package com.drdisagree.teledrive.desktop.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -135,6 +136,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.animation.core.SnapSpec
 import coil3.compose.rememberAsyncImagePainter
 import coil3.compose.AsyncImagePainter
@@ -889,8 +891,12 @@ fun DesktopPreviewScreen(
                         // normal photo/video viewers (previously only inside the
                         // overflow menu), routing through the existing normal
                         // download path. Shown under the same condition the
-                        // overflow uses: a remote copy not yet downloaded.
-                        if (currentFile.hasRemoteCopy && !currentFile.hasLocalCopy) {
+                        // overflow uses (viewerShowsDownloadAction, R3 item
+                        // P1): a media file offers Download whenever a remote
+                        // copy exists — the old `!hasLocalCopy` half dropped
+                        // the action entirely for a Gallery-album video that
+                        // already had a local copy.
+                        if (viewerShowsDownloadAction(currentFile)) {
                             TooltipIconButton(
                                 tooltip = stringResource(Res.string.common_download),
                                 onClick = { viewModel.download(currentFile) }
@@ -1172,7 +1178,7 @@ private fun PreviewOverflowMenu(
                 }
             )
         }
-        if (file.hasRemoteCopy && !file.hasLocalCopy) {
+        if (viewerShowsDownloadAction(file)) {
             DropdownMenuItem(
                 text = { Text(stringResource(Res.string.common_download)) },
                 onClick = {
@@ -1761,7 +1767,14 @@ private fun PreviewPane(
                                 .padding(end = 10.dp)
                                 .padding(24.dp)
                         ) {
-                            if (MimeTypes.isMarkdown(file.mimeType)) {
+                            // R3 X1: markdown rendering follows the file
+                            // NAME as well as the stored MIME — a README.md
+                            // whose stored MIME is generic still renders as
+                            // markdown, exactly as the local-preview screen
+                            // already decided from the display name alone.
+                            if (MimeTypes.isMarkdown(file.mimeType) ||
+                                MimeTypes.isMarkdown(MimeTypes.fromFileName(file.name))
+                            ) {
                                 MarkdownText(
                                     text = current.text,
                                     onOpenUrl = { url -> urlOpener.open(url) },
@@ -3102,7 +3115,7 @@ internal fun DesktopArchivePane(
                             selectionMode = selectionMode,
                             isBusy = busyEntryIndex != null && busyEntryIndex == entryIndex,
                             canDownload = archive.remote && !row.node.isDirectory,
-                            thumbnailSizeDp = thumbnailSize.dp,
+                            thumbnailSize = thumbnailSize,
                             thumbnailStore = thumbnailStore,
                             archiveFile = file,
                             onRowClick = {
@@ -3850,8 +3863,8 @@ private fun DesktopArchiveRow(
     selectionMode: Boolean,
     isBusy: Boolean,
     canDownload: Boolean,
-    /** The persisted thumbnail slot size in dp (PC 1.6.26 item P7); 56 = the pre-switcher size. */
-    thumbnailSizeDp: Int = 56,
+    /** The persisted thumbnail step (PC 1.6.26 item P7; R3 P6 geometry). */
+    thumbnailSize: ArchiveThumbnailSize = ArchiveThumbnailSize.MEDIUM,
     thumbnailStore: DesktopArchiveEntryThumbnailStore? = null,
     archiveFile: DriveFile? = null,
     onRowClick: () -> Unit,
@@ -3915,26 +3928,44 @@ private fun DesktopArchiveRow(
                 null
             }
         }
+        // R3 P6: Big is a wide tile (widthDp > dp), Small/Medium keep the
+        // square slot. R3 P-A9: a non-directory row without a thumbnail
+        // shows the type-labelled placeholder (category icon + the
+        // file's type label under it) instead of the generic
+        // InsertDriveFile glyph every entry used to get; the icon and
+        // label scale with the slot so the label stays legible in the
+        // Big tile (28 dp / 11 sp) and still fits Small/Medium
+        // (16 dp / 8 sp, the Android archive-row proportions).
+        val wideTile = thumbnailSize.widthDp > thumbnailSize.dp
         val genericIcon: @Composable () -> Unit = {
-            Icon(
-                imageVector = if (node.isDirectory) {
-                    Icons.Filled.Folder
-                } else {
-                    Icons.AutoMirrored.Filled.InsertDriveFile
-                },
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (node.isDirectory) {
+                Icon(
+                    imageVector = Icons.Filled.Folder,
+                    contentDescription = null,
+                    modifier = Modifier.size(if (wideTile) 40.dp else 20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                val entryMime = MimeTypes.fromFileName(node.name)
+                FileTypePlaceholder(
+                    name = node.name,
+                    mimeType = entryMime,
+                    category = FileCategory.fromMimeType(entryMime),
+                    iconSize = if (wideTile) 28.dp else 16.dp,
+                    labelSize = if (wideTile) 11.sp else 8.sp
+                )
+            }
         }
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                // The switchable slot (item P7): 40/56/80 dp from the
-                // persisted ArchiveThumbnailSize. The decoded bitmap behind
-                // it does NOT grow with the slot — the store still decodes
-                // at its bounded 256 px and the image is cropped to fill.
-                .size(thumbnailSizeDp.dp)
+                // The switchable slot (item P7, R3 P6 geometry): Small
+                // 40x40 / Medium 56x56 round slots; Big a 160x120 dp
+                // rounded-rectangle preview tile that uses the wide row.
+                // The decode behind Big is 512 px (the step's decodePx,
+                // keyed separately in the store); Small/Medium keep the
+                // bounded 256 px decode. The image is cropped to fill.
+                .size(width = thumbnailSize.widthDp.dp, height = thumbnailSize.dp.dp)
                 .testTag(
                     if (node.entryIndex != null) {
                         "archive-thumbnail-${node.entryIndex}"
@@ -3942,7 +3973,7 @@ private fun DesktopArchiveRow(
                         "archive-thumbnail-folder"
                     }
                 )
-                .clip(CircleShape)
+                .clip(if (wideTile) RoundedCornerShape(10.dp) else CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
         ) {
             if (thumbnailKey != null && thumbnailStore != null && archiveFile != null &&
@@ -3955,6 +3986,7 @@ private fun DesktopArchiveRow(
                     entryName = node.name,
                     sizeBytes = node.sizeBytes,
                     cacheKey = thumbnailKey,
+                    decodePx = thumbnailSize.decodePx,
                     placeholder = genericIcon
                 )
             } else {
@@ -4032,15 +4064,16 @@ private fun DesktopArchiveEntryThumbnail(
     entryName: String,
     sizeBytes: Long,
     cacheKey: String,
+    decodePx: Int = ArchiveEntryThumbnailPolicy.THUMBNAIL_SIZE_PX,
     placeholder: @Composable () -> Unit
 ) {
-    val state by store.state(cacheKey).collectAsState()
+    val state by store.state(cacheKey, decodePx).collectAsState()
     var loadFailed by remember(cacheKey) { mutableStateOf(false) }
-    LaunchedEffect(cacheKey) {
-        store.request(cacheKey, archiveFile, entryIndex, entryName, sizeBytes)
+    LaunchedEffect(cacheKey, decodePx) {
+        store.request(cacheKey, archiveFile, entryIndex, entryName, sizeBytes, decodePx)
     }
-    DisposableEffect(cacheKey) {
-        onDispose { store.release(cacheKey) }
+    DisposableEffect(cacheKey, decodePx) {
+        onDispose { store.release(cacheKey, decodePx) }
     }
     val readyFile = (state as? ArchiveThumbState.Ready)?.file
     if (readyFile != null && !loadFailed) {

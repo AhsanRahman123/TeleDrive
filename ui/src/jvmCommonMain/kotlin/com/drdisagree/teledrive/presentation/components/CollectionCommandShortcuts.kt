@@ -50,6 +50,7 @@ fun Modifier.collectionCommandShortcuts(
     onNewTab: (() -> Boolean)? = null,
     onCloseTab: (() -> Boolean)? = null,
     onDelete: (() -> Boolean)? = null,
+    onPage: ((Int) -> Boolean)? = null,
     interceptBeforeChildren: Boolean = false
 ): Modifier {
     val handleShortcut: (KeyEvent) -> Boolean = { event ->
@@ -60,6 +61,10 @@ fun Modifier.collectionCommandShortcuts(
             false
         } else if (plain && event.key == Key.Delete) {
             onDelete?.invoke() == true
+        } else if (plain && event.key == Key.PageDown) {
+            onPage?.invoke(1) == true
+        } else if (plain && event.key == Key.PageUp) {
+            onPage?.invoke(-1) == true
         } else if (!plainCommand) {
             false
         } else {

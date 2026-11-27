@@ -26,12 +26,14 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * PC 1.6.26 item P7 — the ZIP contents list's thumbnail size switcher,
- * driven through the REAL [DesktopArchivePane]: choosing Big / Medium /
- * Small in the header menu reports the choice through the pane's callback
- * (the production wiring persists it as `archive_thumbnail_size` — see
- * ArchiveThumbnailSizeSettingsTest) and the row thumbnail slots actually
- * resize: 40 / 56 / 80 dp, with the pre-switcher 56 dp as the Medium step.
+ * PC 1.6.26 item P7 + R3 item P6 — the ZIP contents list's thumbnail
+ * size switcher, driven through the REAL [DesktopArchivePane]: choosing
+ * Big / Medium / Small in the header menu reports the choice through the
+ * pane's callback (the production wiring persists it as
+ * `archive_thumbnail_size` — see ArchiveThumbnailSizeSettingsTest) and
+ * the row thumbnail slots actually resize: Small 40x40, Medium 56x56
+ * (the pre-switcher size), and Big a wide 160x120 dp preview tile
+ * (R3 P6 — the old 80 dp square still read as small in the wide row).
  * Assertions are ratio-based so the test does not depend on the test
  * runtime's density.
  */
@@ -119,6 +121,10 @@ class DesktopArchiveThumbnailSizeTest {
         rule.onNodeWithTag("archive-thumbnail-0", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot.width
 
+    private fun thumbnailHeight(): Float =
+        rule.onNodeWithTag("archive-thumbnail-0", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.height
+
     private fun pickSize(name: String) {
         rule.onNodeWithContentDescription("Thumbnail size").performClick()
         rule.waitForIdle()
@@ -135,9 +141,15 @@ class DesktopArchiveThumbnailSizeTest {
         pickSize("big")
         val big = thumbnailWidth()
         assertEquals(
-            "Big must be 80/56 of Medium",
-            medium * 80f / 56f,
+            "Big's tile must be 160/56 of Medium's slot width",
+            medium * 160f / 56f,
             big,
+            2f
+        )
+        assertEquals(
+            "Big's tile must be 120/56 of Medium's slot height",
+            medium * 120f / 56f,
+            thumbnailHeight(),
             2f
         )
 
