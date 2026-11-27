@@ -315,7 +315,14 @@ class FilesPageKeyNavigationTest {
             ) {
                 items(20, key = { it }) { index ->
                     if (index == 0) {
-                        Box(Modifier.keyboardCollectionItem(keyboard, index)) {
+                        // A focusable row (as production rows are) hosting
+                        // the editor, so the collection's focus registration
+                        // sees focus inside the item, not on the item.
+                        Box(
+                            Modifier
+                                .keyboardCollectionItem(keyboard, index)
+                                .clickable {}
+                        ) {
                             BasicTextField(
                                 value = editorValue,
                                 onValueChange = { editorValue = it },
