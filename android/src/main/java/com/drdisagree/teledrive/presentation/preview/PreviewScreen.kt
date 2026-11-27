@@ -24,6 +24,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Close
@@ -104,7 +107,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -210,6 +215,8 @@ import com.drdisagree.teledrive.resources.preview_download_view
 import com.drdisagree.teledrive.resources.preview_archive_remote_hint
 import com.drdisagree.teledrive.resources.preview_extraction_supported_yet_download
 import com.drdisagree.teledrive.resources.preview_file_info
+import com.drdisagree.teledrive.resources.preview_next
+import com.drdisagree.teledrive.resources.preview_previous
 import com.drdisagree.teledrive.resources.preview_move_to_trash
 import com.drdisagree.teledrive.resources.preview_no_preview
 import com.drdisagree.teledrive.resources.preview_open_with
@@ -317,6 +324,17 @@ fun PreviewScreen(
         if (state.ready && state.files.isNotEmpty()) {
             val nextPage = state.initialIndex.coerceIn(0, state.files.lastIndex)
             if (pagerState.currentPage != nextPage) pagerState.scrollToPage(nextPage)
+        }
+    }
+    // vc186 A11: the header Previous/Next buttons step the same linear
+    // sequence the pager counter below shows (currentPage + 1 / size) — no
+    // shuffle, no repeat wrap, disabled at the ends, mirroring the desktop
+    // viewer's header buttons and the pager's own end behaviour. They work
+    // on every file type because they drive the pager itself, which also
+    // gives a guaranteed path past a page whose gestures trap swipes.
+    val stepViewerPage: (Int) -> Unit = { delta ->
+        viewerStepTarget(pagerState.currentPage, state.files.size, delta)?.let { target ->
+            previewScope.launch { pagerState.animateScrollToPage(target) }
         }
     }
     val pagedFile = state.files[pagerState.currentPage.coerceAtMost(state.files.lastIndex)]
@@ -514,6 +532,33 @@ fun PreviewScreen(
                         }
                     },
                     actions = {
+                        // vc186 A11: Previous/Next file, same sequence as
+                        // the counter in the title, shown only when there is
+                        // more than one file and disabled at the ends (the
+                        // desktop viewer's convention).
+                        if (state.files.size > 1) {
+                            IconButton(
+                                onClick = { stepViewerPage(-1) },
+                                enabled = viewerHasPreviousFile(pagerState.currentPage)
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                    contentDescription = stringResource(Res.string.preview_previous)
+                                )
+                            }
+                            IconButton(
+                                onClick = { stepViewerPage(1) },
+                                enabled = viewerHasNextFile(
+                                    pagerState.currentPage,
+                                    state.files.size
+                                )
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = stringResource(Res.string.preview_next)
+                                )
+                            }
+                        }
                         if (MimeTypes.isText(currentFile.mimeType)) {
                             IconButton(
                                 onClick = {
@@ -819,19 +864,46 @@ private fun PreviewPage(
     LaunchedEffect(storedTextScale) {
         if (storedTextScale != textScale) textScale = storedTextScale
     }
+    // vc186 A7: during a pinch only this transient factor (and pan) changes,
+    // applied to the text column as a graphicsLayer transform — the same
+    // transform-only update the image viewer's zoom uses, so a gesture frame
+    // costs a draw, not a measurement. The old handler wrote textScale on
+    // every frame, re-measuring and re-laying-out the whole document (every
+    // Text restyled via scaledBy) per pointer event, which is why text zoom
+    // lagged while image zoom did not. On release the accumulated factor is
+    // committed once through settledTextScale and exactly one re-layout at
+    // the final size happens.
+    var pinchFactor by remember { mutableFloatStateOf(1f) }
+    var pinchPan by remember { mutableStateOf(Offset.Zero) }
     val pinchToScale = Modifier.pointerInput(file.id) {
         awaitEachGesture {
             do {
                 val event = awaitPointerEvent()
                 if (event.changes.count { it.pressed } >= 2) {
                     val zoom = event.calculateZoom()
-                    if (zoom != 1f) {
-                        textScale = (textScale * zoom).coerceIn(TEXT_PREVIEW_SCALE_MIN, TEXT_PREVIEW_SCALE_MAX)
+                    val pan = event.calculatePan()
+                    if (zoom != 1f || pan != Offset.Zero) {
+                        pinchFactor = (pinchFactor * zoom).coerceIn(
+                            TEXT_PREVIEW_SCALE_MIN / textScale,
+                            TEXT_PREVIEW_SCALE_MAX / textScale
+                        )
+                        pinchPan += pan
                         event.changes.forEach { it.consume() }
                     }
                 }
             } while (event.changes.any { it.pressed })
+            if (pinchFactor != 1f) {
+                textScale = settledTextScale(textScale, pinchFactor)
+            }
+            pinchFactor = 1f
+            pinchPan = Offset.Zero
         }
+    }
+    val pinchTransform = Modifier.graphicsLayer {
+        scaleX = pinchFactor
+        scaleY = pinchFactor
+        translationX = pinchPan.x
+        translationY = pinchPan.y
     }
     // Written once the pinch settles, not on every frame of the gesture.
     LaunchedEffect(textScale) {
@@ -935,6 +1007,7 @@ private fun PreviewPage(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .then(pinchToScale)
+                    .then(pinchTransform)
                     .padding(previewContentPadding())
             ) {
                 SavedLink(
@@ -949,6 +1022,7 @@ private fun PreviewPage(
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .then(pinchToScale)
+                .then(pinchTransform)
                 .padding(previewContentPadding())
         ) {
             val linkContext = LocalContext.current
@@ -1129,6 +1203,15 @@ private fun ArchiveEntryPreviewOverlay(
     onDismiss: () -> Unit
 ) {
     val overlaySession = remember(preview) { PlayerSession() }
+    // vc186 A3: the in-zip surfaces own a real controls-visibility state.
+    // Before this, the in-zip MediaPlayer calls passed neither
+    // controlsVisible nor onControlsVisibilityChanged, so the player used
+    // its defaults — a constant `true` and a no-op callback — and a tap
+    // (which notifies !visible) could never hide anything: "hide controls"
+    // was broken in in-zip video (and audio, and the image viewer's own
+    // control row, which also got the defaults). Now every in-zip media
+    // surface shares this state and tap toggles it, like the main viewer.
+    var overlayControlsVisible by remember { mutableStateOf(true) }
     // vc184 P5: the in-zip text viewer shares the normal viewer's persisted
     // text scale (and its save path), so a size set in either place is the
     // size in both. Buttons step it; no pinch is added here.
@@ -1179,7 +1262,12 @@ private fun ArchiveEntryPreviewOverlay(
                     is ArchiveEntryPreview.Image -> ZoomableImage(
                         model = File(preview.path),
                         contentDescription = preview.name,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        controlsVisible = overlayControlsVisible,
+                        onTap = {
+                            overlayControlsVisible =
+                                toggledControlsVisible(overlayControlsVisible)
+                        }
                     )
 
                     is ArchiveEntryPreview.Audio -> MediaPlayer(
@@ -1188,6 +1276,8 @@ private fun ArchiveEntryPreviewOverlay(
                         fileId = "archive-entry-${preview.name}",
                         dataSourceFactory = dataSourceFactory,
                         isActivePage = true,
+                        controlsVisible = overlayControlsVisible,
+                        onControlsVisibilityChanged = { overlayControlsVisible = it },
                         session = overlaySession
                     )
 
@@ -1215,6 +1305,11 @@ private fun ArchiveEntryPreviewOverlay(
                         // synced mirror).
                         hasPreviousFile = pagerPosition > 0,
                         hasNextFile = pagerPosition < pagerCount - 1,
+                        // vc186 A3: the actual fix for "hide controls broken
+                        // in in-zip videos" — real visibility state in, real
+                        // change callback out (see overlayControlsVisible).
+                        controlsVisible = overlayControlsVisible,
+                        onControlsVisibilityChanged = { overlayControlsVisible = it },
                         session = overlaySession
                     )
 
@@ -1334,6 +1429,36 @@ private fun ArchiveEntryPreviewOverlay(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1
+                        )
+                    }
+                }
+                // vc186 A11: Previous/Next entry in the in-zip header too —
+                // same linear sequence as the counter under the name, same
+                // end behaviour (disabled, no wrap), stepping through the
+                // same onPageSelected path a settled swipe uses.
+                if (pagerCount > 1) {
+                    IconButton(
+                        onClick = {
+                            viewerStepTarget(pagerPosition, pagerCount, -1)
+                                ?.let(onPageSelected)
+                        },
+                        enabled = viewerHasPreviousFile(pagerPosition)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                            contentDescription = stringResource(Res.string.preview_previous)
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            viewerStepTarget(pagerPosition, pagerCount, 1)
+                                ?.let(onPageSelected)
+                        },
+                        enabled = viewerHasNextFile(pagerPosition, pagerCount)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = stringResource(Res.string.preview_next)
                         )
                     }
                 }

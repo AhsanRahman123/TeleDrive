@@ -17,9 +17,9 @@ android {
         minSdk = 26
         targetSdk = 37
         // Pinned per release branch: each shipped build sets its own literal
-        // version code (…vc184, now vc185), so the CI run number must not leak
+        // version code (…vc185, now vc186), so the CI run number must not leak
         // into the version code.
-        versionCode = 185
+        versionCode = 186
         versionName = libs.versions.appVersion.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -5,13 +5,16 @@ import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,6 +31,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -68,8 +72,15 @@ import org.jetbrains.compose.resources.stringResource
 fun PdfPreview(path: String, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val scale = remember(path) { Animatable(1f) }
-    val offset = remember(path) { Animatable(Offset.Zero, Offset.VectorConverter) }
+    // vc186 A7: plain snapshot state, not Animatable. The gesture handler
+    // writes these directly (no coroutine launched per pointer event, no
+    // MutatorMutex contention between competing snapTo calls), and they are
+    // read only inside the LazyColumn's graphicsLayer lambda below, so a
+    // pinch frame invalidates the draw phase only — the same transform-only
+    // update path the image viewer's zoom uses. The old code launched two
+    // coroutines per transform event to snapTo Animatable values.
+    var scale by remember(path) { mutableFloatStateOf(1f) }
+    var offset by remember(path) { mutableStateOf(Offset.Zero) }
     var viewport by remember(path) { mutableStateOf(IntSize.Zero) }
     val rendererState = remember(path) { mutableStateOf<PdfRenderer?>(null) }
     val renderMutex = remember(path) { Mutex() }
@@ -108,7 +119,7 @@ fun PdfPreview(path: String, modifier: Modifier = Modifier) {
             .pointerInput(path) {
                 detectTapGestures(
                     onDoubleTap = { tapOffset ->
-                        val zoomedIn = scale.value > 1f
+                        val zoomedIn = scale > 1f
                         val target = if (zoomedIn) 1f else DOUBLE_TAP_SCALE
                         val focus = if (zoomedIn) {
                             Offset.Zero
@@ -122,24 +133,65 @@ fun PdfPreview(path: String, modifier: Modifier = Modifier) {
                                 viewport
                             )
                         }
+                        val startScale = scale
+                        val startOffset = offset
                         scope.launch {
-                            launch { scale.animateTo(target, tween(ZOOM_ANIMATION_MS)) }
-                            launch { offset.animateTo(focus, tween(ZOOM_ANIMATION_MS)) }
+                            launch {
+                                animate(
+                                    startScale,
+                                    target,
+                                    animationSpec = tween(ZOOM_ANIMATION_MS)
+                                ) { value, _ -> scale = value }
+                            }
+                            launch {
+                                animate(
+                                    Offset.VectorConverter,
+                                    startOffset,
+                                    focus,
+                                    Offset.Zero,
+                                    animationSpec = tween(ZOOM_ANIMATION_MS)
+                                ) { value, _ -> offset = value }
+                            }
                         }
                     }
                 )
             }
+            // vc186 A8: NOT detectTransformGestures. That detector consumes
+            // every position change once past touch slop — including a plain
+            // single-finger horizontal swipe at scale 1, where the pan it
+            // reports is discarded (offset stays Zero). The pager's swipe was
+            // eaten here and the viewer was trapped on the PDF page. This
+            // handler consumes a change only when the transform actually
+            // spends it:
+            //  - two or more pointers (a real pinch), or
+            //  - zoomed in past 1x and the zoom/pan really moves the layer
+            //    (a pan already clamped at the page edge does NOT consume,
+            //    so a swipe at the edge still escapes to the pager).
+            // Anything else is left unconsumed for the LazyColumn (vertical
+            // page scroll) and the pager (horizontal file switching), exactly
+            // like the text viewer's pinch handler.
             .pointerInput(path) {
-                detectTransformGestures(panZoomLock = true) { _, pan, zoom, _ ->
-                    val target = (scale.value * zoom).coerceIn(1f, MAX_SCALE)
-                    val moved = if (target > 1f) {
-                        clampPdfOffset(offset.value + pan, target, viewport)
-                    } else {
-                        Offset.Zero
-                    }
-                    scope.launch {
-                        launch { scale.snapTo(target) }
-                        launch { offset.snapTo(moved) }
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var event = awaitPointerEvent()
+                    while (event.changes.any { it.pressed }) {
+                        val pressed = event.changes.filter { it.pressed }
+                        val zoomChange = event.calculateZoom()
+                        val panChange = event.calculatePan()
+                        val target = pdfZoomTarget(scale, zoomChange)
+                        val moved = if (target > 1f) {
+                            clampPdfOffset(offset + panChange, target, viewport)
+                        } else {
+                            Offset.Zero
+                        }
+                        val spendsDrag = pressed.size >= 2 ||
+                            (target > 1f && (zoomChange != 1f || moved != offset))
+                        if (spendsDrag && pressed.any { !it.isConsumed }) {
+                            scale = target
+                            offset = moved
+                            event.changes.forEach { it.consume() }
+                        }
+                        event = awaitPointerEvent()
                     }
                 }
             }
@@ -149,10 +201,10 @@ fun PdfPreview(path: String, modifier: Modifier = Modifier) {
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    scaleX = scale.value
-                    scaleY = scale.value
-                    translationX = offset.value.x
-                    translationY = offset.value.y
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
                 },
             contentPadding = WindowInsets.systemBars
                 .asPaddingValues()
@@ -281,7 +333,11 @@ private fun RectF.toLink(
 private const val TARGET_WIDTH = 1080
 private const val PLACEHOLDER_RATIO = 0.7f
 
-private fun clampPdfOffset(target: Offset, scale: Float, viewport: IntSize): Offset {
+/** The scale one pinch step lands on, clamped to the viewer's range. */
+internal fun pdfZoomTarget(currentScale: Float, zoomChange: Float): Float =
+    (currentScale * zoomChange).coerceIn(1f, MAX_SCALE)
+
+internal fun clampPdfOffset(target: Offset, scale: Float, viewport: IntSize): Offset {
     val maxX = viewport.width * (scale - 1f) / 2f
     val maxY = viewport.height * (scale - 1f) / 2f
     return Offset(
