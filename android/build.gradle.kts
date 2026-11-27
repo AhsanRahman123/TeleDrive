@@ -16,10 +16,10 @@ android {
         applicationId = "com.drdisagree.teledrive.preview2"
         minSdk = 26
         targetSdk = 37
-        // Pinned on this single-purpose branch: it ships exactly one install-over
-        // update above the vc173 build (vc174), so the CI run number (which has
-        // drifted well past 163 since) must not leak into the version code.
-        versionCode = 184
+        // Pinned per release branch: each shipped build sets its own literal
+        // version code (…vc184, now vc185), so the CI run number must not leak
+        // into the version code.
+        versionCode = 185
         versionName = libs.versions.appVersion.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
