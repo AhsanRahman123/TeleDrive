@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.pressKey
 import androidx.lifecycle.SavedStateHandle
 import com.drdisagree.teledrive.core.archive.ArchiveDownloadTracker
