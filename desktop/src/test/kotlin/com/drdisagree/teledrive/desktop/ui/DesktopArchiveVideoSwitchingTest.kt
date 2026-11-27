@@ -354,6 +354,66 @@ class DesktopArchiveVideoSwitchingTest {
     }
 
     /**
+     * PC 1.6.26 P4, silent busy-drop: while one extraction holds the gate,
+     * a second load request must be refused HONESTLY — the load functions
+     * return false and [PreviewViewModel.stepArchivePreview] propagates
+     * that instead of claiming the switch happened. On the baseline these
+     * functions returned Unit / unconditional true, so a dropped switch
+     * (reachable via the player's ungated media keys) was
+     * indistinguishable from a real one.
+     */
+    @Test
+    fun `a load or step attempted while busy is refused and reported as refused`() {
+        val zipBytes = archiveZipBytes(entryData)
+        val file = zipFile("vm-busy-drop-zip")
+        val viewModel = buildViewModel(zipBytes, file)
+        val scope = CoroutineScope(Dispatchers.Default)
+        scope.launch { viewModel.contentFor(file).collect {} }
+        await("remote listing stored") { viewModel.uiState.value.archiveListings.containsKey(file.id) }
+        val listing = viewModel.uiState.value.archiveListings.getValue(file.id)
+        val sequence = archiveUnifiedPreviewIndices(listing, listing.indices.toList())
+        assertEquals(listOf(0, 1, 2, 3), sequence)
+
+        // The first load claims the gate synchronously (busy index is set
+        // before the extraction launches), so a second load attempted
+        // immediately afterwards is refused — and says so.
+        assertTrue(viewModel.previewArchiveVideoEntry(file, 0))
+        assertEquals(0, viewModel.uiState.value.archiveEntryBusyIndex)
+        assertFalse(
+            "second load while busy must be refused",
+            viewModel.previewArchiveVideoEntry(file, 1)
+        )
+        await("first video preview") {
+            (viewModel.uiState.value.archivePreview as? ArchiveEntryPreview.Video)
+                ?.entryIndex == 0
+        }
+        await("busy cleared after open") { viewModel.uiState.value.archiveEntryBusyIndex == null }
+
+        // Same for a step: start a direct load of entry 2, then step from
+        // the published entry 0 while entry 2's extraction holds the gate.
+        // The step targets entry 1, is dropped by the busy gate, and must
+        // report false; the in-flight entry 2 load is the one that lands.
+        assertTrue(viewModel.previewArchiveVideoEntry(file, 2))
+        assertFalse(
+            "step while busy must report the drop, not claim the switch",
+            viewModel.stepArchivePreview(file, +1, sequence)
+        )
+        await("in-flight load publishes entry 2") {
+            (viewModel.uiState.value.archivePreview as? ArchiveEntryPreview.Video)
+                ?.entryIndex == 2
+        }
+        await("busy cleared after in-flight load") {
+            viewModel.uiState.value.archiveEntryBusyIndex == null
+        }
+        val landed = viewModel.uiState.value.archivePreview as ArchiveEntryPreview.Video
+        assertEquals("three.mp4", landed.name)
+        assertArrayEquals(videoBytes[2], File(landed.path).readBytes())
+
+        viewModel.dismissArchivePreview()
+        await("preview dismissed") { viewModel.uiState.value.archivePreview == null }
+    }
+
+    /**
      * PC 1.6.26 P1, ViewModel half: stepping through THREE in-zip audio
      * entries via the production unified-sequence step must publish each
      * entry's OWN Audio preview (its own display name and extracted temp

@@ -651,20 +651,25 @@ class PreviewViewModel(
      * Extracts the entry at [entryIndex] to a verified temp file (never Downloads) and
      * publishes it as the in-archive preview. Text entries over the preview cap are refused
      * before any extraction, with a message that points at the normal download instead.
+     *
+     * Returns true when the request was acted on (a preview extraction was
+     * launched, or a DOWNLOAD-action entry was handed to the download path);
+     * every refusal returns false so [stepArchivePreview] never reports a
+     * switch that did not happen (PC 1.6.26 P4).
      */
-    fun previewArchiveEntry(file: DriveFile, entryIndex: Int) {
-        if (_uiState.value.archiveEntryBusyIndex != null) return
+    fun previewArchiveEntry(file: DriveFile, entryIndex: Int): Boolean {
+        if (_uiState.value.archiveEntryBusyIndex != null) return false
         val listing = _uiState.value.archiveListings[file.id]
         if (listing == null) {
             _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
-            return
+            return false
         }
-        val entry = listing.getOrNull(entryIndex) ?: return
-        if (entry.isDirectory) return
+        val entry = listing.getOrNull(entryIndex) ?: return false
+        if (entry.isDirectory) return false
         val action = archiveEntryTapAction(entry)
         if (action == ArchiveEntryTapAction.DOWNLOAD) {
             downloadArchiveEntry(file, entryIndex)
-            return
+            return true
         }
         if (action == ArchiveEntryTapAction.PREVIEW_TEXT && !archiveEntryTextPreviewable(entry)) {
             _messages.tryEmit(
@@ -674,7 +679,7 @@ class PreviewViewModel(
                         "Download it instead."
                 )
             )
-            return
+            return false
         }
         if (action == ArchiveEntryTapAction.PREVIEW_DOCUMENT &&
             !archiveEntryDocumentPreviewable(entry)
@@ -686,7 +691,7 @@ class PreviewViewModel(
                         "Download it instead."
                 )
             )
-            return
+            return false
         }
         if (action == ArchiveEntryTapAction.PREVIEW_PDF && !archiveEntryPdfPreviewable(entry)) {
             _messages.tryEmit(
@@ -696,10 +701,10 @@ class PreviewViewModel(
                         "Download it instead."
                 )
             )
-            return
+            return false
         }
         val occurrence = archiveEntryOccurrence(listing, entryIndex)
-        if (occurrence < 0) return
+        if (occurrence < 0) return false
         val displayName = archiveEntryDisplayName(entry)
         // MF-1: claim the extraction gate SYNCHRONOUSLY, before launching.
         // While a queued download holds the gate this tap is dropped, exactly
@@ -709,7 +714,7 @@ class PreviewViewModel(
         // closes the window where a just-tapped preview had not yet marked
         // anything and a download could start underneath it.
         val owner = Any()
-        if (!archiveExtractionMutex.tryLock(owner)) return
+        if (!archiveExtractionMutex.tryLock(owner)) return false
         markArchiveBusy(owner, entryIndex)
         val generation = ++archivePreviewGeneration
         viewModelScope.launch {
@@ -799,6 +804,7 @@ class PreviewViewModel(
                 archiveExtractionMutex.unlock(owner)
             }
         }
+        return true
     }
 
     /**
@@ -870,19 +876,22 @@ class PreviewViewModel(
      * (no false corruption verdicts), and a failed/refused step never moves
      * the published preview. Video targets run the free-space preflight inside
      * the load path before any extraction. No neighbour pre-extraction, ever.
-     * Returns false when there is no neighbour (either end / no preview open).
+     * Returns false when there is no neighbour (either end / no preview
+     * open) AND when the target load was refused — above all the silent
+     * busy-drop: a step attempted while another extraction holds the gate
+     * is dropped by the load path, and this function must not claim it
+     * moved (PC 1.6.26 P4; it previously returned true unconditionally).
      */
     fun stepArchivePreview(file: DriveFile, delta: Int, sequence: List<Int>): Boolean {
         val current = _uiState.value.archivePreview ?: return false
         val target = archiveUnifiedPreviewNeighbour(sequence, current.entryIndex, delta)
             ?: return false
         val entry = _uiState.value.archiveListings[file.id]?.getOrNull(target) ?: return false
-        if (MimeTypes.isVideo(MimeTypes.fromFileName(entry.name))) {
+        return if (MimeTypes.isVideo(MimeTypes.fromFileName(entry.name))) {
             previewArchiveVideoEntry(file, target)
         } else {
             previewArchiveEntry(file, target)
         }
-        return true
     }
 
     /**
@@ -896,19 +905,24 @@ class PreviewViewModel(
      * with every other extraction (the ranged reads share one window), and a
      * failure reports the same detailed message as the other preview paths and
      * leaves any current preview untouched.
+     *
+     * Returns true only when the extraction was actually launched; every
+     * refusal (busy gate, wrong type, missing listing, free-space
+     * preflight) returns false so callers — [stepArchivePreview] above
+     * all — never report a switch that did not happen (PC 1.6.26 P4).
      */
-    fun previewArchiveVideoEntry(file: DriveFile, entryIndex: Int) {
-        if (_uiState.value.archiveEntryBusyIndex != null) return
+    fun previewArchiveVideoEntry(file: DriveFile, entryIndex: Int): Boolean {
+        if (_uiState.value.archiveEntryBusyIndex != null) return false
         val listing = _uiState.value.archiveListings[file.id]
         if (listing == null) {
             _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
-            return
+            return false
         }
-        val entry = listing.getOrNull(entryIndex) ?: return
-        if (entry.isDirectory) return
-        if (!MimeTypes.isVideo(MimeTypes.fromFileName(entry.name))) return
+        val entry = listing.getOrNull(entryIndex) ?: return false
+        if (entry.isDirectory) return false
+        if (!MimeTypes.isVideo(MimeTypes.fromFileName(entry.name))) return false
         val occurrence = archiveEntryOccurrence(listing, entryIndex)
-        if (occurrence < 0) return
+        if (occurrence < 0) return false
         val displayName = archiveEntryDisplayName(entry)
         // MF-1: same synchronous gate claim as previewArchiveEntry.
         // Free-space preflight (Android vc181/vc182 semantics): the entry
@@ -928,10 +942,10 @@ class PreviewViewModel(
                         " is free. Download it instead."
                 )
             )
-            return
+            return false
         }
         val owner = Any()
-        if (!archiveExtractionMutex.tryLock(owner)) return
+        if (!archiveExtractionMutex.tryLock(owner)) return false
         markArchiveBusy(owner, entryIndex)
         val generation = ++archivePreviewGeneration
         viewModelScope.launch {
@@ -967,6 +981,7 @@ class PreviewViewModel(
                 archiveExtractionMutex.unlock(owner)
             }
         }
+        return true
     }
 
     /**

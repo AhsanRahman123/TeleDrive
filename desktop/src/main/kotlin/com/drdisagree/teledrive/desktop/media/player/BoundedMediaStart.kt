@@ -1,0 +1,93 @@
+package com.drdisagree.teledrive.desktop.media.player
+
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
+import uk.co.caprica.vlcj.player.base.MediaPlayer
+import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter
+
+/**
+ * Hard bound on proving one media start. A local file or loopback stream
+ * that has not reported Playing/Paused (or Error) by then is treated as a
+ * failed start: the caller surfaces the failure and the user can retry
+ * with the Play control — instead of the session executor staying blocked
+ * forever (see [startMediaBounded]).
+ */
+internal const val MEDIA_START_TIMEOUT_MS = 10_000L
+
+/**
+ * Bounded replacement for vlcj `MediaApi.start(mrl)` on the viewer's
+ * switch path (PC 1.6.26 P4).
+ *
+ * `MediaApi.start()` plays the media and then waits — with NO timeout —
+ * until the source reports playing or an error. The viewer's start
+ * command runs on [PlayerSession]'s single-thread command executor, so
+ * one start whose source never reports (a wedged input) blocks that
+ * thread forever: every later command — the next switch's stop+start,
+ * but also pause, seek and volume — queues behind it and never runs.
+ * The ViewModel has already published the new preview by then, so the UI
+ * moves while playback and the controls are dead: the field shape of
+ * "in-zip video switching stops after 2 videos" (the ViewModel layer was
+ * exonerated by the 4-video stepping test passing on the 1.6.25 baseline;
+ * this serial executor is the only seam where one stuck native call
+ * blocks all later switches).
+ *
+ * This helper plays the media and waits on [MediaStartLatch] for at most
+ * [timeoutMs]. The wait is the only thing that changed: playback itself
+ * starts with the same `play()` call, immediately — landing on a video
+ * still ends in playback with no extra action (A5). On timeout the start
+ * reports failure, the caller's existing failure branch surfaces it
+ * (finished state, Play control retries), and the executor thread is
+ * free for the next command.
+ */
+internal fun startMediaBounded(
+    player: MediaPlayer,
+    mrl: String,
+    timeoutMs: Long = MEDIA_START_TIMEOUT_MS
+): Boolean {
+    val latch = MediaStartLatch()
+    player.events().addMediaPlayerEventListener(latch)
+    return try {
+        val playCalled = runCatching { player.media().play(mrl) }.getOrDefault(false)
+        playCalled && latch.await(timeoutMs)
+    } finally {
+        runCatching { player.events().removeMediaPlayerEventListener(latch) }
+    }
+}
+
+/**
+ * One-shot proof that a started media actually started: completes true
+ * on the first Playing/Paused report (a start that reaches Paused did
+ * start), true on Finished (a very short media that finishes immediately
+ * did start), false on Error.
+ *
+ * `stopped` is deliberately NOT terminal: this latch is registered right
+ * after the outgoing media's `stop()` on the same player, and that stop's
+ * asynchronous Stopped report can land inside this start's window — it
+ * says nothing about the incoming media. A start that truly dies reports
+ * Error; one that wedges hits the [await] timeout. Same semantics as the
+ * appearance-swap StartLatch in PlayerSession, minus the stopped case
+ * that is only safe there because a swap candidate has no outgoing media.
+ */
+internal class MediaStartLatch : MediaPlayerEventAdapter() {
+    private val result = CompletableFuture<Boolean>()
+
+    override fun playing(mediaPlayer: MediaPlayer) {
+        result.complete(true)
+    }
+
+    override fun paused(mediaPlayer: MediaPlayer) {
+        result.complete(true)
+    }
+
+    override fun finished(mediaPlayer: MediaPlayer) {
+        result.complete(true)
+    }
+
+    override fun error(mediaPlayer: MediaPlayer) {
+        result.complete(false)
+    }
+
+    fun await(timeoutMs: Long): Boolean =
+        runCatching { result.get(timeoutMs, TimeUnit.MILLISECONDS) }
+            .getOrDefault(false)
+}

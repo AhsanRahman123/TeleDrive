@@ -606,9 +606,16 @@ internal fun DesktopMediaPlayer(
                     // stop() has completed the outgoing native transition; only now allow
                     // this source's render callbacks into the generation-tagged frame channel.
                     eventGate.setAcceptsFrames(true)
-                    val started = runCatching {
-                        nativePlayer.media().start(mrl)
-                    }.getOrDefault(false)
+                    // Bounded start (PC 1.6.26 P4): MediaApi.start() waits
+                    // with no timeout for the playing/error report, and this
+                    // command runs on the session's single-thread executor —
+                    // one source that never reports would wedge every later
+                    // switch and control behind it forever. startMediaBounded
+                    // plays identically (playback still starts on landing,
+                    // no extra action) but caps the proof wait; a timeout
+                    // lands in the failure branch below, which surfaces the
+                    // failure and keeps this generation retryable via Play.
+                    val started = startMediaBounded(nativePlayer, mrl)
                     val stillCurrent = eventGate.generation() == mediaGeneration
                     if (!started || !stillCurrent) {
                         if (!stillCurrent) {
