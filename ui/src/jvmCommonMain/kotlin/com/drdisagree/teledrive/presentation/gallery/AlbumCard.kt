@@ -1,7 +1,8 @@
 package com.drdisagree.teledrive.presentation.gallery
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,6 +39,7 @@ import com.drdisagree.teledrive.resources.item_count
 import org.jetbrains.compose.resources.pluralStringResource
 import org.jetbrains.compose.resources.stringResource
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AlbumCard(
     album: MediaAlbum,
@@ -45,14 +47,23 @@ fun AlbumCard(
     modifier: Modifier = Modifier,
     selectionMode: Boolean = false,
     selected: Boolean = false,
-    onSelectionChange: ((Boolean) -> Unit)? = null
+    onSelectionChange: ((Boolean) -> Unit)? = null,
+    onLongClick: () -> Unit = {}
 ) {
     val albumName = album.name ?: stringResource(Res.string.album_not_in_folder)
     Column(
         modifier = modifier
             .clip(MaterialTheme.shapes.large)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(role = Role.Button, onClick = onClick)
+            // combinedClickable, not clickable — the same contract as the Files
+            // rows (FileListItem/FileGridItem) and the archive rows: a plain
+            // clickable has no long-press handling, so the press that the
+            // container's drag-select turned into a selection on long-press
+            // ALSO fired onClick when the finger lifted, and that click
+            // toggled the just-selected album back off. With a long-click
+            // handler present, the long-press is absorbed here and no click
+            // follows it.
+            .combinedClickable(role = Role.Button, onClick = onClick, onLongClick = onLongClick)
             .padding(6.dp)
     ) {
         Box(
@@ -107,6 +118,7 @@ fun AlbumCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AlbumListItem(
     album: MediaAlbum,
@@ -114,7 +126,8 @@ fun AlbumListItem(
     modifier: Modifier = Modifier,
     selectionMode: Boolean = false,
     selected: Boolean = false,
-    onSelectionChange: ((Boolean) -> Unit)? = null
+    onSelectionChange: ((Boolean) -> Unit)? = null,
+    onLongClick: () -> Unit = {}
 ) {
     val albumName = album.name ?: stringResource(Res.string.album_not_in_folder)
     Row(
@@ -122,7 +135,9 @@ fun AlbumListItem(
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(role = Role.Button, onClick = onClick)
+            // See AlbumCard: combinedClickable so a selection long-press is
+            // not followed by a click on release.
+            .combinedClickable(role = Role.Button, onClick = onClick, onLongClick = onLongClick)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

@@ -74,11 +74,17 @@ fun FileThumbnail(
                 onError = { failed = true }
             )
         } else {
-            Icon(
-                imageVector = iconFor(file.category),
-                contentDescription = contentDescription,
-                modifier = Modifier.size(28.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            // No thumbnail (or it failed to load): the placeholder names the
+            // file type under the category icon. Very small slots (the 38.dp
+            // compact list thumb) keep the plain icon — there is no room for
+            // a readable label.
+            val showTypeLabel = shortestSide >= TYPE_LABEL_MIN_SIDE
+            FileTypePlaceholder(
+                name = file.name,
+                mimeType = file.mimeType,
+                category = file.category,
+                iconSize = if (showTypeLabel) 22.dp else 28.dp,
+                showLabel = showTypeLabel
             )
         }
 
@@ -115,3 +121,4 @@ fun FileThumbnail(
 private val SCRIM = Color.Black.copy(alpha = 0.45f)
 private const val BADGE_RATIO = 0.34f
 private val DURATION_MIN_SIDE = 72.dp
+private val TYPE_LABEL_MIN_SIDE = 44.dp

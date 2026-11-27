@@ -22,7 +22,19 @@ import com.drdisagree.teledrive.resources.files_sort_descending
 import com.drdisagree.teledrive.resources.files_sort_name
 import com.drdisagree.teledrive.resources.files_sort_size
 import com.drdisagree.teledrive.resources.files_sort_type
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
+
+/** The label every sort surface (sort menu, Gallery advanced panel) shows for a field. */
+fun sortFieldLabelRes(field: FileSortField): StringResource =
+    when (field) {
+        FileSortField.NAME -> Res.string.files_sort_name
+        FileSortField.SIZE -> Res.string.files_sort_size
+        FileSortField.DATE_MODIFIED -> Res.string.files_sort_date_modified
+        FileSortField.DATE_ADDED -> Res.string.files_sort_date_added
+        FileSortField.TYPE -> Res.string.files_sort_type
+        FileSortField.BACKUP_STATUS -> Res.string.files_sort_backup_status
+    }
 
 @Composable
 fun SortMenu(
@@ -39,18 +51,7 @@ fun SortMenu(
             val ascending = direction == SortDirection.ASCENDING
             DropdownMenuItem(
                 text = {
-                    Text(
-                        stringResource(
-                            when (field) {
-                                FileSortField.NAME -> Res.string.files_sort_name
-                                FileSortField.SIZE -> Res.string.files_sort_size
-                                FileSortField.DATE_MODIFIED -> Res.string.files_sort_date_modified
-                                FileSortField.DATE_ADDED -> Res.string.files_sort_date_added
-                                FileSortField.TYPE -> Res.string.files_sort_type
-                                FileSortField.BACKUP_STATUS -> Res.string.files_sort_backup_status
-                            }
-                        )
-                    )
+                    Text(stringResource(sortFieldLabelRes(field)))
                 },
                 trailingIcon = if (selected) {
                     {
