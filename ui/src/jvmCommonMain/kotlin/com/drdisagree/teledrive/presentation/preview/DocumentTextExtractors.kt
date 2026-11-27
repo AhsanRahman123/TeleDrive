@@ -379,6 +379,11 @@ fun parseXmlToTree(bytes: ByteArray): XmlElementNode? {
                             }
                             if (attrName.isNotEmpty()) {
                                 attributes += attrName to decodeXmlEntities(attrValue)
+                            } else if (i == attrStart) {
+                                // No name and no value consumed (a stray
+                                // character): skip it so the loop always
+                                // makes progress.
+                                i++
                             }
                         }
                     }
