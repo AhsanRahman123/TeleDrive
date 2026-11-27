@@ -184,20 +184,64 @@ class TransferRepositoryImpl(
                 AppError.InsufficientStorage(entity.sizeBytes + STORAGE_MARGIN, available)
             )
         }
-        return enqueueLock.withLock {
-            transferDao.unfinishedIdsForFiles(listOf(fileId)).firstOrNull()
-                ?.let { return@withLock AppResult.Success(it) }
-            insertTransfer(
-                entity.id,
-                entity.name,
-                entity.sizeBytes,
-                entity.chatId,
-                TransferType.DOWNLOAD,
-                priority,
-                null
-            )
+        // vc184 A3: a dedupe hit must still leave a GENUINELY RUNNABLE
+        // transfer behind. Before this, an existing unfinished row was
+        // reported as "queued" success untouched — so a PAUSED row (paused
+        // earlier, or preempted by a queue promotion) sat paused forever
+        // while the caller believed a download was running, and a QUEUED row
+        // whose worker had already exited was never kicked again. The row's
+        // state decides the repair, applied after the lock (resume() takes
+        // workerControlLock): PAUSED resumes, QUEUED re-kicks the worker,
+        // RUNNING needs nothing.
+        val outcome = enqueueLock.withLock {
+            val existingId = transferDao.unfinishedIdsForFiles(listOf(fileId)).firstOrNull()
+            if (existingId != null) {
+                ExistingDownload(
+                    id = existingId,
+                    state = transferDao.byId(existingId)?.state
+                )
+            } else {
+                when (
+                    val inserted = insertTransfer(
+                        entity.id,
+                        entity.name,
+                        entity.sizeBytes,
+                        entity.chatId,
+                        TransferType.DOWNLOAD,
+                        priority,
+                        null
+                    )
+                ) {
+                    is AppResult.Success -> FreshDownload(inserted.value)
+                    is AppResult.Failure -> FailedDownload(inserted.error)
+                }
+            }
+        }
+        return when (outcome) {
+            is FreshDownload -> AppResult.Success(outcome.id)
+            is FailedDownload -> AppResult.Failure(outcome.error)
+            is ExistingDownload -> {
+                when (existingDownloadAction(outcome.state)) {
+                    ExistingDownloadAction.RESUME -> resume(outcome.id)
+                    ExistingDownloadAction.KICK -> kickWorker()
+                    ExistingDownloadAction.NONE -> Unit
+                }
+                AppResult.Success(outcome.id)
+            }
         }
     }
+
+    /** Outcome of the locked section of [enqueueDownload]; see its vc184 note. */
+    private sealed interface DownloadEnqueueOutcome
+
+    private data class FreshDownload(val id: String) : DownloadEnqueueOutcome
+
+    private data class FailedDownload(val error: AppError) : DownloadEnqueueOutcome
+
+    private data class ExistingDownload(
+        val id: String,
+        val state: TransferState?
+    ) : DownloadEnqueueOutcome
 
     suspend fun enqueueBackup(
         fileId: String,
@@ -823,4 +867,22 @@ class TransferRepositoryImpl(
         private const val STORAGE_MARGIN = 100L * 1024 * 1024
         private const val SQL_BATCH = 500
     }
+}
+
+/** What a download request that dedupes onto an existing row must do to it (vc184 A3). */
+enum class ExistingDownloadAction { RESUME, KICK, NONE }
+
+/**
+ * The repair for an existing unfinished download row a new download request
+ * deduped onto, by the row's current state: a PAUSED row is resumed (nothing
+ * else would ever start it — the requester was just told it is "queued"), a
+ * QUEUED row re-kicks the worker (its original kick may have been consumed by
+ * a worker run that exited before the row landed), and a RUNNING row is
+ * already genuinely transferring. Anything else (terminal/absent) is left
+ * alone. Pure, so the contract is host-testable.
+ */
+fun existingDownloadAction(state: TransferState?): ExistingDownloadAction = when (state) {
+    TransferState.PAUSED -> ExistingDownloadAction.RESUME
+    TransferState.QUEUED -> ExistingDownloadAction.KICK
+    else -> ExistingDownloadAction.NONE
 }

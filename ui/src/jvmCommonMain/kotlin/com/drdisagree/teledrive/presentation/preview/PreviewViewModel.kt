@@ -70,7 +70,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -108,6 +107,15 @@ class PreviewViewModel(
 
     /** The in-flight in-zip preview extraction (initial open or a pager step), if any. */
     private var archivePreviewJob: Job? = null
+
+    /**
+     * The pager position the user last settled on, as reported by
+     * [onArchivePreviewPageSelected] (vc184 A4). The published preview's
+     * position ([PreviewUiState.archivePreviewPosition]) only moves when a
+     * load lands, so this is the record of where the user actually IS — the
+     * settled-page repair ([repairSettledArchivePage]) compares the two.
+     */
+    private var archivePagerSettledPosition: Int = -1
 
     /** Archive format label ("ZIP", "CBZ", "7Z", …) per file id, as last resolved. */
     private val archiveFormats = mutableMapOf<String, String>()
@@ -223,8 +231,13 @@ class PreviewViewModel(
     }
 
     /**
-     * Follows the row and transfer queue, so a started download shows progress and the viewer
-     * switches when it lands.
+     * Follows the row and transfer queue, so a download started from the
+     * Download-to-view gate shows progress and the viewer switches when it
+     * lands. A file that can already render or play is NEVER replaced by the
+     * transfer's progress (vc184 A3, [viewerContentDuringTransfer]): a
+     * background download runs behind the viewer, it does not hijack it —
+     * before this, tapping Download while a video played swapped the player
+     * for a "Preparing… 0 B" screen until the transfer ended.
      */
     fun contentFor(file: DriveFile): StateFlow<PreviewContent> =
         contentCache.getOrPut(file.id) {
@@ -237,15 +250,8 @@ class PreviewViewModel(
             }
                 .distinctUntilChanged()
                 .flatMapLatest { (latest, incoming) ->
-                    if (incoming != null) {
-                        flowOf(
-                            PreviewContent.DownloadProgress(
-                                transferred = incoming.transferredBytes,
-                                total = incoming.sizeBytes
-                            )
-                        )
-                    } else {
-                        contentResolver.resolve(latest)
+                    contentResolver.resolve(latest).map { resolved ->
+                        viewerContentDuringTransfer(resolved, incoming)
                     }
                 }
                 .onEach { content ->
@@ -759,6 +765,8 @@ class PreviewViewModel(
         val entry = listing.getOrNull(entryIndex) ?: return
         archivePreviewJob?.cancel()
         archivePreviewJob = null
+        // vc184 A4: settling on a video page settles the repair record too.
+        archivePagerSettledPosition = pagerPosition
         val previous = _uiState.value.archivePreview
         _uiState.update {
             it.copy(
@@ -825,6 +833,11 @@ class PreviewViewModel(
         val entry = listing.getOrNull(entryIndex) ?: return
         val action = archiveEntryTapAction(entry)
         if (action == ArchiveEntryTapAction.DOWNLOAD) return
+        // vc184 A4: a load started for a page IS a settle on that page (list
+        // tap, pager step, placeholder Play, or the settled-page repair), so
+        // the repair's settled record follows it even when the pager's own
+        // emission for this position was already consumed.
+        archivePagerSettledPosition = pagerPosition
         val occurrence = archiveEntryOccurrence(listing, entryIndex)
         if (occurrence < 0) return
         val displayName = archiveEntryDisplayName(entry)
@@ -1009,7 +1022,53 @@ class PreviewViewModel(
             }
         }
         archivePreviewJob = job
+        // vc184 A4: every load that ends — landed, failed, superseded or
+        // cancelled — re-checks the settled page. A load that was interrupted
+        // mid-flight (superseded by a later switch, or cancelled by a swipe
+        // back through the published page) used to be the settled page's ONLY
+        // chance: the pager's settle emission that started it was already
+        // consumed, so nothing ever re-asked for that page and it stayed on
+        // its loading/blank state forever. The repair restarts the settled
+        // page's load whenever no load is running and the settled page is
+        // not the published one. A genuinely FAILED load completes normally
+        // (no CancellationException) and is NOT retried here — its step
+        // failure already resynced the pager to the published page, whose
+        // position is by then the settled one, so the repair no-ops.
+        job.invokeOnCompletion { cause ->
+            if (cause is CancellationException) repairSettledArchivePage()
+        }
         job.start()
+    }
+
+    /**
+     * The settled-page guarantee (vc184 A4): if the user has settled on a
+     * pager page that is not the published preview, and no preview load is
+     * running, start that page's load now (a video page gets its placeholder,
+     * exactly as a fresh step would). Called when an interrupted load
+     * completes; the guards make it a no-op in every healthy state — preview
+     * closed, settled == published, a newer load already running, or the
+     * settled position outside the open sequence. The step itself keeps the
+     * existing busy-slot refusal, so a download-owned busy mark still resyncs
+     * instead of extracting.
+     */
+    private fun repairSettledArchivePage() {
+        val state = _uiState.value
+        if (state.archivePreview == null) return
+        val settled = archivePagerSettledPosition
+        if (settled < 0 || settled == state.archivePreviewPosition) return
+        if (settled !in state.archivePreviewEntries.indices) return
+        if (archivePreviewJob?.isActive == true) return
+        viewModelScope.launch {
+            // Re-check inside the launched step: state may have moved on
+            // (a fresh step, a publish, a dismissal) since the completion
+            // handler read it.
+            val current = _uiState.value
+            if (current.archivePreview == null) return@launch
+            if (archivePagerSettledPosition != settled) return@launch
+            if (settled == current.archivePreviewPosition) return@launch
+            if (archivePreviewJob?.isActive == true) return@launch
+            stepArchivePreview(settled - current.archivePreviewPosition)
+        }
     }
 
     /**
@@ -1021,6 +1080,11 @@ class PreviewViewModel(
     fun onArchivePreviewPageSelected(position: Int) {
         val state = _uiState.value
         if (state.archivePreview == null) return
+        // vc184 A4: record where the user settled BEFORE any branch — the
+        // settle-back branch below cancels the in-flight load, and the
+        // settled-page repair needs to know the user's final position was
+        // reported here even when this call starts no load itself.
+        archivePagerSettledPosition = position
         if (position == state.archivePreviewPosition) {
             if (archivePreviewJob?.isActive == true) {
                 archivePreviewJob?.cancel()
@@ -1117,6 +1181,7 @@ class PreviewViewModel(
         val preview = _uiState.value.archivePreview
         archivePreviewJob?.cancel()
         archivePreviewJob = null
+        archivePagerSettledPosition = -1
         _uiState.update {
             it.copy(
                 archivePreview = null,
