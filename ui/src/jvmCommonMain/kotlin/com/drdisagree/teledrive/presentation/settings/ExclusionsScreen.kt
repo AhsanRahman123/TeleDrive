@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.drdisagree.teledrive.domain.model.Exclusion
 import com.drdisagree.teledrive.domain.model.ExclusionType
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
 import com.drdisagree.teledrive.presentation.components.ConfirmDialog
@@ -127,6 +128,9 @@ fun ExclusionsScreen(
             onDismiss = { exclusionToRemove = null }
         )
     }
+
+    // P2 (1.6.26): Esc is a back key here too, not only the top-bar button.
+    AppBackHandler { onBack() }
 
     val listState = rememberLazyListState()
     val lifted by rememberToolbarLift(listState)

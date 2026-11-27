@@ -58,6 +58,7 @@ import com.drdisagree.teledrive.domain.repository.StorageExplorerEntry
 import com.drdisagree.teledrive.domain.repository.StorageExplorerRepository
 import com.drdisagree.teledrive.domain.repository.StorageExplorerRoot
 import com.drdisagree.teledrive.domain.repository.StorageExplorerSnapshot
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
 import com.drdisagree.teledrive.presentation.platform.LocalFileSharer
@@ -231,6 +232,13 @@ fun StorageExplorerScreen(modifier: Modifier = Modifier) {
             currentPath = File(currentPath).parentFile?.path ?: root.path
         }
         selectedPaths = emptySet()
+    }
+
+    // P2 (1.6.26): Esc runs the same step as the "Up" button while inside a
+    // root (the button itself is hidden while searching, so Esc is too);
+    // at the roots list the host section's own back handler leaves.
+    AppBackHandler(enabled = currentRootId != null && search.isBlank()) {
+        navigateUp()
     }
 
     fun deleteSelected() {

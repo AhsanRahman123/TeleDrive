@@ -9,4 +9,13 @@ object DesktopPlatformScreens : PlatformScreens {
     override fun Preview(onBack: () -> Unit, onEditNote: (String, String) -> Unit) {
         DesktopPreviewScreen(onBack = onBack, onEditNote = onEditNote)
     }
+
+    @Composable
+    override fun LocalPreview(localPath: String, displayName: String, onBack: () -> Unit) {
+        DesktopLocalPreviewScreen(
+            localPath = localPath,
+            displayName = displayName,
+            onBack = onBack
+        )
+    }
 }

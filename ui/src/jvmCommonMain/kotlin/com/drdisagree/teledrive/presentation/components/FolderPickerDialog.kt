@@ -39,7 +39,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.drdisagree.teledrive.domain.model.DriveFolder
+import com.drdisagree.teledrive.presentation.platform.LocalPlatformCapabilities
 import com.drdisagree.teledrive.resources.Res
 import com.drdisagree.teledrive.resources.common_cancel
 import com.drdisagree.teledrive.resources.common_create
@@ -67,10 +69,19 @@ fun FolderPickerDialog(
     var currentId by remember { mutableStateOf<String?>(null) }
     var naming by remember { mutableStateOf(false) }
     val children = childrenOf(currentId).filterNot { it.id in excludedFolderIds }
+    // P2 (1.6.26): on desktop, Escape runs this dialog's back ladder (up
+    // one level, dismiss only at the root) instead of dismissing outright.
+    val desktopKeys = !LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.backspaceUp(currentId?.let { id -> { currentId = parentOf(id) } }),
+        properties = DialogProperties(dismissOnBackPress = !desktopKeys),
+        modifier = Modifier
+            .backspaceUp(currentId?.let { id -> { currentId = parentOf(id) } })
+            .dialogEscapeBack(desktopKeys) {
+                val id = currentId
+                if (id != null) currentId = parentOf(id) else onDismiss()
+            },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (currentId != null) {

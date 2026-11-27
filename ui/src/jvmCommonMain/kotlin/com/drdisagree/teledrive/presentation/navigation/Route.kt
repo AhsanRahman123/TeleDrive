@@ -51,6 +51,10 @@ sealed interface Route {
         val sortDescending: Boolean = false
     ) : Route
 
+    /** A saved local file with no drive file row (a completed Transfers archive row). */
+    @Serializable
+    data class LocalPreview(val localPath: String, val displayName: String) : Route
+
     @Serializable
     data object Transfers : Route
 

@@ -203,6 +203,37 @@ class PreviewContentResolver(
         }
         .flowOn(dispatchers.io)
 
+    /**
+     * Preview an arbitrary saved local file (a completed Transfers row with
+     * no drive file id, e.g. an in-ZIP download — PC 1.6.26 P6, ported from
+     * Android vc181). The mime/category are derived from [displayName]
+     * alone, then the exact same local dispatch as the Files preview runs.
+     * A stale path whose file was deleted fails cleanly with
+     * [Res.string.preview_no_copy_available] instead of crashing or hanging
+     * in a renderer.
+     */
+    fun resolveLocalPath(path: String, displayName: String): Flow<PreviewContent> = flow {
+        emit(PreviewContent.Loading)
+        if (!File(path).exists()) {
+            emit(PreviewContent.Failed(Res.string.preview_no_copy_available))
+            return@flow
+        }
+        val mimeType = MimeTypes.fromFileName(displayName)
+        emit(
+            fromLocal(
+                mimeType = mimeType,
+                category = FileCategory.fromMimeType(mimeType),
+                fileName = displayName,
+                path = path
+            )
+        )
+    }
+        .catch { failure ->
+            SafeLog.w(TAG, "Local preview failed", failure)
+            emit(PreviewContent.Failed(Res.string.preview_fetch_failed))
+        }
+        .flowOn(dispatchers.io)
+
     private fun captureVideoFrame(file: DriveFile, parts: List<MediaPart>) {
         if (!file.isEncrypted || file.category != FileCategory.VIDEO) return
         scope.launch {

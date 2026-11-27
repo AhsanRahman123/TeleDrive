@@ -230,6 +230,7 @@ import com.drdisagree.teledrive.presentation.platform.LocalTransferBubblePrefere
 import com.drdisagree.teledrive.presentation.platform.TransferWidgetColor
 import com.drdisagree.teledrive.presentation.platform.TransferWidgetStyle
 import com.drdisagree.teledrive.presentation.platform.PickResult
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.UiText
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.Formatters
@@ -272,6 +273,12 @@ fun SettingsSectionScreen(
             }
         }
     }
+
+    // P2 (1.6.26): Esc is a back key here too, not only the top-bar button.
+    // Sub-screens hosted below (Thumbnail Manager, Storage Explorer)
+    // register their own handlers for their internal steps; those are
+    // composed later and take precedence while they have a step to run.
+    AppBackHandler { onBack() }
 
     val scrollState = rememberScrollState()
     val lifted by rememberToolbarLift(scrollState)

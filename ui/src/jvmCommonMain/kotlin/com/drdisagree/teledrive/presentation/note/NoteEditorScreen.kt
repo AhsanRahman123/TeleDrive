@@ -69,6 +69,7 @@ import com.drdisagree.teledrive.resources.note_quote
 import com.drdisagree.teledrive.resources.note_save
 import com.drdisagree.teledrive.resources.note_strikethrough
 import com.drdisagree.teledrive.resources.note_title_hint
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.components.BottomBarSnackbarHost
 import com.drdisagree.teledrive.presentation.components.LoadingState
@@ -88,6 +89,9 @@ fun NoteEditorScreen(
 
     CollectSnackbarMessages(viewModel.messages, snackbarHostState)
     LaunchedEffect(Unit) { viewModel.saved.collect { onBack() } }
+
+    // P2 (1.6.26): Esc is a back key here too, not only the top-bar button.
+    AppBackHandler { onBack() }
 
     Scaffold(
         modifier = Modifier.imePadding(),

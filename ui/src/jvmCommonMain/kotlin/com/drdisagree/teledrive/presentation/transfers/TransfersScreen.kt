@@ -86,6 +86,7 @@ import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.domain.model.TransferType
 import com.drdisagree.teledrive.core.telegram.TelegramClient
 import kotlinx.coroutines.flow.map
+import com.drdisagree.teledrive.presentation.common.AppBackHandler
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.add
 import com.drdisagree.teledrive.presentation.components.CollectionShortcuts
@@ -153,6 +154,7 @@ import kotlinx.coroutines.launch
 fun TransfersScreen(
     onBack: () -> Unit,
     onOpenFile: (String) -> Unit = {},
+    onOpenLocalFile: (String, String) -> Unit = { _, _ -> },
     viewModel: TransfersViewModel = koinViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -187,6 +189,16 @@ fun TransfersScreen(
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedTransferIds by remember { mutableStateOf(emptySet<String>()) }
     var detailsTransfer by remember { mutableStateOf<TransferTask?>(null) }
+
+    // P2 (1.6.26): Esc runs the same back ladder as everywhere else —
+    // clear the selection first, then leave the screen.
+    AppBackHandler {
+        if (selectedTransferIds.isNotEmpty()) {
+            selectedTransferIds = emptySet()
+        } else {
+            onBack()
+        }
+    }
     var speedClock by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var draggedTransferId by remember { mutableStateOf<String?>(null) }
     var draggedOffsetY by remember { mutableStateOf(0f) }
@@ -902,9 +914,25 @@ fun TransfersScreen(
                 )
             }
             section("finished", finishedTitle, visibleCompleted, completedTotal) { transfer ->
+                // P6 (1.6.26): "Open in Pranto Drive" resolves through the
+                // same pure target Android uses — a fileId row keeps the
+                // existing preview route, but a completed archive row (no
+                // fileId, only the saved local path) now also gets the item
+                // and opens the local preview instead of being left with
+                // only Open with… / Show in folder / Details.
+                val openInAppTarget = completedTransferRowTap(transfer)
                 TransferRow(
                     transfer = transfer,
-                    onOpenInApp = transfer.fileId?.let { id -> { onOpenFile(id) } },
+                    onOpenInApp = when (openInAppTarget) {
+                        is TransferRowTapTarget.InApp -> ({ onOpenFile(openInAppTarget.fileId) })
+                        is TransferRowTapTarget.LocalPreview -> ({
+                            onOpenLocalFile(
+                                openInAppTarget.localPath,
+                                openInAppTarget.displayName
+                            )
+                        })
+                        TransferRowTapTarget.None -> null
+                    },
                     onOpenWith = transferOpenWithPath(transfer)?.takeIf { fileOpener != null }?.let { path ->
                         {
                             // Use the opener's real result: if the chooser
