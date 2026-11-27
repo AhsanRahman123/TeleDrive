@@ -2,6 +2,7 @@ package com.drdisagree.teledrive.desktop.media.player
 
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeImageBitmap
+import com.drdisagree.teledrive.core.common.SafeLog
 import java.nio.ByteBuffer
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
@@ -36,12 +37,68 @@ internal data class VideoFramePixels(
     }
 }
 
+/**
+ * Records the buffer dimensions libVLC negotiates with the callback
+ * surface (PC 1.6.27 item P3 diagnostics).
+ *
+ * A video's first play can render heavily pixelated at the wrong
+ * resolution until the file is replayed. Every app-side part of the PC
+ * pipeline is identical between a first play and a replay — same instance
+ * arguments, same surface, same start call with no per-media options,
+ * same source bytes — except ONE native step the app cannot see from
+ * code: the dimensions libVLC hands this surface's format callback when
+ * it creates the video output for a start. If a first play negotiates a
+ * smaller buffer than a replay of the same file, every frame of that
+ * play is decoded/scaled into the smaller buffer (blocky picture at a
+ * wrong resolution, cured by the replay's renegotiation). This tracker
+ * makes that step observable: [record] returns true exactly when the
+ * negotiated size changes, so the surface logs each negotiation once and
+ * one field log compares a first play's negotiated size against its
+ * replay's. A full-size negotiation on a blocky first play instead
+ * points below the surface (decoder/output), not at this seam.
+ */
+internal class NegotiatedVideoFormat {
+    @Volatile
+    private var lastWidth: Int = 0
+
+    @Volatile
+    private var lastHeight: Int = 0
+
+    /** The last negotiated size, or null before the first valid one. */
+    fun current(): Pair<Int, Int>? =
+        if (lastWidth > 0 && lastHeight > 0) lastWidth to lastHeight else null
+
+    /**
+     * Records one negotiation. Returns true when the size differs from
+     * the previously recorded one (including the first valid size);
+     * invalid sizes are ignored and never recorded.
+     */
+    @Synchronized
+    fun record(width: Int, height: Int): Boolean {
+        if (width <= 0 || height <= 0) return false
+        if (width == lastWidth && height == lastHeight) return false
+        lastWidth = width
+        lastHeight = height
+        return true
+    }
+}
+
 internal fun composeVideoSurface(
     onFrame: (MediaPlayer, VideoFramePixels) -> Unit
 ): CallbackVideoSurface {
+    val negotiatedFormat = NegotiatedVideoFormat()
     val bufferFormat = object : BufferFormatCallbackAdapter() {
-        override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat =
-            RV32BufferFormat(sourceWidth, sourceHeight)
+        override fun getBufferFormat(sourceWidth: Int, sourceHeight: Int): BufferFormat {
+            // The surface always requests the buffer at the FULL size
+            // libVLC reports for the source — it never asks for a
+            // downscale, on any play. The negotiation is logged (item
+            // P3) so a field log shows the size each start actually
+            // negotiated.
+            if (negotiatedFormat.record(sourceWidth, sourceHeight)) {
+                SafeLog.d(TAG, "VLC negotiated video buffer ${sourceWidth}x$sourceHeight")
+            }
+            return RV32BufferFormat(sourceWidth, sourceHeight)
+        }
     }
 
     val render = object : RenderCallback {
@@ -108,3 +165,4 @@ internal fun copyVideoFramePixels(
 }
 
 private const val BYTES_PER_PIXEL = 4
+private const val TAG = "ComposeVideoSurface"

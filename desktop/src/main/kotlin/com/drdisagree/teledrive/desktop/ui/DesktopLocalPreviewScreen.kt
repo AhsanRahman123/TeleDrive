@@ -1,5 +1,8 @@
 package com.drdisagree.teledrive.desktop.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -24,7 +27,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -84,9 +89,23 @@ fun DesktopLocalPreviewScreen(
     // P2: Esc is a back key on every screen, this one included.
     AppBackHandler { onBack() }
 
+    // Item P5 (PC 1.6.27): the header hides and returns together with
+    // the media player's controls, as in the main preview. Before this,
+    // the player here was composed without its
+    // onControlsVisibilityChange callback and the Scaffold top bar was
+    // unconditional, so hiding the player UI left this header floating
+    // over the video. Only the player reports here, so every non-media
+    // content keeps the header.
+    var playerChromeVisible by remember { mutableStateOf(true) }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
+            AnimatedVisibility(
+                visible = playerChromeVisible,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
             TopAppBar(
                 title = {
                     Text(
@@ -107,6 +126,7 @@ fun DesktopLocalPreviewScreen(
                     }
                 }
             )
+            }
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -135,7 +155,8 @@ fun DesktopLocalPreviewScreen(
                         mrl = current.path,
                         isAudio = current.isAudio,
                         mediaId = "local-preview-$localPath",
-                        mediaTitle = displayName
+                        mediaTitle = displayName,
+                        onControlsVisibilityChange = { playerChromeVisible = it }
                     )
                 } else {
                     OpenWithState(

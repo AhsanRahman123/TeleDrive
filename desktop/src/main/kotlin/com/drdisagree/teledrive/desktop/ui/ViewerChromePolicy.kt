@@ -1,0 +1,39 @@
+package com.drdisagree.teledrive.desktop.ui
+
+import com.drdisagree.teledrive.domain.model.FileCategory
+
+/**
+ * PC 1.6.27 item P5: whether the desktop preview's header (top bar) is
+ * visible, given each surface's own chrome state. This is the decision
+ * [DesktopPreviewScreen] applies to its top bar's AnimatedVisibility,
+ * extracted so the coupling is pinned by plain unit tests (the headless
+ * test scene has no VLC, so a real player's hide cannot be driven
+ * there — the same bound the 1.6.26 MF-1 tests document).
+ *
+ * The reference behaviour is the photo viewer and the Files-route
+ * player, which already couple header + chrome: hiding the surface's
+ * UI hides the header with it, and showing the UI brings it back.
+ * Before this round the in-zip media preview was the exception: its
+ * player reported its visibility nowhere, so an open in-zip media
+ * preview fell through to the always-visible branch and the header
+ * (and the in-zip overlay bar) stayed up over a hidden player UI.
+ *
+ * Priority order matters: a route media file's own player wins first;
+ * an open in-zip media preview (the viewed file itself is the ZIP)
+ * follows the in-zip player's chrome; a still image follows the image
+ * chrome; everything else (zip contents list, documents, text) always
+ * shows the header.
+ */
+fun previewHeaderVisible(
+    mediaCategory: FileCategory?,
+    archiveMediaPreviewOpen: Boolean,
+    fileCategory: FileCategory?,
+    playerChromeVisible: Boolean,
+    archivePlayerChromeVisible: Boolean,
+    imageChromeVisible: Boolean
+): Boolean = when {
+    mediaCategory != null -> playerChromeVisible
+    archiveMediaPreviewOpen -> archivePlayerChromeVisible
+    fileCategory == FileCategory.IMAGE -> imageChromeVisible
+    else -> true
+}

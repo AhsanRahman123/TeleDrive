@@ -42,16 +42,52 @@ internal const val MEDIA_START_TIMEOUT_MS = 10_000L
 internal fun startMediaBounded(
     player: MediaPlayer,
     mrl: String,
-    timeoutMs: Long = MEDIA_START_TIMEOUT_MS
+    timeoutMs: Long = MEDIA_START_TIMEOUT_MS,
+    beforePlay: (MediaPlayer) -> Unit = {}
 ): Boolean {
     val latch = MediaStartLatch()
     player.events().addMediaPlayerEventListener(latch)
     return try {
-        val playCalled = runCatching { player.media().play(mrl) }.getOrDefault(false)
-        playCalled && latch.await(timeoutMs)
+        boundedStartSequence(
+            beforePlay = { runCatching { beforePlay(player) } },
+            play = { runCatching { player.media().play(mrl) }.getOrDefault(false) },
+            awaitStarted = { latch.await(it) },
+            timeoutMs = timeoutMs
+        )
     } finally {
         runCatching { player.events().removeMediaPlayerEventListener(latch) }
     }
+}
+
+/**
+ * The ordering core of [startMediaBounded], separated so it is unit-testable
+ * without a native player (PC 1.6.27 item P2).
+ *
+ * [beforePlay] runs FIRST, on the caller's thread (the session's serial
+ * command executor), immediately before [play] is invoked. That ordering is
+ * the volume-ramp fix: state applied in [beforePlay] — the viewer applies
+ * the user's current volume/mute there — is already set on the native
+ * player when its audio output is created for the new media, so the first
+ * audible moment plays at the user's volume. Before this hook existed, the
+ * ONLY application was a Compose effect that ran after the playing event
+ * (plus a 250 ms delay per attempt, plus a submit queued behind this very
+ * start command on the same executor), so every start opened at libVLC's
+ * own volume and jumped when the effect landed — the field shape "starts
+ * low, plays a bit, then full volume suddenly arrives", on first play and
+ * on every file switch alike (each switch runs this same start).
+ *
+ * A failing [beforePlay] never blocks the start: the bounded await still
+ * decides the outcome exactly as the pre-P2 code did.
+ */
+internal fun boundedStartSequence(
+    beforePlay: () -> Unit,
+    play: () -> Boolean,
+    awaitStarted: (Long) -> Boolean,
+    timeoutMs: Long
+): Boolean {
+    runCatching { beforePlay() }
+    if (!play()) return false
+    return awaitStarted(timeoutMs)
 }
 
 /**
