@@ -413,7 +413,22 @@ class DesktopTwoLevelSwitchingTest {
         rule.onNodeWithText("bundle.zip").performClick()
         rule.waitForIdle()
         press(Key.E)
-        waitDisplayed("LAST FILE BODY")
+        try {
+            waitDisplayed("LAST FILE BODY")
+        } catch (failure: AssertionError) {
+            // DIAGNOSTIC PROBE (temporary): dump what the screen actually
+            // shows and what the ViewModel holds, so the next run says
+            // whether the press was lost, the index moved elsewhere, or
+            // the content never resolved.
+            val tree = rule.onRoot().printToString()
+            throw AssertionError(
+                "PROBE: alpha=${displayed("alpha.txt")} first=${displayed("FIRST FILE BODY")} " +
+                    "gamma=${displayed("gamma.mp3")} exits=${exits.get()} " +
+                    "files=${viewModel.uiState.value.files.map { it.name }} " +
+                    "preview=${viewModel.uiState.value.archivePreview} " +
+                    "tree=${tree.take(1500)}"
+            )
+        }
         assertEquals("folder-level E must not exit the viewer", 0, exits.get())
 
         // W returns to the zip, and its contents list is what shows again.
