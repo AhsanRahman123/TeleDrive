@@ -12,7 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -124,7 +124,7 @@ fun decodeGifFrames(
     try {
         val codec = Codec.makeFromData(data)
         try {
-            decodeGifFrames(codec, maxFrames, maxTotalPixels)
+            decodeGifFrames(codec, parseGifFrameRects(bytes), maxFrames, maxTotalPixels)
         } finally {
             codec.close()
         }
@@ -133,7 +133,12 @@ fun decodeGifFrames(
     }
 }.getOrNull()
 
-private fun decodeGifFrames(codec: Codec, maxFrames: Int, maxTotalPixels: Long): GifFrames? {
+private fun decodeGifFrames(
+    codec: Codec,
+    frameRects: List<GifFrameRect>,
+    maxFrames: Int,
+    maxTotalPixels: Long
+): GifFrames? {
     val width = codec.imageInfo.width
     val height = codec.imageInfo.height
     if (width <= 0 || height <= 0) return null
@@ -171,17 +176,24 @@ private fun decodeGifFrames(codec: Codec, maxFrames: Int, maxTotalPixels: Long):
                     // A restore-to-background previous frame clears its
                     // own rectangle out of the frame it was drawn on
                     // before the next frame is drawn (GIF89a disposal 2).
+                    // The disposal comes from Skia's own frame info (the
+                    // property is `disposalMethod` in Skiko 0.150.1), but
+                    // that version declares AnimationFrameInfo.frameRect
+                    // `internal`, so the rectangle comes from our own GIF
+                    // parse (see parseGifFrameRects); when the parse has
+                    // no rectangle for the frame, fall back to the whole
+                    // canvas — over-clearing beats leaving stale pixels.
                     val previous = frameInfos.getOrNull(index - 1)
                     if (required == index - 1 &&
-                        previous?.disposalMode == AnimationDisposalMode.RESTORE_BG_COLOR
+                        previous?.disposalMethod == AnimationDisposalMode.RESTORE_BG_COLOR
                     ) {
-                        val rect = previous.frameRect
+                        val rect = frameRects.getOrNull(index - 1)
                         canvas.drawRect(
                             Rect.makeXYWH(
-                                rect.left.toFloat(),
-                                rect.top.toFloat(),
-                                rect.width.toFloat(),
-                                rect.height.toFloat()
+                                (rect?.left ?: 0).toFloat(),
+                                (rect?.top ?: 0).toFloat(),
+                                (rect?.width ?: width).toFloat(),
+                                (rect?.height ?: height).toFloat()
                             ),
                             clearPaint
                         )
@@ -191,7 +203,10 @@ private fun decodeGifFrames(codec: Codec, maxFrames: Int, maxTotalPixels: Long):
                 // through the scratch bitmap and back.
                 check(surface.readPixels(scratch, 0, 0)) { "GIF canvas readback failed" }
                 codec.readPixels(scratch, index)
-                check(surface.writePixels(scratch, 0, 0)) { "GIF canvas writeback failed" }
+                // Surface.writePixels returns Unit in Skiko 0.150.1
+                // (unlike readPixels, which returns Boolean), so there
+                // is no success flag to check here.
+                surface.writePixels(scratch, 0, 0)
                 // A raster snapshot is copy-on-write: later canvas edits
                 // can never mutate a frame already handed out.
                 val snapshot = surface.makeImageSnapshot()
@@ -199,7 +214,12 @@ private fun decodeGifFrames(codec: Codec, maxFrames: Int, maxTotalPixels: Long):
                 durations += frameInfo?.duration ?: DEFAULT_FRAME_MS
             }
             return GifFrames(
-                frames = images.map { it.asComposeImageBitmap() },
+                // Compose Multiplatform 1.12.0: asComposeImageBitmap()
+                // exists only for org.jetbrains.skia.Bitmap; the Skia
+                // Image conversion is toComposeImageBitmap(), which
+                // copies the snapshot's pixels into a Bitmap-backed
+                // ImageBitmap.
+                frames = images.map { it.toComposeImageBitmap() },
                 durationsMs = durations,
                 retainedImages = images
             )
@@ -216,6 +236,79 @@ private fun decodeGifFrames(codec: Codec, maxFrames: Int, maxTotalPixels: Long):
     } finally {
         surface.close()
     }
+}
+
+/** One frame's Image Descriptor rectangle, from [parseGifFrameRects]. */
+private data class GifFrameRect(val left: Int, val top: Int, val width: Int, val height: Int)
+
+/**
+ * Walks the GIF byte stream and returns each frame's Image Descriptor
+ * rectangle, in frame order. Skiko 0.150.1 (the version Compose
+ * Multiplatform 1.12.0 pins) declares `AnimationFrameInfo.frameRect`
+ * `internal`, so the compositing above cannot read the rectangle a
+ * restore-to-background frame must clear from Skia — but the rectangle
+ * is a fixed field of the Image Descriptor, so a small block walk
+ * recovers it exactly. Bounds-checked throughout: a malformed stream
+ * yields the rectangles found so far (possibly none) instead of
+ * throwing, and the caller falls back to the full canvas for a missing
+ * rectangle. Mirrors the byte-level parser in DesktopGifImageTest.
+ */
+private fun parseGifFrameRects(bytes: ByteArray): List<GifFrameRect> {
+    if (!hasGifHeader(bytes)) return emptyList()
+    var pos = GIF_HEADER_BYTES
+    fun u8(): Int? = if (pos < bytes.size) bytes[pos++].toInt() and 0xFF else null
+    fun u16(): Int? {
+        val lo = u8() ?: return null
+        val hi = u8() ?: return null
+        return lo or (hi shl 8)
+    }
+    fun skip(count: Int): Boolean {
+        if (count < 0 || pos + count > bytes.size) return false
+        pos += count
+        return true
+    }
+    fun skipSubBlocks(): Boolean {
+        while (true) {
+            val size = u8() ?: return false
+            if (size == 0) return true
+            if (!skip(size)) return false
+        }
+    }
+    fun colourTableSize(packed: Int): Int = 3 * (1 shl ((packed and 0x07) + 1))
+
+    // Logical Screen Descriptor: width, height, packed, background, aspect.
+    if (u16() == null || u16() == null) return emptyList()
+    val screenPacked = u8() ?: return emptyList()
+    if (u8() == null || u8() == null) return emptyList()
+    if (screenPacked and 0x80 != 0 && !skip(colourTableSize(screenPacked))) return emptyList()
+
+    val rects = ArrayList<GifFrameRect>()
+    while (pos < bytes.size) {
+        when (u8()) {
+            0x3B -> return rects // trailer
+            0x21 -> {
+                // Extension: a label, then data in sub-blocks. The
+                // Graphic Control Extension's first sub-block is its
+                // fixed 4-byte body; the generic sub-block walk covers
+                // it and every other extension (application, comment,
+                // plain text) alike.
+                if (u8() == null || !skipSubBlocks()) return rects
+            }
+            0x2C -> {
+                // Image Descriptor: left, top, width, height, packed.
+                val left = u16() ?: return rects
+                val top = u16() ?: return rects
+                val width = u16() ?: return rects
+                val height = u16() ?: return rects
+                val descPacked = u8() ?: return rects
+                if (descPacked and 0x80 != 0 && !skip(colourTableSize(descPacked))) return rects
+                if (u8() == null || !skipSubBlocks()) return rects // LZW min code size + data
+                rects += GifFrameRect(left, top, width, height)
+            }
+            else -> return rects // unknown block: stop rather than guess
+        }
+    }
+    return rects
 }
 
 /** Skia's "this frame needs no earlier frame" marker in FrameInfo.requiredFrame. */
