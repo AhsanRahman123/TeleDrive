@@ -12,8 +12,8 @@ class TextPreviewsTest {
     @Test
     fun jsonMinifiedIsPrettyPrinted() {
         val out = prettyPrintJson("""{"a":1,"b":[1,2],"c":{"d":true}}""")
-        assertTrue(out.contains("\n  \"a\": 1"), out)
-        assertTrue(out.contains("\"b\": [\n    1,\n    2\n  ]"), out)
+        assertTrue(out, out.contains("\n  \"a\": 1"))
+        assertTrue(out, out.contains("\"b\": [\n    1,\n    2\n  ]"))
     }
 
     @Test
@@ -47,9 +47,9 @@ class TextPreviewsTest {
         )
         val lines = out.lines()
         assertEquals("""<?xml version="1.0"?>""", lines[0])
-        assertTrue(lines.any { it.trim() == "<!-- note -->" }, out)
-        assertTrue(lines.any { it.trim() == "<empty/>" }, out)
-        assertTrue(lines.any { it.trim() == "<![CDATA[<raw>]]>" }, out)
+        assertTrue(out, lines.any { it.trim() == "<!-- note -->" })
+        assertTrue(out, lines.any { it.trim() == "<empty/>" })
+        assertTrue(out, lines.any { it.trim() == "<![CDATA[<raw>]]>" })
     }
 
     @Test
