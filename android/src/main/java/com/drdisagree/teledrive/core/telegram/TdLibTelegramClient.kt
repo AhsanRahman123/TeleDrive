@@ -1400,6 +1400,18 @@ class TdLibTelegramClient(
         send<TdApi.File>(
             TdApi.AddFileToDownloads(fileId, chatId, messageId, priority.coerceIn(1, 32))
         )
+        // Attaching IS the resume signal (vc186 A2): a re-attached entry can
+        // still carry is_paused from an earlier Pause all / per-row pause, and
+        // nothing else in the resume path clears it — Resume all re-queues
+        // the Room rows and restarts the worker, and this attach is where the
+        // native entry must actually start moving again. Best effort: the
+        // entry was just added, and an already-active entry treats the
+        // toggle as a no-op.
+        try {
+            send<TdApi.Ok>(TdApi.ToggleDownloadIsPaused(fileId, false))
+        } catch (_: TelegramException) {
+            // The download was still added; TDLib may drive it regardless.
+        }
     }
 
     override suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray? {
@@ -1556,12 +1568,48 @@ class TdLibTelegramClient(
     }
 
     override suspend fun pauseManagedDownload(remoteFileId: String) {
-        val file = remoteFile(remoteFileId)
+        pauseManagedDownload(remoteFile(remoteFileId))
+    }
+
+    /**
+     * vc186 A2: pause the entry the download was actually added under.
+     * [downloadDocument] adds managed downloads under the file object
+     * attached to the source message (see the note on
+     * [remoteFile] with chat/message ids: resolving the stored remote id
+     * alone can produce a valid but DIFFERENT TDLib file id). The old
+     * single-id implementation resolved that other id here, so
+     * ToggleDownloadIsPaused landed on a file with no download-list entry
+     * and the real entry kept downloading — Pause all / Cancel all changed
+     * only the Room rows in the field, exactly as before vc184. Desktop is
+     * unaffected: its download path resolves by remote id too, so its
+     * single-id pause/remove already target the right entry.
+     */
+    override suspend fun pauseManagedDownload(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ) {
+        pauseManagedDownload(remoteFile(remoteFileId, chatId, messageId))
+    }
+
+    private suspend fun pauseManagedDownload(file: TdApi.File) {
         send<TdApi.Ok>(TdApi.ToggleDownloadIsPaused(file.id, true))
     }
 
     override suspend fun removeManagedDownload(remoteFileId: String) {
-        val file = remoteFile(remoteFileId)
+        removeManagedDownload(remoteFile(remoteFileId))
+    }
+
+    /** vc186 A2: the cancel-side twin of the source-aware pause above. */
+    override suspend fun removeManagedDownload(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ) {
+        removeManagedDownload(remoteFile(remoteFileId, chatId, messageId))
+    }
+
+    private suspend fun removeManagedDownload(file: TdApi.File) {
         evictManagedDownloadCache(
             removeFromDownloadList = {
                 send<TdApi.Ok>(TdApi.RemoveFileFromDownloads(file.id, true))

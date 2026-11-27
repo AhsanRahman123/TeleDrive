@@ -195,8 +195,34 @@ interface TelegramClient {
     /** Pauses a file already submitted to TDLib's persistent download queue. */
     suspend fun pauseManagedDownload(remoteFileId: String)
 
+    /**
+     * Source-aware [pauseManagedDownload]: a managed download is added to
+     * TDLib's list under the file object attached to its source message, and
+     * a platform whose download path resolves that message-attached file
+     * must pause the entry through the SAME resolution — the file id
+     * obtained from the remote id alone can be a different TDLib file object
+     * that owns no download-list entry, so toggling it silently leaves the
+     * real entry downloading (vc186 A2: this was Android's Pause all /
+     * Cancel all field failure — its download path resolves from the
+     * message, its pause/remove resolved from the remote id only). The
+     * default ignores the source ids, for platforms whose add and
+     * pause/remove already resolve identically (desktop).
+     */
+    suspend fun pauseManagedDownload(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ) = pauseManagedDownload(remoteFileId)
+
     /** Removes a file from TDLib's persistent download queue and deletes its TDLib cache copy. */
     suspend fun removeManagedDownload(remoteFileId: String)
+
+    /** Source-aware [removeManagedDownload]; see [pauseManagedDownload]. */
+    suspend fun removeManagedDownload(
+        remoteFileId: String,
+        chatId: Long?,
+        messageId: Long?
+    ) = removeManagedDownload(remoteFileId)
 
     /** Telegram's own generated preview, for files with no local copy; null when there is none. */
     suspend fun fetchThumbnail(chatId: Long, messageId: Long): ByteArray?

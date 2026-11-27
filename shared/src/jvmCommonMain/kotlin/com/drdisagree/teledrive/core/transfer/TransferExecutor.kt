@@ -686,7 +686,12 @@ class TransferExecutor(
                             if (outcome == TransferOutcome.Completed) {
                                 runCatching {
                                     if (managedDownload) {
-                                        telegramClient.removeManagedDownload(remoteFileId)
+                                        // Source-aware (vc186 A2): remove the entry
+                                        // under the same message-attached file this
+                                        // execution added it with.
+                                        telegramClient.removeManagedDownload(
+                                            remoteFileId, sourceChatId, sourceMessageId
+                                        )
                                     } else {
                                         telegramClient.deleteLocalCopy(remoteFileId)
                                     }
@@ -711,10 +716,17 @@ class TransferExecutor(
                             TransferState.PAUSED,
                             TransferState.QUEUED
                         ) -> runCatching {
-                            telegramClient.pauseManagedDownload(remoteFileId)
+                            // Source-aware (vc186 A2), like the repository's
+                            // pause: the reconcile must pause the entry this
+                            // execution added, under its message-attached file.
+                            telegramClient.pauseManagedDownload(
+                                remoteFileId, sourceChatId, sourceMessageId
+                            )
                         }
                         !e.paused -> runCatching {
-                            telegramClient.removeManagedDownload(remoteFileId)
+                            telegramClient.removeManagedDownload(
+                                remoteFileId, sourceChatId, sourceMessageId
+                            )
                         }
                     }
                 }

@@ -270,6 +270,115 @@ class TransferQueueControlsTest {
         Unit
     }
 
+    // ------------------------------------------------------- vc186 A2
+
+    /**
+     * The vc184 field failure, at the seam the vc184 tests could not see:
+     * production pause/cancel must reach TDLib through the SOURCE-AWARE
+     * client calls, carrying the chat/message identity the download was
+     * added under. The Android client adds managed downloads under the
+     * message-attached file object; resolving the native entry from the
+     * remote id alone can land on a different TDLib file that owns no
+     * download-list entry, so a pause/remove addressed that way silently
+     * leaves the real entry downloading. These tests pin the repository +
+     * executor side of that contract: every bulk/per-row native call goes
+     * out source-aware, with the row's own source ids (harness files all
+     * live at chat 1, message 10).
+     */
+    @Test
+    fun `pause all pauses native downloads through their source message identity`() =
+        runBlocking {
+            val h = Harness(concurrency = 1)
+            h.addFile("f1", size = 10_000); h.addRow("run", "f1", TransferState.QUEUED, createdAt = 1)
+            h.addFile("f2", size = 10_000); h.addRow("queued", "f2", TransferState.QUEUED, createdAt = 2)
+            h.telegram.script = { remote -> h.hangingFlow(remote) }
+
+            h.scheduler.kick(true)
+            awaitTrue { h.dao.byId("run")!!.state == TransferState.RUNNING }
+
+            h.repository.pauseAll()
+
+            assertEquals(TransferState.PAUSED, h.dao.byId("run")!!.state)
+            assertEquals(TransferState.PAUSED, h.dao.byId("queued")!!.state)
+            // Both rows' native entries were paused via the source-aware
+            // call — the running one AND the queued one (a queued row can
+            // already sit in TDLib's persistent list).
+            awaitTrue {
+                h.telegram.pausedWithSource.containsAll(
+                    listOf(Triple("r-f1", 1L, 10L), Triple("r-f2", 1L, 10L))
+                )
+            }
+            Unit
+        }
+
+    @Test
+    fun `cancel all removes native entries for failed rows whose downloads live only in tdlib`() =
+        runBlocking {
+            val h = Harness(concurrency = 1)
+            h.addFile("f1", size = 10_000); h.addRow("run", "f1", TransferState.QUEUED, createdAt = 1)
+            // A FAILED row: its execution already ended, but a native entry
+            // can still be downloading inside TDLib (e.g. the stall timeout
+            // fired while TDLib kept pulling bytes). It is in neither the
+            // active queue nor any running executor — Cancel all must still
+            // remove its native entry.
+            h.addFile("f2", size = 10_000); h.addRow("failed", "f2", TransferState.FAILED, createdAt = 2)
+            h.telegram.script = { remote -> h.hangingFlow(remote) }
+
+            h.scheduler.kick(true)
+            awaitTrue { h.dao.byId("run")!!.state == TransferState.RUNNING }
+
+            h.repository.cancelAll()
+
+            assertEquals(TransferState.CANCELLED, h.dao.byId("run")!!.state)
+            assertEquals(TransferState.CANCELLED, h.dao.byId("failed")!!.state)
+            awaitTrue {
+                h.telegram.removedWithSource.containsAll(
+                    listOf(Triple("r-f1", 1L, 10L), Triple("r-f2", 1L, 10L))
+                )
+            }
+            Unit
+        }
+
+    @Test
+    fun `pausing a running download reconciles its native entry through the source identity`() =
+        runBlocking {
+            val h = Harness(concurrency = 1)
+            h.addFile("f1", size = 10_000); h.addRow("run", "f1", TransferState.QUEUED, createdAt = 1)
+            h.telegram.script = { remote -> h.hangingFlow(remote) }
+
+            h.scheduler.kick(true)
+            awaitTrue { h.dao.byId("run")!!.state == TransferState.RUNNING }
+            awaitTrue { h.telegram.started.contains("r-f1") }
+
+            h.repository.pause("run")
+
+            assertEquals(TransferState.PAUSED, h.dao.byId("run")!!.state)
+            // The repository's pause and the stopped executor's reconcile
+            // both address the native entry source-aware.
+            awaitTrue { h.telegram.pausedWithSource.contains(Triple("r-f1", 1L, 10L)) }
+            awaitTrue { h.telegram.stopped.contains("r-f1") }
+            Unit
+        }
+
+    @Test
+    fun `a completed download is removed from the native list through the source identity`() =
+        runBlocking {
+            val h = Harness(concurrency = 1)
+            h.addFile("f1", size = 10_000); h.addRow("dl", "f1", TransferState.QUEUED, createdAt = 1)
+            h.telegram.script = { _ ->
+                flow {
+                    emit(TelegramDownloadEvent.Progress(5_000, 10_000))
+                    emit(TelegramDownloadEvent.Completed(h.payloadFile().absolutePath, 1000))
+                }
+            }
+
+            h.scheduler.kick(true)
+
+            awaitTrue { h.dao.byId("dl")!!.state == TransferState.COMPLETED }
+            awaitTrue { h.telegram.removedWithSource.contains(Triple("r-f1", 1L, 10L)) }
+            Unit
+        }
+
     // ------------------------------------------------------- MF-1 (A3 x A2)
 
     @Test
@@ -523,6 +632,8 @@ class TransferQueueControlsTest {
         val stopped = CopyOnWriteArrayList<String>()
         val removed = CopyOnWriteArrayList<String>()
         val pausedNative = CopyOnWriteArrayList<String>()
+        val pausedWithSource = CopyOnWriteArrayList<Triple<String, Long?, Long?>>()
+        val removedWithSource = CopyOnWriteArrayList<Triple<String, Long?, Long?>>()
 
         @Volatile
         var completing = false
@@ -546,6 +657,27 @@ class TransferQueueControlsTest {
 
         override suspend fun removeManagedDownload(remoteFileId: String) {
             removed += remoteFileId
+        }
+
+        // vc186 A2: the production repository/executor call the SOURCE-AWARE
+        // variants, so the fake records them separately (and mirrors them
+        // into the plain lists the vc184 assertions read).
+        override suspend fun pauseManagedDownload(
+            remoteFileId: String,
+            chatId: Long?,
+            messageId: Long?
+        ) {
+            pausedNative += remoteFileId
+            pausedWithSource += Triple(remoteFileId, chatId, messageId)
+        }
+
+        override suspend fun removeManagedDownload(
+            remoteFileId: String,
+            chatId: Long?,
+            messageId: Long?
+        ) {
+            removed += remoteFileId
+            removedWithSource += Triple(remoteFileId, chatId, messageId)
         }
 
         override suspend fun deleteLocalCopy(remoteFileId: String) = Unit
