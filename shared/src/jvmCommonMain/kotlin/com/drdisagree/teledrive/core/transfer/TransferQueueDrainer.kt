@@ -58,7 +58,26 @@ class TransferQueueDrainer(
 
     fun isPauseHeld(): Boolean = pauseHold
 
+    /**
+     * Serializes drains (vc184 A2): a replacement drain must not observe the
+     * previous drain's teardown window — executing entries already removed,
+     * claimed rows not yet requeued by the cancellation recovery — or it
+     * finds nothing to claim, exits, and the rows the recovery then requeues
+     * are stranded with no drain to run them. Holding this mutex for the
+     * whole drain (recovery included) means a new drain only ever starts
+     * from the recovered state.
+     */
+    private val drainMutex = Mutex()
+
     suspend fun drain(
+        isStopped: () -> Boolean,
+        onTerminalFailure: suspend (TransferEntity) -> Unit
+    ): TransferDrainResult {
+        if (pauseHold) return TransferDrainResult.COMPLETED
+        return drainMutex.withLock { drainLocked(isStopped, onTerminalFailure) }
+    }
+
+    private suspend fun drainLocked(
         isStopped: () -> Boolean,
         onTerminalFailure: suspend (TransferEntity) -> Unit
     ): TransferDrainResult {
