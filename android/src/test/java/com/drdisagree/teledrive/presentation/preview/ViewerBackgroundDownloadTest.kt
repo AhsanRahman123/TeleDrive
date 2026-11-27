@@ -4,6 +4,7 @@ import com.drdisagree.teledrive.domain.model.FileCategory
 import com.drdisagree.teledrive.domain.model.UserPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -77,15 +78,17 @@ class ViewerBackgroundDownloadTest {
                 awaitPreviewCondition("the background transfer is enqueued") {
                     transfers.enqueuedFileIds == listOf("vid-1")
                 }
-                // The transfer appearing re-runs the content pipeline; wait
-                // until it has fully re-settled on the streamed video (the
-                // second StreamedMedia emission), then assert the player
-                // content is untouched and no progress screen ever appeared
-                // after playback started.
-                awaitPreviewCondition("content re-settles on the video with the transfer active") {
-                    transfers.activeForFile.value != null &&
-                        seen.count { it is PreviewContent.StreamedMedia } >= 2
+                // The transfer becoming active re-runs the content pipeline.
+                // Wait until it is active, then give the pipeline every
+                // chance to (wrongly) react to it, and assert below that the
+                // player content is untouched. (An equal re-resolved content
+                // is conflated by the StateFlow, so a second StreamedMedia
+                // emission is not something to wait for — staying on
+                // StreamedMedia with no DownloadProgress is the property.)
+                awaitPreviewCondition("the background transfer becomes active for the file") {
+                    transfers.activeForFile.value != null
                 }
+                delay(500)
                 assertTrue(
                     "viewer content must stay the streamed video, was ${seen.lastOrNull()}",
                     seen.lastOrNull() is PreviewContent.StreamedMedia

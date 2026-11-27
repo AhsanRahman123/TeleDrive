@@ -50,9 +50,20 @@ class InZipRapidSwitchingTest {
     @get:Rule
     val folder = TemporaryFolder()
 
+    // Kept in a field: the A5 autoplay settle delay runs on Dispatchers.Main,
+    // whose test scheduler is virtual — the script advances it explicitly to
+    // simulate time passing on a settled page.
+    private val mainDispatcher = UnconfinedTestDispatcher()
+
     @Before
     fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        Dispatchers.setMain(mainDispatcher)
+    }
+
+    /** Advances the Main test scheduler past [ms] of virtual time. */
+    private fun advanceMainTime(ms: Long) {
+        mainDispatcher.scheduler.advanceTimeBy(ms)
+        mainDispatcher.scheduler.runCurrent()
     }
 
     @After
@@ -153,11 +164,12 @@ class InZipRapidSwitchingTest {
                 assertTempBytes(viewModel.uiState.value.archivePreview!!, img2)
 
                 // A5 pass-through: the burst above PASSED the video page
-                // (position 2) without settling on it. Even after waiting
+                // (position 2) without settling on it. Even after time runs
                 // well past the autoplay settle delay, the video must never
                 // have been extracted or published — the settled image page
                 // is still what is shown.
-                delay(1_000)
+                advanceMainTime(1_000)
+                delay(100)
                 run {
                     val state = viewModel.uiState.value
                     assertTrue(
@@ -179,7 +191,8 @@ class InZipRapidSwitchingTest {
                         (state.archivePreview as? ArchiveEntryPreview.Pdf)?.entryIndex == 3
                 }
                 assertTempBytes(viewModel.uiState.value.archivePreview!!, pdf)
-                delay(1_000)
+                advanceMainTime(1_000)
+                delay(100)
                 run {
                     val state = viewModel.uiState.value
                     assertTrue(
@@ -194,6 +207,9 @@ class InZipRapidSwitchingTest {
                 // published Video preview is what the player auto-plays
                 // (playWhenReady), with the verified temp on disk.
                 viewModel.onArchivePreviewPageSelected(2)
+                // Staying on the page lets the settle delay elapse, which is
+                // what starts the extraction on its own.
+                advanceMainTime(600)
                 awaitPreviewCondition("settled video autoplays without a Play tap") {
                     val state = viewModel.uiState.value
                     state.settledOn(2) &&

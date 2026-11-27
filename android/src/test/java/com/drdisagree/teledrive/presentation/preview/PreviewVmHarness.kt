@@ -46,6 +46,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -311,15 +312,19 @@ internal suspend fun awaitPreviewCondition(
     timeoutMs: Long = 20_000,
     condition: () -> Boolean
 ) {
-    withTimeout(timeoutMs) {
-        while (!condition()) {
-            uncaughtThrowables.firstOrNull()?.let { throwable ->
-                throw AssertionError(
-                    "uncaught exception while waiting for '$description':\n" +
-                        throwable.stackTraceToString()
-                )
+    try {
+        withTimeout(timeoutMs) {
+            while (!condition()) {
+                uncaughtThrowables.firstOrNull()?.let { throwable ->
+                    throw AssertionError(
+                        "uncaught exception while waiting for '$description':\n" +
+                            throwable.stackTraceToString()
+                    )
+                }
+                delay(10)
             }
-            delay(10)
         }
+    } catch (e: TimeoutCancellationException) {
+        throw AssertionError("timed out waiting for '$description'")
     }
 }
