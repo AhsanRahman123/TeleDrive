@@ -169,6 +169,7 @@ import com.drdisagree.teledrive.resources.files_search
 import com.drdisagree.teledrive.resources.files_sort
 import com.drdisagree.teledrive.resources.picker_selected_count
 import com.drdisagree.teledrive.resources.preview_archive_download_selected
+import com.drdisagree.teledrive.resources.preview_archive_downloads_queued
 import com.drdisagree.teledrive.resources.preview_archive_entry_saving
 import com.drdisagree.teledrive.resources.files_copy_to
 import com.drdisagree.teledrive.resources.files_move_here
@@ -449,12 +450,14 @@ fun PreviewScreen(
                     onChromeRequested = { visible -> chromeVisible = visible },
                     playerSession = playerSession,
                     onArchiveEntryDownload = { entryIndex -> viewModel.downloadArchiveEntry(file, entryIndex) },
+
                     onArchiveEntryTap = { entryIndex -> viewModel.onArchiveEntryTap(file, entryIndex) },
                     onArchiveDownloadSelected = { entries, folders ->
                         viewModel.downloadArchiveSelection(file, entries, folders)
                     },
                     archiveEntryBusyIndex = state.archiveEntryBusyIndex,
                     archiveBatchProgress = state.archiveBatchProgress,
+                    archiveQueuedDownloads = state.archiveQueuedDownloads,
                     archiveSortField = archiveSort.first,
                     archiveSortDirection = archiveSort.second,
                     onArchiveSortChange = viewModel::setArchiveSort,
@@ -653,7 +656,9 @@ fun PreviewScreen(
                     videoQueueLastIndex = state.archiveVideoQueue.lastIndex,
                     onDownload = viewModel::downloadCurrentArchiveEntry,
                     onInfo = viewModel::showArchiveEntryInfo,
-                    downloadBusy = state.archiveEntryBusyIndex != null,
+                    // Not gated on the busy index (vc183 N8): the overlay's
+                    // Download queues behind a running extraction in the
+                    // ViewModel instead of being disabled/dropped.
                     dataSourceFactory = dataSourceFactory,
                     onDismiss = stepBack
                 )
@@ -756,6 +761,7 @@ private fun PreviewPage(
     onArchiveDownloadSelected: (Set<Int>, Set<String>) -> Unit,
     archiveEntryBusyIndex: Int?,
     archiveBatchProgress: ArchiveBatchProgress?,
+    archiveQueuedDownloads: Int = 0,
     archiveSortField: FileSortField,
     archiveSortDirection: SortDirection,
     onArchiveSortChange: (FileSortField, SortDirection) -> Unit,
@@ -930,6 +936,7 @@ private fun PreviewPage(
             archiveFile = if (content.remote) file else null,
             busyEntryIndex = archiveEntryBusyIndex,
             batchProgress = archiveBatchProgress,
+            queuedDownloads = archiveQueuedDownloads,
             onEntryTap = onArchiveEntryTap,
             onEntryDownload = onArchiveEntryDownload,
             onDownloadSelected = onArchiveDownloadSelected,
@@ -1194,6 +1201,7 @@ private fun ArchiveList(
     archiveFile: DriveFile? = null,
     busyEntryIndex: Int? = null,
     batchProgress: ArchiveBatchProgress? = null,
+    queuedDownloads: Int = 0,
     onEntryTap: (Int) -> Unit = {},
     onEntryDownload: (Int) -> Unit = {},
     onDownloadSelected: (Set<Int>, Set<String>) -> Unit = { _, _ -> },
@@ -1468,6 +1476,22 @@ private fun ArchiveList(
                                 modifier = Modifier.padding(top = 4.dp)
                             )
                         }
+                        if (queuedDownloads > 0) {
+                            // Downloads tapped while an extraction runs are
+                            // queued in the ViewModel, not dropped (vc183 N8,
+                            // ported from PC 1.6.24 note 2); the header says
+                            // how many are waiting, in the same small-line
+                            // style as the batch progress above.
+                            Text(
+                                text = stringResource(
+                                    Res.string.preview_archive_downloads_queued,
+                                    queuedDownloads
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1500,7 +1524,11 @@ private fun ArchiveList(
                         }
                     },
                     onDownloadClick = {
-                        if (!busy) entryIndex?.let(onEntryDownload)
+                        // No busy gate (vc183 N8): a download tapped while an
+                        // extraction runs queues in the ViewModel instead of
+                        // being silently dropped. Row taps that would PREVIEW
+                        // still wait while busy, exactly as before.
+                        entryIndex?.let(onEntryDownload)
                     },
                     onToggleSelection = {
                         if (row.node.isDirectory) {
@@ -1601,7 +1629,9 @@ private fun ArchiveList(
                         Text(stringResource(Res.string.common_select_all))
                     }
                     Button(
-                        enabled = !busy,
+                        // Always enabled while shown (vc183 N8): the batch
+                        // queues behind any running extraction in the
+                        // ViewModel instead of the tap being dropped.
                         onClick = {
                             val entries = selectedEntries
                             val folders = selectedFolders

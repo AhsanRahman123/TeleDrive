@@ -55,8 +55,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -301,14 +303,152 @@ class PreviewViewModel(
     }
 
     /**
+     * One accepted in-ZIP download request. Requests run strictly one at a time, in
+     * acceptance order, through [drainArchiveDownloadQueue]: ranged reads on one
+     * archive fileId share one Telegram window, so extractions of the same archive
+     * must stay serialised even though starting them is no longer blocked (ported
+     * from PC 1.6.24 note 2 — the old code early-returned while any download ran,
+     * which silently dropped the tap for the whole duration of a download).
+     */
+    private sealed interface ArchiveDownloadRequest {
+        val file: DriveFile
+
+        /** A single entry, saved flat like a tap-download. */
+        data class Single(
+            override val file: DriveFile,
+            val step: ArchiveDownloadStep,
+            val displayName: String,
+            val sizeBytes: Long
+        ) : ArchiveDownloadRequest
+
+        /** A Download-selected batch: [plan] steps over the listing snapshot [listing]. */
+        data class Batch(
+            override val file: DriveFile,
+            val listing: List<ArchiveEntry>,
+            val plan: List<ArchiveDownloadStep>
+        ) : ArchiveDownloadRequest
+    }
+
+    private val archiveDownloadQueue = ArrayDeque<ArchiveDownloadRequest>()
+    private var archiveDownloadProcessor: Job? = null
+
+    /**
+     * The single serialisation gate for EVERY archive extraction of this
+     * viewer — queued downloads AND previews (MF-1, report 54 second pass,
+     * ported with the fix, not the pre-fix design). [RemoteArchiveService]
+     * has no internal lock and all extractions of one archive share the one
+     * TDLib window for its fileId, so two extractions must never run at once
+     * on either axis:
+     *  - the queue processor [Mutex.lock]s the gate before running a request,
+     *    so a download waits while a preview extraction is in flight;
+     *  - a preview load [Mutex.lock]s the gate as the first step of its job
+     *    (see loadArchivePreview), so it can never run concurrently with a
+     *    download either; the entry points keep their existing busy-index
+     *    refusals, so a preview tap while a download runs is still dropped
+     *    exactly as before — the gate closes the race where a just-tapped
+     *    preview had launched but not yet marked anything.
+     * Each holder passes a unique owner token, and the downloads' busy index
+     * is only ever cleared by its owner ([clearArchiveBusy]), so one
+     * extraction's teardown can no longer wipe the other's busy mark.
+     */
+    private val archiveExtractionMutex = Mutex()
+    private var archiveBusyOwner: Any? = null
+    private val archiveBusyLock = Any()
+
+    /** Marks [entryIndex] busy on behalf of [owner] (the gate holder). */
+    private fun markArchiveBusy(owner: Any, entryIndex: Int) {
+        synchronized(archiveBusyLock) { archiveBusyOwner = owner }
+        _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
+    }
+
+    /** Clears the busy index only if [owner] is the one who set it. */
+    private fun clearArchiveBusy(owner: Any) {
+        val owns = synchronized(archiveBusyLock) {
+            if (archiveBusyOwner === owner) {
+                archiveBusyOwner = null
+                true
+            } else {
+                false
+            }
+        }
+        if (owns) _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+    }
+
+    /**
+     * Accepts a download request: it is queued behind any running request and its
+     * start message is emitted immediately (the message carries the View ->
+     * Transfers action, so it must be on screen from the moment the download is
+     * accepted, not only when it completes — the vc180 instant-View behaviour,
+     * extended from the running case to the queued case). The Transfers record
+     * is deliberately NOT created here: records are created when a request
+     * actually starts running, so a queued request has no record to cancel yet
+     * and the history never shows work that has not begun.
+     */
+    private fun enqueueArchiveDownload(request: ArchiveDownloadRequest, startedMessage: UiText) {
+        // The add and the processor liveness check are one locked step with the
+        // drain loop's exit decision, so a request can never land in the gap
+        // between the processor seeing an empty queue and it finishing.
+        synchronized(archiveDownloadQueue) {
+            archiveDownloadQueue.addLast(request)
+            if (archiveDownloadProcessor?.isActive != true) {
+                archiveDownloadProcessor = viewModelScope.launch { drainArchiveDownloadQueue() }
+            }
+        }
+        publishArchiveQueueDepth()
+        _messages.tryEmit(startedMessage)
+    }
+
+    private fun publishArchiveQueueDepth() {
+        val depth = synchronized(archiveDownloadQueue) { archiveDownloadQueue.size }
+        _uiState.update { it.copy(archiveQueuedDownloads = depth) }
+    }
+
+    /** Runs queued requests one at a time until the queue is empty. */
+    private suspend fun drainArchiveDownloadQueue() {
+        while (true) {
+            val request = synchronized(archiveDownloadQueue) {
+                val next = archiveDownloadQueue.removeFirstOrNull()
+                if (next == null) archiveDownloadProcessor = null
+                next
+            } ?: return
+            publishArchiveQueueDepth()
+            // Per-request isolation (MF-2): one request failing outside its
+            // own inner catches must never kill the processor and strand the
+            // requests still queued behind it. The failure is surfaced and
+            // the loop CONTINUES with the next request; only a cancellation
+            // of the processor's own context propagates.
+            val owner = Any()
+            try {
+                // MF-1: hold the extraction gate for the whole request, so a
+                // download never runs concurrently with a preview extraction
+                // (it waits here until the preview finishes).
+                archiveExtractionMutex.lock(owner)
+                try {
+                    when (request) {
+                        is ArchiveDownloadRequest.Single -> runArchiveSingleDownload(request, owner)
+                        is ArchiveDownloadRequest.Batch -> runArchiveBatchDownload(request, owner)
+                    }
+                } finally {
+                    archiveExtractionMutex.unlock(owner)
+                }
+            } catch (failure: CancellationException) {
+                if (!currentCoroutineContext().isActive) throw failure
+                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+            } catch (failure: Exception) {
+                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+            }
+        }
+    }
+
+    /**
      * Downloads just the entry at [entryIndex] in the stored listing out of a remotely listed
      * ZIP, saved to Downloads like a normal download. Identity is the listing index, never the
      * entry value, so duplicate names each download their own bytes. A listing that came from a
      * local-only copy has no remote source to extract from, so it gets a clear message instead
-     * of a failure.
+     * of a failure. While another download is running this one queues behind it instead of
+     * being dropped (ported from PC 1.6.24 note 2).
      */
     fun downloadArchiveEntry(file: DriveFile, entryIndex: Int) {
-        if (_uiState.value.archiveEntryBusyIndex != null) return
         val listing = _uiState.value.archiveListings[file.id]
         if (listing == null) {
             _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
@@ -320,58 +460,90 @@ class PreviewViewModel(
         // the same rule RemoteArchiveService uses to pick the entry, so both sides agree.
         val occurrence = archiveEntryOccurrence(listing, entryIndex)
         if (occurrence < 0) return
-        val displayName = entry.name.substringAfterLast('/').substringAfterLast('\\')
-            .ifBlank { entry.name }
-        viewModelScope.launch {
-            _uiState.update { it.copy(archiveEntryBusyIndex = entryIndex) }
-            // View -> Transfers from the very start, like a normal download's
-            // queued message — not only on the finished snackbar.
-            _messages.tryEmit(
-                UiText.Resource(Res.string.preview_archive_entry_saving, displayName)
+        val displayName = archiveEntryDisplayName(entry)
+        enqueueArchiveDownload(
+            request = ArchiveDownloadRequest.Single(
+                file = file,
+                step = ArchiveDownloadStep(entryIndex, entry.name, occurrence),
+                displayName = displayName,
+                sizeBytes = entry.sizeBytes
+            ),
+            startedMessage = UiText.Resource(
+                Res.string.preview_archive_entry_saving, displayName
             )
-            // Report-only Transfers history record: written before extraction starts,
-            // completed/failed/stopped alongside the extraction's own outcome.
-            val recordId = archiveDownloadReporter.begin(displayName, entry.sizeBytes)
-            currentCoroutineContext()[Job]?.let { job ->
-                archiveDownloadReporter.attach(recordId, job)
-            }
-            try {
-                val local = localArchives[file.id]
-                val savedPath = if (local != null) {
-                    localArchiveService.extractEntry(
-                        file = file,
-                        localPath = local.path,
-                        format = local.format,
-                        entryIndex = entryIndex,
-                        entryName = entry.name,
-                        onProgress = { done -> archiveDownloadReporter.progress(recordId, done) }
-                    )
-                } else {
-                    remoteArchiveService.extractEntry(
-                        file,
-                        entry.name,
-                        occurrence,
-                        onProgress = { done -> archiveDownloadReporter.progress(recordId, done) }
-                    )
+        )
+    }
+
+    /** Runs one queued single-entry download; see [downloadArchiveEntry]. */
+    private suspend fun runArchiveSingleDownload(
+        request: ArchiveDownloadRequest.Single,
+        owner: Any
+    ) {
+        val file = request.file
+        val step = request.step
+        markArchiveBusy(owner, step.entryIndex)
+        // Report-only Transfers history record: written before extraction starts,
+        // completed/failed/stopped alongside the extraction's own outcome. The
+        // begin() call lives INSIDE the try (MF-2): it is a suspending Room
+        // insert, and a throw from it must land in the catches below (recordId
+        // still null, which every reporter call tolerates) instead of escaping
+        // and killing the queue processor.
+        var recordId: String? = null
+        try {
+            recordId = archiveDownloadReporter.begin(request.displayName, request.sizeBytes)
+            // The extraction runs as a CHILD job registered under this record, so a
+            // stop from Transfers cancels only this extraction while the queue
+            // processor stays alive to run the next request — the same discipline
+            // the batch path uses per step. (Pre-queue this path attached the
+            // whole launch job; with a queue that would have killed the processor.)
+            val savedPath = coroutineScope {
+                val stepJob = async {
+                    val local = localArchives[file.id]
+                    if (local != null) {
+                        localArchiveService.extractEntry(
+                            file = file,
+                            localPath = local.path,
+                            format = local.format,
+                            entryIndex = step.entryIndex,
+                            entryName = step.entryName,
+                            onProgress = { done ->
+                                archiveDownloadReporter.progress(recordId, done)
+                            }
+                        )
+                    } else {
+                        remoteArchiveService.extractEntry(
+                            file,
+                            step.entryName,
+                            step.occurrence,
+                            onProgress = { done ->
+                                archiveDownloadReporter.progress(recordId, done)
+                            }
+                        )
+                    }
                 }
-                archiveDownloadReporter.complete(recordId, savedPath)
-                _messages.tryEmit(
-                    UiText.Resource(Res.string.preview_archive_entry_saved, displayName)
-                )
-            } catch (failure: CancellationException) {
-                // The finally block clears the busy state, so a cancelled download cannot wedge
-                // later ones; cancellation itself must keep propagating.
-                archiveDownloadReporter.ownerStopped(recordId)
-                throw failure
-            } catch (failure: ArchiveException) {
-                archiveDownloadReporter.fail(recordId, failure.message)
-                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
-            } catch (failure: Exception) {
-                archiveDownloadReporter.fail(recordId, null)
-                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
-            } finally {
-                _uiState.update { it.copy(archiveEntryBusyIndex = null) }
+                archiveDownloadReporter.attach(recordId, stepJob)
+                stepJob.await()
             }
+            archiveDownloadReporter.complete(recordId, savedPath)
+            _messages.tryEmit(
+                UiText.Resource(Res.string.preview_archive_entry_saved, request.displayName)
+            )
+        } catch (failure: CancellationException) {
+            archiveDownloadReporter.ownerStopped(recordId)
+            if (!currentCoroutineContext().isActive) {
+                // Real teardown of the queue processor itself: keep propagating.
+                // (A per-record stop from Transfers leaves this context active and
+                // falls through, so the queue continues with the next request.)
+                throw failure
+            }
+        } catch (failure: ArchiveException) {
+            archiveDownloadReporter.fail(recordId, failure.message)
+            _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
+        } catch (failure: Exception) {
+            archiveDownloadReporter.fail(recordId, null)
+            _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+        } finally {
+            clearArchiveBusy(owner)
         }
     }
 
@@ -571,7 +743,18 @@ class PreviewViewModel(
         val displayName = archiveEntryDisplayName(entry)
         archivePreviewJob?.cancel()
         val previous = _uiState.value.archivePreview
+        // MF-1 gate owner for this load: the job below holds the extraction
+        // gate for its whole extraction, so a queued download can never run
+        // concurrently with it (the queue processor locks the same mutex).
+        // A superseding load cancels this job first; its finally releases
+        // the gate and the replacement's lock() then proceeds — preview vs
+        // preview serialisation stays the existing job-cancellation one.
+        val gateOwner = Any()
         val job = viewModelScope.launch {
+            // If this job is cancelled while waiting for the gate, lock()
+            // throws before the try is entered and nothing is held.
+            archiveExtractionMutex.lock(gateOwner)
+            try {
             _uiState.update {
                 it.copy(
                     archiveEntryBusyIndex = entryIndex,
@@ -719,6 +902,9 @@ class PreviewViewModel(
                     }
                 }
             }
+            } finally {
+                archiveExtractionMutex.unlock(gateOwner)
+            }
         }
         archivePreviewJob = job
     }
@@ -857,7 +1043,6 @@ class PreviewViewModel(
         entryIndices: Set<Int>,
         folderPaths: Set<String>
     ) {
-        if (_uiState.value.archiveEntryBusyIndex != null) return
         val listing = _uiState.value.archiveListings[file.id]
         if (listing == null) {
             _messages.tryEmit(UiText.Resource(Res.string.preview_archive_local_only))
@@ -868,27 +1053,51 @@ class PreviewViewModel(
             _messages.tryEmit(UiText.Resource(Res.string.preview_archive_folder_empty))
             return
         }
-        viewModelScope.launch {
-            var saved = 0
-            _uiState.update { it.copy(archiveBatchProgress = ArchiveBatchProgress(0, plan.size)) }
-            // View -> Transfers from the very start of the batch, like a normal
-            // download's queued message — not only on the finished snackbar.
-            // The header progress display above stays exactly as it was.
-            _messages.tryEmit(
+        // While another download is running this batch queues behind it instead of
+        // being dropped (ported from PC 1.6.24 note 2); its start message fires
+        // now, at acceptance (note 5). A 1-entry batch uses the single-entry
+        // message, matching its completion-message behaviour.
+        enqueueArchiveDownload(
+            request = ArchiveDownloadRequest.Batch(file, listing, plan),
+            startedMessage = if (plan.size == 1) {
+                UiText.Resource(
+                    Res.string.preview_archive_entry_saving,
+                    archiveEntryDisplayName(listing[plan.first().entryIndex])
+                )
+            } else {
                 UiText.Resource(Res.string.preview_archive_downloading_selected, plan.size)
-            )
-            try {
-                for (step in plan) {
-                    _uiState.update { it.copy(archiveEntryBusyIndex = step.entryIndex) }
-                    val stepEntry = listing[step.entryIndex]
-                    val recordId = archiveDownloadReporter.begin(
+            }
+        )
+    }
+
+    /** Runs one queued Download-selected batch; see [downloadArchiveSelection]. */
+    private suspend fun runArchiveBatchDownload(
+        request: ArchiveDownloadRequest.Batch,
+        owner: Any
+    ) {
+        val file = request.file
+        val listing = request.listing
+        val plan = request.plan
+        var saved = 0
+        _uiState.update { it.copy(archiveBatchProgress = ArchiveBatchProgress(0, plan.size)) }
+        try {
+            for (step in plan) {
+                markArchiveBusy(owner, step.entryIndex)
+                val stepEntry = listing[step.entryIndex]
+                // MF-2: begin() inside the per-step try, like the single path —
+                // a throwing Room insert fails THIS step through the catches
+                // below (recordId still null, tolerated by every reporter
+                // call) and the batch/queue continues, instead of escaping.
+                var recordId: String? = null
+                try {
+                    recordId = archiveDownloadReporter.begin(
                         archiveEntryDisplayName(stepEntry),
                         stepEntry.sizeBytes
                     )
-                    try {
-                        // The extraction runs as a CHILD job registered under this step's
-                        // record, so a stop from Transfers cancels only this step's job
-                        // while this batch coroutine stays alive to continue with the rest.
+                    // The extraction runs as a CHILD job registered under this step's
+                    // record, so a stop from Transfers cancels only this step's job
+                    // while this batch coroutine stays alive to continue with the rest.
+                    val savedPath = coroutineScope {
                         val stepJob = async {
                             val local = localArchives[file.id]
                             if (local != null) {
@@ -916,66 +1125,65 @@ class PreviewViewModel(
                             }
                         }
                         archiveDownloadReporter.attach(recordId, stepJob)
-                        val savedPath = stepJob.await()
-                        archiveDownloadReporter.complete(recordId, savedPath)
-                        saved++
-                    } catch (failure: CancellationException) {
-                        archiveDownloadReporter.ownerStopped(recordId)
-                        if (currentCoroutineContext().isActive) {
-                            // Per-record stop from Transfers: the repository already wrote
-                            // CANCELLED or PAUSED for this record. No failure message, not
-                            // counted as saved — the batch continues with the next step.
-                        } else {
-                            // Real teardown of the batch itself: keep propagating.
-                            throw failure
-                        }
-                    } catch (failure: ArchiveException) {
-                        archiveDownloadReporter.fail(recordId, failure.message)
-                        _messages.tryEmit(
-                            UiText.Resource(
-                                Res.string.preview_archive_entry_failed,
-                                archiveEntryDisplayName(listing[step.entryIndex]),
-                                failure.message ?: "unknown error"
-                            )
-                        )
-                    } catch (failure: Exception) {
-                        archiveDownloadReporter.fail(recordId, null)
-                        _messages.tryEmit(
-                            UiText.Resource(
-                                Res.string.preview_archive_entry_failed,
-                                archiveEntryDisplayName(listing[step.entryIndex]),
-                                "unknown error"
-                            )
-                        )
+                        stepJob.await()
                     }
-                    _uiState.update {
-                        it.copy(
-                            archiveBatchProgress = ArchiveBatchProgress(
-                                (it.archiveBatchProgress?.done ?: 0) + 1,
-                                plan.size
-                            )
-                        )
+                    archiveDownloadReporter.complete(recordId, savedPath)
+                    saved++
+                } catch (failure: CancellationException) {
+                    archiveDownloadReporter.ownerStopped(recordId)
+                    if (currentCoroutineContext().isActive) {
+                        // Per-record stop from Transfers: the repository already wrote
+                        // CANCELLED or PAUSED for this record. No failure message, not
+                        // counted as saved — the batch continues with the next step.
+                    } else {
+                        // Real teardown of the batch itself: keep propagating.
+                        throw failure
                     }
-                }
-            } finally {
-                _uiState.update {
-                    it.copy(archiveEntryBusyIndex = null, archiveBatchProgress = null)
-                }
-            }
-            when {
-                saved == 0 -> _messages.tryEmit(
-                    UiText.Resource(Res.string.preview_archive_none_saved)
-                )
-                plan.size == 1 -> _messages.tryEmit(
-                    UiText.Resource(
-                        Res.string.preview_archive_entry_saved,
-                        archiveEntryDisplayName(listing[plan.first().entryIndex])
+                } catch (failure: ArchiveException) {
+                    archiveDownloadReporter.fail(recordId, failure.message)
+                    _messages.tryEmit(
+                        UiText.Resource(
+                            Res.string.preview_archive_entry_failed,
+                            archiveEntryDisplayName(listing[step.entryIndex]),
+                            failure.message ?: "unknown error"
+                        )
                     )
-                )
-                else -> _messages.tryEmit(
-                    UiText.Resource(Res.string.preview_archive_entries_saved, saved)
-                )
+                } catch (failure: Exception) {
+                    archiveDownloadReporter.fail(recordId, null)
+                    _messages.tryEmit(
+                        UiText.Resource(
+                            Res.string.preview_archive_entry_failed,
+                            archiveEntryDisplayName(listing[step.entryIndex]),
+                            "unknown error"
+                        )
+                    )
+                }
+                _uiState.update {
+                    it.copy(
+                        archiveBatchProgress = ArchiveBatchProgress(
+                            (it.archiveBatchProgress?.done ?: 0) + 1,
+                            plan.size
+                        )
+                    )
+                }
             }
+        } finally {
+            clearArchiveBusy(owner)
+            _uiState.update { it.copy(archiveBatchProgress = null) }
+        }
+        when {
+            saved == 0 -> _messages.tryEmit(
+                UiText.Resource(Res.string.preview_archive_none_saved)
+            )
+            plan.size == 1 -> _messages.tryEmit(
+                UiText.Resource(
+                    Res.string.preview_archive_entry_saved,
+                    archiveEntryDisplayName(listing[plan.first().entryIndex])
+                )
+            )
+            else -> _messages.tryEmit(
+                UiText.Resource(Res.string.preview_archive_entries_saved, saved)
+            )
         }
     }
 

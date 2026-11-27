@@ -33,7 +33,13 @@ data class PreviewUiState(
      */
     val archivePreviewResyncCount: Int = 0,
     /** Progress of a multi-entry archive download: finished steps out of the plan total. */
-    val archiveBatchProgress: ArchiveBatchProgress? = null
+    val archiveBatchProgress: ArchiveBatchProgress? = null,
+    /**
+     * Accepted-but-not-started in-ZIP download requests (ported from PC
+     * 1.6.24 note 2): downloads queue behind the running extraction instead
+     * of being dropped, and the pane header shows how many are waiting.
+     */
+    val archiveQueuedDownloads: Int = 0
 )
 
 /** An archive entry extracted to a verified temp file (or read from one) for in-place viewing. */

@@ -514,6 +514,7 @@
     <string name="preview_archive_download_selected">Download selected</string>
     <string name="preview_archive_entry_saving">Downloading %1$s…</string>
     <string name="preview_archive_downloading_selected">Downloading %1$d files…</string>
+    <string name="preview_archive_downloads_queued">%1$d more downloads queued</string>
     <string name="preview_archive_local_only">This archive is only on this device, so its files cannot be downloaded one by one. Open it after downloading the whole archive.</string>
     <string name="preview_archive_encrypted">This ZIP was encrypted by Pranto Drive when it was uploaded, so its contents cannot be browsed online. Download the whole file to open it.</string>
     <string name="preview_archive_split">This file was split by Pranto Drive into multiple Telegram parts when it was uploaded, so it is not a single file online and cannot be browsed here. Download the whole file to open it.</string>
