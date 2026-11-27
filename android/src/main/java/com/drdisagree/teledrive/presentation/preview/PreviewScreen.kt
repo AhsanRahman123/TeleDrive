@@ -1733,10 +1733,16 @@ private fun ArchiveRow(
                 modifier = Modifier.padding(end = 4.dp)
             )
         }
-        // vc182 item 6: for image entries of a remote archive, the 40dp slot shows
+        // vc182 item 6: for image entries of a remote archive, the slot shows
         // a real thumbnail once the store has one; until then (and on any failure)
         // it shows exactly the generic icon it always showed. The key is derived
         // from this row's own listing identity only — no list-level state.
+        // vc183 item 6: the slot grows 40dp -> 56dp (field request: the vc182
+        // thumbnails were right, just small). Nothing else in the row moves —
+        // same paddings, same text column, same trailing size/download column;
+        // the taller slot simply sets the row height instead of the text
+        // column's 48dp minimum. ZIP and CBZ rows share this code path, so
+        // both get the bigger slot.
         val entryIndex = node.entryIndex
         val thumbnailKey = remember(
             archiveFile?.id, entryIndex, node.sizeBytes, node.compressedBytes, node.modifiedAtMillis
@@ -1771,7 +1777,7 @@ private fun ArchiveRow(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(40.dp)
+                .size(56.dp)
                 .clip(CircleShape)
                 .background(
                     if (node.isDirectory) {

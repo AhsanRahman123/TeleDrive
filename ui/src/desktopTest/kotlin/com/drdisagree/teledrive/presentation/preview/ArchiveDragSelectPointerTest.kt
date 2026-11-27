@@ -45,8 +45,9 @@ import org.junit.Test
  * the LIST variant of rememberDragSelect with resolveNearestVisibleItem = true, a
  * LazyColumn emitting header item / data items keyed by the real archiveRowKey /
  * hint item, the preview content padding class (~100.dp top: system bars +
- * PreviewTopBarHeight 64.dp + 8.dp), Arrangement.spacedBy(4.dp), 72.dp rows (12.dp
- * vertical padding around the constant 48.dp row content), and the REAL translation
+ * PreviewTopBarHeight 64.dp + 8.dp), Arrangement.spacedBy(4.dp), 80.dp rows (12.dp
+ * vertical padding around the 56.dp row content — the vc183 item 6 thumbnail slot,
+ * previously 72.dp rows around 48.dp content), and the REAL translation
  * callbacks (archiveDragAnchorSelected / applyArchiveDragRange) over rows built by
  * the REAL tree/flatten code. The screen and this test consume ONE plan: the tree,
  * flatten, key and translation code lives in :ui (ArchiveNode.kt) and is used by
@@ -57,7 +58,7 @@ import org.junit.Test
  * before-content padding — while pointer positions are measured from the
  * container's edge and include it. DragSelect's hit tests compared the two spaces
  * directly, so every hit landed beforeContentPadding too low: with the archive's
- * ~100.dp top padding against a 76.dp row stride that is exactly one row too low,
+ * ~100.dp top padding against an 84.dp row stride that is still over one row too low,
  * and a press on the last row resolves to the trailing hint item (no row). The fix
  * translates the pointer into the items' space inside DragSelect's hit tests.
  *
@@ -164,8 +165,9 @@ class ArchiveDragSelectPointerTest {
                         Modifier
                             .fillMaxWidth()
                             .testTag("archive-row-$listIndex")
-                            // ArchiveRow: 12.dp vertical padding around 48.dp content.
-                            .height(72.dp)
+                            // ArchiveRow: 12.dp vertical padding around 56.dp content
+                            // (the vc183 item 6 thumbnail slot sets the row height).
+                            .height(80.dp)
                             // Real rows absorb the long-press as a no-op long-click.
                             .combinedClickable(onClick = {}, onLongClick = {})
                     )

@@ -18,8 +18,15 @@ object ArchiveEntryThumbnailPolicy {
     /** Entries larger than this never get a thumbnail: the fetch downloads the whole entry. */
     const val MAX_ENTRY_BYTES: Long = 20L * 1024 * 1024
 
-    /** Decode target: thumbnails are generated at at most this many pixels per side. */
-    const val THUMBNAIL_SIZE_PX: Int = 192
+    /**
+     * Decode target: thumbnails are generated at at most this many pixels per side.
+     * vc183 item 6: raised 192 -> 256 alongside the row slot's 40dp -> 56dp, and
+     * deliberately no higher — decode cost scales with this size and the smooth
+     * vc182 scrolling baseline must not regress. Cached 192px JPEGs from vc182
+     * stay valid under the same keys (they upscale marginally in the bigger
+     * slot); only newly fetched thumbnails decode at the new size.
+     */
+    const val THUMBNAIL_SIZE_PX: Int = 256
 
     /** Cache subdir (under the app cache dir) holding generated archive-entry thumbnails. */
     const val CACHE_DIR_NAME: String = "archive-thumbs"
