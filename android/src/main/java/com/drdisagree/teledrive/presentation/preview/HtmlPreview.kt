@@ -26,6 +26,7 @@ import com.drdisagree.teledrive.core.files.HtmlWebViewPolicy
 import com.drdisagree.teledrive.core.files.htmlNavigationAllowed
 import com.drdisagree.teledrive.core.files.htmlSubresourceAllowed
 import com.drdisagree.teledrive.resources.Res
+import com.drdisagree.teledrive.resources.preview_html_renderer_gone
 import com.drdisagree.teledrive.resources.preview_html_safe_mode
 import com.drdisagree.teledrive.resources.preview_truncated_download_view
 import java.io.ByteArrayInputStream

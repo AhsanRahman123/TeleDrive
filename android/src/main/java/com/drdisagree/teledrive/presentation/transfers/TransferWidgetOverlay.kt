@@ -61,7 +61,6 @@ import com.drdisagree.teledrive.resources.bubble_overall
 import com.drdisagree.teledrive.resources.bubble_show_transfers
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 
@@ -264,17 +263,26 @@ private fun Modifier.bubbleGestures(
         var upChange: PointerInputChange? = null
         var cancelled = false
         // Long-press: a motionless hold past the platform timeout hides the
-        // widget (SF-1). The timer dies the moment the press becomes a drag
-        // or ends; a fired long-press swallows the release (no click).
-        val longPressJob = launch {
-            delay(viewConfiguration.longPressTimeoutMillis)
-            if (!dragged) {
-                longPressed = true
-                onLongPress()
-            }
-        }
+        // widget (SF-1). The first wait is bounded by the long-press
+        // timeout: if it expires with the pointer still down and no drag
+        // has begun, the long-press fires; a fired long-press swallows the
+        // release (no click). Any event ends the bounded wait.
+        var awaitingLongPress = true
         while (true) {
-            val event = awaitPointerEvent()
+            val event = if (awaitingLongPress) {
+                awaitingLongPress = false
+                withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                    awaitPointerEvent()
+                } ?: run {
+                    if (!dragged) {
+                        longPressed = true
+                        onLongPress()
+                    }
+                    continue
+                }
+            } else {
+                awaitPointerEvent()
+            }
             val change = event.changes.firstOrNull { it.id == down.id }
             if (change == null) {
                 // The tracked pointer vanished without an up: a cancellation.
@@ -290,7 +298,6 @@ private fun Modifier.bubbleGestures(
                 (change.position - down.position).getDistance() > viewConfiguration.touchSlop
             ) {
                 dragged = true
-                longPressJob.cancel()
                 onDragStart()
             }
             if (dragged && delta != Offset.Zero) {
@@ -298,7 +305,6 @@ private fun Modifier.bubbleGestures(
                 change.consume()
             }
         }
-        longPressJob.cancel()
         when {
             cancelled -> if (dragged) onDragCancelled()
             upChange != null -> when {
