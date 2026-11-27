@@ -312,6 +312,22 @@ fun DesktopPreviewScreen(
     // jumped zip-to-zip through the outer folder sequence.
     var archiveStepHandler by remember { mutableStateOf<((Int) -> Boolean)?>(null) }
 
+    // The id of the file whose pane registered [archiveStepHandler]
+    // (PC 1.6.26 second-pass review, MF-2). The pane-side registration is
+    // deliberately NOT cleared on dispose (see DesktopArchivePane: during
+    // an AnimatedContent transition the outgoing pane's dispose would
+    // null the incoming pane's handler), so a disposed pane's handler can
+    // outlive its pane — a CBZ's edge pager buttons stay enabled while an
+    // entry preview is open (the buttons hide only for .zip files), so
+    // the folder can be paged away from a CBZ with its preview still
+    // open in the shared ViewModel, and the dead pane's handler would
+    // otherwise consume every later W/E and step that invisible preview.
+    // The screen therefore only invokes the handler while the file it was
+    // registered for is the currently displayed one; a stale registration
+    // is ignored (never invoked), and the next archive pane to compose
+    // overwrites it.
+    var archiveStepHandlerFileId by remember { mutableStateOf<String?>(null) }
+
     // True while a text/document viewer is composed (PC 1.6.26 item P5),
     // reported by the pane: the normal PlainText/Html contents or an in-zip
     // Text entry preview. The screen's Ctrl+plus/minus/0 routing steps the
@@ -340,6 +356,20 @@ fun DesktopPreviewScreen(
         mutableStateOf(state.initialIndex.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
     }
     val file = state.files.getOrNull(index.coerceIn(0, (state.files.size - 1).coerceAtLeast(0)))
+
+    /**
+     * Runs the registered in-zip step for [delta], but only while the
+     * pane that registered it belongs to the currently displayed file
+     * (MF-2, see [archiveStepHandlerFileId]): a stale registration left
+     * behind by a disposed pane — reachable by paging the folder away
+     * from a CBZ whose entry preview is still open — is ignored, so the
+     * press pages the folder instead of stepping the invisible preview.
+     */
+    fun invokeArchiveStep(delta: Int): Boolean {
+        val handler = archiveStepHandler ?: return false
+        if (archiveStepHandlerFileId != file?.id) return false
+        return handler(delta)
+    }
 
     val displayIndex = if (state.files.isEmpty()) 0 else index.coerceIn(0, state.files.lastIndex)
     var previewFolderName by remember { mutableStateOf("Files") }
@@ -560,6 +590,21 @@ fun DesktopPreviewScreen(
                     // was in 1.6.24; text/audio/video/PDF overlays had no
                     // Escape at all.
                     if (event.key == Key.Escape) {
+                        // MF-1 (PC 1.6.26 second-pass review): while the
+                        // player is fullscreen, Escape belongs to the
+                        // player — its own onPreviewKeyEvent exits
+                        // fullscreen (DesktopMediaPlayer). Key dispatch
+                        // runs this preview phase root-to-leaf, so
+                        // consuming here would step the back ladder and
+                        // leave the window fullscreen over the zip list.
+                        // Decline so the player's handler consumes it;
+                        // the ladder runs on the next Escape, once
+                        // fullscreen is off. The bubble-phase handler
+                        // below applies the same decline for the case
+                        // where the player is not in the focus path.
+                        if (fullscreenController?.isFullscreen() == true) {
+                            return@onPreviewKeyEvent false
+                        }
                         stepBack()
                         return@onPreviewKeyEvent true
                     }
@@ -631,13 +676,13 @@ fun DesktopPreviewScreen(
                         // move; after Back/Esc closes the entry, W/E resume
                         // the folder sequence from that position.
                         val steppedInZip = !archiveTextInputFocused &&
-                            archiveStepHandler?.invoke(-1) == true
+                            invokeArchiveStep(-1)
                         if (!steppedInZip && index > 0) index--
                         true
                     }
                     event.key == Key.E -> {
                         val steppedInZip = !archiveTextInputFocused &&
-                            archiveStepHandler?.invoke(1) == true
+                            invokeArchiveStep(1)
                         if (!steppedInZip && index < state.files.lastIndex) index++
                         true
                     }
@@ -653,9 +698,22 @@ fun DesktopPreviewScreen(
                 // surface exits fullscreen, the in-zip image overlay closes
                 // itself, a focused archive row clears its selection — and
                 // only an unconsumed Escape reaches this handler.
+                // MF-1 (PC 1.6.26 second-pass review): one exception —
+                // while the player is fullscreen and an archive pane is
+                // composed, an Escape that reaches this bubble handler
+                // was NOT consumed by the player (it is not in the focus
+                // path, e.g. after mouse use reclaimed focus to the
+                // Scaffold). Running the ladder here would close the
+                // in-zip preview under a still-fullscreen window, the
+                // exact failure the preview-phase decline prevents when
+                // the player does hold focus — so decline here too.
+                // When fullscreen is off, the ladder runs exactly as
+                // before.
                 if (event.type == KeyEventType.KeyDown &&
                     event.key == Key.Escape &&
-                    !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                    !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
+                    !(archiveBackHandler != null &&
+                        fullscreenController?.isFullscreen() == true)
                 ) {
                     stepBack()
                     true
@@ -890,7 +948,13 @@ fun DesktopPreviewScreen(
                 onToggleImageChrome = { imageChromeVisible = !imageChromeVisible },
                 onPlayerControlsVisibilityChange = { playerChromeVisible = it },
                 onRegisterArchiveBackStep = { handler -> archiveBackHandler = handler },
-                onRegisterArchiveStep = { handler -> archiveStepHandler = handler },
+                onRegisterArchiveStep = { handler ->
+                    // MF-2: bind the step registration to THIS pane's
+                    // file; the screen invokes it only while that file
+                    // is the displayed one (see archiveStepHandlerFileId).
+                    archiveStepHandler = handler
+                    archiveStepHandlerFileId = if (handler != null) pageFile.id else null
+                },
                 onTextViewerVisibilityChanged = { showing -> textViewerShowing = showing },
                 onArchiveTextInputFocusChanged = { focused ->
                     archiveTextInputFocused = focused
@@ -3143,9 +3207,15 @@ internal fun DesktopArchivePane(
         // outgoing pane's dispose would null the incoming pane's handler
         // (the back-step registration above predates this concern and is
         // left exactly as field-passed). A stale registration left behind
-        // by a disposed pane is harmless: its preview is closed — paging
-        // away is only possible from the contents list — so it declines
-        // every step, and the next archive pane's effect overwrites it.
+        // by a disposed pane is NOT harmless on its own — a CBZ's edge
+        // pager buttons stay enabled while an entry preview is open, so
+        // the folder can be paged away with this pane's preview still
+        // open, and the captured handler would keep consuming steps
+        // (MF-2, PC 1.6.26 second-pass review). The bound lives on the
+        // screen side instead: the registration is keyed by this pane's
+        // file and the screen invokes it only while that file is the
+        // displayed one, so a stale handler is never invoked, and the
+        // next archive pane's effect overwrites it.
         LaunchedEffect(currentArchiveStep) {
             onRegisterStepPreview { delta -> currentArchiveStep(delta) }
         }
