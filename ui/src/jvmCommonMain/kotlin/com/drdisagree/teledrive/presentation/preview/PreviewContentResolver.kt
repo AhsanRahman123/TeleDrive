@@ -11,10 +11,14 @@ import com.drdisagree.teledrive.resources.preview_archive_failed
 import com.drdisagree.teledrive.resources.preview_archive_multi_disk
 import com.drdisagree.teledrive.resources.preview_archive_not_zip
 import com.drdisagree.teledrive.resources.preview_archive_split
+import com.drdisagree.teledrive.resources.preview_epub_drm
 import com.drdisagree.teledrive.resources.preview_fetch_failed
 import com.drdisagree.teledrive.core.archive.ArchiveErrorKind
 import com.drdisagree.teledrive.core.archive.ArchiveException
+import com.drdisagree.teledrive.core.archive.LocalArchiveFormat
 import com.drdisagree.teledrive.core.archive.RemoteArchiveService
+import com.drdisagree.teledrive.core.archive.localArchiveReader
+import com.drdisagree.teledrive.core.files.formatPreviewText
 import com.drdisagree.teledrive.resources.preview_no_copy_available
 import com.drdisagree.teledrive.resources.preview_no_preview_for_type
 import com.drdisagree.teledrive.resources.preview_only_zip
@@ -48,9 +52,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import net.lingala.zip4j.ZipFile
-import org.apache.commons.compress.archivers.sevenz.SevenZFile
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.CompressorStreamFactory
 import java.io.File
 
 /** Original local files are always plaintext; only remote copies and caches are ever encrypted. */
@@ -79,7 +80,8 @@ class PreviewContentResolver(
             // occurrence in the same central-directory order, so its rows are tappable.
             // A local-ONLY zip stays remote = false with the existing local-only message.
             emit(
-                if (content is PreviewContent.Archive && content.format == "ZIP" &&
+                if (content is PreviewContent.Archive &&
+                    (content.format == "ZIP" || content.format == "CBZ") &&
                     file.hasRemoteCopy
                 ) {
                     content.copy(remote = true)
@@ -170,12 +172,14 @@ class PreviewContentResolver(
         }
 
         // Only small files are fetched on open, so browsing stays instant and a large transfer
-        // never starts unasked.
-        val autoFetchable = file.sizeBytes <= AUTO_PREVIEW_LIMIT &&
-                (MimeTypes.isImage(file.mimeType) ||
-                        file.category == FileCategory.IMAGE ||
-                        MimeTypes.isText(file.mimeType) ||
-                        MimeTypes.isApk(file.mimeType, file.name))
+        // never starts unasked. PDF and EPUB/OOXML documents get their own larger caps
+        // (see isAutoFetchable) so a remote copy previews exactly like an in-zip entry.
+        val autoFetchable = isAutoFetchable(
+            mimeType = file.mimeType,
+            category = file.category,
+            fileName = file.name,
+            sizeBytes = file.sizeBytes
+        )
         if (!autoFetchable) {
             emit(PreviewContent.RequiresDownload(file.sizeBytes))
             return@flow
@@ -206,8 +210,21 @@ class PreviewContentResolver(
         }
     }
 
-    private fun isZipFile(file: DriveFile): Boolean =
-        file.mimeType == "application/zip" || file.extension.equals("zip", ignoreCase = true)
+    private fun isZipFile(file: DriveFile): Boolean {
+        // An EPUB/OOXML file is a ZIP container on the inside, and a stored or
+        // Telegram-declared MIME of application/zip for one must NOT route it
+        // to the archive browser: it is a document, exactly as the in-zip
+        // route treats a same-named archive entry (vc183 item 4 semantics).
+        if (isDocumentPreviewType(file.mimeType, file.name)) return false
+        return file.mimeType == "application/zip" ||
+            file.extension.equals("zip", ignoreCase = true) ||
+            isCbzFile(file)
+    }
+
+    /** A CBZ is a ZIP of comic pages: it browses and extracts through the ZIP machinery. */
+    private fun isCbzFile(file: DriveFile): Boolean =
+        file.mimeType == "application/vnd.comicbook+zip" ||
+            file.extension.equals("cbz", ignoreCase = true)
 
     private suspend fun remoteArchive(file: DriveFile): PreviewContent = try {
         val entries = remoteArchiveService.listEntries(file).map { entry ->
@@ -219,7 +236,7 @@ class PreviewContentResolver(
                 modifiedAtMillis = normalizeArchiveEntryModifiedAt(entry.modifiedAtMillis)
             )
         }
-        PreviewContent.Archive(entries, "ZIP", remote = true)
+        PreviewContent.Archive(entries, if (isCbzFile(file)) "CBZ" else "ZIP", remote = true)
     } catch (failure: ArchiveException) {
         when (failure.kind) {
             ArchiveErrorKind.ENCRYPTED_FILE ->
@@ -247,19 +264,33 @@ class PreviewContentResolver(
         )
     }
 
-    private fun fromLocal(file: DriveFile, path: String): PreviewContent = when {
-        MimeTypes.isImage(file.mimeType) || file.category == FileCategory.IMAGE ->
-            PreviewContent.Image(File(path))
-        MimeTypes.isVideo(file.mimeType) || file.category == FileCategory.VIDEO ->
-            PreviewContent.LocalMedia(path, isAudio = false)
-        MimeTypes.isAudio(file.mimeType) || file.category == FileCategory.AUDIO ->
-            PreviewContent.LocalMedia(path, isAudio = true)
-        MimeTypes.isPdf(file.mimeType) -> PreviewContent.Pdf(path)
-        MimeTypes.isText(file.mimeType) -> readText(path)
-        MimeTypes.isArchive(file.mimeType) || file.category == FileCategory.ARCHIVE ->
-            readArchive(file, path)
-        MimeTypes.isApk(file.mimeType, file.name) -> readApk(path)
-        else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
+    private fun fromLocal(file: DriveFile, path: String): PreviewContent =
+        fromLocal(
+            mimeType = file.mimeType,
+            category = file.category,
+            fileName = file.name,
+            path = path
+        )
+
+    // The dispatch itself is the pure [previewDispatch] seam below; this
+    // function only maps each kind to its content builder.
+    private fun fromLocal(
+        mimeType: String,
+        category: FileCategory,
+        fileName: String,
+        path: String
+    ): PreviewContent = when (previewDispatch(mimeType, category, fileName)) {
+        PreviewDispatch.IMAGE -> PreviewContent.Image(File(path))
+        PreviewDispatch.VIDEO -> PreviewContent.LocalMedia(path, isAudio = false)
+        PreviewDispatch.AUDIO -> PreviewContent.LocalMedia(path, isAudio = true)
+        PreviewDispatch.PDF -> PreviewContent.Pdf(path)
+        PreviewDispatch.HTML -> readHtml(path)
+        PreviewDispatch.DOCUMENT -> readDocumentText(path)
+        PreviewDispatch.TEXT -> readText(path, mimeType)
+        PreviewDispatch.ARCHIVE -> readArchive(mimeType, path)
+        PreviewDispatch.APK -> readApk(path)
+        PreviewDispatch.UNSUPPORTED ->
+            PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
     }
 
     private fun readApk(path: String): PreviewContent = runCatching {
@@ -272,61 +303,83 @@ class PreviewContentResolver(
         }
     }.getOrElse { PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path) }
 
-    private fun readText(path: String): PreviewContent = runCatching {
+    /** Reads up to [limit] bytes of [path] as UTF-8 text; the flag marks a longer file. */
+    private fun readTextBytes(path: String, limit: Int = TEXT_LIMIT): Pair<String, Boolean> {
         val target = File(path)
-        val truncated = target.length() > TEXT_LIMIT
+        val truncated = target.length() > limit
         val bytes = target.inputStream().use { stream ->
-            val buffer = ByteArray(TEXT_LIMIT)
+            val buffer = ByteArray(limit)
             var read = 0
-            while (read < TEXT_LIMIT) {
-                val count = stream.read(buffer, read, TEXT_LIMIT - read)
+            while (read < limit) {
+                val count = stream.read(buffer, read, limit - read)
                 if (count <= 0) break
                 read += count
             }
             buffer.copyOf(read)
         }
-        PreviewContent.PlainText(String(bytes, Charsets.UTF_8), truncated)
+        return String(bytes, Charsets.UTF_8) to truncated
+    }
+
+    private fun readText(path: String, mimeType: String): PreviewContent = runCatching {
+        val (raw, truncated) = readTextBytes(path)
+        PreviewContent.PlainText(formatPreviewText(raw, mimeType), truncated)
     }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
 
-    private fun readArchive(file: DriveFile, path: String): PreviewContent =
-        when (file.mimeType) {
-            "application/zip" -> runCatching {
-                val entries = ZipFile(path).fileHeaders.map { header ->
-                    ArchiveEntry(
-                        name = header.fileName,
-                        sizeBytes = header.uncompressedSize,
-                        compressedBytes = header.compressedSize,
-                        isDirectory = header.isDirectory,
-                        // zip4j yields 0 for a dateless entry but the packed DOS
-                        // dword itself as "millis" for a DOS-dated one (January 1970
-                        // when read as a date — the field defect). Decode it back to
-                        // the real date; see archiveEntryModifiedAtFromZip4j.
-                        modifiedAtMillis = archiveEntryModifiedAtFromZip4j(
-                            header.lastModifiedTime
-                        )
-                    )
-                }
-                PreviewContent.Archive(entries, "ZIP")
-            }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
+    /**
+     * EPUB (Tier 1) and OOXML files extract to plain text on this IO flow. A DRM'd
+     * EPUB gets its own honest message; an unparseable document keeps "Open with…".
+     * Legacy .doc/.xls/.ppt never reach here — they are not OOXML and stay Unsupported.
+     */
+    private fun readDocumentText(path: String): PreviewContent =
+        when (val extraction = extractDocumentText(File(path))) {
+            is DocumentExtraction.Text ->
+                PreviewContent.PlainText(extraction.text, extraction.truncated)
+            DocumentExtraction.DrmProtected ->
+                PreviewContent.Failed(Res.string.preview_epub_drm)
+            DocumentExtraction.Failed ->
+                PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
+        }
 
+    /** HTML goes to the safe viewer as a raw string — no formatting transform applies. */
+    private fun readHtml(path: String): PreviewContent = runCatching {
+        val (raw, truncated) = readTextBytes(path)
+        PreviewContent.Html(raw, truncated)
+    }.getOrElse { PreviewContent.Failed(Res.string.preview_read_failed) }
+
+    private fun readLocalZip(path: String, format: String = "ZIP"): PreviewContent =
+        runCatching {
+            val entries = ZipFile(path).fileHeaders.map { header ->
+                ArchiveEntry(
+                    name = header.fileName,
+                    sizeBytes = header.uncompressedSize,
+                    compressedBytes = header.compressedSize,
+                    isDirectory = header.isDirectory,
+                    // zip4j yields 0 for a dateless entry but the packed DOS
+                    // dword itself as "millis" for a DOS-dated one (January 1970
+                    // when read as a date — the field defect). Decode it back to
+                    // the real date; see archiveEntryModifiedAtFromZip4j.
+                    modifiedAtMillis = archiveEntryModifiedAtFromZip4j(
+                        header.lastModifiedTime
+                    )
+                )
+            }
+            PreviewContent.Archive(entries, format)
+        }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
+
+    private fun readArchive(mimeType: String, path: String): PreviewContent =
+        when (mimeType) {
+            "application/zip" -> readLocalZip(path)
+
+            // A CBZ is listed by the exact ZIP lister; only the format label
+            // differs, which is what switches the viewer to the comic pager.
+            "application/vnd.comicbook+zip" -> readLocalZip(path, format = "CBZ")
+
+            // Listing delegates to the local readers (Android vc181 B10 port):
+            // the entries produced are exactly the ones the open-coded listing
+            // produced, and the same readers now also extract for preview.
             "application/x-7z-compressed" -> runCatching {
-                val entries = SevenZFile.builder()
-                    // Keep archive metadata parsing bounded on low-memory devices.
-                    .setMaxMemoryLimitKiB(128 * 1024)
-                    .setFile(File(path))
-                    .get()
-                    .use { archive ->
-                        archive.entries.map { header ->
-                            ArchiveEntry(
-                                name = header.name.orEmpty(),
-                                sizeBytes = header.size.coerceAtLeast(0L),
-                                // Commons Compress does not expose this 7z value publicly.
-                                compressedBytes = 0L,
-                                isDirectory = header.isDirectory
-                            )
-                        }
-                    }
-                PreviewContent.Archive(entries, "7Z")
+                val entries = localArchiveReader(LocalArchiveFormat.SEVEN_Z).list(File(path))
+                PreviewContent.Archive(entries, LocalArchiveFormat.SEVEN_Z.archiveLabel)
             }.getOrElse { PreviewContent.Failed(Res.string.preview_archive_failed) }
 
             "application/x-tar" -> readTar(path, compressed = false)
@@ -336,31 +389,15 @@ class PreviewContentResolver(
         }
 
     private fun readTar(path: String, compressed: Boolean): PreviewContent = runCatching {
-        val input = File(path).inputStream().buffered()
-        val tarInput = if (compressed) {
-            CompressorStreamFactory().createCompressorInputStream(input)
+        val format = if (compressed) {
+            LocalArchiveFormat.TAR_COMPRESSED
         } else {
-            input
+            LocalArchiveFormat.TAR
         }
-        TarArchiveInputStream(tarInput).use { archive ->
-            val entries = buildList {
-                while (size < MAX_ARCHIVE_ENTRIES) {
-                    val entry = archive.nextEntry ?: break
-                    add(
-                        ArchiveEntry(
-                            name = entry.name,
-                            sizeBytes = entry.size.coerceAtLeast(0L),
-                            compressedBytes = 0L,
-                            isDirectory = entry.isDirectory
-                        )
-                    )
-                }
-            }
-            PreviewContent.Archive(
-                entries = entries,
-                format = if (compressed) "TAR (compressed)" else "TAR"
-            )
-        }
+        PreviewContent.Archive(
+            entries = localArchiveReader(format).list(File(path)),
+            format = format.archiveLabel
+        )
     }.getOrElse {
         SafeLog.w(TAG, "Could not read TAR archive metadata", it)
         PreviewContent.Failed(Res.string.preview_archive_failed)
@@ -373,8 +410,17 @@ class PreviewContentResolver(
         val previewDir = File(storagePaths.cacheDir, "previews").apply { mkdirs() }
         val target = File(previewDir, "${file.id}-${file.name}")
         if (target.exists() && target.length() > 0) {
-            cacheDao.touch(target.absolutePath, System.currentTimeMillis())
-            return target
+            // A non-empty cache file is only reused when it is the WHOLE file:
+            // a truncated copy left by an interrupted earlier fetch otherwise
+            // stayed cached forever and every later preview extracted from
+            // the wrong (short) content object — an EPUB whose container.xml
+            // was cut off read as "No preview for this file type" and a DOCX
+            // with a cut document.xml extracted to blank text (vc183 item 4).
+            if (file.sizeBytes <= 0 || target.length() == file.sizeBytes) {
+                cacheDao.touch(target.absolutePath, System.currentTimeMillis())
+                return target
+            }
+            target.delete()
         }
 
         var tdlibPath: String? = null
@@ -428,8 +474,118 @@ class PreviewContentResolver(
 
     companion object {
         private const val TAG = "PreviewContent"
-        private const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
+
+        // Public (not private) only so the top-level pure isAutoFetchable seam
+        // in this file — and its host tests — can use the same values.
+        const val AUTO_PREVIEW_LIMIT = 10L * 1024 * 1024
+
+        /**
+         * Largest remote PDF fetched on open: 50 MiB. Deliberately equal to the
+         * in-zip cap ARCHIVE_PDF_PREVIEW_MAX_BYTES (ArchiveSelection.kt), as a
+         * literal with this parity note — the same way the in-zip cap itself is
+         * defined — rather than a new cross-reference.
+         */
+        const val PDF_AUTO_PREVIEW_LIMIT = 50L * 1024 * 1024
+
+        /**
+         * Largest remote EPUB/OOXML document fetched on open: 20 MiB.
+         * Deliberately equal to the in-zip cap
+         * ARCHIVE_DOCUMENT_PREVIEW_MAX_BYTES (ArchiveSelection.kt), as a
+         * literal with this parity note, for the same reason as
+         * [PDF_AUTO_PREVIEW_LIMIT].
+         */
+        const val DOCUMENT_AUTO_PREVIEW_LIMIT = 20L * 1024 * 1024
+
         private const val TEXT_LIMIT = 256 * 1024
-        private const val MAX_ARCHIVE_ENTRIES = 5_000
     }
 }
+
+/** The viewer a normal-route local file is dispatched to (see [previewDispatch]). */
+enum class PreviewDispatch {
+    IMAGE, VIDEO, AUDIO, PDF, HTML, DOCUMENT, TEXT, ARCHIVE, APK, UNSUPPORTED
+}
+
+/**
+ * Whether a file is an EPUB/OOXML document for preview purposes, by its stored
+ * MIME **or by its file name** — the same name-based classification the in-zip
+ * route has always used (`archiveEntryTapAction` keys off
+ * `MimeTypes.fromFileName(entry.name)` alone).
+ *
+ * vc183 item 4 semantics, ported to PC with 1.6.25 item 5: the normal route
+ * previously trusted the stored MIME alone, but that MIME is not reliable for
+ * these formats — `MimeTypes.resolve` prefers a declared MIME over the
+ * filename, and EPUB/OOXML are ZIP containers, so a Telegram- or
+ * client-declared `application/zip` (or another container-ish value) is
+ * exactly what such a file can carry. With the stored MIME alone, the normal
+ * dispatch then sent the file to the archive branch (or to Unsupported) and
+ * the document viewer was never reached, while the identical file inside a
+ * ZIP — classified by name — previewed fine.
+ */
+fun isDocumentPreviewType(mimeType: String, fileName: String): Boolean {
+    if (MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType)) return true
+    val byName = MimeTypes.fromFileName(fileName)
+    return MimeTypes.isEpub(byName) || MimeTypes.isOoxml(byName)
+}
+
+/**
+ * The normal-route preview dispatch, pure so host tests can pin it.
+ *
+ * Branch order: image -> video -> audio -> pdf -> html -> document -> text ->
+ * archive -> apk -> unsupported. The DOCUMENT branch deliberately sits
+ * BEFORE text and archive (vc183 item 4): an EPUB's MIME ends in `+zip` and
+ * an OOXML file is a ZIP of XML, so under the old order (text -> archive ->
+ * document) any stored MIME that read as text or archive captured the file
+ * first and the document branch was unreachable for it — a remote EPUB
+ * landed on "No preview for this file type" and a DOCX that was captured by
+ * the text branch (or extracted to an empty string) opened blank. Every
+ * other type keeps its original relative order and outcome: a real `.zip`
+ * (name-derived MIME `application/zip`, not a document type) still archives,
+ * a CBZ still archives, and legacy `.doc`/`.xls`/`.ppt` are not OOXML and
+ * stay unsupported.
+ */
+fun previewDispatch(
+    mimeType: String,
+    category: FileCategory,
+    fileName: String
+): PreviewDispatch = when {
+    MimeTypes.isImage(mimeType) || category == FileCategory.IMAGE -> PreviewDispatch.IMAGE
+    MimeTypes.isVideo(mimeType) || category == FileCategory.VIDEO -> PreviewDispatch.VIDEO
+    MimeTypes.isAudio(mimeType) || category == FileCategory.AUDIO -> PreviewDispatch.AUDIO
+    MimeTypes.isPdf(mimeType) -> PreviewDispatch.PDF
+    MimeTypes.isHtml(mimeType) -> PreviewDispatch.HTML
+    isDocumentPreviewType(mimeType, fileName) -> PreviewDispatch.DOCUMENT
+    MimeTypes.isText(mimeType) -> PreviewDispatch.TEXT
+    MimeTypes.isArchive(mimeType) || category == FileCategory.ARCHIVE -> PreviewDispatch.ARCHIVE
+    MimeTypes.isApk(mimeType, fileName) -> PreviewDispatch.APK
+    else -> PreviewDispatch.UNSUPPORTED
+}
+
+/**
+ * Whether a remote-only file is fetched automatically on open instead of
+ * showing the Download-to-view gate (PreviewContent.RequiresDownload).
+ *
+ * The original rule is unchanged: images, text and APKs fetch only up to
+ * [PreviewContentResolver.AUTO_PREVIEW_LIMIT] (10 MiB). The document types
+ * that already preview in place inside a ZIP get parity: a PDF fetches up
+ * to [PreviewContentResolver.PDF_AUTO_PREVIEW_LIMIT] and an EPUB or OOXML
+ * document up to [PreviewContentResolver.DOCUMENT_AUTO_PREVIEW_LIMIT] —
+ * exactly the in-zip caps — so the same file is not gated on the
+ * normal-file route while being previewable in-zip. Everything else
+ * (unsupported types, images/text/APKs over 10 MiB, documents over their
+ * caps) keeps the gate exactly as before. Pure and side-effect free so
+ * host tests can pin the boundaries.
+ */
+fun isAutoFetchable(
+    mimeType: String,
+    category: FileCategory,
+    fileName: String,
+    sizeBytes: Long
+): Boolean =
+    (sizeBytes <= PreviewContentResolver.AUTO_PREVIEW_LIMIT &&
+        (MimeTypes.isImage(mimeType) ||
+            category == FileCategory.IMAGE ||
+            MimeTypes.isText(mimeType) ||
+            MimeTypes.isApk(mimeType, fileName))) ||
+        (MimeTypes.isPdf(mimeType) && sizeBytes <= PreviewContentResolver.PDF_AUTO_PREVIEW_LIMIT) ||
+        (isDocumentPreviewType(mimeType, fileName) &&
+            sizeBytes <= PreviewContentResolver.DOCUMENT_AUTO_PREVIEW_LIMIT)

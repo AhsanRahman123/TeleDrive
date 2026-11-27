@@ -61,9 +61,23 @@ sealed interface ArchiveEntryPreview {
         val path: String,
         override val entryIndex: Int = -1
     ) : ArchiveEntryPreview
+
     data class Text(
         override val name: String,
         val text: String,
+        override val entryIndex: Int = -1,
+        /** Render with the Markdown renderer (in-zip parity with normal .md files). */
+        val isMarkdown: Boolean = false,
+        /** Render in the safe HTML viewer instead of as plain text. */
+        val isHtml: Boolean = false,
+        /** The extracted text was cut at the preview budget. */
+        val truncated: Boolean = false
+    ) : ArchiveEntryPreview
+
+    /** An extracted PDF entry, rendered by the same in-app PDF viewer as a normal PDF file. */
+    data class Pdf(
+        override val name: String,
+        val path: String,
         override val entryIndex: Int = -1
     ) : ArchiveEntryPreview
 }

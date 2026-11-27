@@ -74,7 +74,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Rotate90DegreesCw
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -186,6 +185,8 @@ import com.drdisagree.teledrive.presentation.preview.archiveUnifiedPreviewIndice
 import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
 import com.drdisagree.teledrive.desktop.media.ArchiveThumbState
 import com.drdisagree.teledrive.desktop.media.DesktopArchiveEntryThumbnailStore
+import com.drdisagree.teledrive.presentation.preview.archiveImagePagerIndices
+import com.drdisagree.teledrive.presentation.preview.comicPageSequence
 import com.drdisagree.teledrive.presentation.preview.archiveBackStep
 import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
 import com.drdisagree.teledrive.presentation.preview.ArchiveRowState
@@ -1314,11 +1315,11 @@ private fun PreviewPane(
                 )
             }
 
-            is PreviewContent.Pdf -> OpenExternallyState(
-                icon = Icons.Filled.PictureAsPdf,
-                file = file,
-                path = current.path,
-                snackbarHostState = snackbarHostState
+            is PreviewContent.Pdf -> DesktopPdfViewer(path = current.path)
+
+            is PreviewContent.Html -> DesktopHtmlViewer(
+                html = current.text,
+                truncated = current.truncated
             )
 
             is PreviewContent.StreamedMedia -> if (!VlcPlayback.available) {
@@ -1524,6 +1525,22 @@ private fun ZoomablePreviewImage(
     Box(modifier = Modifier.fillMaxSize()) {
         if (undecodable) {
             undecodableFallback()
+        } else if (isGifImageModel(model)) {
+            // GIF animation (1.6.25 item 5): Coil has no GIF decoder on
+            // desktop (coil-gif is Android-only), so GIFs play through the
+            // Skia-Codec frame player instead of the Coil painter. The
+            // telephoto zoom surface does not apply — rotate/mirror and the
+            // chrome toggle behave as in the regular viewer.
+            AnimatedGifImage(
+                model = model,
+                contentDescription = contentDescription,
+                imageRotationDegrees = imageRotationDegrees,
+                mirrorImageHorizontally = mirrorImageHorizontally,
+                mirrorImageVertically = mirrorImageVertically,
+                onToggleChrome = onToggleChrome,
+                onUndecodable = { undecodable = true },
+                modifier = Modifier.fillMaxSize()
+            )
         } else {
             // AsyncImage sizes the decoded bitmap to the viewport, which makes
             // zooming a low-resolution preview look blurred. The painter intentionally
@@ -2273,6 +2290,7 @@ internal fun DesktopArchivePane(
     modifier: Modifier = Modifier
 ) {
     val listing = archive.entries
+    val urlOpener = LocalUrlOpener.current
     var query by remember(file.id) { mutableStateOf("") }
     var expanded by remember(file.id) { mutableStateOf(emptySet<String>()) }
     val selection = remember(file.id) { ArchiveSelectionState() }
@@ -2651,13 +2669,25 @@ internal fun DesktopArchivePane(
         // The UNIFIED in-zip stepping sequence (PC 1.6.25 item 7): ALL
         // previewable entries among the rows as currently displayed (tree +
         // sort + filter applied), in display order, across types — stepping
-        // from any in-zip preview (photo / video / audio / text) moves to the
-        // neighbouring previewable entry and opens its own surface. Desktop
+        // from any in-zip preview (photo / video / audio / text / PDF) moves to
+        // the neighbouring previewable entry and opens its own surface. Desktop
         // has no touch swipe: the keyboard arrows / W-E keys and the on-screen
         // prev/next controls (image arrows, player Skip buttons, overlay
         // buttons) are the desktop equivalent and drive this same sequence.
         val unifiedPreviewIndices = remember(rows, listing) {
             archiveUnifiedPreviewIndices(listing, rows.mapNotNull { it.node.entryIndex })
+        }
+        // The in-zip photo pager's stops for a CBZ (1.6.25 item 5, Android
+        // parity): image pages only, in natural path (comic) order — not the
+        // archive list's sort and not the unified display order. The Image
+        // overlay below pages through THIS sequence for a CBZ; every other
+        // archive (and every non-image overlay) uses the unified sequence.
+        val displayedImageIndices = remember(rows, listing, archive.format) {
+            if (archive.format == "CBZ") {
+                comicPageSequence(listing)
+            } else {
+                archiveImagePagerIndices(listing, rows.mapNotNull { it.node.entryIndex })
+            }
         }
         // In-archive preview overlay: image in the full desktop photo viewer
         // (note 7), audio AND video in the desktop player (notes 9 — video is
@@ -2665,16 +2695,23 @@ internal fun DesktopArchivePane(
         // text read-only.
         when (val preview = archivePreview) {
             is ArchiveEntryPreview.Image -> {
-                val pagerPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
+                // CBZ pages step in comic (natural) order; all other archives
+                // step the unified display-order sequence.
+                val imageSequence = if (archive.format == "CBZ") {
+                    displayedImageIndices
+                } else {
+                    unifiedPreviewIndices
+                }
+                val pagerPosition = imageSequence.indexOf(preview.entryIndex)
                 ArchiveImagePreview(
                     preview = preview,
                     entry = listing.getOrNull(preview.entryIndex),
                     hasPrevious = pagerPosition > 0,
                     hasNext = pagerPosition >= 0 &&
-                        pagerPosition < unifiedPreviewIndices.lastIndex,
+                        pagerPosition < imageSequence.lastIndex,
                     busy = busyEntryIndex != null,
-                    onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
-                    onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                    onPrevious = { onStepArchivePreview(-1, imageSequence) },
+                    onNext = { onStepArchivePreview(+1, imageSequence) },
                     onDismiss = onDismissPreview,
                     onDownload = onDownloadCurrentEntry,
                     snackbarHostState = snackbarHostState
@@ -2801,8 +2838,7 @@ internal fun DesktopArchivePane(
                 }
             }
 
-            is ArchiveEntryPreview.Text -> {
-                val textScrollState = rememberScrollState()
+            is ArchiveEntryPreview.Pdf -> {
                 val stepPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
                 val stepHasPrevious = stepPosition > 0
                 val stepHasNext = stepPosition >= 0 &&
@@ -2813,19 +2849,76 @@ internal fun DesktopArchivePane(
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(textScrollState)
-                            .padding(start = 24.dp, end = 24.dp, top = 64.dp, bottom = 24.dp)
-                    ) {
-                        Text(
-                            text = preview.text,
-                            style = MaterialTheme.typography.bodySmall.copy(
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                    DesktopPdfViewer(path = preview.path)
+                    ArchiveOverlayBar(
+                        name = preview.name,
+                        busy = busyEntryIndex != null,
+                        hasPrevious = stepHasPrevious,
+                        hasNext = stepHasNext,
+                        onPrevious = { onStepArchivePreview(-1, unifiedPreviewIndices) },
+                        onNext = { onStepArchivePreview(+1, unifiedPreviewIndices) },
+                        onDownload = onDownloadCurrentEntry,
+                        onInfo = { infoOpen = true },
+                        onDismiss = onDismissPreview,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
+                if (infoOpen) {
+                    ArchiveEntryInfoDialog(
+                        previewName = preview.name,
+                        entry = listing.getOrNull(preview.entryIndex),
+                        onDismiss = { infoOpen = false }
+                    )
+                }
+            }
+
+            is ArchiveEntryPreview.Text -> {
+                val stepPosition = unifiedPreviewIndices.indexOf(preview.entryIndex)
+                val stepHasPrevious = stepPosition > 0
+                val stepHasNext = stepPosition >= 0 &&
+                    stepPosition < unifiedPreviewIndices.lastIndex
+                var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                ) {
+                    if (preview.isHtml) {
+                        // The HTML viewer scrolls itself; it must not sit
+                        // inside the scrolling text column below.
+                        DesktopHtmlViewer(html = preview.text, truncated = preview.truncated)
+                    } else {
+                        val textScrollState = rememberScrollState()
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(textScrollState)
+                                .padding(start = 24.dp, end = 24.dp, top = 64.dp, bottom = 24.dp)
+                        ) {
+                            if (preview.isMarkdown) {
+                                MarkdownText(
+                                    text = preview.text,
+                                    onOpenUrl = { url -> urlOpener.open(url) }
+                                )
+                            } else {
+                                Text(
+                                    text = preview.text,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            if (preview.truncated) {
+                                Text(
+                                    text = stringResource(
+                                        Res.string.preview_truncated_download_view
+                                    ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                     ArchiveOverlayBar(
                         name = preview.name,

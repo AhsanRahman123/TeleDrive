@@ -158,6 +158,8 @@ object MimeTypes {
         "otp" to "application/vnd.oasis.opendocument.presentation-template",
         "epub" to "application/epub+zip",
         "mobi" to "application/x-mobipocket-ebook",
+        "srt" to "application/x-subrip",
+        "vtt" to "text/vtt",
 
         // Source code, configuration and scripts are safe to render as bounded plain text.
         "js" to "text/javascript",
@@ -201,8 +203,13 @@ object MimeTypes {
         "diff" to "text/x-diff",
         "patch" to "text/x-diff",
 
+        // Junk/system files with no previewable type: pinned to GENERIC here so
+        // host unit tests never consult a platform MIME map for them.
+        "db" to GENERIC,
+
         // Archives and compressed files
         "zip" to "application/zip",
+        "cbz" to "application/vnd.comicbook+zip",
         "7z" to "application/x-7z-compressed",
         "rar" to "application/vnd.rar",
         "tar" to "application/x-tar",
@@ -305,6 +312,23 @@ object MimeTypes {
 
     fun isMarkdown(mimeType: String): Boolean = mimeType == "text/markdown"
 
+    fun isEpub(mimeType: String): Boolean = mimeType == "application/epub+zip"
+
+    /** The OOXML trio with a text-extraction preview (legacy .doc/.xls/.ppt excluded). */
+    fun isOoxml(mimeType: String): Boolean = mimeType in setOf(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    )
+
+    /** HTML documents, shown in the safe (script-free) HTML viewer, not as source. */
+    fun isHtml(mimeType: String): Boolean =
+        mimeType == "text/html" || mimeType == "application/xhtml+xml"
+
+    /** Standalone subtitle files (.srt / .vtt), shown as cleaned readable text. */
+    fun isSubtitle(mimeType: String): Boolean =
+        mimeType == "application/x-subrip" || mimeType == "text/vtt"
+
     fun isApk(mimeType: String, fileName: String? = null): Boolean =
         mimeType == "application/vnd.android.package-archive" ||
             fileName?.lowercase()?.endsWith(".apk") == true
@@ -314,6 +338,7 @@ object MimeTypes {
             mimeType == "application/json" ||
             mimeType == "application/jsonl" ||
             mimeType == "application/javascript" ||
+            mimeType == "application/x-subrip" ||
             mimeType == "application/toml" ||
             mimeType == "application/x-httpd-php" ||
             mimeType == "application/x-sh" ||
@@ -326,6 +351,7 @@ object MimeTypes {
 
     fun isArchive(mimeType: String): Boolean = mimeType in setOf(
         "application/zip",
+        "application/vnd.comicbook+zip",
         "application/x-7z-compressed",
         "application/vnd.rar",
         "application/x-tar",

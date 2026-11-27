@@ -27,6 +27,14 @@ sealed interface PreviewContent {
 
     data class PlainText(val text: String, val truncated: Boolean) : PreviewContent
 
+    /**
+     * An HTML document carried as a string (never a path/URL), so the safe viewer
+     * can render it with no base URL, no JavaScript and no network access.
+     * Desktop has no WebView: its screen renders this as readable text under the
+     * same safe-mode caption instead.
+     */
+    data class Html(val text: String, val truncated: Boolean) : PreviewContent
+
     /** [remote] means the listing came from the online copy: entries can be downloaded one by one. */
     data class Archive(
         val entries: List<ArchiveEntry>,

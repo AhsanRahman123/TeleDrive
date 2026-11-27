@@ -63,6 +63,13 @@ class UnifiedArchivePreviewTest {
         assertTrue(archiveEntryUnifiedPreviewable(entry("x.mkv")))
         assertTrue(archiveEntryUnifiedPreviewable(entry("x.mp3")))
         assertTrue(archiveEntryUnifiedPreviewable(entry("x.txt")))
+        // PDF and document entries became previewable with the viewers merge
+        // (ArchiveEntryPreview.Pdf / extracted document text), so they are
+        // unified-sequence stops too, each within its own cap.
+        assertTrue(archiveEntryUnifiedPreviewable(entry("x.pdf")))
+        assertFalse(archiveEntryUnifiedPreviewable(entry("x.pdf", size = ARCHIVE_PDF_PREVIEW_MAX_BYTES + 1)))
+        assertTrue(archiveEntryUnifiedPreviewable(entry("x.epub")))
+        assertFalse(archiveEntryUnifiedPreviewable(entry("x.epub", size = ARCHIVE_DOCUMENT_PREVIEW_MAX_BYTES + 1)))
         assertFalse(archiveEntryUnifiedPreviewable(entry("x.txt", size = ARCHIVE_TEXT_PREVIEW_MAX_BYTES + 1)))
         assertFalse(archiveEntryUnifiedPreviewable(entry("x.zip")))
         assertFalse(archiveEntryUnifiedPreviewable(entry("x/", isDirectory = true)))
@@ -86,5 +93,6 @@ class UnifiedArchivePreviewTest {
         assertEquals(1, ArchiveEntryPreview.Video("movie.mp4", "/tmp/x", 1).entryIndex)
         assertEquals(3, ArchiveEntryPreview.Audio("song.mp3", "/tmp/x", 3).entryIndex)
         assertEquals(4, ArchiveEntryPreview.Text("notes.txt", "hi", 4).entryIndex)
+        assertEquals(2, ArchiveEntryPreview.Pdf("doc.pdf", "/tmp/x", 2).entryIndex)
     }
 }
