@@ -528,6 +528,10 @@
     <string name="preview_image_undecodable">This image format cannot be displayed here. Download it and open it in another app.</string>
     <string name="preview_zoom_in">Zoom in</string>
     <string name="preview_zoom_out">Zoom out</string>
+    <string name="preview_rotate_counter_clockwise">Rotate counter-clockwise</string>
+    <string name="preview_rotate_clockwise">Rotate clockwise</string>
+    <string name="preview_mirror_horizontally">Mirror horizontally</string>
+    <string name="preview_mirror_vertically">Mirror vertically</string>
     <string name="preview_local_copy_removed">Local copy removed</string>
     <string name="preview_move_to_trash">Move to trash?</string>
     <string name="preview_next">Next file</string>
