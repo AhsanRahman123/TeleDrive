@@ -247,10 +247,17 @@ class DesktopViewerBackgroundDownloadTest {
             await("the background transfer is enqueued") {
                 transfers.enqueued.toList() == listOf("vid-1")
             }
-            await("content re-settles on the video with the transfer active") {
-                transfers.active.value != null &&
-                    seen.count { it is PreviewContent.StreamedMedia } >= 2
+            // vc184 MF-2 (mirrors the Android test's adaptation): resolution
+            // is keyed on the file only, so the transfer becoming active no
+            // longer re-runs resolve — and an equal re-resolved content would
+            // be conflated by the StateFlow anyway. A second StreamedMedia
+            // emission is not something to wait for: wait until the transfer
+            // is active, give the pipeline every chance to (wrongly) react
+            // to it, and assert below that the player content is untouched.
+            await("the background transfer becomes active for the file") {
+                transfers.active.value != null
             }
+            Thread.sleep(500)
             assertTrue(
                 "viewer content must stay the streamed video, was ${seen.lastOrNull()}",
                 seen.lastOrNull() is PreviewContent.StreamedMedia

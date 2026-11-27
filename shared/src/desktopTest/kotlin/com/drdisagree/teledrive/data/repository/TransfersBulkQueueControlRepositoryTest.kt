@@ -47,21 +47,38 @@ class TransfersBulkQueueControlRepositoryTest {
         var pauses = 0
         var resumes = 0
 
+        /**
+         * Mirrors DesktopTransferScheduler's latch exactly: pause() sets
+         * globallyPaused, resume() clears it, and kick() returns early while
+         * it is set (vc184 MF-1's isPauseHeld seam).
+         */
+        var pauseHeld = false
+
+        /** Simulated drain claim; kick/resume reach it only when not held. */
+        var onDrain: (() -> Unit)? = null
+
         override fun kick(allowMetered: Boolean) {
             kicks++
+            if (!pauseHeld) onDrain?.invoke()
         }
 
         override fun rekick(allowMetered: Boolean) {
             rekicks++
+            if (!pauseHeld) onDrain?.invoke()
         }
 
         override suspend fun pause() {
             pauses++
+            pauseHeld = true
         }
 
         override fun resume(allowMetered: Boolean) {
             resumes++
+            pauseHeld = false
+            onDrain?.invoke()
         }
+
+        override fun isPauseHeld(): Boolean = pauseHeld
     }
 
     private val scheduler = RecordingScheduler()
@@ -201,4 +218,129 @@ class TransfersBulkQueueControlRepositoryTest {
         assertEquals(2_000L, row("dl-live")?.transferredBytes)
         assertEquals(2_000L, row("dl-live")?.speedBytesPerSecond)
     }
+
+    private suspend fun downloadableFile(id: String) {
+        database.fileDao().upsert(
+            com.drdisagree.teledrive.data.local.entity.FileEntity(
+                id = id,
+                folderId = null,
+                name = "$id.bin",
+                sizeBytes = 100_000,
+                mimeType = "application/octet-stream",
+                category = com.drdisagree.teledrive.domain.model.FileCategory.OTHER,
+                localPath = null,
+                contentHash = null,
+                chatId = 100L,
+                messageId = 200L,
+                remoteFileId = "remote-$id",
+                remoteUniqueId = "unique-$id",
+                backupState = com.drdisagree.teledrive.domain.model.BackupState.BACKED_UP,
+                createdAt = 1,
+                modifiedAt = 1,
+                addedAt = 1
+            )
+        )
+    }
+
+    private suspend fun downloadRow(id: String, fileId: String, state: TransferState) {
+        database.transferDao().upsert(
+            TransferEntity(
+                id = id,
+                type = TransferType.DOWNLOAD,
+                fileId = fileId,
+                displayName = "$id.bin",
+                localPath = null,
+                chatId = 100L,
+                messageId = 200L,
+                remoteFileId = "remote-$fileId",
+                sizeBytes = 100_000,
+                transferredBytes = 0,
+                speedBytesPerSecond = 0,
+                state = state,
+                createdAt = 1,
+                updatedAt = 1
+            )
+        )
+    }
+
+    /**
+     * vc184 MF-1 combined (desktop port of the Android TransferQueueControlsTest
+     * case): Pause all, then a Download tap that dedupes onto a PAUSED row.
+     * Before MF-1 the repair called resume(id), whose scheduler.resume() is
+     * the GLOBAL latch release on desktop (it clears globallyPaused), so the
+     * hold would silently drop and the whole queue would restart. The drain
+     * claim itself is simulated (onDrain completes QUEUED rows); the
+     * repository, the DAO and the latch semantics under test are production.
+     */
+    @Test
+    fun `enqueue onto a paused row during pause all keeps the hold and drains only on resume all`() =
+        runBlocking {
+            downloadableFile("f-target")
+            downloadableFile("f-other")
+            downloadRow("dl-target", "f-target", TransferState.QUEUED)
+            downloadRow("dl-other", "f-other", TransferState.QUEUED)
+            val repo = repository()
+
+            // The simulated drain: claiming completes every QUEUED row.
+            val drained = mutableListOf<String>()
+            scheduler.onDrain = {
+                runBlocking {
+                    for (id in listOf("dl-target", "dl-other")) {
+                        if (row(id)?.state == TransferState.QUEUED) {
+                            database.transferDao()
+                                .setState(id, TransferState.COMPLETED, 9)
+                            drained += id
+                        }
+                    }
+                    database.transferDao().unfinishedIdsForFiles(listOf("f-fresh"))
+                        .firstOrNull()?.let { freshId ->
+                            if (row(freshId)?.state == TransferState.QUEUED) {
+                                database.transferDao()
+                                    .setState(freshId, TransferState.COMPLETED, 9)
+                                drained += freshId
+                            }
+                        }
+                }
+            }
+
+            repo.pauseAll()
+            assertTrue("pauseAll must latch the scheduler hold", scheduler.pauseHeld)
+            assertEquals(TransferState.PAUSED, row("dl-target")?.state)
+            assertEquals(TransferState.PAUSED, row("dl-other")?.state)
+
+            // A fresh download enqueued during the hold waits QUEUED.
+            downloadableFile("f-fresh")
+            val fresh = repo.enqueueDownload("f-fresh")
+            assertTrue(fresh is com.drdisagree.teledrive.core.common.AppResult.Success)
+            val freshId = (fresh as com.drdisagree.teledrive.core.common.AppResult.Success).value
+            assertEquals(TransferState.QUEUED, row(freshId)?.state)
+
+            // The A3 dedupe repair on the PAUSED target row, during the hold.
+            val repaired = repo.enqueueDownload("f-target")
+            assertEquals(
+                com.drdisagree.teledrive.core.common.AppResult.Success("dl-target"),
+                repaired
+            )
+
+            // The repair still happened: the target row is runnable again...
+            assertEquals(TransferState.QUEUED, row("dl-target")?.state)
+            // ...but the hold is intact, the global resume was never reached,
+            // and nothing started: not the target, not the other rows.
+            assertTrue("pause hold must survive the enqueue repair", scheduler.pauseHeld)
+            assertTrue("scheduler must still report the hold", scheduler.isPauseHeld())
+            assertEquals(0, scheduler.resumes)
+            assertTrue("the held repair must kick (dropped while held)", scheduler.kicks >= 1)
+            assertTrue("nothing may drain during the hold: $drained", drained.isEmpty())
+            assertEquals(TransferState.QUEUED, row("dl-target")?.state)
+            assertEquals(TransferState.PAUSED, row("dl-other")?.state)
+            assertEquals(TransferState.QUEUED, row(freshId)?.state)
+
+            // Resume all releases the hold and the whole queue drains.
+            repo.resumeAll()
+            assertTrue("resumeAll must release the hold", !scheduler.pauseHeld)
+            assertTrue(scheduler.resumes >= 1)
+            assertEquals(TransferState.COMPLETED, row("dl-target")?.state)
+            assertEquals(TransferState.COMPLETED, row("dl-other")?.state)
+            assertEquals(TransferState.COMPLETED, row(freshId)?.state)
+        }
 }

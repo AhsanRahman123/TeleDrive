@@ -2,7 +2,14 @@ package com.drdisagree.teledrive.presentation.preview
 
 import org.jetbrains.compose.resources.StringResource
 import com.drdisagree.teledrive.core.media.MediaPart
+import com.drdisagree.teledrive.domain.model.DriveFile
 import com.drdisagree.teledrive.domain.model.TransferTask
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 
 sealed interface PreviewContent {
 
@@ -87,3 +94,31 @@ fun viewerContentDuringTransfer(
     } else {
         resolved
     }
+
+/**
+ * The viewer's content pipeline (vc184 MF-2): resolution is keyed on the
+ * FILE only, and the transfer overlay is applied downstream.
+ *
+ * Before this, [PreviewViewModel.contentFor] flatMapLatest-ed over the
+ * (file, transfer) pair, so every transfer progress emission — about once
+ * a second for the life of a download — restarted [resolve]. Resolution
+ * is uncached and, for documents and archives, runs a full EPUB/DOCX
+ * extraction or archive listing on every restart. Here the resolve flow
+ * is collected once per distinct file; progress ticks only re-run the
+ * cheap [viewerContentDuringTransfer] overlay, so the Download-to-view
+ * gate still repaints its DownloadProgress on every tick (and renderable
+ * content still passes through unhijacked) without re-resolving.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+fun resolvedPreviewContentFlow(
+    fileFlow: Flow<DriveFile>,
+    incomingFlow: Flow<TransferTask?>,
+    resolve: (DriveFile) -> Flow<PreviewContent>
+): Flow<PreviewContent> = combine(
+    fileFlow
+        .distinctUntilChanged()
+        .flatMapLatest { latest -> resolve(latest) },
+    incomingFlow
+        .map { transfer -> transfer?.takeIf { it.type.isIncoming } }
+        .distinctUntilChanged()
+) { resolved, incoming -> viewerContentDuringTransfer(resolved, incoming) }

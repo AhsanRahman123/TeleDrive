@@ -91,6 +91,8 @@ class DesktopTransferScheduler(
         kick(allowMetered)
     }
 
+    override fun isPauseHeld(): Boolean = globallyPaused
+
     /** Mirrors Android's TransferQueueWorker: a terminal failure notifies if the user kept failure notifications on. */
     private suspend fun notifyFailure(transfer: TransferEntity) {
         if (!settingsRepository.preferences.first().failureNotifications) return

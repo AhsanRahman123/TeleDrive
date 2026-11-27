@@ -240,7 +240,7 @@ class TransferRepositoryImpl(
             is FailedDownload -> AppResult.Failure(outcome.error)
             is ExistingDownload -> {
                 when (existingDownloadAction(outcome.state)) {
-                    ExistingDownloadAction.RESUME -> resume(outcome.id)
+                    ExistingDownloadAction.RESUME -> resumeExistingDownload(outcome.id)
                     ExistingDownloadAction.KICK -> kickWorker()
                     ExistingDownloadAction.NONE -> Unit
                 }
@@ -450,6 +450,56 @@ class TransferRepositoryImpl(
         )
         kickWorker()
         return AppResult.Success(transfer.id)
+    }
+
+    /**
+     * The enqueueDownload dedupe repair for a PAUSED row (vc184 MF-1).
+     *
+     * Outside Pause all this is exactly [resume] (the A3 fix: a PAUSED row
+     * tapped again must genuinely run). But [resume] ends in
+     * `transferScheduler.resume(...)`, which on BOTH platforms is the global
+     * latch release — Android clears the drainer's pause hold, desktop
+     * clears globallyPaused — so routing the repair through it while the
+     * Pause-all hold is set would disarm Pause all for the whole queue: the
+     * restarted drain would also claim every other QUEUED row, defeating
+     * A2's guarantee that downloads enqueued during the hold must wait.
+     *
+     * While the hold is set, the repair therefore re-queues ONLY this row
+     * and kicks: kicks are dropped while held on both platforms, so the row
+     * waits QUEUED and drains when Resume all clears the hold (Resume all
+     * also re-queues any PAUSED rows, so nothing is lost if this row is
+     * somehow still PAUSED by then). The hold is re-checked under
+     * [workerControlLock]; if it was released concurrently, the ordinary
+     * [resume] path runs after the lock instead.
+     */
+    private suspend fun resumeExistingDownload(id: String) {
+        val requeuedWhileHeld = workerControlLock.withLock {
+            if (!transferScheduler.isPauseHeld()) return@withLock false
+            val transfer = transferDao.byId(id) ?: return@withLock true
+            if (transfer.type.isReportOnly) {
+                // Mirror resume()'s report-only handling, minus the scheduler
+                // resume: a paused report-only row still ends as FAILED.
+                if (transfer.state == TransferState.PAUSED) {
+                    transferDao.setFailed(
+                        id,
+                        TransferState.FAILED,
+                        "A paused archive download can't be resumed. " +
+                            "Download the file again from its ZIP.",
+                        System.currentTimeMillis()
+                    )
+                }
+                return@withLock true
+            }
+            if (transfer.state == TransferState.PAUSED ||
+                transfer.state == TransferState.FAILED
+            ) {
+                transferDao.setState(id, TransferState.QUEUED, System.currentTimeMillis())
+                kickWorker()
+                backupSessionTracker.refresh(transfer.backupSessionId)
+            }
+            true
+        }
+        if (!requeuedWhileHeld) resume(id)
     }
 
     override suspend fun pause(id: String) = workerControlLock.withLock {
