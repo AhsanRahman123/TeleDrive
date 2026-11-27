@@ -576,7 +576,7 @@ class TransferRepositoryImpl(
         // Capture active native downloads before changing the app rows to PAUSED.
         // The desktop scheduler cancels its drain job, so every native TDLib download must be
         // explicitly paused before that cancellation can detach the app's observer.
-        val runningDownloads = transferDao.activeIncomingTransfersForPause()
+        val runningDownloads = incomingRowsThatMayOwnNativeDownloads()
         transferDao.pauseAll(System.currentTimeMillis())
         runningDownloads.forEach { pauseNativeDownloadIfPresent(it) }
         // Pause TDLib's persistent queue before joining the drain.
@@ -618,7 +618,7 @@ class TransferRepositoryImpl(
         // attached them). Cancel all must remove those entries, not just flip
         // the Room rows; previously only a currently-running executor removed
         // its own row, so queued downloads kept moving inside TDLib.
-        val activeIncoming = transferDao.incomingQueueOrder()
+        val activeIncoming = incomingRowsThatMayOwnNativeDownloads()
         val cancelled = enqueueLock.withLock {
             // Serialize cancellation against upload inserts. Any import batch holding an older
             // generation is rejected if it tries to enqueue after this block completes.
@@ -889,18 +889,45 @@ class TransferRepositoryImpl(
     }
 
     /**
+     * Every incoming row that can own an entry in TDLib's persistent download
+     * list right now: the queued/running/paused queue PLUS failed rows
+     * (vc186 A2). A download whose execution failed — e.g. the stall timeout
+     * fired while TDLib kept pulling bytes — leaves its native entry
+     * downloading with only a FAILED Room row to show for it; bulk pause /
+     * cancel snapshots that skip FAILED rows leave exactly those entries
+     * running, the "living only in TDLib's native list" case.
+     */
+    private suspend fun incomingRowsThatMayOwnNativeDownloads(): List<TransferEntity> {
+        val queued = transferDao.incomingQueueOrder()
+        val failed = transferDao.observeFailed(Int.MAX_VALUE).first()
+            .filter { it.type.isIncoming }
+        return (queued + failed).distinctBy { it.id }
+    }
+
+    /**
      * The app's transfer row and TDLib's persistent download queue are separate state stores.
      * Pausing only the Room row is insufficient: TDLib can continue downloading after the
      * worker is cancelled or the app is closed. Explicitly pause the native queue entry too.
+     *
+     * vc186 A2: the pause goes through the SOURCE-AWARE client call with the
+     * file's chat/message ids. The entry was added under the file object
+     * attached to that source message; resolving the native entry from the
+     * remote id alone can land on a different TDLib file object that owns no
+     * entry, which is why the vc184 pause/remove calls changed nothing in
+     * the field on Android.
      */
     private suspend fun pauseNativeDownloadIfPresent(transfer: TransferEntity) {
         if (!transfer.type.isIncoming) return
-        val remoteFileId = transfer.fileId
-            ?.let { fileDao.byId(it)?.remoteFileId }
+        val file = transfer.fileId?.let { fileDao.byId(it) }
+        val remoteFileId = file?.remoteFileId
             ?.takeIf { it.isNotBlank() }
             ?: return
         try {
-            telegramClient.pauseManagedDownload(remoteFileId)
+            telegramClient.pauseManagedDownload(
+                remoteFileId,
+                file.chatId ?: transfer.chatId,
+                file.messageId ?: transfer.messageId
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -918,16 +945,21 @@ class TransferRepositoryImpl(
      * download list is a separate state store from the Room row, so cancelling
      * only the row leaves the native entry downloading. Best effort — a file
      * that was never attached has no entry to remove, and the row is already
-     * cancelled either way.
+     * cancelled either way. Source-aware for the same vc186 A2 reason as the
+     * pause above.
      */
     private suspend fun removeNativeDownloadIfPresent(transfer: TransferEntity) {
         if (!transfer.type.isIncoming) return
-        val remoteFileId = transfer.fileId
-            ?.let { fileDao.byId(it)?.remoteFileId }
+        val file = transfer.fileId?.let { fileDao.byId(it) }
+        val remoteFileId = file?.remoteFileId
             ?.takeIf { it.isNotBlank() }
             ?: return
         try {
-            telegramClient.removeManagedDownload(remoteFileId)
+            telegramClient.removeManagedDownload(
+                remoteFileId,
+                file.chatId ?: transfer.chatId,
+                file.messageId ?: transfer.messageId
+            )
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {

@@ -149,7 +149,14 @@ class MainActivity : FragmentActivity() {
         handleIntent(intent)
         setContent {
             CompositionLocalProvider(LocalAndroidLayout provides true) {
-                ProvidePlatformActions {
+                ProvidePlatformActions(
+                    // vc186 A6: the floating transfer widget's tap lands here;
+                    // TeleDriveApp already navigates to Route.Transfers for
+                    // this destination (the transfers-notification route).
+                    onOpenTransfers = {
+                        destination.value = AppNotifications.DESTINATION_TRANSFERS
+                    }
+                ) {
                     TeleDriveApp(
                         pendingShare = pendingShare,
                         notificationDestination = destination.collectAsStateWithLifecycle().value,

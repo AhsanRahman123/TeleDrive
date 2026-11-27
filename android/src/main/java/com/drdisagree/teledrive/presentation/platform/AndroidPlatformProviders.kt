@@ -54,7 +54,10 @@ import org.koin.compose.koinInject
 import java.io.File
 
 @Composable
-fun ProvidePlatformActions(content: @Composable () -> Unit) {
+fun ProvidePlatformActions(
+    onOpenTransfers: () -> Unit = {},
+    content: @Composable () -> Unit
+) {
     val capabilities = koinInject<PlatformCapabilities>()
     val settingsRepository = koinInject<SettingsRepository>()
     val context = LocalContext.current
@@ -241,8 +244,10 @@ fun ProvidePlatformActions(content: @Composable () -> Unit) {
         Box {
             content()
             // The floating transfer widget (bubble / bottom strip) floats over the app,
-            // exactly like the Windows overlay floats over its window.
-            TransferWidgetOverlay(transferBubbleStore)
+            // exactly like the Windows overlay floats over its window. Tapping it
+            // opens the full Transfers screen (vc186 A6) via the activity's
+            // destination flow — the same route a transfers notification tap takes.
+            TransferWidgetOverlay(transferBubbleStore, onOpenTransfers)
         }
 
         activeUploadPickerCallback?.let { callback ->

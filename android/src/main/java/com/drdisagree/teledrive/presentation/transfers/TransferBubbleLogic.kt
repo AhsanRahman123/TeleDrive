@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import com.drdisagree.teledrive.domain.model.TransferState
 import com.drdisagree.teledrive.domain.model.TransferTask
 import com.drdisagree.teledrive.presentation.platform.TransferWidgetColor
+import com.drdisagree.teledrive.presentation.platform.TransferWidgetStyle
 
 /**
  * Pure logic for the Android transfer widget — a direct port of the Windows widget's
@@ -14,6 +15,19 @@ import com.drdisagree.teledrive.presentation.platform.TransferWidgetColor
 
 /** A dp offset of a top-left corner from the window's top-left. */
 data class BubbleOffset(val x: Float, val y: Float)
+
+/** What tapping the transfer widget does (vc186 A6). */
+enum class WidgetTapTarget { TRANSFERS_SCREEN }
+
+/**
+ * The tap contract for BOTH widget shells (vc186 A6): tapping the floating
+ * transfer widget — bubble or bottom strip — opens the full Transfers
+ * screen. It used to expand an in-widget summary panel; the shells now
+ * route their tap through this single decision so the two styles can
+ * never drift apart again.
+ */
+fun widgetTapTarget(style: TransferWidgetStyle): WidgetTapTarget =
+    WidgetTapTarget.TRANSFERS_SCREEN
 
 /** What the transfer-bubble overlay shows, if anything. */
 enum class BubbleVisibility { GONE, TAB, BUBBLE }

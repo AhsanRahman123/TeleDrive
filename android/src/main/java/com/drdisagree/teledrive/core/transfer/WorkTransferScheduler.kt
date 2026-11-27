@@ -68,10 +68,20 @@ class WorkTransferScheduler(
         WorkManager.getInstance(context).cancelUniqueWork(TransferQueueWorker.UNIQUE_NAME)
     }
 
-    /** Explicit resume: clear the hold first, then restart the worker. */
+    /**
+     * Explicit resume: clear the hold first, then restart the worker.
+     *
+     * vc186 A2: the restart is EXPEDITED, like [kick]. It previously went
+     * through [rekick]'s non-expedited REPLACE request, which WorkManager
+     * may defer under battery optimisation / Doze — the user tapped Resume
+     * and the paused rows sat QUEUED with no worker running, while on
+     * desktop resume starts the in-process drain immediately. A user-tapped
+     * resume is exactly what expedited work (with the non-expedited
+     * fallback) exists for.
+     */
     override fun resume(allowMetered: Boolean) {
         drainer.setPauseHold(false)
-        rekick(allowMetered)
+        enqueue(allowMetered, ExistingWorkPolicy.REPLACE, expedited = true)
     }
 
     override fun isPauseHeld(): Boolean = drainer.isPauseHeld()
