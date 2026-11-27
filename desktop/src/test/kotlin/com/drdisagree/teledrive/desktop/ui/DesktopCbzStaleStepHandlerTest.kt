@@ -6,7 +6,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -388,6 +388,28 @@ class DesktopCbzStaleStepHandlerTest {
         rule.waitForIdle()
     }
 
+    /**
+     * Clicks the SCREEN-level edge Next pager button. Two nodes carry the
+     * "Next file" description while an in-zip image preview is open: the
+     * screen's folder pager (vertically centred on the window's right
+     * edge) and the image overlay's own in-zip pager (below centre).
+     * The screen's is the one whose centre sits on the window's vertical
+     * centre — that is the button this scenario pages the folder with.
+     */
+    private fun clickScreenNextPager() {
+        val all = rule.onAllNodesWithContentDescription("Next file")
+        val nodes = all.fetchSemanticsNodes()
+        if (nodes.isEmpty()) throw AssertionError("No 'Next file' pager button found")
+        val rootBounds = rule.onRoot().fetchSemanticsNode().boundsInRoot
+        val windowCenterY = (rootBounds.top + rootBounds.bottom) / 2f
+        val targetIndex = nodes.indices.minBy { i ->
+            val b = nodes[i].boundsInRoot
+            kotlin.math.abs((b.top + b.bottom) / 2f - windowCenterY)
+        }
+        all[targetIndex].performClick()
+        rule.waitForIdle()
+    }
+
     @Test
     fun `after paging away from a cbz with its preview open W and E page the folder not the dead preview`() {
         setProductionScreen()
@@ -404,7 +426,7 @@ class DesktopCbzStaleStepHandlerTest {
         // The CBZ keeps the screen-level edge pager buttons (they hide
         // only for .zip files): page the folder to the plain text file
         // WHILE the entry preview is still open.
-        rule.onNodeWithContentDescription("Next file").performClick()
+        clickScreenNextPager()
         waitDisplayed("NEXT FILE BODY")
         // Let the page transition finish and the CBZ pane dispose; its
         // step registration is what goes stale at this point.
