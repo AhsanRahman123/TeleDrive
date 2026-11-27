@@ -187,6 +187,7 @@ import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
 import com.drdisagree.teledrive.desktop.media.ArchiveThumbState
 import com.drdisagree.teledrive.desktop.media.DesktopArchiveEntryThumbnailStore
 import com.drdisagree.teledrive.presentation.preview.archiveImagePagerIndices
+import com.drdisagree.teledrive.presentation.preview.archiveImagePagerNeighbour
 import com.drdisagree.teledrive.presentation.preview.comicPageSequence
 import com.drdisagree.teledrive.presentation.preview.archiveBackStep
 import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
@@ -2748,6 +2749,35 @@ internal fun DesktopArchivePane(
                     unifiedPreviewIndices
                 }
                 val pagerPosition = imageSequence.indexOf(preview.entryIndex)
+                // The photo pager steps through onPreviewEntry — the direct
+                // preview request this pane's parameter documents as "the
+                // in-zip photo pager's neighbour switch" (the viewers-branch
+                // wiring). The c1ae8d71 merge resolution rerouted these two
+                // handlers through onStepArchivePreview, whose pane default
+                // is a no-op, leaving onPreviewEntry with no call site in the
+                // pane and the pager dead for any caller that wires only the
+                // documented preview callback. A step that lands on a VIDEO
+                // entry (the unified sequence includes video) routes to
+                // onVideoEntryTap instead — the same desktop-only video
+                // routing the row tap uses above, and the same split
+                // PreviewViewModel.stepArchivePreview applies — so a video
+                // stop opens the player, never the shared download routing.
+                val stepImagePager: (Int) -> Unit = { delta ->
+                    archiveImagePagerNeighbour(
+                        imageSequence, preview.entryIndex, delta
+                    )?.let { targetIndex ->
+                        val targetEntry = listing.getOrNull(targetIndex)
+                        if (targetEntry != null &&
+                            MimeTypes.isVideo(
+                                MimeTypes.fromFileName(targetEntry.name)
+                            )
+                        ) {
+                            onVideoEntryTap(targetIndex)
+                        } else {
+                            onPreviewEntry(targetIndex)
+                        }
+                    }
+                }
                 ArchiveImagePreview(
                     preview = preview,
                     entry = listing.getOrNull(preview.entryIndex),
@@ -2755,8 +2785,8 @@ internal fun DesktopArchivePane(
                     hasNext = pagerPosition >= 0 &&
                         pagerPosition < imageSequence.lastIndex,
                     busy = busyEntryIndex != null,
-                    onPrevious = { onStepArchivePreview(-1, imageSequence) },
-                    onNext = { onStepArchivePreview(+1, imageSequence) },
+                    onPrevious = { stepImagePager(-1) },
+                    onNext = { stepImagePager(+1) },
                     onDismiss = onDismissPreview,
                     onDownload = onDownloadCurrentEntry,
                     snackbarHostState = snackbarHostState
