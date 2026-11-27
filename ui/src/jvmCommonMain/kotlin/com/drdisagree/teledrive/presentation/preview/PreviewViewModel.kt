@@ -805,10 +805,9 @@ class PreviewViewModel(
             // guard serialises publishes against superseding preview loads.
             archiveExtractionMutex.lock(gateOwner)
             try {
+            val myJob = currentCoroutineContext()[Job]
             val isCurrentLoad = {
-                archivePreviewLoadMayPublish(
-                    archivePreviewJob === currentCoroutineContext()[Job]
-                )
+                archivePreviewLoadMayPublish(archivePreviewJob === myJob)
             }
             _uiState.update {
                 it.copy(
