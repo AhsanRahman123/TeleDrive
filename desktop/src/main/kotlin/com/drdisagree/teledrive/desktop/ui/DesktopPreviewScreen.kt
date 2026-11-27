@@ -182,12 +182,10 @@ import com.drdisagree.teledrive.presentation.preview.ArchiveBackStep
 import com.drdisagree.teledrive.presentation.preview.ArchiveBatchProgress
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntry
 import com.drdisagree.teledrive.presentation.preview.ArchiveEntryPreview
-import com.drdisagree.teledrive.presentation.preview.archiveImagePagerIndices
 import com.drdisagree.teledrive.presentation.preview.archiveUnifiedPreviewIndices
 import com.drdisagree.teledrive.core.archive.ArchiveEntryThumbnailPolicy
 import com.drdisagree.teledrive.desktop.media.ArchiveThumbState
 import com.drdisagree.teledrive.desktop.media.DesktopArchiveEntryThumbnailStore
-import com.drdisagree.teledrive.presentation.preview.archiveImagePagerNeighbour
 import com.drdisagree.teledrive.presentation.preview.archiveBackStep
 import com.drdisagree.teledrive.presentation.preview.deepestExpandedArchiveFolder
 import com.drdisagree.teledrive.presentation.preview.ArchiveRowState
