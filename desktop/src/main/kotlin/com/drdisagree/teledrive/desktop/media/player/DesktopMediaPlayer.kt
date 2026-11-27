@@ -105,6 +105,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.drdisagree.teledrive.core.common.SafeLog
 import com.drdisagree.teledrive.desktop.ui.LocalFullscreenController
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.resources.Res
@@ -571,6 +572,17 @@ internal fun DesktopMediaPlayer(
         // instance configuration, already built into the current player's
         // instance (see PlayerSession).
         val mediaGeneration = eventGate.beginMedia()
+        // N3 widened (PC 1.6.27 comparison round): one start line per
+        // MRL, tagged with its route, immediately before this start's
+        // negotiated-buffer lines from the video surface — so a single
+        // field log capture attributes every negotiation to the route
+        // (normal streamed / normal local / in-zip) that produced it.
+        // All routes share this player, session and surface, so this
+        // line is the only route marker the diagnostics need.
+        SafeLog.d(
+            TAG,
+            "Starting media route=${playbackRouteForMrl(mrl)} mrl=$mrl"
+        )
         hasCurrentMediaFrame = false
         while (frameUpdates.tryReceive().isSuccess) Unit
         while (timeUpdates.tryReceive().isSuccess) Unit
@@ -2597,6 +2609,7 @@ private fun PlayerSession.submitAudioState(volume: Int, muted: Boolean) {
     }
 }
 
+private const val TAG = "DesktopMediaPlayer"
 private const val PLAYER_NATIVE_CALL_TIMEOUT_MS = 2_500L
 private const val MOVE_THRESHOLD_PX = 4f
 private const val SKIP_MS = 10_000L
