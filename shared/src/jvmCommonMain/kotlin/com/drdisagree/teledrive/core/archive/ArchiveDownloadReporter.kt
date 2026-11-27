@@ -213,17 +213,17 @@ class ArchiveDownloadTracker(
         // been cancelled a plain suspend DAO call throws CancellationException
         // before writing, leaving the row RUNNING forever ("No recent
         // progress") — the stop then appears to have done nothing.
-        // NonCancellable lets the write land; the RUNNING guard below still
-        // leaves any state the transfer repository wrote first untouched.
+        // NonCancellable lets the write land from the cancelled coroutine.
+        //
+        // The write itself is a CONDITIONAL update (second-pass MF-2): it
+        // applies only where the row is still RUNNING, atomically in the SQL,
+        // so a PAUSED/CANCELLED the transfer repository wrote at any moment —
+        // including between any earlier read and this write — is never
+        // overwritten. The old read(RUNNING)-then-write sequence had exactly
+        // that overwrite window; there is no read here anymore.
         withContext(NonCancellable) {
             try {
-                val row = transferDao.byId(recordId)
-                if (row != null && row.state == TransferState.RUNNING) {
-                    transferDao.setLocalPath(recordId, localPath)
-                    transferDao.setCompleted(recordId, nowMillis())
-                }
-                // Any other state was written by the transfer repository first
-                // (pause/cancel from Transfers) and is left untouched.
+                transferDao.setCompletedIfRunning(recordId, localPath, nowMillis())
             } catch (failure: Exception) {
                 // Best-effort: the file is saved either way.
             } finally {
@@ -237,21 +237,17 @@ class ArchiveDownloadTracker(
 
     override suspend fun fail(recordId: String?, message: String?) {
         if (recordId == null) return
-        // Cancellation-proof, like complete(): a failure reported from an
-        // already-cancelled extraction coroutine must still land (vc183).
+        // Cancellation-proof and conditional, like complete() (vc183 MF-2):
+        // a failure reported from an already-cancelled extraction coroutine
+        // must still land, but only over a row that is still RUNNING.
         withContext(NonCancellable) {
             try {
-                val row = transferDao.byId(recordId)
-                if (row != null && row.state == TransferState.RUNNING) {
-                    transferDao.setFailed(
-                        recordId,
-                        TransferState.FAILED,
-                        message,
-                        nowMillis()
-                    )
-                }
-                // Any other state was written by the transfer repository first
-                // (pause/cancel from Transfers) and is left untouched.
+                transferDao.setFailedIfRunning(
+                    recordId,
+                    TransferState.FAILED,
+                    message,
+                    nowMillis()
+                )
             } catch (failure: Exception) {
                 // Best-effort history write.
             } finally {
@@ -265,39 +261,38 @@ class ArchiveDownloadTracker(
 
     override suspend fun ownerStopped(recordId: String?, cause: CancellationException?) {
         if (recordId == null) return
-        // Cancellation-proof, like complete(): this is normally called from
-        // the extraction coroutine's own CancellationException catch, i.e.
-        // from a context that is already cancelled (vc183).
+        // Cancellation-proof and conditional, like complete(): this is
+        // normally called from the extraction coroutine's own
+        // CancellationException catch, i.e. from a context that is already
+        // cancelled (vc183), and its write must land — but only over a row
+        // that is still RUNNING (MF-2). In particular the internal-timeout
+        // FAILED below can no longer overwrite a PAUSED a concurrent Pause
+        // tap wrote while this call was on its way to the DAO.
         withContext(NonCancellable) {
             try {
-                val row = transferDao.byId(recordId)
-                if (row != null && row.state == TransferState.RUNNING) {
-                    val registryStop = jobs.wasCancelledViaRegistry(recordId)
-                    when {
-                        // A Transfers stop (the repository normally already
-                        // wrote PAUSED/CANCELLED; a still-RUNNING row becomes
-                        // CANCELLED), a caller that cannot name its cause, and
-                        // ordinary owner teardown all keep the historical
-                        // CANCELLED outcome.
-                        registryStop || cause == null || cause !is TimeoutCancellationException ->
-                            transferDao.setState(
-                                recordId,
-                                TransferState.CANCELLED,
-                                nowMillis()
-                            )
-                        // Nobody asked for this stop: the byte source's own
-                        // delivery deadline fired. That is a failure, not a
-                        // user cancellation.
-                        else -> transferDao.setFailed(
+                val registryStop = jobs.wasCancelledViaRegistry(recordId)
+                when {
+                    // A Transfers stop (the repository normally already
+                    // wrote PAUSED/CANCELLED; a still-RUNNING row becomes
+                    // CANCELLED), a caller that cannot name its cause, and
+                    // ordinary owner teardown all keep the historical
+                    // CANCELLED outcome.
+                    registryStop || cause == null || cause !is TimeoutCancellationException ->
+                        transferDao.setStateIfRunning(
                             recordId,
-                            TransferState.FAILED,
-                            "Telegram did not deliver the file in time. Try again.",
+                            TransferState.CANCELLED,
                             nowMillis()
                         )
-                    }
+                    // Nobody asked for this stop: the byte source's own
+                    // delivery deadline fired. That is a failure, not a
+                    // user cancellation.
+                    else -> transferDao.setFailedIfRunning(
+                        recordId,
+                        TransferState.FAILED,
+                        "Telegram did not deliver the file in time. Try again.",
+                        nowMillis()
+                    )
                 }
-                // Any other state was written by the transfer repository first
-                // (pause/cancel from Transfers) and is left untouched.
             } catch (failure: Exception) {
                 // Best-effort history write.
             } finally {

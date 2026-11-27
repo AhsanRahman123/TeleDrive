@@ -194,6 +194,55 @@ class AndroidArchiveQueueTest {
                     rows.computeIfPresent(id) { _, row -> row.copy(state = args[1] as TransferState) }
                     Unit
                 }
+                // MF-2 conditional terminal writes: apply only over a
+                // still-RUNNING row, like the real DAO; return 1/0.
+                "setCompletedIfRunning" -> {
+                    val id = args!![0] as String
+                    var applied = 0
+                    rows.computeIfPresent(id) { _, row ->
+                        if (row.state == TransferState.RUNNING) {
+                            applied = 1
+                            row.copy(
+                                state = TransferState.COMPLETED,
+                                localPath = args[1] as String?,
+                                transferredBytes = row.sizeBytes,
+                                completedAt = args[2] as Long
+                            )
+                        } else {
+                            row
+                        }
+                    }
+                    applied
+                }
+                "setFailedIfRunning" -> {
+                    val id = args!![0] as String
+                    var applied = 0
+                    rows.computeIfPresent(id) { _, row ->
+                        if (row.state == TransferState.RUNNING) {
+                            applied = 1
+                            row.copy(
+                                state = args[1] as TransferState,
+                                errorMessage = args[2] as String?
+                            )
+                        } else {
+                            row
+                        }
+                    }
+                    applied
+                }
+                "setStateIfRunning" -> {
+                    val id = args!![0] as String
+                    var applied = 0
+                    rows.computeIfPresent(id) { _, row ->
+                        if (row.state == TransferState.RUNNING) {
+                            applied = 1
+                            row.copy(state = args[1] as TransferState)
+                        } else {
+                            row
+                        }
+                    }
+                    applied
+                }
                 else -> throw UnsupportedOperationException(method)
             }
         }

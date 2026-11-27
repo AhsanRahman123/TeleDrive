@@ -251,6 +251,49 @@ private class FakeTransferDao : TransferDao {
         }
     }
 
+    // MF-2 conditional terminal writes, mirroring the real DAO's RUNNING guard.
+    override suspend fun setCompletedIfRunning(
+        id: String,
+        localPath: String?,
+        completedAt: Long,
+        completed: TransferState
+    ): Int {
+        val row = rows[id]?.takeIf { it.state == TransferState.RUNNING } ?: return 0
+        rows[id] = row.copy(
+            state = completed, localPath = localPath, transferredBytes = row.sizeBytes,
+            speedBytesPerSecond = 0, completedAt = completedAt, updatedAt = completedAt
+        )
+        return 1
+    }
+
+    override suspend fun setFailedIfRunning(
+        id: String,
+        state: TransferState,
+        error: String?,
+        updatedAt: Long
+    ): Int {
+        val row = rows[id]?.takeIf { it.state == TransferState.RUNNING } ?: return 0
+        rows[id] = row.copy(
+            state = state, errorMessage = error, speedBytesPerSecond = 0, updatedAt = updatedAt
+        )
+        return 1
+    }
+
+    override suspend fun setStateIfRunning(
+        id: String,
+        state: TransferState,
+        updatedAt: Long
+    ): Int {
+        val row = rows[id]?.takeIf { it.state == TransferState.RUNNING } ?: return 0
+        val speed = if (state in setOf(
+                TransferState.QUEUED, TransferState.RUNNING, TransferState.PAUSED,
+                TransferState.CANCELLED, TransferState.FAILED
+            )
+        ) 0 else row.speedBytesPerSecond
+        rows[id] = row.copy(state = state, speedBytesPerSecond = speed, updatedAt = updatedAt)
+        return 1
+    }
+
     override suspend fun requeueRunning() {
         rows.values.filter {
             it.state == TransferState.RUNNING && it.type != TransferType.ARCHIVE_DOWNLOAD

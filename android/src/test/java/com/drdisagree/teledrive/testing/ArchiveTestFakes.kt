@@ -209,6 +209,71 @@ class FakeTransferDao : TransferDao {
             }
         }
 
+    // MF-2 conditional terminal writes: apply only over a still-RUNNING row,
+    // mirroring the real DAO's `WHERE state = 'RUNNING'`; 1 = landed, 0 = not.
+    override suspend fun setCompletedIfRunning(
+        id: String,
+        localPath: String?,
+        completedAt: Long,
+        completed: TransferState
+    ): Int {
+        var applied = 0
+        mutate {
+            rows[id]?.takeIf { it.state == TransferState.RUNNING }?.let {
+                applied = 1
+                replace(
+                    it.copy(
+                        state = completed, localPath = localPath,
+                        transferredBytes = it.sizeBytes, speedBytesPerSecond = 0,
+                        completedAt = completedAt, updatedAt = completedAt
+                    )
+                )
+            }
+        }
+        return applied
+    }
+
+    override suspend fun setFailedIfRunning(
+        id: String,
+        state: TransferState,
+        error: String?,
+        updatedAt: Long
+    ): Int {
+        var applied = 0
+        mutate {
+            rows[id]?.takeIf { it.state == TransferState.RUNNING }?.let {
+                applied = 1
+                replace(
+                    it.copy(
+                        state = state, errorMessage = error,
+                        speedBytesPerSecond = 0, updatedAt = updatedAt
+                    )
+                )
+            }
+        }
+        return applied
+    }
+
+    override suspend fun setStateIfRunning(
+        id: String,
+        state: TransferState,
+        updatedAt: Long
+    ): Int {
+        var applied = 0
+        mutate {
+            rows[id]?.takeIf { it.state == TransferState.RUNNING }?.let {
+                applied = 1
+                val speed = if (state in setOf(
+                        TransferState.QUEUED, TransferState.RUNNING, TransferState.PAUSED,
+                        TransferState.CANCELLED, TransferState.FAILED
+                    )
+                ) 0 else it.speedBytesPerSecond
+                replace(it.copy(state = state, speedBytesPerSecond = speed, updatedAt = updatedAt))
+            }
+        }
+        return applied
+    }
+
     override suspend fun requeueRunning() = mutate {
         snapshot().filter {
             it.state == TransferState.RUNNING && it.type != TransferType.ARCHIVE_DOWNLOAD

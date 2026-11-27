@@ -190,6 +190,51 @@ interface TransferDao {
         completed: TransferState = TransferState.COMPLETED
     )
 
+    /**
+     * Conditional terminal writes for the archive download tracker (vc183
+     * second-pass MF-2): the state change applies ONLY where the row is still
+     * RUNNING, atomically in the UPDATE itself, and the affected-row count
+     * says whether it landed. This replaces the tracker's old
+     * read(RUNNING)-then-write sequence, whose window let a concurrent
+     * repository PAUSED/CANCELLED write land between the read and the write
+     * and then be overwritten by the terminal state. Queries only — no schema
+     * change.
+     */
+    @Query(
+        """UPDATE transfers SET state = :completed, localPath = :localPath,
+           transferredBytes = sizeBytes, speedBytesPerSecond = 0,
+           completedAt = :completedAt, updatedAt = :completedAt
+           WHERE id = :id AND state = 'RUNNING'"""
+    )
+    suspend fun setCompletedIfRunning(
+        id: String,
+        localPath: String?,
+        completedAt: Long,
+        completed: TransferState = TransferState.COMPLETED
+    ): Int
+
+    @Query(
+        """UPDATE transfers SET state = :state, errorMessage = :error,
+           speedBytesPerSecond = 0, updatedAt = :updatedAt
+           WHERE id = :id AND state = 'RUNNING'"""
+    )
+    suspend fun setFailedIfRunning(
+        id: String,
+        state: TransferState,
+        error: String?,
+        updatedAt: Long
+    ): Int
+
+    @Query(
+        """UPDATE transfers SET state = :state,
+           speedBytesPerSecond = CASE
+               WHEN :state IN ('QUEUED', 'RUNNING', 'PAUSED', 'CANCELLED', 'FAILED') THEN 0
+               ELSE speedBytesPerSecond
+           END,
+           updatedAt = :updatedAt WHERE id = :id AND state = 'RUNNING'"""
+    )
+    suspend fun setStateIfRunning(id: String, state: TransferState, updatedAt: Long): Int
+
     @Query("UPDATE transfers SET state = 'QUEUED', telegramFileId = NULL, speedBytesPerSecond = 0 WHERE state = 'RUNNING' AND type != 'ARCHIVE_DOWNLOAD'")
     suspend fun requeueRunning()
 

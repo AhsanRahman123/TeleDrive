@@ -131,6 +131,97 @@ class ArchiveCancelStopTest {
             yield()
             delegate.setLocalPath(id, localPath)
         }
+
+        override suspend fun setCompletedIfRunning(
+            id: String,
+            localPath: String?,
+            completedAt: Long,
+            completed: TransferState
+        ): Int {
+            yield()
+            return delegate.setCompletedIfRunning(id, localPath, completedAt, completed)
+        }
+
+        override suspend fun setFailedIfRunning(
+            id: String,
+            state: TransferState,
+            error: String?,
+            updatedAt: Long
+        ): Int {
+            yield()
+            return delegate.setFailedIfRunning(id, state, error, updatedAt)
+        }
+
+        override suspend fun setStateIfRunning(
+            id: String,
+            state: TransferState,
+            updatedAt: Long
+        ): Int {
+            yield()
+            return delegate.setStateIfRunning(id, state, updatedAt)
+        }
+    }
+
+    /**
+     * MF-2 (second pass) interposing DAO: once armed for a record, a
+     * repository-style PAUSED write lands at the worst possible moment for
+     * the tracker — immediately after the tracker's own read of the row
+     * (the pre-fix read-then-write interleave), or, if the tracker never
+     * reads, immediately before its conditional terminal write. Either way
+     * the PAUSED is in place before the tracker's terminal state is applied,
+     * so a tracker that overwrites it fails the test.
+     */
+    private class PauseInterposingDao(
+        private val delegate: FakeTransferDao
+    ) : TransferDao by delegate {
+        var pauseTargetId: String? = null
+        private var pauseLanded = false
+
+        private suspend fun landPause(id: String) {
+            if (id == pauseTargetId && !pauseLanded) {
+                pauseLanded = true
+                delegate.setState(id, TransferState.PAUSED, 999L)
+            }
+        }
+
+        override suspend fun byId(id: String): TransferEntity? {
+            yield()
+            val row = delegate.byId(id)
+            if (row?.state == TransferState.RUNNING) landPause(id)
+            return row
+        }
+
+        override suspend fun setCompletedIfRunning(
+            id: String,
+            localPath: String?,
+            completedAt: Long,
+            completed: TransferState
+        ): Int {
+            yield()
+            landPause(id)
+            return delegate.setCompletedIfRunning(id, localPath, completedAt, completed)
+        }
+
+        override suspend fun setFailedIfRunning(
+            id: String,
+            state: TransferState,
+            error: String?,
+            updatedAt: Long
+        ): Int {
+            yield()
+            landPause(id)
+            return delegate.setFailedIfRunning(id, state, error, updatedAt)
+        }
+
+        override suspend fun setStateIfRunning(
+            id: String,
+            state: TransferState,
+            updatedAt: Long
+        ): Int {
+            yield()
+            landPause(id)
+            return delegate.setStateIfRunning(id, state, updatedAt)
+        }
     }
 
     private val fakeDao = FakeTransferDao()
@@ -319,6 +410,80 @@ class ArchiveCancelStopTest {
                 "Telegram did not deliver the file in time. Try again.",
                 row.errorMessage
             )
+        }
+
+    @Test
+    fun `pause landing between tracker read and timeout write leaves the row PAUSED`() =
+        runBlocking {
+            // MF-2 (second pass): the internal-timeout branch of ownerStopped
+            // races a concurrent Pause tap. The interposing DAO lands the
+            // repository's PAUSED after the tracker's read (pre-fix shape) or
+            // just before its conditional write (post-fix shape); the FAILED
+            // must NOT overwrite it and the pause must not appear ignored.
+            val interposingFake = FakeTransferDao()
+            val interposingDao = PauseInterposingDao(interposingFake)
+            val interposingTracker = ArchiveDownloadTracker(
+                interposingDao, ArchiveExtractionJobs()
+            )
+            val id = interposingTracker.begin("song.mp3", 100L)!!
+            interposingDao.pauseTargetId = id
+
+            val job = scope.async {
+                try {
+                    withTimeout(50) { delay(60_000) }
+                } catch (failure: TimeoutCancellationException) {
+                    interposingTracker.ownerStopped(id, failure)
+                    throw failure
+                }
+            }
+            runCatching { job.await() }
+
+            assertEquals(TransferState.PAUSED, interposingFake.byId(id)!!.state)
+        }
+
+    @Test
+    fun `pause landing just before tracker complete leaves the row PAUSED with no local path`() =
+        runBlocking {
+            // MF-2, complete() axis: the same interleave must not let a
+            // COMPLETED (with its saved path) overwrite a just-written PAUSED.
+            val interposingFake = FakeTransferDao()
+            val interposingDao = PauseInterposingDao(interposingFake)
+            val interposingTracker = ArchiveDownloadTracker(
+                interposingDao, ArchiveExtractionJobs()
+            )
+            val id = interposingTracker.begin("song.mp3", 100L)!!
+            interposingDao.pauseTargetId = id
+
+            interposingTracker.complete(id, "/Downloads/song.mp3")
+
+            val row = interposingFake.byId(id)!!
+            assertEquals(TransferState.PAUSED, row.state)
+            assertEquals(null, row.localPath)
+        }
+
+    @Test
+    fun `tracker complete write lands from an already cancelled coroutine`() =
+        runBlocking {
+            // MF-2 must not reopen the original vc183 defect: the conditional
+            // terminal write still runs under NonCancellable, so a write
+            // issued from a cancelled extraction coroutine (through the
+            // genuinely-suspending DAO) still lands.
+            val id = tracker.begin("song.mp3", 100L)!!
+            val job = scope.async {
+                try {
+                    delay(60_000)
+                } catch (failure: CancellationException) {
+                    tracker.complete(id, "/Downloads/song.mp3")
+                    throw failure
+                }
+            }
+            delay(100)
+            job.cancel()
+            runCatching { job.await() }
+
+            val row = fakeDao.byId(id)!!
+            assertEquals(TransferState.COMPLETED, row.state)
+            assertEquals("/Downloads/song.mp3", row.localPath)
         }
 
     @Test
