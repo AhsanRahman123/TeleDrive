@@ -3695,9 +3695,10 @@ internal fun DesktopArchivePane(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            if (loading.delayedUntilComplete && loading.note != null) {
+                            val loadingNote = loading.note
+                            if (loading.delayedUntilComplete && loadingNote != null) {
                                 Text(
-                                    text = loading.note,
+                                    text = loadingNote,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
