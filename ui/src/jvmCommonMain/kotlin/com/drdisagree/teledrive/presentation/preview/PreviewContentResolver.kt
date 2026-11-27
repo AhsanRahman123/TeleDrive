@@ -187,9 +187,16 @@ class PreviewContentResolver(
         }
         .flowOn(dispatchers.io)
 
-    private fun isZipFile(file: DriveFile): Boolean =
-        file.mimeType == "application/zip" || file.extension.equals("zip", ignoreCase = true) ||
+    private fun isZipFile(file: DriveFile): Boolean {
+        // An EPUB/OOXML file is a ZIP container on the inside, and a stored or
+        // Telegram-declared MIME of application/zip for one must NOT route it
+        // to the archive browser: it is a document, exactly as the in-zip
+        // route treats a same-named archive entry (vc183 item 4).
+        if (isDocumentPreviewType(file.mimeType, file.name)) return false
+        return file.mimeType == "application/zip" ||
+            file.extension.equals("zip", ignoreCase = true) ||
             isCbzFile(file)
+    }
 
     /** A CBZ is a ZIP of comic pages: it browses and extracts through the ZIP machinery. */
     private fun isCbzFile(file: DriveFile): Boolean =
@@ -269,30 +276,25 @@ class PreviewContentResolver(
             path = path
         )
 
-    // Branch order is load-bearing and unchanged from the original
-    // DriveFile-keyed dispatch: image -> video -> audio -> pdf -> text ->
-    // archive -> apk -> unsupported.
+    // The dispatch itself is the pure [previewDispatch] seam below; this
+    // function only maps each kind to its content builder.
     private suspend fun fromLocal(
         mimeType: String,
         category: FileCategory,
         fileName: String,
         path: String
-    ): PreviewContent = when {
-        MimeTypes.isImage(mimeType) || category == FileCategory.IMAGE ->
-            PreviewContent.Image(File(path))
-        MimeTypes.isVideo(mimeType) || category == FileCategory.VIDEO ->
-            PreviewContent.LocalMedia(path, isAudio = false)
-        MimeTypes.isAudio(mimeType) || category == FileCategory.AUDIO ->
-            PreviewContent.LocalMedia(path, isAudio = true)
-        MimeTypes.isPdf(mimeType) -> PreviewContent.Pdf(path)
-        MimeTypes.isHtml(mimeType) -> readHtml(path)
-        MimeTypes.isText(mimeType) -> readText(path, mimeType)
-        MimeTypes.isArchive(mimeType) || category == FileCategory.ARCHIVE ->
-            readArchive(mimeType, path)
-        MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType) ->
-            readDocumentText(path)
-        MimeTypes.isApk(mimeType, fileName) -> readApk(path)
-        else -> PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
+    ): PreviewContent = when (previewDispatch(mimeType, category, fileName)) {
+        PreviewDispatch.IMAGE -> PreviewContent.Image(File(path))
+        PreviewDispatch.VIDEO -> PreviewContent.LocalMedia(path, isAudio = false)
+        PreviewDispatch.AUDIO -> PreviewContent.LocalMedia(path, isAudio = true)
+        PreviewDispatch.PDF -> PreviewContent.Pdf(path)
+        PreviewDispatch.HTML -> readHtml(path)
+        PreviewDispatch.DOCUMENT -> readDocumentText(path)
+        PreviewDispatch.TEXT -> readText(path, mimeType)
+        PreviewDispatch.ARCHIVE -> readArchive(mimeType, path)
+        PreviewDispatch.APK -> readApk(path)
+        PreviewDispatch.UNSUPPORTED ->
+            PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
     }
 
     private fun readApk(path: String): PreviewContent = runCatching {
@@ -444,8 +446,17 @@ class PreviewContentResolver(
         val previewDir = File(storagePaths.cacheDir, "previews").apply { mkdirs() }
         val target = File(previewDir, "${file.id}-${file.name}")
         if (target.exists() && target.length() > 0) {
-            cacheDao.touch(target.absolutePath, System.currentTimeMillis())
-            return target
+            // A non-empty cache file is only reused when it is the WHOLE file:
+            // a truncated copy left by an interrupted earlier fetch otherwise
+            // stayed cached forever and every later preview extracted from
+            // the wrong (short) content object — an EPUB whose container.xml
+            // was cut off read as "No preview for this file type" and a DOCX
+            // with a cut document.xml extracted to blank text (vc183 item 4).
+            if (file.sizeBytes <= 0 || target.length() == file.sizeBytes) {
+                cacheDao.touch(target.absolutePath, System.currentTimeMillis())
+                return target
+            }
+            target.delete()
         }
 
         var tdlibPath: String? = null
@@ -525,6 +536,65 @@ class PreviewContentResolver(
     }
 }
 
+/** The viewer a normal-route local file is dispatched to (see [previewDispatch]). */
+enum class PreviewDispatch {
+    IMAGE, VIDEO, AUDIO, PDF, HTML, DOCUMENT, TEXT, ARCHIVE, APK, UNSUPPORTED
+}
+
+/**
+ * Whether a file is an EPUB/OOXML document for preview purposes, by its stored
+ * MIME **or by its file name** — the same name-based classification the in-zip
+ * route has always used (`archiveEntryTapAction` keys off
+ * `MimeTypes.fromFileName(entry.name)` alone).
+ *
+ * vc183 item 4: the normal route previously trusted the stored MIME alone,
+ * but that MIME is not reliable for these formats — `MimeTypes.resolve`
+ * prefers a declared MIME over the filename, and EPUB/OOXML are ZIP
+ * containers, so a Telegram- or client-declared `application/zip` (or another
+ * container-ish value) is exactly what such a file can carry. With the stored
+ * MIME alone, the normal dispatch then sent the file to the archive branch
+ * (or to Unsupported) and the document viewer was never reached, while the
+ * identical file inside a ZIP — classified by name — previewed fine.
+ */
+fun isDocumentPreviewType(mimeType: String, fileName: String): Boolean {
+    if (MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType)) return true
+    val byName = MimeTypes.fromFileName(fileName)
+    return MimeTypes.isEpub(byName) || MimeTypes.isOoxml(byName)
+}
+
+/**
+ * The normal-route preview dispatch, pure so host tests can pin it.
+ *
+ * Branch order: image -> video -> audio -> pdf -> html -> document -> text ->
+ * archive -> apk -> unsupported. The DOCUMENT branch deliberately sits
+ * BEFORE text and archive (vc183 item 4): an EPUB's MIME ends in `+zip` and
+ * an OOXML file is a ZIP of XML, so under the old order (text -> archive ->
+ * document) any stored MIME that read as text or archive captured the file
+ * first and the document branch was unreachable for it — a remote EPUB
+ * landed on "No preview for this file type" and a DOCX that was captured by
+ * the text branch (or extracted to an empty string) opened blank. Every
+ * other type keeps its original relative order and outcome: a real `.zip`
+ * (name-derived MIME `application/zip`, not a document type) still archives,
+ * a CBZ still archives, and legacy `.doc`/`.xls`/`.ppt` are not OOXML and
+ * stay unsupported.
+ */
+fun previewDispatch(
+    mimeType: String,
+    category: FileCategory,
+    fileName: String
+): PreviewDispatch = when {
+    MimeTypes.isImage(mimeType) || category == FileCategory.IMAGE -> PreviewDispatch.IMAGE
+    MimeTypes.isVideo(mimeType) || category == FileCategory.VIDEO -> PreviewDispatch.VIDEO
+    MimeTypes.isAudio(mimeType) || category == FileCategory.AUDIO -> PreviewDispatch.AUDIO
+    MimeTypes.isPdf(mimeType) -> PreviewDispatch.PDF
+    MimeTypes.isHtml(mimeType) -> PreviewDispatch.HTML
+    isDocumentPreviewType(mimeType, fileName) -> PreviewDispatch.DOCUMENT
+    MimeTypes.isText(mimeType) -> PreviewDispatch.TEXT
+    MimeTypes.isArchive(mimeType) || category == FileCategory.ARCHIVE -> PreviewDispatch.ARCHIVE
+    MimeTypes.isApk(mimeType, fileName) -> PreviewDispatch.APK
+    else -> PreviewDispatch.UNSUPPORTED
+}
+
 /**
  * Whether a remote-only file is fetched automatically on open instead of
  * showing the Download-to-view gate (PreviewContent.RequiresDownload).
@@ -552,7 +622,7 @@ fun isAutoFetchable(
             MimeTypes.isText(mimeType) ||
             MimeTypes.isApk(mimeType, fileName))) ||
         (MimeTypes.isPdf(mimeType) && sizeBytes <= PreviewContentResolver.PDF_AUTO_PREVIEW_LIMIT) ||
-        ((MimeTypes.isEpub(mimeType) || MimeTypes.isOoxml(mimeType)) &&
+        (isDocumentPreviewType(mimeType, fileName) &&
             sizeBytes <= PreviewContentResolver.DOCUMENT_AUTO_PREVIEW_LIMIT)
 
 /**
