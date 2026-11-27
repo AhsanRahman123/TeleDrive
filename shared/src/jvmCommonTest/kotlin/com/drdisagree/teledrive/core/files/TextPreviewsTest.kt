@@ -104,4 +104,56 @@ class TextPreviewsTest {
         assertFalse(htmlNavigationAllowed(null))
         assertTrue(htmlNavigationAllowed("about:blank"))
     }
+
+    // ---- Round 3 A10: same-document fragment taps stay inside the page ----
+
+    @Test
+    fun htmlNavigationAllowsSameDocumentFragmentsOnly() {
+        // A checklist's table-of-contents tap resolves to about:blank#item-52:
+        // it scrolls within the loaded document and must not be refused.
+        assertTrue(htmlNavigationAllowed("about:blank#item-52"))
+        assertTrue(htmlNavigationAllowed("about:blank#"))
+        // Anything that would leave the document is still refused, fragments
+        // on foreign origins included.
+        assertFalse(htmlNavigationAllowed("https://example.com/page#item-52"))
+        assertFalse(htmlNavigationAllowed("about:blanket#item-52"))
+        assertFalse(htmlNavigationAllowed("intent://scan#Intent;scheme=zxing;end"))
+        assertFalse(htmlNavigationAllowed("tel:+123"))
+        assertFalse(htmlNavigationAllowed(""))
+    }
+
+    // ---- Round 3 A10: subresource policy ----
+
+    @Test
+    fun htmlSubresourcesOnlyWhatTheDocumentCarries() {
+        assertTrue(htmlSubresourceAllowed("data:image/png;base64,iVBORw0KGgo="))
+        assertTrue(htmlSubresourceAllowed("data:text/css;base64,Ym9keXt9"))
+        assertTrue(htmlSubresourceAllowed("about:blank"))
+        assertFalse(htmlSubresourceAllowed("https://example.com/tracker.png"))
+        assertFalse(htmlSubresourceAllowed("http://example.com/style.css"))
+        assertFalse(htmlSubresourceAllowed("file:///data/data/com.example/secret"))
+        assertFalse(htmlSubresourceAllowed("content://com.example.provider/file"))
+        assertFalse(htmlSubresourceAllowed(null))
+        assertFalse(htmlSubresourceAllowed(""))
+    }
+
+    // ---- Round 3 A10: WebView settings posture ----
+
+    @Test
+    fun htmlWebViewPolicyRunsPageScriptsButKeepsEveryRouteOutClosed() {
+        // On, so script-rendered / script-driven pages (checklists) render
+        // completely and their checkboxes work.
+        assertTrue(HtmlWebViewPolicy.JAVA_SCRIPT_ENABLED)
+        assertTrue(HtmlWebViewPolicy.DOM_STORAGE_ENABLED)
+        // Off/blocked: no route from the page to files, content providers,
+        // the network, other windows, or autoplay.
+        assertFalse(HtmlWebViewPolicy.ALLOW_FILE_ACCESS)
+        assertFalse(HtmlWebViewPolicy.ALLOW_CONTENT_ACCESS)
+        assertFalse(HtmlWebViewPolicy.ALLOW_FILE_ACCESS_FROM_FILE_URLS)
+        assertFalse(HtmlWebViewPolicy.ALLOW_UNIVERSAL_ACCESS_FROM_FILE_URLS)
+        assertTrue(HtmlWebViewPolicy.BLOCK_NETWORK_LOADS)
+        assertFalse(HtmlWebViewPolicy.JAVA_SCRIPT_CAN_OPEN_WINDOWS_AUTOMATICALLY)
+        assertFalse(HtmlWebViewPolicy.SUPPORT_MULTIPLE_WINDOWS)
+        assertTrue(HtmlWebViewPolicy.MEDIA_PLAYBACK_REQUIRES_USER_GESTURE)
+    }
 }

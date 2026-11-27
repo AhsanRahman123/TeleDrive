@@ -246,8 +246,59 @@ fun looksLikeText(bytes: ByteArray): Boolean {
  * B2 safe-WebView navigation policy: no navigation is ever allowed out of the loaded
  * document — only the initial about:blank / data load itself passes. Everything else
  * (http, https, file, intent, …) is refused.
+ *
+ * Round 3 A10: same-document fragment navigations (`about:blank#section`, produced by
+ * tapping an in-page anchor such as a checklist's table-of-contents link) are also
+ * allowed — they never leave the loaded document, they only scroll within it. Before
+ * this, every anchor tap was classified as a forbidden external navigation.
  */
 fun htmlNavigationAllowed(url: String?): Boolean {
     val value = url?.trim()?.lowercase() ?: return false
-    return value == "about:blank" || value.startsWith("data:text/html")
+    return value == "about:blank" || value.startsWith("about:blank#") ||
+        value.startsWith("data:text/html")
+}
+
+/**
+ * Round 3 A10 subresource policy for the HTML viewer: the only subresources a preview
+ * page may load are ones already inside the document itself — `data:` URLs (inline
+ * images/styles the file carries) and `about:` placeholders. Every http/https/file/
+ * content subresource is refused (the Android client answers it with an empty
+ * response), so a previewed file cannot reach the network or the filesystem through
+ * an `<img>`, `<link>`, `<script src>` or CSS `url(...)` even though scripts now run.
+ */
+fun htmlSubresourceAllowed(url: String?): Boolean {
+    val value = url?.trim()?.lowercase() ?: return false
+    return value.startsWith("data:") || value.startsWith("about:")
+}
+
+/**
+ * Round 3 A10: the HTML viewer's WebView settings, as pure values so host tests can
+ * pin the security posture (the settings themselves are applied by the Android
+ * `HtmlPreview`, which is not host-testable).
+ *
+ * What changed from the vc181 safe mode and why: JavaScript and DOM storage are ON,
+ * because the field failure was a real-world checklist page whose items are rendered
+ * and whose checkboxes are driven by its inline script — with scripts off only the
+ * static top of such a page ever appears and its checkboxes are dead. Everything
+ * that gives a page a route OUT of the WebView stays OFF: no file access, no content
+ * access, no file-URL access in either direction, network loads blocked, no
+ * JavaScript interface is ever registered (there is no field for one here on
+ * purpose), windows cannot be opened, and navigation/subresources stay governed by
+ * [htmlNavigationAllowed] / [htmlSubresourceAllowed]. A script can therefore only
+ * rearrange its own page; it cannot read files, reach the network, or call app code.
+ */
+object HtmlWebViewPolicy {
+    const val JAVA_SCRIPT_ENABLED = true
+    const val DOM_STORAGE_ENABLED = true
+    const val ALLOW_FILE_ACCESS = false
+    const val ALLOW_CONTENT_ACCESS = false
+    const val ALLOW_FILE_ACCESS_FROM_FILE_URLS = false
+    const val ALLOW_UNIVERSAL_ACCESS_FROM_FILE_URLS = false
+    const val BLOCK_NETWORK_LOADS = true
+    const val JAVA_SCRIPT_CAN_OPEN_WINDOWS_AUTOMATICALLY = false
+    const val SUPPORT_MULTIPLE_WINDOWS = false
+    const val MEDIA_PLAYBACK_REQUIRES_USER_GESTURE = true
+    const val LOAD_WITH_OVERVIEW_MODE = true
+    const val USE_WIDE_VIEW_PORT = true
+    const val SUPPORT_ZOOM = false
 }

@@ -130,7 +130,7 @@ fun LocalPreviewScreen(
 
                 is PreviewContent.Pdf -> PdfPreview(path = current.path)
 
-                is PreviewContent.Html -> HtmlPreview(html = current.text)
+                is PreviewContent.Html -> HtmlPreview(html = current.text, truncated = current.truncated)
 
                 is PreviewContent.PlainText -> Column(
                     modifier = Modifier
