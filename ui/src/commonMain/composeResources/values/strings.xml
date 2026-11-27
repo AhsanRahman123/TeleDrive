@@ -526,6 +526,10 @@
     <string name="preview_forward_10_seconds">Forward 10 seconds</string>
     <string name="preview_hidden">Hidden</string>
     <string name="preview_image_undecodable">This image format cannot be displayed here. Download it and open it in another app.</string>
+    <string name="preview_thumbnail_size">Thumbnail size</string>
+    <string name="preview_thumbnail_small">Small</string>
+    <string name="preview_thumbnail_medium">Medium</string>
+    <string name="preview_thumbnail_big">Big</string>
     <string name="preview_zoom_in">Zoom in</string>
     <string name="preview_zoom_out">Zoom out</string>
     <string name="preview_rotate_counter_clockwise">Rotate counter-clockwise</string>

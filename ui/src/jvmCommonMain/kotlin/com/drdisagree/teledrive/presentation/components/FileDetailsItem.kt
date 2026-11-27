@@ -83,7 +83,8 @@ fun FileDetailsItem(
             file = file,
             contentDescription = null,
             modifier = Modifier
-                .size(if (compact) 34.dp else 68.dp)
+                // vc184 P7: details-view thumbnails get bigger (68dp -> 80dp).
+                .size(if (compact) 34.dp else 80.dp)
                 .clip(MaterialTheme.shapes.medium)
         )
         Spacer(Modifier.width(if (compact) 10.dp else 16.dp))

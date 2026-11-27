@@ -1614,6 +1614,22 @@ class PreviewViewModel(
         }
     }
 
+    /** The ZIP list's persisted thumbnail size step (vc184 P7, shared setting). */
+    val archiveThumbnailSize: StateFlow<com.drdisagree.teledrive.domain.model.ThumbnailSize> =
+        settingsRepository.preferences
+            .map { it.archiveThumbnailSize }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                com.drdisagree.teledrive.domain.model.ThumbnailSize.MEDIUM
+            )
+
+    fun setArchiveThumbnailSize(size: com.drdisagree.teledrive.domain.model.ThumbnailSize) {
+        viewModelScope.launch {
+            settingsRepository.update { it.copy(archiveThumbnailSize = size) }
+        }
+    }
+
     private val linkCache = mutableMapOf<String, LinkMetadata?>()
 
     suspend fun linkPreview(url: String): LinkMetadata? =

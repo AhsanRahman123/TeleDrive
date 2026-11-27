@@ -61,6 +61,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -74,6 +76,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -130,6 +133,7 @@ import com.drdisagree.teledrive.domain.model.FileSortField
 import com.drdisagree.teledrive.domain.model.SortDirection
 import com.drdisagree.teledrive.domain.model.LinkMetadata
 import com.drdisagree.teledrive.domain.model.PreviewBackgroundMode
+import com.drdisagree.teledrive.domain.model.ThumbnailSize
 import com.drdisagree.teledrive.presentation.common.CollectSnackbarMessages
 import com.drdisagree.teledrive.presentation.common.Formatters
 import com.drdisagree.teledrive.presentation.common.LinkedText
@@ -193,6 +197,12 @@ import com.drdisagree.teledrive.resources.preview_archive_format_title
 import com.drdisagree.teledrive.resources.preview_archive_packed_summary
 import com.drdisagree.teledrive.resources.preview_archive_packed_summary_saved
 import com.drdisagree.teledrive.resources.preview_chevron
+import com.drdisagree.teledrive.resources.preview_thumbnail_big
+import com.drdisagree.teledrive.resources.preview_thumbnail_medium
+import com.drdisagree.teledrive.resources.preview_thumbnail_size
+import com.drdisagree.teledrive.resources.preview_thumbnail_small
+import com.drdisagree.teledrive.resources.preview_zoom_in
+import com.drdisagree.teledrive.resources.preview_zoom_out
 import com.drdisagree.teledrive.resources.preview_confirm_trash_file_message
 import com.drdisagree.teledrive.resources.preview_download_view
 import com.drdisagree.teledrive.resources.preview_archive_remote_hint
@@ -235,6 +245,7 @@ fun PreviewScreen(
     val preferredSubtitleLanguage by
     viewModel.preferredSubtitleLanguage.collectAsStateWithLifecycle()
     val storedTextScale by viewModel.textScale.collectAsStateWithLifecycle()
+    val archiveThumbnailSize by viewModel.archiveThumbnailSize.collectAsStateWithLifecycle()
     val archiveSort by viewModel.archiveSort.collectAsStateWithLifecycle()
     val previewBackgroundMode by viewModel.previewBackgroundMode.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -392,6 +403,8 @@ fun PreviewScreen(
                     loadLinkMetadata = { url -> viewModel.linkPreview(url) },
                     storedTextScale = storedTextScale,
                     onTextScaleChange = viewModel::setTextScale,
+                    archiveThumbnailSize = archiveThumbnailSize,
+                    onArchiveThumbnailSizeChange = viewModel::setArchiveThumbnailSize,
                     file = file,
                     content = content,
                     isActivePage = pagerState.currentPage == page,
@@ -678,6 +691,8 @@ fun PreviewScreen(
                     pagerResyncCount = state.archivePreviewResyncCount,
                     onPageSelected = viewModel::onArchivePreviewPageSelected,
                     onStepVideo = viewModel::stepArchiveVideo,
+                    storedTextScale = storedTextScale,
+                    onTextScaleChange = viewModel::setTextScale,
                     videoQueuePosition = state.archiveVideoQueuePosition,
                     videoQueueLastIndex = state.archiveVideoQueue.lastIndex,
                     onPlayVideo = viewModel::playCurrentArchiveVideo,
@@ -783,6 +798,8 @@ private fun PreviewPage(
     playerSession: PlayerSession,
     storedTextScale: Float,
     onTextScaleChange: (Float) -> Unit,
+    archiveThumbnailSize: ThumbnailSize = ThumbnailSize.MEDIUM,
+    onArchiveThumbnailSizeChange: (ThumbnailSize) -> Unit = {},
     onArchiveEntryDownload: (Int) -> Unit,
     onArchiveEntryTap: (Int) -> Unit,
     onArchiveDownloadSelected: (Set<Int>, Set<String>) -> Unit,
@@ -807,7 +824,7 @@ private fun PreviewPage(
                 if (event.changes.count { it.pressed } >= 2) {
                     val zoom = event.calculateZoom()
                     if (zoom != 1f) {
-                        textScale = (textScale * zoom).coerceIn(TEXT_SCALE_MIN, TEXT_SCALE_MAX)
+                        textScale = (textScale * zoom).coerceIn(TEXT_PREVIEW_SCALE_MIN, TEXT_PREVIEW_SCALE_MAX)
                         event.changes.forEach { it.consume() }
                     }
                 }
@@ -907,7 +924,8 @@ private fun PreviewPage(
 
         is PreviewContent.Pdf -> PdfPreview(path = content.path)
         is PreviewContent.Html -> HtmlPreview(html = content.text)
-        is PreviewContent.PlainText -> if (soleUrlOf(content.text) != null) {
+        is PreviewContent.PlainText -> Box(modifier = Modifier.fillMaxSize()) {
+            if (soleUrlOf(content.text) != null) {
             val url = normalizeUrl(soleUrlOf(content.text).orEmpty())
             val linkContext = LocalContext.current
             Column(
@@ -957,6 +975,21 @@ private fun PreviewPage(
                 )
             }
         }
+            // vc184 P5: zoom buttons for every text surface that reaches this
+            // branch (plain text/code, Markdown, EPUB/OOXML extraction,
+            // subtitles, JSON/XML pretty-print). They step the same persisted
+            // textScale the pinch writes, so buttons and pinch never disagree
+            // and the size is consistent across all text viewers.
+            TextZoomButtons(
+                scale = textScale,
+                onZoomIn = { textScale = textZoomIn(textScale) },
+                onZoomOut = { textScale = textZoomOut(textScale) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(16.dp)
+            )
+        }
 
         is PreviewContent.Archive -> ArchiveList(
             archive = content,
@@ -970,6 +1003,8 @@ private fun PreviewPage(
             sortField = archiveSortField,
             sortDirection = archiveSortDirection,
             onSortChange = onArchiveSortChange,
+            thumbnailSize = archiveThumbnailSize,
+            onThumbnailSizeChange = onArchiveThumbnailSizeChange,
             registerBackStep = onRegisterArchiveBackStep,
             isActivePage = isActivePage
         )
@@ -1022,6 +1057,46 @@ private fun PreviewPage(
 }
 
 /**
+ * Zoom in/out buttons for a text viewer (vc184 P5): one press steps the
+ * shared text scale by the shared step factor; the current size is shown
+ * between the buttons. Buttons only — no pinch gesture is attached here.
+ */
+@Composable
+private fun TextZoomButtons(
+    scale: Float,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 4.dp,
+        modifier = modifier
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onZoomOut, enabled = scale > TEXT_PREVIEW_SCALE_MIN) {
+                Icon(
+                    Icons.Filled.ZoomOut,
+                    contentDescription = stringResource(Res.string.preview_zoom_out)
+                )
+            }
+            Text(
+                text = "${(scale * 100).toInt()}%",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            IconButton(onClick = onZoomIn, enabled = scale < TEXT_PREVIEW_SCALE_MAX) {
+                Icon(
+                    Icons.Filled.ZoomIn,
+                    contentDescription = stringResource(Res.string.preview_zoom_in)
+                )
+            }
+        }
+    }
+}
+
+/**
  * An archive entry opened in place: the verified temp extraction shown with the app's own
  * image viewer / audio player / text view. Read-only; closing deletes the temp file.
  *
@@ -1045,11 +1120,26 @@ private fun ArchiveEntryPreviewOverlay(
     onPlayVideo: () -> Unit = {},
     onDownload: () -> Unit = {},
     onInfo: () -> Unit = {},
+    storedTextScale: Float = 1f,
+    onTextScaleChange: (Float) -> Unit = {},
     downloadBusy: Boolean = false,
     dataSourceFactory: TelegramDataSourceFactory,
     onDismiss: () -> Unit
 ) {
     val overlaySession = remember(preview) { PlayerSession() }
+    // vc184 P5: the in-zip text viewer shares the normal viewer's persisted
+    // text scale (and its save path), so a size set in either place is the
+    // size in both. Buttons step it; no pinch is added here.
+    var overlayTextScale by remember { mutableFloatStateOf(storedTextScale) }
+    LaunchedEffect(storedTextScale) {
+        if (storedTextScale != overlayTextScale) overlayTextScale = storedTextScale
+    }
+    LaunchedEffect(overlayTextScale) {
+        if (overlayTextScale != storedTextScale) {
+            delay(TEXT_SCALE_SAVE_DELAY_MS.milliseconds)
+            onTextScaleChange(overlayTextScale)
+        }
+    }
     val pagerState = rememberPagerState(
         initialPage = pagerPosition,
         pageCount = { pagerCount }
@@ -1171,6 +1261,7 @@ private fun ArchiveEntryPreviewOverlay(
                         if (preview.isMarkdown) {
                             MarkdownText(
                                 text = preview.text,
+                                textScale = overlayTextScale,
                                 onOpenUrl = { url -> openUrl(overlayContext, url) }
                             )
                         } else {
@@ -1179,6 +1270,7 @@ private fun ArchiveEntryPreviewOverlay(
                                 style = MaterialTheme.typography.bodySmall
                                     .copy(fontFamily = FontFamily.Monospace)
                                     .copy(color = MaterialTheme.colorScheme.onSurface)
+                                    .scaledBy(overlayTextScale)
                             )
                         }
                         if (preview.truncated) {
@@ -1191,6 +1283,17 @@ private fun ArchiveEntryPreviewOverlay(
                     }
                 }
             }
+        }
+        if (preview is ArchiveEntryPreview.Text && !preview.isHtml) {
+            TextZoomButtons(
+                scale = overlayTextScale,
+                onZoomIn = { overlayTextScale = textZoomIn(overlayTextScale) },
+                onZoomOut = { overlayTextScale = textZoomOut(overlayTextScale) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(16.dp)
+            )
         }
         Surface(
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
@@ -1271,6 +1374,8 @@ private fun ArchiveList(
     sortField: FileSortField = FileSortField.NAME,
     sortDirection: SortDirection = SortDirection.ASCENDING,
     onSortChange: (FileSortField, SortDirection) -> Unit = { _, _ -> },
+    thumbnailSize: ThumbnailSize = ThumbnailSize.MEDIUM,
+    onThumbnailSizeChange: (ThumbnailSize) -> Unit = {},
     registerBackStep: ((() -> Boolean)?) -> Unit = {},
     isActivePage: Boolean = true
 ) {
@@ -1516,6 +1621,44 @@ private fun ArchiveList(
                                 .fillMaxWidth()
                                 .padding(top = 12.dp)
                         )
+                        // vc184 P7: Big / Medium / Small thumbnail switcher
+                        // for the ZIP contents list, mirroring the Gallery's
+                        // size controls. The choice is persisted (shared
+                        // UserPreferences.archiveThumbnailSize), so it is the
+                        // same in every archive and on the next visit. Only
+                        // the row slot changes — thumbnail decode stays at
+                        // the policy's fixed bounded target.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(top = 12.dp)
+                        ) {
+                            Text(
+                                text = stringResource(Res.string.preview_thumbnail_size),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            for (size in ThumbnailSize.entries) {
+                                FilterChip(
+                                    selected = thumbnailSize == size,
+                                    onClick = { onThumbnailSizeChange(size) },
+                                    label = {
+                                        Text(
+                                            stringResource(
+                                                when (size) {
+                                                    ThumbnailSize.SMALL ->
+                                                        Res.string.preview_thumbnail_small
+                                                    ThumbnailSize.MEDIUM ->
+                                                        Res.string.preview_thumbnail_medium
+                                                    ThumbnailSize.BIG ->
+                                                        Res.string.preview_thumbnail_big
+                                                }
+                                            )
+                                        )
+                                    }
+                                )
+                            }
+                        }
                         if (batchProgress != null) {
                             LinearProgressIndicator(
                                 progress = {
@@ -1570,6 +1713,7 @@ private fun ArchiveList(
                 }
                 ArchiveRow(
                     row = row,
+                    thumbnailSize = thumbnailSize,
                     thumbnailStore = thumbnailStore,
                     archiveFile = archiveFile,
                     canDownload = archive.remote && !row.node.isDirectory,
@@ -1731,6 +1875,7 @@ private val ARCHIVE_SORT_FIELDS = listOf(
 @Composable
 private fun ArchiveRow(
     row: ArchiveRowState,
+    thumbnailSize: ThumbnailSize = ThumbnailSize.MEDIUM,
     onToggle: () -> Unit,
     thumbnailStore: ArchiveEntryThumbnailStore? = null,
     archiveFile: DriveFile? = null,
@@ -1845,7 +1990,10 @@ private fun ArchiveRow(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(56.dp)
+                // vc184 P7: the slot follows the persisted switcher step
+                // (Small 40dp / Medium 56dp / Big 80dp) instead of the fixed
+                // vc183 56dp. The generic icon inside keeps its own 20dp.
+                .size(thumbnailSize.slotDp.dp)
                 .clip(CircleShape)
                 .background(
                     if (node.isDirectory) {
@@ -2046,6 +2194,4 @@ private fun openUrl(context: Context, url: String) {
     }
 }
 
-private const val TEXT_SCALE_MIN = 0.7f
-private const val TEXT_SCALE_MAX = 3f
 private const val TEXT_SCALE_SAVE_DELAY_MS = 400L
