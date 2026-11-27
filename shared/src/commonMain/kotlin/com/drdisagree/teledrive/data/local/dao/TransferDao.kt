@@ -166,8 +166,17 @@ interface TransferDao {
     @Query("UPDATE transfers SET stage = :stage, updatedAt = :updatedAt WHERE id = :id")
     suspend fun setStage(id: String, stage: TransferStage?, updatedAt: Long)
 
+    /**
+     * Progress writes are MAX-monotonic in transferredBytes (PC 1.6.27 item
+     * N7, the Android A2 guard): a re-attached execution whose TDLib counter
+     * restarted must never drag a row's displayed percentage backwards,
+     * whatever order concurrent progress writes land in. No caller
+     * legitimately lowers transferredBytes through this statement — retry
+     * resets go through upsert with a fresh entity.
+     */
     @Query(
-        """UPDATE transfers SET transferredBytes = :transferred, speedBytesPerSecond = :speed,
+        """UPDATE transfers SET transferredBytes = MAX(transferredBytes, :transferred),
+           speedBytesPerSecond = :speed,
            updatedAt = :updatedAt WHERE id = :id AND state = 'RUNNING'"""
     )
     suspend fun updateProgress(id: String, transferred: Long, speed: Long, updatedAt: Long)

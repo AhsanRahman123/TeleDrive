@@ -31,9 +31,10 @@ import org.junit.Test
  * Small in the header menu reports the choice through the pane's callback
  * (the production wiring persists it as `archive_thumbnail_size` — see
  * ArchiveThumbnailSizeSettingsTest) and the row thumbnail slots actually
- * resize: 40 / 56 / 80 dp, with the pre-switcher 56 dp as the Medium step.
- * Assertions are ratio-based so the test does not depend on the test
- * runtime's density.
+ * resize, with the pre-switcher 56 dp as the Medium step. PC 1.6.27 (N6)
+ * re-mapped the PC steps: Small / Medium stay round 40 / 56 dp slots,
+ * while Big is a wide 152x112 dp preview tile. Assertions are
+ * ratio-based so the test does not depend on the test runtime's density.
  */
 @OptIn(ExperimentalTestApi::class)
 class DesktopArchiveThumbnailSizeTest {
@@ -119,6 +120,10 @@ class DesktopArchiveThumbnailSizeTest {
         rule.onNodeWithTag("archive-thumbnail-0", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot.width
 
+    private fun thumbnailHeight(): Float =
+        rule.onNodeWithTag("archive-thumbnail-0", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.height
+
     private fun pickSize(name: String) {
         rule.onNodeWithContentDescription("Thumbnail size").performClick()
         rule.waitForIdle()
@@ -130,16 +135,25 @@ class DesktopArchiveThumbnailSizeTest {
     fun `switcher resizes the thumbnail slots through the persisted steps`() {
         setPane()
         val medium = thumbnailWidth()
+        val mediumHeight = thumbnailHeight()
         assertTrue("medium slot must have a real size", medium > 0f)
+        assertEquals("medium slot is square", medium, mediumHeight, 2f)
 
         pickSize("big")
         val big = thumbnailWidth()
         assertEquals(
-            "Big must be 80/56 of Medium",
-            medium * 80f / 56f,
+            "Big tile must be 152/56 of Medium wide",
+            medium * 152f / 56f,
             big,
             2f
         )
+        assertEquals(
+            "Big tile must be 112/56 of Medium high",
+            mediumHeight * 112f / 56f,
+            thumbnailHeight(),
+            2f
+        )
+        assertTrue("Big tile must be wider than it is tall", big > thumbnailHeight())
 
         pickSize("small")
         val small = thumbnailWidth()
@@ -149,6 +163,7 @@ class DesktopArchiveThumbnailSizeTest {
             small,
             2f
         )
+        assertEquals("small slot is square", small, thumbnailHeight(), 2f)
 
         pickSize("medium")
         assertEquals(medium, thumbnailWidth(), 2f)
