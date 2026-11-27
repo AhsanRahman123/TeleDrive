@@ -145,13 +145,6 @@ class DesktopCbzStaleStepHandlerTest {
         }
     }
 
-    private val imageBytes: ByteArray by lazy {
-        val image = java.awt.image.BufferedImage(6, 4, java.awt.image.BufferedImage.TYPE_INT_RGB)
-        val out = ByteArrayOutputStream()
-        javax.imageio.ImageIO.write(image, "png", out)
-        out.toByteArray()
-    }
-
     private fun driveFile(
         id: String,
         name: String,
@@ -187,11 +180,16 @@ class DesktopCbzStaleStepHandlerTest {
     )
 
     private fun setProductionScreen() {
-        // Display order inside the CBZ is name order: page1.png (0), page2.png (1).
+        // Display order inside the CBZ is name order: page1.txt (0),
+        // page2.txt (1). Text pages on purpose: the stale-handler
+        // mechanics are the same for every entry-preview type, and the
+        // text overlay keeps this test off the photo viewer's async
+        // image/zoom state, which raced the recomposer in CI run
+        // 46007309824 (snapshot concurrent-change crash).
         val cbzBytes = archiveZipBytes(
             listOf(
-                "page1.png" to imageBytes,
-                "page2.png" to imageBytes
+                "page1.txt" to "PAGE ONE BODY".toByteArray(),
+                "page2.txt" to "PAGE TWO BODY".toByteArray()
             )
         )
         val cbz = driveFile(
@@ -416,15 +414,16 @@ class DesktopCbzStaleStepHandlerTest {
     @Test
     fun `after paging away from a cbz with its preview open W and E page the folder not the dead preview`() {
         setProductionScreen()
-        waitDisplayed("page1.png")
-        assertTrue(displayed("page2.png"))
+        waitDisplayed("page1.txt")
+        assertTrue(displayed("page2.txt"))
 
         // Open the CBZ's first page: an entry preview is open at zip level.
-        rule.onNodeWithText("page1.png").performClick()
+        rule.onNodeWithText("page1.txt").performClick()
         waitPreview(0)
         assertTrue(
-            viewModel.uiState.value.archivePreview is ArchiveEntryPreview.Image
+            viewModel.uiState.value.archivePreview is ArchiveEntryPreview.Text
         )
+        waitDisplayed("PAGE ONE BODY")
 
         // The CBZ keeps the screen-level edge pager buttons (they hide
         // only for .zip files): page the folder to the plain text file
@@ -458,15 +457,16 @@ class DesktopCbzStaleStepHandlerTest {
         // BODY would stay on screen and this wait would time out.
         press(Key.W)
         waitNotDisplayed("NEXT FILE BODY")
-        waitDisplayed("page1.png")
+        waitDisplayed("page1.txt")
         assertEquals("paging the folder must not exit the viewer", 0, exits.get())
 
         // Back on the CBZ, its own W/E routing is live again (the pane
         // re-registered for the now-current file): open the first page
         // and E steps the preview that is actually on screen.
-        rule.onNodeWithText("page1.png").performClick()
+        rule.onNodeWithText("page1.txt").performClick()
         waitPreview(0)
         press(Key.E)
         waitPreview(1)
+        waitDisplayed("PAGE TWO BODY")
     }
 }
