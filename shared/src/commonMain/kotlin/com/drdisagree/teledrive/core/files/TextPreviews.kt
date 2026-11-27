@@ -222,6 +222,27 @@ fun subtitleToCleanText(raw: String): String {
 }
 
 /**
+ * Whether [bytes] look like readable text: no NUL byte and no C0 control
+ * characters other than tab / LF / CR / FF. This is the classic text-vs-binary
+ * heuristic (the same family `grep -I` uses), applied to a bounded head of a
+ * file whose name and MIME carry no type — an extension-less `README` is the
+ * motivating case. High bytes are accepted either way: UTF-8 and Latin-1 text
+ * both stay readable, and the preview decodes as UTF-8 with replacement.
+ * An empty input counts as text (an empty file honestly shows an empty viewer).
+ */
+fun looksLikeText(bytes: ByteArray): Boolean {
+    for (byte in bytes) {
+        val value = byte.toInt() and 0xFF
+        if (value == 0) return false
+        if (value < 0x20 && value != 0x09 && value != 0x0A && value != 0x0D && value != 0x0C) {
+            return false
+        }
+        if (value == 0x7F) return false
+    }
+    return true
+}
+
+/**
  * B2 safe-WebView navigation policy: no navigation is ever allowed out of the loaded
  * document — only the initial about:blank / data load itself passes. Everything else
  * (http, https, file, intent, …) is refused.

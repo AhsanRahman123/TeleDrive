@@ -294,8 +294,32 @@ class PreviewContentResolver(
         PreviewDispatch.ARCHIVE -> readArchive(mimeType, path)
         PreviewDispatch.APK -> readApk(path)
         PreviewDispatch.UNSUPPORTED ->
-            PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
+            // X1 (vc186): a file no name/MIME signal classifies — above all an
+            // extension-less README — still opens when its BYTES are plainly
+            // text. The sniff is bounded (one head read) and conservative
+            // (any NUL/control byte keeps the honest Unsupported page), so
+            // genuinely typeless binaries are unchanged.
+            if (looksLikeTextFile(path)) {
+                readText(path, "text/plain")
+            } else {
+                PreviewContent.Unsupported(Res.string.preview_no_preview_for_type, path)
+            }
     }
+
+    /** Bounded head sniff for the typeless-file text fallback in [fromLocal]. */
+    private fun looksLikeTextFile(path: String): Boolean = runCatching {
+        val head = File(path).inputStream().use { stream ->
+            val buffer = ByteArray(TEXT_SNIFF_BYTES)
+            var read = 0
+            while (read < buffer.size) {
+                val count = stream.read(buffer, read, buffer.size - read)
+                if (count <= 0) break
+                read += count
+            }
+            buffer.copyOf(read)
+        }
+        com.drdisagree.teledrive.core.files.looksLikeText(head)
+    }.getOrDefault(false)
 
     private fun readApk(path: String): PreviewContent = runCatching {
         val file = File(path)
@@ -545,6 +569,9 @@ class PreviewContentResolver(
         const val DOCUMENT_AUTO_PREVIEW_LIMIT = 20L * 1024 * 1024
 
         private const val TEXT_LIMIT = 256 * 1024
+
+        /** Head size for the typeless-file text sniff (X1): one small read, never the whole file. */
+        private const val TEXT_SNIFF_BYTES = 8 * 1024
     }
 }
 
@@ -599,9 +626,16 @@ fun previewDispatch(
     MimeTypes.isVideo(mimeType) || category == FileCategory.VIDEO -> PreviewDispatch.VIDEO
     MimeTypes.isAudio(mimeType) || category == FileCategory.AUDIO -> PreviewDispatch.AUDIO
     MimeTypes.isPdf(mimeType) -> PreviewDispatch.PDF
-    MimeTypes.isHtml(mimeType) -> PreviewDispatch.HTML
+    MimeTypes.isHtml(mimeType) || MimeTypes.isHtml(MimeTypes.fromFileName(fileName)) ->
+        PreviewDispatch.HTML
     isDocumentPreviewType(mimeType, fileName) -> PreviewDispatch.DOCUMENT
-    MimeTypes.isText(mimeType) -> PreviewDispatch.TEXT
+    // X1 (vc186): the TEXT branch also trusts the file NAME, like the
+    // document branch above learned to in vc183 — a .txt/.md whose stored
+    // MIME is generic (a common Telegram/SAF declared value) is still text.
+    // Extension-less names stay UNSUPPORTED here on purpose: only the
+    // byte sniff in fromLocal may promote those, never a guess.
+    MimeTypes.isText(mimeType) || MimeTypes.isText(MimeTypes.fromFileName(fileName)) ->
+        PreviewDispatch.TEXT
     MimeTypes.isArchive(mimeType) || category == FileCategory.ARCHIVE -> PreviewDispatch.ARCHIVE
     MimeTypes.isApk(mimeType, fileName) -> PreviewDispatch.APK
     else -> PreviewDispatch.UNSUPPORTED
@@ -632,6 +666,7 @@ fun isAutoFetchable(
         (MimeTypes.isImage(mimeType) ||
             category == FileCategory.IMAGE ||
             MimeTypes.isText(mimeType) ||
+            MimeTypes.isText(MimeTypes.fromFileName(fileName)) ||
             MimeTypes.isApk(mimeType, fileName))) ||
         (MimeTypes.isPdf(mimeType) && sizeBytes <= PreviewContentResolver.PDF_AUTO_PREVIEW_LIMIT) ||
         (isDocumentPreviewType(mimeType, fileName) &&

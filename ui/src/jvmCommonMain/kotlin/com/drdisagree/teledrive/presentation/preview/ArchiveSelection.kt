@@ -18,6 +18,28 @@ enum class ArchiveEntryTapAction {
     PREVIEW_IMAGE, PLAY_AUDIO, PREVIEW_TEXT, PREVIEW_PDF, PREVIEW_DOCUMENT, PLAY_VIDEO, DOWNLOAD
 }
 
+/**
+ * Basenames (lowercase, extension-less) that are text by near-universal
+ * convention. An archive entry's tap action is decided from the listing
+ * alone — no bytes are available to sniff at that point — so an
+ * extension-less `README` inside a ZIP can only be recognised by name
+ * (X1, vc186). The Files route is not limited to this list: it sniffs the
+ * local copy's bytes, so any extension-less text file opens there.
+ */
+private val EXTENSIONLESS_TEXT_BASENAMES = setOf(
+    "readme", "license", "licence", "copying", "copyright", "authors",
+    "notice", "changelog", "changes", "history", "news", "todo",
+    "install", "makefile", "dockerfile", "jenkinsfile", "vagrantfile",
+    "gemfile", "rakefile", "procfile"
+)
+
+/** True when [entryName]'s basename is an extension-less known text name (see above). */
+fun isExtensionlessTextEntryName(entryName: String): Boolean {
+    val base = entryName.substringAfterLast('/').substringAfterLast('\\')
+    if (base.contains('.')) return false
+    return base.lowercase() in EXTENSIONLESS_TEXT_BASENAMES
+}
+
 fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
     if (entry.isDirectory) return ArchiveEntryTapAction.DOWNLOAD
     val mimeType = MimeTypes.fromFileName(entry.name)
@@ -33,6 +55,9 @@ fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
         MimeTypes.isVideo(mimeType) -> ArchiveEntryTapAction.PLAY_VIDEO
         // The app's own text classification (MimeTypes.isText) decides what counts as text.
         MimeTypes.isText(mimeType) -> ArchiveEntryTapAction.PREVIEW_TEXT
+        // X1 (vc186): an extension-less known text name (README & friends)
+        // previews as text instead of being download-only.
+        isExtensionlessTextEntryName(entry.name) -> ArchiveEntryTapAction.PREVIEW_TEXT
         // Everything else stays download-only.
         else -> ArchiveEntryTapAction.DOWNLOAD
     }
