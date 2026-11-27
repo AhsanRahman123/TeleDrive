@@ -102,6 +102,45 @@ class DesktopArchiveThumbnailPriorityTest {
         ) as TelegramClient
     }
 
+    /**
+     * Like [CountingTelegram], but every readFilePart first waits on
+     * [gate] — a fetch can be held genuinely in flight while the test
+     * flips preview priority (the MF-1 scenario).
+     */
+    private class GatedTelegram(private val bytes: ByteArray) {
+        val totalCalls = AtomicInteger(0)
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val client: TelegramClient = Proxy.newProxyInstance(
+            TelegramClient::class.java.classLoader,
+            arrayOf(TelegramClient::class.java),
+            InvocationHandler { _, method, args ->
+                totalCalls.incrementAndGet()
+                val info = TelegramFileInfo(
+                    fileId = 7, sizeBytes = bytes.size.toLong(), localPath = null,
+                    isDownloadingCompleted = true, isDownloadingActive = false,
+                    downloadOffset = 0, downloadedPrefixSize = bytes.size.toLong()
+                )
+                when (method.name) {
+                    "resolveFile" -> info
+                    "getFileInfo" -> info
+                    "readFilePart" -> {
+                        gate.await(15, java.util.concurrent.TimeUnit.SECONDS)
+                        val offset = (args[1] as Number).toLong()
+                        val count = (args[2] as Number).toLong()
+                        if (offset >= bytes.size) ByteArray(0)
+                        else bytes.copyOfRange(
+                            offset.toInt(),
+                            minOf(offset + count, bytes.size.toLong()).toInt()
+                        )
+                    }
+                    "requestFileRange", "cancelFileDownload" -> Unit
+                    "fileUpdates" -> flowOf(info)
+                    else -> throw UnsupportedOperationException(method.name)
+                }
+            }
+        ) as TelegramClient
+    }
+
     private fun service(telegram: TelegramClient) = RemoteArchiveService(
         telegramClient = telegram,
         filePartDao = FakeFilePartDao(),
@@ -180,6 +219,42 @@ class DesktopArchiveThumbnailPriorityTest {
             }
             assertTrue(telegram.totalCalls.get() > 0)
         } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a fetch cancelled by priority activation is re-queued and completes after priority clears`() {
+        // MF-1 (second-pass): priority activation used to cancel in-flight
+        // fetches and lose them — the row stranded on Placeholder forever
+        // because nothing ever re-issued the request. The cancelled fetch's
+        // parameters must move into the pending queue and replay on clear.
+        val png = pngBytes()
+        val zipBytes = storedZip(listOf("pic.png" to png))
+        val telegram = GatedTelegram(zipBytes)
+        val cacheDir = Files.createTempDirectory("thumb-priority-mf1").toFile()
+        try {
+            val store = DesktopArchiveEntryThumbnailStore.forCacheDir(
+                cacheDir, service(telegram.client)
+            )
+            val key = "priority-mf1-key"
+            store.request(key, driveFile(), 0, "pic.png", png.size.toLong())
+            await("fetch is genuinely in flight") { telegram.totalCalls.get() > 0 }
+
+            store.setPreviewPriorityActive(true)
+            assertEquals(
+                "the cancelled in-flight fetch must be re-queued, not lost",
+                1, store.pendingRequestCount()
+            )
+
+            store.setPreviewPriorityActive(false)
+            assertEquals(0, store.pendingRequestCount())
+            telegram.gate.countDown()
+            await("replayed thumbnail completes after priority clears") {
+                store.state(key).value is ArchiveThumbState.Ready
+            }
+        } finally {
+            telegram.gate.countDown()
             cacheDir.deleteRecursively()
         }
     }

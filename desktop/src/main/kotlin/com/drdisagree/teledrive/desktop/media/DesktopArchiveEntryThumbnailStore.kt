@@ -127,14 +127,36 @@ class DesktopArchiveEntryThumbnailStore private constructor(
     /** Guarded by [requestLock]. */
     private val pendingRequests = mutableMapOf<String, PendingThumbRequest>()
 
+    /**
+     * Full parameters of every fetch currently in flight, keyed like
+     * [inFlight] (MF-1): when preview priority activates, the in-flight
+     * fetches are cancelled — their parameters are moved into
+     * [pendingRequests] first, so deactivation replays them instead of
+     * stranding their rows on the placeholder forever. Guarded by
+     * [requestLock].
+     */
+    private val activeRequests = mutableMapOf<String, PendingThumbRequest>()
+
     fun setPreviewPriorityActive(active: Boolean) {
         val toReplay: List<PendingThumbRequest>
         synchronized(requestLock) {
             previewPriorityActive = active
             if (active) {
-                val running = inFlight.values.toList()
+                // MF-1: fetches cancelled here must not be lost. Move the
+                // parameters of every still-running fetch into the pending
+                // queue BEFORE cancelling, so deactivation replays them
+                // exactly like requests that arrived during the hold.
+                val running = inFlight.entries.toList()
                 inFlight.clear()
-                running.forEach { it.cancel() }
+                running.forEach { (key, deferred) ->
+                    if (!deferred.isCompleted) {
+                        activeRequests[key]?.let { params ->
+                            pendingRequests.putIfAbsent(key, params)
+                        }
+                    }
+                    activeRequests.remove(key)
+                    deferred.cancel()
+                }
                 toReplay = emptyList()
             } else {
                 toReplay = pendingRequests.values.toList()
@@ -210,6 +232,9 @@ class DesktopArchiveEntryThumbnailStore private constructor(
             }
             val existing = inFlight[key]
             if (existing == null || existing.isCompleted) {
+                activeRequests[key] = PendingThumbRequest(
+                    cacheKey, archiveFile, entryIndex, entryName, sizeBytes, decodePx
+                )
                 inFlight[key] = scope.async {
                     fetch(key, archiveFile, entryIndex, decodePx)
                 }
@@ -230,6 +255,7 @@ class DesktopArchiveEntryThumbnailStore private constructor(
             }
             waiters.remove(key)
             pendingRequests.remove(key)
+            activeRequests.remove(key)
             inFlight.remove(key)?.cancel()
         }
     }

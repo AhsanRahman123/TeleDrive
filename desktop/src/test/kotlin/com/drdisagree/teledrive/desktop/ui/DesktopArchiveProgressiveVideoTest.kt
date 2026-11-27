@@ -229,7 +229,7 @@ class DesktopArchiveProgressiveVideoTest {
             fileName: String,
             mimeType: String,
             folderPath: String?,
-            token: <redacted>
+            token: String?
         ): PartialDownload? = null
 
         override fun freeBytes(folderPath: String?): Long? = null
