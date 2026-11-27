@@ -61,6 +61,11 @@ fun HtmlPreview(html: String, truncated: Boolean = false, modifier: Modifier = M
     // in-zip pager reuses the slot for the next entry) must be loaded explicitly —
     // before this, the first document stayed on screen for every later one.
     var loadedHtml by remember { mutableStateOf<String?>(null) }
+    // SF-3: set when the WebView's renderer dies. The view must NOT be
+    // destroyed inside the callback — it is still in composition and a later
+    // update could load into the destroyed view. Instead the flag removes
+    // the AndroidView from composition, and onRelease does the destroy.
+    var rendererGone by remember { mutableStateOf(false) }
     Column(modifier = modifier.fillMaxSize()) {
         Text(
             text = stringResource(Res.string.preview_html_safe_mode),
@@ -76,6 +81,14 @@ fun HtmlPreview(html: String, truncated: Boolean = false, modifier: Modifier = M
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
         }
+        if (rendererGone) {
+            Text(
+                text = stringResource(Res.string.preview_html_renderer_gone),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        } else {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
@@ -144,7 +157,10 @@ fun HtmlPreview(html: String, truncated: Boolean = false, modifier: Modifier = M
                             view: WebView?,
                             detail: RenderProcessGoneDetail?
                         ): Boolean {
-                            view?.destroy()
+                            // Do not destroy here (SF-3): the view is still
+                            // composed. Flag it; composition swaps in the
+                            // fallback text and onRelease destroys the view.
+                            rendererGone = true
                             return true
                         }
 
@@ -166,7 +182,7 @@ fun HtmlPreview(html: String, truncated: Boolean = false, modifier: Modifier = M
                 }
             },
             update = { webView ->
-                if (loadedHtml != html) {
+                if (!rendererGone && loadedHtml != html) {
                     loadedHtml = html
                     webView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
                 }
@@ -178,5 +194,6 @@ fun HtmlPreview(html: String, truncated: Boolean = false, modifier: Modifier = M
                 webView.destroy()
             }
         )
+        }
     }
 }

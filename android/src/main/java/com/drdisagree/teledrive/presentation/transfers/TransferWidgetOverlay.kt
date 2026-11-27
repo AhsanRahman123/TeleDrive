@@ -1,6 +1,8 @@
 package com.drdisagree.teledrive.presentation.transfers
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -22,7 +24,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +61,7 @@ import com.drdisagree.teledrive.resources.bubble_overall
 import com.drdisagree.teledrive.resources.bubble_show_transfers
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 
@@ -166,6 +172,27 @@ private fun BubbleShell(
         }
         val bubbleDrag = remember { BubbleDragSession() }
 
+        // SF-1 (second-pass): the hide-to-tab affordance the panel used to
+        // carry must survive the panel's removal — a long-press on the
+        // bubble hides it to the slim edge tab; tapping the tab restores
+        // it. Tap still opens Transfers (A6); drag is unchanged.
+        var userHidden by remember { mutableStateOf(false) }
+        when (bubbleVisibility(enabled = true, fullscreen = false, userHidden = userHidden)) {
+            BubbleVisibility.GONE -> return@BoxWithConstraints
+            BubbleVisibility.TAB -> {
+                TransferBubbleTab(
+                    offset = TransferBubbleLayout.tabOffset(
+                        effectiveOffset, windowWidth, windowHeight
+                    ),
+                    onLeftEdge = TransferBubbleLayout.tabOnLeftEdge(effectiveOffset, windowWidth),
+                    accent = accent,
+                    onClick = { userHidden = false }
+                )
+                return@BoxWithConstraints
+            }
+            BubbleVisibility.BUBBLE -> Unit
+        }
+
         TransferBubble(
             summary = summary,
             offset = effectiveOffset,
@@ -204,7 +231,9 @@ private fun BubbleShell(
             },
             // A tap (not a drag — the gesture layer separates them) opens the
             // full Transfers screen (vc186 A6).
-            onClick = onTap
+            onClick = onTap,
+            // A long-press hides the widget to its edge tab (SF-1).
+            onLongPress = { userHidden = true }
         )
     }
 }
@@ -224,14 +253,26 @@ private fun Modifier.bubbleGestures(
     onDragDelta: (Float, Float) -> Unit,
     onDragFinished: () -> Unit,
     onDragCancelled: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongPress: () -> Unit
 ): Modifier = pointerInput(Unit) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = true)
         down.consume()
         var dragged = false
+        var longPressed = false
         var upChange: PointerInputChange? = null
         var cancelled = false
+        // Long-press: a motionless hold past the platform timeout hides the
+        // widget (SF-1). The timer dies the moment the press becomes a drag
+        // or ends; a fired long-press swallows the release (no click).
+        val longPressJob = launch {
+            delay(viewConfiguration.longPressTimeoutMillis)
+            if (!dragged) {
+                longPressed = true
+                onLongPress()
+            }
+        }
         while (true) {
             val event = awaitPointerEvent()
             val change = event.changes.firstOrNull { it.id == down.id }
@@ -249,6 +290,7 @@ private fun Modifier.bubbleGestures(
                 (change.position - down.position).getDistance() > viewConfiguration.touchSlop
             ) {
                 dragged = true
+                longPressJob.cancel()
                 onDragStart()
             }
             if (dragged && delta != Offset.Zero) {
@@ -256,9 +298,14 @@ private fun Modifier.bubbleGestures(
                 change.consume()
             }
         }
+        longPressJob.cancel()
         when {
             cancelled -> if (dragged) onDragCancelled()
-            upChange != null -> if (dragged) onDragFinished() else onClick()
+            upChange != null -> when {
+                longPressed -> Unit
+                dragged -> onDragFinished()
+                else -> onClick()
+            }
             else -> Unit
         }
     }
@@ -281,7 +328,8 @@ private fun TransferBubble(
     onDragDelta: (Float, Float) -> Unit,
     onDragFinished: () -> Unit,
     onDragCancelled: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongPress: () -> Unit
 ) {
     val primary = accentColor(accent)
     val secondary = MaterialTheme.colorScheme.secondary
@@ -296,7 +344,8 @@ private fun TransferBubble(
             }
             .size(TransferBubbleLayout.BUBBLE_SIZE_DP.dp)
             .bubbleGestures(
-                onDragStart, onDragDelta, onDragFinished, onDragCancelled, onClick
+                onDragStart, onDragDelta, onDragFinished, onDragCancelled, onClick,
+                onLongPress
             ),
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surface,
@@ -379,11 +428,67 @@ private fun TransferBubble(
 }
 
 /**
+ * The bubble's collapsed edge tab (restored, SF-1): shown while the widget
+ * is user-hidden; tapping it brings the bubble back. Copied from the vc185
+ * baseline implementation, which the A6 rewrite dropped along with the
+ * panel that used to carry the Hide button.
+ */
+@Composable
+private fun TransferBubbleTab(
+    offset: BubbleOffset,
+    onLeftEdge: Boolean,
+    accent: WidgetAccent?,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .offset {
+                IntOffset(
+                    (offset.x * density).roundToInt(),
+                    (offset.y * density).roundToInt()
+                )
+            }
+            .size(
+                TransferBubbleLayout.TAB_WIDTH_DP.dp,
+                TransferBubbleLayout.TAB_HEIGHT_DP.dp
+            )
+            .clickable(onClick = onClick),
+        shape = if (onLeftEdge) {
+            RoundedCornerShape(topEnd = 14.dp, bottomEnd = 14.dp)
+        } else {
+            RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp)
+        },
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 6.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                if (onLeftEdge) Icons.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowLeft,
+                contentDescription = stringResource(Res.string.bubble_show_transfers),
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                Icons.Filled.SwapVert,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = accentColor(accent)
+            )
+        }
+    }
+}
+
+/**
  * The bottom strip: a slim bar centred at the bottom of the content area — live ↑/↓
  * speeds, the active count, the overall progress bar and the session totals.
  * Tapping it opens the full Transfers screen, exactly like tapping the
  * bubble (vc186 A6: both shells share the one tap handler).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun StripShell(
     state: TransfersUiState,
@@ -395,6 +500,43 @@ private fun StripShell(
         val windowWidth = maxWidth.value
         val windowHeight = (maxHeight.value - BOTTOM_NAV_LIFT_DP).coerceAtLeast(0f)
         val accentCol = accentColor(accent)
+
+        // SF-1: same hide contract as the bubble — a long-press collapses
+        // the strip to its edge tab; tapping the tab restores it.
+        var userHidden by remember { mutableStateOf(false) }
+        if (userHidden) {
+            val tab = TransferStripLayout.tabOffset(windowWidth, windowHeight)
+            Surface(
+                modifier = Modifier
+                    .offset {
+                        IntOffset(
+                            (tab.x * density).roundToInt(),
+                            (tab.y * density).roundToInt()
+                        )
+                    }
+                    .size(
+                        TransferStripLayout.TAB_WIDTH_DP.dp,
+                        TransferStripLayout.TAB_HEIGHT_DP.dp
+                    )
+                    .clickable { userHidden = false },
+                shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
+                color = accentCol,
+                shadowElevation = 6.dp
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowUp,
+                        contentDescription = stringResource(Res.string.bubble_show_transfers),
+                        modifier = Modifier.size(16.dp),
+                        tint = onAccentColor(accent)
+                    )
+                }
+            }
+            return@BoxWithConstraints
+        }
 
         val stripWidth = TransferStripLayout.stripWidth(windowWidth)
         val strip = TransferStripLayout.stripOffset(windowWidth, windowHeight)
@@ -408,7 +550,10 @@ private fun StripShell(
                 }
                 .width(stripWidth.dp)
                 .height(TransferStripLayout.BAR_HEIGHT_DP.dp)
-                .clickable { onTap() },
+                .combinedClickable(
+                    onClick = { onTap() },
+                    onLongClick = { userHidden = true }
+                ),
             shape = RoundedCornerShape(22.dp),
             color = MaterialTheme.colorScheme.surface,
             shadowElevation = 8.dp

@@ -1429,7 +1429,7 @@ class FileRepositoryImpl(
                 if (removeTdlibCache) {
                     val remoteFileId = entity.remoteFileId ?: continue
                     val cacheReleased = try {
-                        telegramClient.removeManagedDownload(remoteFileId)
+                        telegramClient.removeManagedDownload(remoteFileId, entity.chatId, entity.messageId)
                         true
                     } catch (error: CancellationException) {
                         throw error

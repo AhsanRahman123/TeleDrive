@@ -124,6 +124,16 @@ class DocumentTextExtractorsTest {
     }
 
     @Test
+    fun `common named entities decode instead of rendering literally`() {
+        // SF-2 regression: real books use &rsquo; &ldquo; &euro; constantly;
+        // before the table extension they survived as literal text.
+        val xml = """<w:document xmlns:w="urn:x"><w:p><w:r><w:t>It&rsquo;s &ldquo;5 &euro; &amp; 3 &pound;&rdquo; &mdash; caf&eacute;</w:t></w:r></w:p></w:document>"""
+        val text = docxToText(xml.toByteArray())
+        assertTrue(text, text.contains("It’s “5 € & 3 £” — café"))
+        assertTrue(text, !text.contains("&rsquo;"))
+    }
+
+    @Test
     fun `legacy office and unknown files fail honestly`() {
         val legacy = zipFile("old.doc", mapOf("x" to "y"))
         assertEquals(DocumentExtraction.Failed, extractDocumentText(legacy))
