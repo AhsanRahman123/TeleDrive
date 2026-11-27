@@ -40,7 +40,6 @@ class KeyboardCollectionState internal constructor(
     currentState: MutableIntState,
     private val scope: CoroutineScope,
     private val cells: () -> List<CollectionCell>,
-    private val viewportHeight: () -> Int,
     private val totalCount: () -> Int,
     private val reveal: suspend (Int) -> Unit,
     private val scrollBy: suspend (Float) -> Unit
@@ -201,7 +200,16 @@ class KeyboardCollectionState internal constructor(
     private fun enterFromContainer(event: KeyEvent): Boolean {
         val plain = !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
                 !event.isShiftPressed
-        if (!plain || event.key !in ENTER_KEYS) return false
+        if (!plain) return false
+        // Page keys enter the collection too (R3 item P9): from the
+        // container tab stop they page from the current item, exactly as
+        // if that item owned focus — the Files workspace container is
+        // what owns focus when the section opens, so without this the
+        // keys did nothing there at all.
+        if (event.key == Key.PageDown || event.key == Key.PageUp) {
+            return pageBy(if (event.key == Key.PageDown) 1 else -1)
+        }
+        if (event.key !in ENTER_KEYS) return false
         itemFocusAllowed = true
         focusIndex(
             when (event.key) {
@@ -250,17 +258,38 @@ class KeyboardCollectionState internal constructor(
         return candidates.filter { it.row == row }.minBy { abs(it.column - here.column) }
     }
 
+    /**
+     * Moves the focus highlight one page of visible items in [direction]
+     * (+1 = Page Down, -1 = Page Up), clamped to the first/last item —
+     * the standard file-manager behaviour: the highlight lands on the
+     * item one page away from the current one and the list scrolls so
+     * the new highlight is visible (via the existing focus/reveal path).
+     * The page size is the number of items the layout currently shows
+     * (rows × columns in a grid, rows in a list), read from the layout
+     * state, never a hard-coded count.
+     *
+     * The previous implementation scrolled by the viewport height and
+     * then read the visible cells synchronously — before the scroll had
+     * laid out — so it landed on whatever row the OLD viewport's edge
+     * held, not one page from the current item (R3 item P9).
+     *
+     * Returns false when the collection is empty, so callers at outer
+     * containers can let the key fall through.
+     */
+    fun pageBy(direction: Int): Boolean {
+        if (totalCount() == 0) return false
+        page(direction)
+        return true
+    }
+
     private fun page(direction: Int) {
-        scope.launch {
-            val here = cells().firstOrNull { it.index == current }
-            scrollBy(direction * viewportHeight().toFloat())
-            val visible = cells().filter { isItem(it.index) && it.top >= 0 }
-            if (visible.isEmpty()) return@launch
-            val row = if (direction > 0) visible.maxOf { it.row } else visible.minOf { it.row }
-            val column = here?.column ?: 0
-            val target = visible.filter { it.row == row }.minBy { abs(it.column - column) }
-            focusNow(target.index)
-        }
+        val target = pageTargetIndex(
+            current = current,
+            direction = direction,
+            pageSize = cells().count { isItem(it.index) },
+            totalCount = totalCount()
+        )
+        focusIndex(target)
     }
 
     private fun focusIndex(index: Int) {
@@ -295,6 +324,17 @@ class KeyboardCollectionState internal constructor(
     }
 }
 
+/**
+ * The item one page away from [current]: [pageSize] items in [direction]
+ * (sign only), clamped to the valid range. A page is the number of items
+ * currently visible, supplied by the caller from the layout state.
+ */
+internal fun pageTargetIndex(current: Int, direction: Int, pageSize: Int, totalCount: Int): Int {
+    if (totalCount <= 0) return 0
+    val step = pageSize.coerceAtLeast(1) * if (direction < 0) -1 else 1
+    return (current + step).coerceIn(0, totalCount - 1)
+}
+
 @Composable
 fun rememberKeyboardCollection(
     state: LazyGridState,
@@ -313,7 +353,6 @@ fun rememberKeyboardCollection(
                     CollectionCell(it.index, it.row, it.column, it.offset.y, it.size.height)
                 }
             },
-            viewportHeight = { state.layoutInfo.viewportSize.height },
             totalCount = { state.layoutInfo.totalItemsCount },
             reveal = { state.scrollToItem(it) },
             scrollBy = { state.scrollBy(it) }
@@ -346,9 +385,6 @@ fun rememberKeyboardCollection(
                         CollectionCell(it.index, it.index, 0, it.offset, it.size)
                     }
                 }
-            },
-            viewportHeight = {
-                state.layoutInfo.viewportEndOffset - state.layoutInfo.viewportStartOffset
             },
             totalCount = { state.layoutInfo.totalItemsCount },
             reveal = { state.scrollToItem(it) },

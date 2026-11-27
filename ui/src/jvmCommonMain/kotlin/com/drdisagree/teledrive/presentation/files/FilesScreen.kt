@@ -175,6 +175,7 @@ import com.drdisagree.teledrive.presentation.components.keyboardCollectionItem
 import com.drdisagree.teledrive.presentation.components.liftedTopAppBarColors
 import com.drdisagree.teledrive.presentation.components.pinchZoom
 import com.drdisagree.teledrive.presentation.components.rememberDragSelect
+import com.drdisagree.teledrive.presentation.components.KeyboardCollectionState
 import com.drdisagree.teledrive.presentation.components.rememberKeyboardCollection
 import com.drdisagree.teledrive.presentation.components.rememberToolbarLift
 import com.drdisagree.teledrive.presentation.components.skeleton.CollectionSkeleton
@@ -523,6 +524,16 @@ fun FilesScreen(
 
 
     val gridState = rememberLazyGridState()
+    // The Files keyboard collection lives here, not inside FilesContent,
+    // so the workspace-level shortcut container below can page it too
+    // (R3 item P9): Page Up / Page Down must work wherever focus sits in
+    // the Files section — a row, the list container, or the workspace
+    // container that takes focus when the section opens — not only while
+    // a row owns focus.
+    val filesKeyboard = rememberKeyboardCollection(
+        gridState,
+        if (state.viewMode == ViewMode.GRID) state.gridSize else 1
+    )
     // While this list is scrolling, keep the publish outbox from writing to
     // the files table: each write invalidates this list's paging source and
     // forces a reload mid-gesture (F1). The gate expires on its own shortly
@@ -777,6 +788,21 @@ fun FilesScreen(
                             } else {
                                 false
                             }
+                        }
+                    },
+                    onPage = { direction ->
+                        // Page keys belong to the file list only while it
+                        // is the active surface: not over a dialog, a menu,
+                        // or one of the utility screens that replace the
+                        // list (R3 item P9).
+                        if (showDuplicateManager || showEmptyItems || showCreateFolder ||
+                            renameTarget != null || confirmTrash || showMovePicker ||
+                            showCopyPicker || showSelectionOverflow || showViewMenu ||
+                            showSortMenu || showAddMenu
+                        ) {
+                            false
+                        } else {
+                            filesKeyboard.pageBy(direction)
                         }
                     },
                     // Files has no inline text editor in this workspace (edit dialogs
@@ -1275,6 +1301,7 @@ fun FilesScreen(
                             FilesContent(
                                 highlightedFileId = highlightedFileId,
                                 gridState = gridState,
+                                keyboard = filesKeyboard,
                                 state = state,
                                 selectionMode = selectionMode,
                                 selectedFileIds = selectedFileIds,
@@ -1672,6 +1699,7 @@ private const val INLINE_CRUMBS = 3
 private fun FilesContent(
     highlightedFileId: String?,
     gridState: LazyGridState,
+    keyboard: KeyboardCollectionState,
     state: FilesUiState,
     selectionMode: Boolean,
     selectedFileIds: Set<String>,
@@ -1690,7 +1718,6 @@ private fun FilesContent(
 ) {
     val columns = if (state.viewMode == ViewMode.GRID) state.gridSize else 1
     val touchRangeSelection = LocalPlatformCapabilities.current.supportsTouchSelectionActionBar
-    val keyboard = rememberKeyboardCollection(gridState, columns)
     val itemCount = state.folders.size + files.itemCount
     val toggleAt: (Int) -> Unit = { index ->
         if (index < state.folders.size) {

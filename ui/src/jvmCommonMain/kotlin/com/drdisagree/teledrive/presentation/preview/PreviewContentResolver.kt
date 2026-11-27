@@ -559,6 +559,29 @@ fun isDocumentPreviewType(mimeType: String, fileName: String): Boolean {
 }
 
 /**
+ * Whether a file is a text file for preview purposes, by its stored MIME
+ * **or by its file name** — the same name-based classification the in-zip
+ * route has always used (`archiveEntryTapAction` keys off
+ * `MimeTypes.fromFileName(entry.name)` alone) and the same pattern as
+ * [isDocumentPreviewType].
+ *
+ * R3 item X1: the normal route previously trusted the stored MIME alone
+ * for text, but that MIME is not reliable for text files either —
+ * `MimeTypes.resolve` prefers a declared MIME over the filename, and a
+ * README.md declared by Telegram (or a sync manifest) as a generic or
+ * container type then missed the text branch entirely and landed on
+ * "No preview for this file type", while the identical file inside a
+ * ZIP — classified by name — previewed fine. Extension-less text files
+ * (README, LICENSE, …) have no name-derived MIME at all, so they are
+ * recognised by their conventional names
+ * ([MimeTypes.isExtensionlessTextName]).
+ */
+fun isTextPreviewType(mimeType: String, fileName: String): Boolean =
+    MimeTypes.isText(mimeType) ||
+        MimeTypes.isText(MimeTypes.fromFileName(fileName)) ||
+        MimeTypes.isExtensionlessTextName(fileName)
+
+/**
  * The normal-route preview dispatch, pure so host tests can pin it.
  *
  * Branch order: image -> video -> audio -> pdf -> html -> document -> text ->
@@ -585,7 +608,7 @@ fun previewDispatch(
     MimeTypes.isPdf(mimeType) -> PreviewDispatch.PDF
     MimeTypes.isHtml(mimeType) -> PreviewDispatch.HTML
     isDocumentPreviewType(mimeType, fileName) -> PreviewDispatch.DOCUMENT
-    MimeTypes.isText(mimeType) -> PreviewDispatch.TEXT
+    isTextPreviewType(mimeType, fileName) -> PreviewDispatch.TEXT
     MimeTypes.isArchive(mimeType) || category == FileCategory.ARCHIVE -> PreviewDispatch.ARCHIVE
     MimeTypes.isApk(mimeType, fileName) -> PreviewDispatch.APK
     else -> PreviewDispatch.UNSUPPORTED
@@ -615,7 +638,7 @@ fun isAutoFetchable(
     (sizeBytes <= PreviewContentResolver.AUTO_PREVIEW_LIMIT &&
         (MimeTypes.isImage(mimeType) ||
             category == FileCategory.IMAGE ||
-            MimeTypes.isText(mimeType) ||
+            isTextPreviewType(mimeType, fileName) ||
             MimeTypes.isApk(mimeType, fileName))) ||
         (MimeTypes.isPdf(mimeType) && sizeBytes <= PreviewContentResolver.PDF_AUTO_PREVIEW_LIMIT) ||
         (isDocumentPreviewType(mimeType, fileName) &&

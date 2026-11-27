@@ -349,6 +349,42 @@ object MimeTypes {
             mimeType == "application/xhtml+xml" ||
             mimeType.endsWith("+xml")
 
+    /**
+     * Conventional extension-less plain-text file names (R3 item X1):
+     * files that carry no extension at all yet are text by universal
+     * convention — README above all, plus the licence/notice family and
+     * the common extension-less build files. Matching is exact and
+     * case-insensitive on the whole file name, and only for names with
+     * no dot at all, so "README.zip" or "LICENSE.txt" never match here
+     * (they classify by their extension instead).
+     */
+    private val extensionlessTextNames = setOf(
+        "readme",
+        "license",
+        "licence",
+        "copying",
+        "copyright",
+        "notice",
+        "authors",
+        "contributors",
+        "changelog",
+        "history",
+        "news",
+        "todo",
+        "makefile",
+        "dockerfile",
+        "gemfile",
+        "rakefile",
+        "procfile",
+        "vagrantfile"
+    )
+
+    fun isExtensionlessTextName(fileName: String): Boolean {
+        val name = fileName.substringAfterLast('/').substringAfterLast('\\')
+        if ('.' in name) return false
+        return name.lowercase() in extensionlessTextNames
+    }
+
     fun isArchive(mimeType: String): Boolean = mimeType in setOf(
         "application/zip",
         "application/vnd.comicbook+zip",

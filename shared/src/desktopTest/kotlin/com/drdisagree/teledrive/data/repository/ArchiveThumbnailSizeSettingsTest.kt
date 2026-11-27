@@ -19,11 +19,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * PC 1.6.26 item P7: the ZIP contents list's thumbnail size persists
- * through the real DataStore settings mechanism under the
+ * PC 1.6.26 item P7 + R3 item P6: the ZIP contents list's thumbnail size
+ * persists through the real DataStore settings mechanism under the
  * `archive_thumbnail_size` key (the enum name), defaults to MEDIUM
- * (56 dp — the size the lists shipped with before the switcher existed),
- * and the steps are genuinely ordered Small 40 < Medium 56 < Big 80.
+ * (56 dp — the size the lists shipped with before the switcher existed).
+ * R3 P6 re-mapped the steps' PC geometry: Small 40x40 / Medium 56x56
+ * unchanged, Big is now a wide 160x120 dp tile (was an 80 dp square) and
+ * decodes at 512 px instead of 256 px. Persistence stores only the enum
+ * name, so a "BIG" saved by an older build maps to the new tile with no
+ * migration.
  */
 class ArchiveThumbnailSizeSettingsTest {
 
@@ -46,10 +50,19 @@ class ArchiveThumbnailSizeSettingsTest {
     }
 
     @Test
-    fun `steps are small 40 medium 56 big 80 and the default is medium`() {
+    fun `steps are small 40 medium 56 and big is a wide 160 by 120 tile decoding at 512`() {
         assertEquals(40, ArchiveThumbnailSize.SMALL.dp)
+        assertEquals(40, ArchiveThumbnailSize.SMALL.widthDp)
+        assertEquals(256, ArchiveThumbnailSize.SMALL.decodePx)
         assertEquals(56, ArchiveThumbnailSize.MEDIUM.dp)
-        assertEquals(80, ArchiveThumbnailSize.BIG.dp)
+        assertEquals(56, ArchiveThumbnailSize.MEDIUM.widthDp)
+        assertEquals(256, ArchiveThumbnailSize.MEDIUM.decodePx)
+        // R3 P6: Big's slot height (dp) and width (widthDp), stated
+        // explicitly — this is the px-value change behind the same
+        // persisted enum name.
+        assertEquals(120, ArchiveThumbnailSize.BIG.dp)
+        assertEquals(160, ArchiveThumbnailSize.BIG.widthDp)
+        assertEquals(512, ArchiveThumbnailSize.BIG.decodePx)
         assertEquals(ArchiveThumbnailSize.MEDIUM, UserPreferences().archiveThumbnailSize)
     }
 

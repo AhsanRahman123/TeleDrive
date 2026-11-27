@@ -184,6 +184,58 @@ class DesktopArchiveEntryThumbnailStoreTest {
         assertEquals(callsAfterFetch, telegram.totalCalls.get())
     }
 
+    private fun bigPngBytes(): ByteArray {
+        val image = BufferedImage(1024, 768, BufferedImage.TYPE_INT_RGB)
+        val out = ByteArrayOutputStream()
+        ImageIO.write(image, "png", out)
+        return out.toByteArray()
+    }
+
+    private fun awaitState(
+        store: DesktopArchiveEntryThumbnailStore,
+        key: String,
+        decodePx: Int
+    ): ArchiveThumbState {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (System.currentTimeMillis() < deadline) {
+            val value = store.state(key, decodePx).value
+            if (value !is ArchiveThumbState.Placeholder) return value
+            Thread.sleep(25)
+        }
+        return store.state(key, decodePx).value
+    }
+
+    @Test
+    fun `big step decode is a separate larger cache file than the 256 px decode`() {
+        // R3 P6: the Big tile (512 px decode) must never be served the
+        // 256 px decode used by Small/Medium, and vice versa — the store
+        // keys state and cache files per decode size.
+        val png = bigPngBytes()
+        val telegram = CountingTelegram(storedZip(listOf("cat.png" to png)))
+        val dir = Files.createTempDirectory("thumbs-test").toFile()
+        val store = DesktopArchiveEntryThumbnailStore.forCacheDir(dir, service(telegram.client))
+        val file = driveFile()
+        val key = ArchiveEntryThumbnailPolicy.cacheKey(file.id, 0, png.size.toLong(), png.size.toLong(), 0)
+
+        store.request(key, file, 0, "cat.png", png.size.toLong(), decodePx = 512)
+        val readyBig = awaitState(store, key, 512)
+        assertTrue("expected Ready at 512, was $readyBig", readyBig is ArchiveThumbState.Ready)
+        val bigFile = (readyBig as ArchiveThumbState.Ready).file
+        val bigImage = ImageIO.read(bigFile)
+        assertEquals(512, maxOf(bigImage.width, bigImage.height))
+
+        store.request(key, file, 0, "cat.png", png.size.toLong())
+        val readySmall = awaitState(store, key)
+        assertTrue("expected Ready at 256, was $readySmall", readySmall is ArchiveThumbState.Ready)
+        val smallFile = (readySmall as ArchiveThumbState.Ready).file
+        assertTrue(
+            "the two decode sizes must live in different cache files",
+            bigFile.absolutePath != smallFile.absolutePath
+        )
+        val smallImage = ImageIO.read(smallFile)
+        assertEquals(256, maxOf(smallImage.width, smallImage.height))
+    }
+
     @Test
     fun `externally deleted ready file refetches instead of stranding the row`() {
         val png = pngBytes()
