@@ -102,6 +102,9 @@ object SevenZLocalArchiveReader : LocalArchiveReader {
             }
         } catch (failure: ArchiveException) {
             throw failure
+        } catch (failure: kotlinx.coroutines.CancellationException) {
+            // vc183: cancellation is not corruption (see ZipArchiveReader).
+            throw failure
         } catch (failure: Exception) {
             // Header-encrypted archives fail at open, content-encrypted entries
             // and unsupported codecs/filters fail here; none of them is helped
@@ -170,6 +173,9 @@ class TarLocalArchiveReader(private val compressed: Boolean) : LocalArchiveReade
                 }
             }
         } catch (failure: ArchiveException) {
+            throw failure
+        } catch (failure: kotlinx.coroutines.CancellationException) {
+            // vc183: cancellation is not corruption (see ZipArchiveReader).
             throw failure
         } catch (failure: Exception) {
             throw ArchiveException(

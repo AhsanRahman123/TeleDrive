@@ -40,31 +40,43 @@ fun archiveEntryTapAction(entry: ArchiveEntry): ArchiveEntryTapAction {
 
 /**
  * Whether [entry] can appear in the in-zip preview pager at all: it must open in place
- * (image / audio / text) rather than download, and a text entry must be within the
- * preview size cap — an oversized text entry only ever shows the too-large message on
- * tap, so it has no page to swipe to.
+ * (image / audio / text / pdf / document / video) rather than download, and a text entry
+ * must be within the preview size cap — an oversized text entry only ever shows the
+ * too-large message on tap, so it has no page to swipe to.
+ *
+ * vc183 (Pranto's vc182 field order): video IS a pager page now — the unified
+ * sequence is the Files-pager model, one page per previewable entry of every
+ * type, so swipe and prev/next can cross image↔video in both directions.
+ * Inclusion in the sequence does NOT mean a swipe extracts the video: a video
+ * page first publishes only [ArchiveEntryPreview.VideoPlaceholder] (no
+ * extraction, no free-space preflight), and the whole-file extraction runs
+ * only on the deliberate Play tap on that page (see PreviewViewModel). That
+ * is the closest in-zip mirror of the Files pager, where a video page exists
+ * for every video but its player is only created/prepared once the page is
+ * the active one — except that Files can stream, while an archive entry can
+ * only be extracted whole, so the deliberate step is a Play button instead
+ * of autoplay-on-settle.
  */
 fun archiveEntryPreviewable(entry: ArchiveEntry): Boolean =
     when (archiveEntryTapAction(entry)) {
         ArchiveEntryTapAction.PREVIEW_IMAGE,
-        ArchiveEntryTapAction.PLAY_AUDIO -> true
+        ArchiveEntryTapAction.PLAY_AUDIO,
+        ArchiveEntryTapAction.PLAY_VIDEO -> true
         ArchiveEntryTapAction.PREVIEW_TEXT -> archiveEntryTextPreviewable(entry)
         ArchiveEntryTapAction.PREVIEW_PDF -> archiveEntryPdfPreviewable(entry)
         ArchiveEntryTapAction.PREVIEW_DOCUMENT -> archiveEntryDocumentPreviewable(entry)
-        // PLAY_VIDEO is tap-only: a video is never a pager page. Swiping
-        // across one would trigger a full (potentially multi-GB) extraction
-        // for a page the user may pass in a second, breaking the pager's
-        // cheap-page contract. A tapped video publishes a single-entry
-        // sequence instead (see archiveVideoPreviewSequence).
-        ArchiveEntryTapAction.PLAY_VIDEO,
         ArchiveEntryTapAction.DOWNLOAD -> false
     }
 
+/** True when [entry] is an in-archive video (its pager page is a placeholder until Play). */
+fun archiveEntryIsVideo(entry: ArchiveEntry): Boolean =
+    archiveEntryTapAction(entry) == ArchiveEntryTapAction.PLAY_VIDEO
+
 /**
- * The pager sequence for a tapped in-archive video: just the video itself.
- * The overlay's invariant "entries[position] is the open preview" holds,
- * the pager has one page (no swipe neighbours, no counter), and a stray
- * page-selected callback can only ever re-target the same entry.
+ * Legacy vc181/vc182 helper, kept for compatibility: the single-entry overlay
+ * sequence a tapped video used to publish. vc183 no longer uses it — a tapped
+ * or swiped-to video publishes its position in the unified sequence
+ * ([archivePreviewPagerIndices]) instead.
  */
 fun archiveVideoPreviewSequence(entryIndex: Int): List<Int> = listOf(entryIndex)
 
@@ -86,14 +98,17 @@ fun archiveVideoFitsInFreeSpace(entrySizeBytes: Long, freeBytes: Long): Boolean 
         freeBytes - entrySizeBytes >= ARCHIVE_VIDEO_SPACE_MARGIN_BYTES
 
 /**
- * The in-zip preview pager sequence: the LISTING INDICES of the previewable entries of
- * [listing], in the order the archive list shows them — the archive tree flattened with
- * every folder expanded under the remembered archive sort, i.e. the rows of the fully
- * expanded list with the download-only rows removed. Download-only entries (video
- * included) are skipped rather than shown as placeholders, matching the Files pager,
- * whose sequence is built from the browsed query and simply contains no page for a
- * file that is not in it. Identity stays the listing index, so duplicate names each
- * keep their own page and extraction.
+ * The in-zip preview pager sequence — THE unified sequence (vc183): the LISTING
+ * INDICES of the previewable entries of [listing], in the order the archive list
+ * shows them — the archive tree flattened with every folder expanded under the
+ * remembered archive sort, i.e. the rows of the fully expanded list with the
+ * download-only rows removed. Every previewable type is in it (image, audio,
+ * video, text, PDF, document), in display order, matching the Files pager,
+ * whose sequence is built from the browsed query and simply contains no page
+ * for a file that is not in it. This one sequence drives the swipe pager, the
+ * image pager's steps and the video player's prev/next buttons alike.
+ * Identity stays the listing index, so duplicate names each keep their own
+ * page and extraction.
  */
 fun archivePreviewPagerIndices(
     listing: List<ArchiveEntry>,
@@ -111,15 +126,37 @@ fun archivePreviewPagerIndices(
     }
 }
 
+/** The unified sequence, under its vc183 name — exactly [archivePreviewPagerIndices]. */
+fun archiveUnifiedPreviewIndices(
+    listing: List<ArchiveEntry>,
+    sortField: FileSortField = FileSortField.NAME,
+    sortDirection: SortDirection = SortDirection.ASCENDING
+): List<Int> = archivePreviewPagerIndices(listing, sortField, sortDirection)
+
 /**
- * The in-zip video queue: the LISTING INDICES of the archive's video entries, in the
- * same flattened display order as [archivePreviewPagerIndices] — the archive tree
- * flattened with every folder expanded under the remembered archive sort — filtered
- * to entries whose tap action is PLAY_VIDEO. Videos stay out of the preview pager
- * (see [archiveEntryPreviewable]); this queue is what the player's SkipPrevious /
- * SkipNext buttons step through while an in-zip video is open (vc182). Identity
- * stays the listing index, so duplicate names each keep their own queue slot and
- * extraction.
+ * Whether the pager page at [position] in [pagerIndices] is a video entry of
+ * [listing] — the pure decision the view model uses to publish a video
+ * placeholder (no extraction) instead of extracting on a swipe/step.
+ */
+fun archivePagerPageIsVideo(
+    listing: List<ArchiveEntry>,
+    pagerIndices: List<Int>,
+    position: Int
+): Boolean {
+    val entryIndex = pagerIndices.getOrNull(position) ?: return false
+    val entry = listing.getOrNull(entryIndex) ?: return false
+    return archiveEntryIsVideo(entry)
+}
+
+/**
+ * The video-only subsequence of the unified sequence: the LISTING INDICES of
+ * the archive's video entries, in the same flattened display order as
+ * [archivePreviewPagerIndices], filtered to PLAY_VIDEO entries. In vc182 this
+ * queue drove the player's SkipPrevious/SkipNext buttons; in vc183 those
+ * buttons follow the unified sequence instead (they can step onto images and
+ * every other previewable type), and this helper remains as the pure
+ * video-subsequence view of that sequence. Identity stays the listing index,
+ * so duplicate names each keep their own slot.
  */
 fun archiveVideoQueueIndices(
     listing: List<ArchiveEntry>,

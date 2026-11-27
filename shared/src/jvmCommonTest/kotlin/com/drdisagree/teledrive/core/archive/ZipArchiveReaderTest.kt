@@ -551,4 +551,39 @@ class ZipArchiveReaderTest {
         }
         return -1
     }
+
+    @Test
+    fun `cancellation during extraction propagates as cancellation, not corruption`() {
+        // vc183 false-corruption fix: a superseded pager step cancels its
+        // extraction; the source read then throws CancellationException
+        // inside the reader's loop. It must come out as CancellationException
+        // — wrapping it as ArchiveException(CORRUPT) made the switch path
+        // report a good entry as corrupted.
+        val bytes = zipOf(listOf(Triple("a.txt", "hello world".toByteArray(), ZipEntry.STORED)))
+        val source = object : MediaByteSource {
+            private val delegate = InMemorySource(bytes)
+            private var reads = 0
+            override suspend fun size(): Long = delegate.size()
+            override suspend fun read(position: Long, count: Int): ByteArray {
+                reads++
+                // Reads 1-2: entries() tail + central directory. Read 3:
+                // extract's local header. Read 4: the entry data — cancel here.
+                if (reads >= 4) throw kotlinx.coroutines.CancellationException("superseded")
+                return delegate.read(position, count)
+            }
+            override fun close() = Unit
+        }
+        val cancellingReader = ZipArchiveReader(source)
+        runBlocking {
+            val entry = cancellingReader.entries().single()
+            try {
+                cancellingReader.extract(entry, ByteArrayOutputStream())
+                fail("Expected CancellationException")
+            } catch (expected: kotlinx.coroutines.CancellationException) {
+                // propagated unwrapped: pass
+            } catch (failure: ArchiveException) {
+                fail("Cancellation was re-wrapped as archive error: ${failure.kind}")
+            }
+        }
+    }
 }

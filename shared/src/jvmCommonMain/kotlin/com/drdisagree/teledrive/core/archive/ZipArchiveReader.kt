@@ -252,6 +252,16 @@ class ZipArchiveReader(
             throw failure
         } catch (failure: ArchiveException) {
             throw failure
+        } catch (failure: kotlinx.coroutines.CancellationException) {
+            // vc183 false-corruption fix: cancellation is NOT corruption. A
+            // superseded pager step cancels its extraction; the suspending
+            // source read then throws CancellationException inside the loop
+            // above, and wrapping it as CORRUPT made the switch path report
+            // "archive is corrupted" for entries that open fine individually
+            // (individual open is never cancelled by a successor). Rethrow
+            // unwrapped so callers' CancellationException handling applies —
+            // the same pattern TelegramMediaByteSource already uses.
+            throw failure
         } catch (failure: Exception) {
             throw ArchiveException(
                 ArchiveErrorKind.CORRUPT,

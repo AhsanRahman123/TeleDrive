@@ -8,15 +8,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * In-archive video playback (vc181 B11): tap-only routing, the pager
- * exclusion, the single-entry sequence a tapped video publishes, and the
- * free-space preflight predicate that refuses an extraction before it
- * starts when the temp dir cannot hold the entry.
+ * In-archive video playback (vc181 B11): tap routing and the free-space
+ * preflight predicate that refuses an extraction before it starts when the
+ * temp dir cannot hold the entry.
  *
- * vc182 adds the video queue: a tapped video still publishes the single-entry
- * overlay sequence, PLUS the archive's video queue and the tapped video's
- * position in it, which the player's SkipPrevious/SkipNext buttons step
- * through (clamped, no wrap) without videos ever joining the swipe pager.
+ * vc182 added a video-only queue for the player's Skip buttons. vc183
+ * (Pranto's field order) supersedes that: videos join the ONE unified pager
+ * sequence over all previewable types, swipe and prev/next cross
+ * video<->image in both directions, and a video page reached by swipe/step
+ * is a placeholder — no extraction until the deliberate Play tap. A direct
+ * list tap on a video still extracts and plays immediately. The video-only
+ * queue helper remains as a subsequence view and its pins stay.
  */
 class InZipVideoTest {
 
@@ -29,14 +31,24 @@ class InZipVideoTest {
     )
 
     @Test
-    fun `video taps play but are never pager previewable`() {
+    fun `video taps play and videos are pager previewable as placeholder pages`() {
+        // vc183 contract change (field order overrides the vc181/182 pin):
+        // a video has a page in the unified sequence. Previewable here means
+        // "has a page", NOT "a swipe extracts it" — the view model publishes
+        // a VideoPlaceholder for a swiped-to video and extracts only on the
+        // deliberate Play tap or a direct list tap.
         val video = entry("a/movie.mp4", size = 5_000_000)
         assertEquals(ArchiveEntryTapAction.PLAY_VIDEO, archiveEntryTapAction(video))
-        assertFalse(archiveEntryPreviewable(video))
+        assertTrue(archiveEntryPreviewable(video))
+        assertTrue(archiveEntryIsVideo(video))
     }
 
     @Test
-    fun `pager indices are unchanged by video entries in the listing`() {
+    fun `pager indices include video entries in display order`() {
+        // vc183 contract change: was "pager indices are unchanged by video
+        // entries" (vc180-182). The unified sequence now contains every
+        // previewable type: NAME sort orders the folder's rows clip.mkv,
+        // movie.mp4, notes.txt, photo.jpg, song.mp3 — all five are pages.
         val listing = listOf(
             entry("a/photo.jpg"),
             entry("a/movie.mp4", size = 5_000_000),
@@ -44,27 +56,36 @@ class InZipVideoTest {
             entry("a/clip.mkv", size = 5_000_000),
             entry("a/notes.txt")
         )
-        // Exactly the vc180 sequence for the same listing: the archive NAME
-        // sort orders the folder's rows clip.mkv, movie.mp4, notes.txt,
-        // photo.jpg, song.mp3 — image, audio and text pages only, the two
-        // videos contribute no page.
-        assertEquals(listOf(4, 0, 2), archivePreviewPagerIndices(listing))
+        assertEquals(listOf(3, 1, 4, 0, 2), archivePreviewPagerIndices(listing))
+        assertEquals(
+            archivePreviewPagerIndices(listing),
+            archiveUnifiedPreviewIndices(listing)
+        )
     }
 
     @Test
-    fun `a tapped video publishes a single entry sequence`() {
+    fun `a tapped video publishes its position in the unified sequence`() {
+        // vc183 contract change: was "a tapped video publishes a single
+        // entry sequence" (vc181/182). The legacy helper still returns the
+        // single-entry list, but the view model no longer publishes it.
         assertEquals(listOf(7), archiveVideoPreviewSequence(7))
-        assertEquals(0, archivePreviewPagerPosition(archiveVideoPreviewSequence(7), 7))
-        // A step from the only page leaves the sequence: the pager cannot move.
-        assertEquals(null, archivePreviewPagerTarget(1, 0, 1))
-        assertEquals(null, archivePreviewPagerTarget(1, 0, -1))
+        val listing = listOf(
+            entry("a/photo.jpg"),
+            entry("a/movie.mp4", size = 5_000_000),
+            entry("a/notes.txt")
+        )
+        // Display order: movie(1), notes(2), photo(0) — the video is page 0
+        // of 3, with real neighbours on the next side.
+        val unified = archiveUnifiedPreviewIndices(listing)
+        assertEquals(listOf(1, 2, 0), unified)
+        assertEquals(0, archivePreviewPagerPosition(unified, 1))
+        assertEquals(1, archivePreviewPagerTarget(unified.size, 0, 1))
     }
 
     @Test
-    fun `a tapped video also publishes its queue and position in it`() {
-        // vc182 contract: the overlay sequence stays single-entry (above),
-        // and alongside it the view model stores the video queue plus the
-        // tapped video's position — the pair the Skip buttons step through.
+    fun `the video queue is the video subsequence of the unified sequence`() {
+        // vc183: the Skip buttons follow the unified sequence, not this
+        // queue; the queue remains as its video-only subsequence view.
         val listing = listOf(
             entry("a/first.mp4"),
             entry("a/photo.jpg"),
@@ -74,8 +95,64 @@ class InZipVideoTest {
         val queue = archiveVideoQueueIndices(listing)
         assertEquals(listOf(0, 2, 3), queue)
         assertEquals(1, archivePreviewPagerPosition(queue, 2))
-        // The overlay sequence for that same tap is still just the video.
-        assertEquals(listOf(2), archiveVideoPreviewSequence(2))
+        // The unified sequence for the same listing interleaves the photo.
+        assertEquals(listOf(0, 1, 2, 3), archiveUnifiedPreviewIndices(listing))
+    }
+
+    // ---- Unified mixed-type stepping (vc183) ----
+
+    @Test
+    fun `mixed-type sequence keeps display order across all previewable types`() {
+        val listing = listOf(
+            entry("z/photo.jpg"),        // 0 image
+            entry("a/movie.mp4"),        // 1 video
+            entry("m/notes.txt"),        // 2 text
+            entry("m/book.pdf"),         // 3 pdf
+            entry("m/song.mp3"),         // 4 audio
+            entry("m/blob.zip"),         // 5 download-only: no page
+            entry("m/novel.epub")        // 6 document
+        )
+        // Display order (folders first per level, NAME asc):
+        // a/movie(1), m/blob(5), m/book(3), m/notes(2), m/novel(6), m/song(4), z/photo(0)
+        assertEquals(listOf(1, 3, 2, 6, 4, 0), archiveUnifiedPreviewIndices(listing))
+    }
+
+    @Test
+    fun `video to image and image to video steps both work over the unified sequence`() {
+        val listing = listOf(
+            entry("a/photo.jpg"),   // 0
+            entry("a/movie.mp4"),   // 1
+            entry("a/photo2.jpg")   // 2
+        )
+        // Display order: movie(1), photo(0), photo2(2).
+        val unified = archiveUnifiedPreviewIndices(listing)
+        assertEquals(listOf(1, 0, 2), unified)
+        // Video page (position 0) -> next is the image: the step the field
+        // test said failed in vc182 (video-only queue had no image target).
+        assertEquals(1, archivePreviewPagerTarget(unified.size, 0, 1))
+        assertFalse(archivePagerPageIsVideo(listing, unified, 1))
+        // Image page (position 1) -> previous is the video, and the pure
+        // decision says that target is a video page (placeholder, no extract).
+        assertEquals(0, archivePreviewPagerTarget(unified.size, 1, -1))
+        assertTrue(archivePagerPageIsVideo(listing, unified, 0))
+        // And forward again from the second image clamps at the end.
+        assertEquals(null, archivePreviewPagerTarget(unified.size, 2, 1))
+    }
+
+    @Test
+    fun `unified sequence keeps duplicate names as distinct pages`() {
+        val listing = listOf(
+            entry("dup.mp4", 1),
+            entry("dup.jpg", 2),
+            entry("dup.mp4", 3),
+            entry("dup.jpg", 4)
+        )
+        // Display order by name: dup.jpg(1), dup.jpg(3), dup.mp4(0), dup.mp4(2).
+        val unified = archiveUnifiedPreviewIndices(listing)
+        assertEquals(listOf(1, 3, 0, 2), unified)
+        assertEquals(3, archivePreviewPagerPosition(unified, 2))
+        assertTrue(archivePagerPageIsVideo(listing, unified, 3))
+        assertFalse(archivePagerPageIsVideo(listing, unified, 0))
     }
 
     // ---- Video queue (vc182) ----

@@ -502,37 +502,21 @@ class PreviewViewModel(
             )
             return
         }
-        // An in-zip video steps through the archive's other videos with the
-        // player's SkipPrevious/SkipNext buttons (vc182): remember the video
-        // queue in display order and the tapped video's position in it. The
-        // queue position only ever moves inside a successful load's publish
-        // (see loadArchivePreview), so a failed step cannot advance it.
-        if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
-            val videoQueue = archiveVideoQueueIndices(
-                listing,
-                archiveSort.value.first,
-                archiveSort.value.second
-            )
-            _uiState.update {
-                it.copy(
-                    archiveVideoQueue = videoQueue,
-                    archiveVideoQueuePosition = videoQueue.indexOf(entryIndex)
-                )
-            }
-        }
-        // A tapped video is tap-only (vc181 B11): it publishes a single-entry
-        // pager sequence, never the full pager — see archiveVideoPreviewSequence.
+        // vc183: ONE unified sequence for every previewable type (video
+        // included), in display order — a direct list tap on a video is a
+        // deliberate open, so it extracts and plays immediately (with the
+        // vc181 preflight inside loadArchivePreview), but it publishes its
+        // position in the unified sequence so swipe and the player's
+        // prev/next can cross to neighbouring images/text/etc. and back.
         // A CBZ reads as a comic: image pages only, in natural path order —
         // not the archive list's sort. Any other tap inside a CBZ (a text file,
         // say) keeps the plain ZIP pager behaviour.
-        val pagerIndices = if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
-            archiveVideoPreviewSequence(entryIndex)
-        } else if (archiveFormats[file.id] == "CBZ" &&
+        val pagerIndices = if (archiveFormats[file.id] == "CBZ" &&
             action == ArchiveEntryTapAction.PREVIEW_IMAGE
         ) {
             comicPageSequence(listing)
         } else {
-            archivePreviewPagerIndices(
+            archiveUnifiedPreviewIndices(
                 listing,
                 archiveSort.value.first,
                 archiveSort.value.second
@@ -547,6 +531,61 @@ class PreviewViewModel(
     }
 
     /**
+     * Publishes a video placeholder page at [pagerPosition] in [pagerIndices]
+     * (vc183): no extraction, no preflight, no temp file. Used when a swipe or
+     * a prev/next step settles on a video — the deliberate Play tap on the
+     * placeholder ([playCurrentArchiveVideo]) is what extracts it. Any
+     * in-flight preview load is superseded (cancelled); the previous preview's
+     * temp is deleted only after the placeholder is published.
+     */
+    private fun publishArchiveVideoPlaceholder(
+        file: DriveFile,
+        entryIndex: Int,
+        pagerIndices: List<Int>,
+        pagerPosition: Int
+    ) {
+        val listing = _uiState.value.archiveListings[file.id] ?: return
+        val entry = listing.getOrNull(entryIndex) ?: return
+        archivePreviewJob?.cancel()
+        archivePreviewJob = null
+        val previous = _uiState.value.archivePreview
+        _uiState.update {
+            it.copy(
+                archivePreview = ArchiveEntryPreview.VideoPlaceholder(
+                    name = archiveEntryDisplayName(entry),
+                    entryIndex = entryIndex,
+                    sizeBytes = entry.sizeBytes
+                ),
+                archivePreviewEntries = pagerIndices,
+                archivePreviewPosition = pagerPosition,
+                archivePreviewFileId = file.id,
+                archiveVideoQueue = pagerIndices,
+                archiveVideoQueuePosition = pagerPosition,
+                archiveEntryBusyIndex = null,
+                archivePreviewLoading = false
+            )
+        }
+        if (previous != null && previous.entryIndex != entryIndex) {
+            deleteArchivePreviewTemp(previous)
+        }
+    }
+
+    /** Deliberate Play on a video placeholder page: extract + play that entry. */
+    fun playCurrentArchiveVideo() {
+        val state = _uiState.value
+        val placeholder = state.archivePreview as? ArchiveEntryPreview.VideoPlaceholder ?: return
+        if (archivePreviewJob?.isActive != true && state.archiveEntryBusyIndex != null) return
+        val fileId = state.archivePreviewFileId ?: return
+        val file = state.files.firstOrNull { it.id == fileId } ?: return
+        loadArchivePreview(
+            file = file,
+            entryIndex = placeholder.entryIndex,
+            pagerIndices = state.archivePreviewEntries,
+            pagerPosition = state.archivePreviewPosition
+        )
+    }
+
+    /**
      * Extracts [entryIndex] to a verified temp file and publishes it as the in-archive
      * preview at [pagerPosition] in [pagerIndices]. Shared by the initial tap-open and
      * by pager steps: a step keeps the current preview (and position) published until
@@ -554,6 +593,12 @@ class PreviewViewModel(
      * load supersedes an in-flight preview load — fast swipes cancel the extraction
      * they leave behind (the archive service deletes its partial temp on failure,
      * cancellation included) and only the last page swiped to is published.
+     *
+     * vc183 superseded-load discipline: the job is created LAZY, registered as
+     * [archivePreviewJob] BEFORE it starts, and every publish in it — success,
+     * step-failure resync and error message alike — is guarded by
+     * [archivePreviewLoadMayPublish] on job identity. A superseded load
+     * publishes nothing (see PreviewUiState for the false-corruption story).
      */
     private fun loadArchivePreview(
         file: DriveFile,
@@ -571,7 +616,12 @@ class PreviewViewModel(
         val displayName = archiveEntryDisplayName(entry)
         archivePreviewJob?.cancel()
         val previous = _uiState.value.archivePreview
-        val job = viewModelScope.launch {
+        val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            val isCurrentLoad = {
+                archivePreviewLoadMayPublish(
+                    archivePreviewJob === currentCoroutineContext()[Job]
+                )
+            }
             _uiState.update {
                 it.copy(
                     archiveEntryBusyIndex = entryIndex,
@@ -579,10 +629,6 @@ class PreviewViewModel(
                 )
             }
             try {
-                // In-archive video preflight (vc181 B11): the entry extracts
-                // WHOLE to a temp file before the first frame, so refuse up
-                // front when the temp dir cannot hold it — otherwise a full
-                // disk mid-extraction would be misreported as corruption.
                 if (action == ArchiveEntryTapAction.PLAY_VIDEO) {
                     val tempDir = java.io.File(
                         System.getProperty("java.io.tmpdir") ?: "."
@@ -613,18 +659,21 @@ class PreviewViewModel(
                 } else {
                     remoteArchiveService.extractEntryToTempFile(file, entry.name, occurrence)
                 }
+                // A superseded load that finished anyway (a non-suspending
+                // local extraction can outrun cancellation) publishes
+                // nothing and deletes its own temp.
+                if (!isCurrentLoad()) {
+                    temp.delete()
+                    return@launch
+                }
                 val preview = when (action) {
                     ArchiveEntryTapAction.PREVIEW_IMAGE ->
                         ArchiveEntryPreview.Image(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PLAY_AUDIO ->
                         ArchiveEntryPreview.Audio(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PREVIEW_PDF ->
-                        // The extracted temp file is already a real, seekable .pdf —
-                        // exactly what PdfRenderer needs, same as a normal local PDF.
                         ArchiveEntryPreview.Pdf(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PREVIEW_DOCUMENT -> {
-                        // EPUB Tier 1 / OOXML text extraction runs on the extracted
-                        // temp file, exactly as for a normal local document.
                         val extraction = try {
                             extractDocumentText(temp)
                         } finally {
@@ -648,8 +697,6 @@ class PreviewViewModel(
                     ArchiveEntryTapAction.PLAY_VIDEO ->
                         ArchiveEntryPreview.Video(displayName, temp.absolutePath, entryIndex)
                     ArchiveEntryTapAction.PREVIEW_TEXT -> {
-                        // String decoding with the UTF-8 charset replaces malformed input
-                        // instead of failing, so a non-UTF-8 text file still shows sanely.
                         val entryMime =
                             com.drdisagree.teledrive.core.files.MimeTypes.fromFileName(entry.name)
                         val text = com.drdisagree.teledrive.core.files.formatPreviewText(
@@ -669,50 +716,47 @@ class PreviewViewModel(
                     }
                     ArchiveEntryTapAction.DOWNLOAD -> error("unreachable")
                 }
+                if (!isCurrentLoad()) {
+                    if (preview is ArchiveEntryPreview.Image) java.io.File(preview.path).delete()
+                    if (preview is ArchiveEntryPreview.Audio) java.io.File(preview.path).delete()
+                    if (preview is ArchiveEntryPreview.Pdf) java.io.File(preview.path).delete()
+                    if (preview is ArchiveEntryPreview.Video) java.io.File(preview.path).delete()
+                    return@launch
+                }
                 _uiState.update {
                     it.copy(
                         archivePreview = preview,
                         archivePreviewEntries = pagerIndices,
                         archivePreviewPosition = pagerPosition,
                         archivePreviewFileId = file.id,
-                        // The video queue position moves only here, inside the
-                        // successful publish (vc182): a failed step — the
-                        // INSUFFICIENT_SPACE preflight included — leaves the
-                        // published video and its queue position untouched.
-                        // Publishing a non-video preview clears the queue.
-                        archiveVideoQueue = if (preview is ArchiveEntryPreview.Video) {
-                            it.archiveVideoQueue
-                        } else {
-                            emptyList()
-                        },
-                        archiveVideoQueuePosition = if (preview is ArchiveEntryPreview.Video) {
-                            videoQueuePosition ?: it.archiveVideoQueuePosition
-                        } else {
-                            -1
-                        }
+                        archiveVideoQueue = pagerIndices,
+                        archiveVideoQueuePosition = pagerPosition
                     )
                 }
-                // The previous page's temp file is deleted only after its replacement
-                // is published, so a failed or cancelled step never blanks the viewer.
                 if (previous != null && previous.entryIndex != entryIndex) {
                     deleteArchivePreviewTemp(previous)
                 }
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: DocumentPreviewException) {
-                _uiState.update { it.withArchivePreviewStepFailure() }
-                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not read this file."))
+                if (isCurrentLoad()) {
+                    _uiState.update { it.withArchivePreviewStepFailure() }
+                    _messages.tryEmit(UiText.Plain(failure.message ?: "Could not read this file."))
+                }
             } catch (failure: ArchiveException) {
-                // The step failed: the published preview never moved, so signal the
-                // failure to snap the pager back to the published page.
-                _uiState.update { it.withArchivePreviewStepFailure() }
-                _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
+                // Same error semantics as individual open, and only from the
+                // current load: a superseded load's failure (e.g. a transient
+                // read failure racing its cancellation) publishes nothing.
+                if (isCurrentLoad()) {
+                    _uiState.update { it.withArchivePreviewStepFailure() }
+                    _messages.tryEmit(UiText.Plain(failure.message ?: "Could not extract this file."))
+                }
             } catch (failure: Exception) {
-                _uiState.update { it.withArchivePreviewStepFailure() }
-                _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+                if (isCurrentLoad()) {
+                    _uiState.update { it.withArchivePreviewStepFailure() }
+                    _messages.tryEmit(UiText.Resource(Res.string.preview_archive_failed))
+                }
             } finally {
-                // A superseded load must not clear the busy/loading state its
-                // replacement just set; only the load still registered as current may.
                 if (archivePreviewJob === currentCoroutineContext()[Job]) {
                     _uiState.update {
                         it.copy(archiveEntryBusyIndex = null, archivePreviewLoading = false)
@@ -721,6 +765,7 @@ class PreviewViewModel(
             }
         }
         archivePreviewJob = job
+        job.start()
     }
 
     /**
@@ -768,46 +813,45 @@ class PreviewViewModel(
         }
         val fileId = state.archivePreviewFileId ?: return
         val file = state.files.firstOrNull { it.id == fileId } ?: return
-        loadArchivePreview(
-            file = file,
-            entryIndex = state.archivePreviewEntries[target],
-            pagerIndices = state.archivePreviewEntries,
-            pagerPosition = target
-        )
+        // vc183: settling/stepping onto a video page publishes only its
+        // placeholder — a swipe must never start a whole-file extraction.
+        // The extraction runs on the placeholder's deliberate Play tap, or
+        // when the entry is tapped directly in the list.
+        val listing = state.archiveListings[fileId]
+        if (listing != null &&
+            archivePagerPageIsVideo(listing, state.archivePreviewEntries, target)
+        ) {
+            publishArchiveVideoPlaceholder(
+                file = file,
+                entryIndex = state.archivePreviewEntries[target],
+                pagerIndices = state.archivePreviewEntries,
+                pagerPosition = target
+            )
+        } else {
+            loadArchivePreview(
+                file = file,
+                entryIndex = state.archivePreviewEntries[target],
+                pagerIndices = state.archivePreviewEntries,
+                pagerPosition = target
+            )
+        }
     }
 
     /**
-     * Steps the open in-zip video by [delta] entries in the video queue
-     * (negative = previous), clamped to the queue with no wrap-around — the
-     * player's SkipPrevious/SkipNext buttons for in-zip video (vc182). Videos
-     * stay out of the swipe pager: the stepped-to video publishes the same
-     * single-entry overlay sequence a tapped video does, and only its queue
-     * position moves, inside the successful publish. Refused under the same
-     * busy-slot rule as [stepArchivePreview]; an in-flight preview load is
-     * superseded instead. Playback finishing does NOT auto-advance.
+     * Steps the open in-zip video (or video placeholder) by [delta] pages in
+     * the UNIFIED sequence (vc183) — the player's SkipPrevious/SkipNext
+     * buttons now follow the same sequence as the swipe pager, so they can
+     * step onto an image, text, PDF or another video (a video target lands
+     * on its placeholder, never on an extraction). Before vc183 this stepped
+     * a video-only queue, which is why video->image switching failed in the
+     * field. Playback finishing does NOT auto-advance.
      */
     fun stepArchiveVideo(delta: Int) {
-        val state = _uiState.value
-        if (state.archivePreview !is ArchiveEntryPreview.Video || delta == 0) return
-        val target = archivePreviewPagerTarget(
-            state.archiveVideoQueue.size,
-            state.archiveVideoQueuePosition,
-            delta
-        ) ?: return
-        if (archivePreviewJob?.isActive != true && state.archiveEntryBusyIndex != null) {
-            // Refused: a list-side extraction owns the busy slot.
-            return
-        }
-        val fileId = state.archivePreviewFileId ?: return
-        val file = state.files.firstOrNull { it.id == fileId } ?: return
-        val targetIndex = state.archiveVideoQueue[target]
-        loadArchivePreview(
-            file = file,
-            entryIndex = targetIndex,
-            pagerIndices = archiveVideoPreviewSequence(targetIndex),
-            pagerPosition = 0,
-            videoQueuePosition = target
-        )
+        val preview = _uiState.value.archivePreview
+        if (preview !is ArchiveEntryPreview.Video &&
+            preview !is ArchiveEntryPreview.VideoPlaceholder
+        ) return
+        stepArchivePreview(delta)
     }
 
     /** Deletes an in-archive preview's temp file (text previews hold no file). */
@@ -817,6 +861,7 @@ class PreviewViewModel(
             is ArchiveEntryPreview.Audio -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Pdf -> java.io.File(preview.path).delete()
             is ArchiveEntryPreview.Video -> java.io.File(preview.path).delete()
+            is ArchiveEntryPreview.VideoPlaceholder -> Unit
             is ArchiveEntryPreview.Text -> Unit
         }
     }
