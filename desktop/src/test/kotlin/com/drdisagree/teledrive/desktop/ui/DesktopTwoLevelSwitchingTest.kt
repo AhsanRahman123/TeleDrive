@@ -86,6 +86,14 @@ import org.koin.dsl.module
  * folder index even while an entry preview was open, so W/E inside a zip
  * jumped zip-to-zip (here: out of the zip to last.txt) instead of stepping
  * to the next entry.
+ *
+ * A second defect this round's first CI run proved (diagnostic probe: the
+ * overlay's Next BUTTON stepped text->audio while the E KEY did not): only
+ * the in-zip IMAGE overlay requested keyboard focus, so stepping onto a
+ * text/audio/video/PDF entry disposed the focused surface and left
+ * nothing focused — W/E went dead until the next mouse click. Every
+ * in-zip overlay now requests focus on open/step, like the image overlay
+ * always did; the text->audio key step below pins it.
  */
 @OptIn(ExperimentalTestApi::class)
 class DesktopTwoLevelSwitchingTest {
@@ -399,22 +407,13 @@ class DesktopTwoLevelSwitchingTest {
         assertTrue(displayed("gamma.mp3"))
 
         // Folder level: E moves to the NEXT folder file after the zip.
+        // (A press on the top-bar title first — the mouse user's window
+        // focus, which the screen's pointer handling reclaims to the
+        // Scaffold the W/E routing lives on.)
+        rule.onNodeWithText("bundle.zip").performClick()
+        rule.waitForIdle()
         press(Key.E)
-        try {
-            waitDisplayed("LAST FILE BODY")
-        } catch (failure: AssertionError) {
-            // DIAGNOSTIC PROBE (temporary): establish window focus the way a
-            // mouse user does — a press on the top-bar title — and retry.
-            rule.onNodeWithText("bundle.zip").performClick()
-            rule.waitForIdle()
-            press(Key.E)
-            try {
-                waitDisplayed("LAST FILE BODY")
-            } catch (retryFailure: AssertionError) {
-                throw AssertionError("PROBE: folder E failed even after focus click")
-            }
-            throw AssertionError("PROBE: folder E worked only after focus click")
-        }
+        waitDisplayed("LAST FILE BODY")
         assertEquals("folder-level E must not exit the viewer", 0, exits.get())
 
         // W returns to the zip, and its contents list is what shows again.
@@ -458,21 +457,7 @@ class DesktopTwoLevelSwitchingTest {
         waitDisplayed("DELTA ENTRY BODY")
 
         press(Key.E)
-        try {
-            waitPreview(3)
-        } catch (failure: AssertionError) {
-            // DIAGNOSTIC PROBE (temporary): if the overlay's own Next button
-            // steps to the audio entry, the VM step works and the E key
-            // press is what got lost; if the button also fails, the step
-            // itself is broken.
-            rule.onNodeWithContentDescription("Next file").performClick()
-            try {
-                waitPreview(3)
-            } catch (buttonFailure: AssertionError) {
-                throw AssertionError("PROBE: button step ALSO failed: ${buttonFailure.message}")
-            }
-            throw AssertionError("PROBE: key step failed but button step worked")
-        }
+        waitPreview(3)
         assertTrue(
             viewModel.uiState.value.archivePreview is ArchiveEntryPreview.Audio
         )

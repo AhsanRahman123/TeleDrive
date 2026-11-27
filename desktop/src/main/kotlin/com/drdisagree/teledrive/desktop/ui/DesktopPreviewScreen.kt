@@ -3148,10 +3148,13 @@ internal fun DesktopArchivePane(
                 val stepHasNext = stepPosition >= 0 &&
                     stepPosition < unifiedPreviewIndices.lastIndex
                 var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
+                val overlayFocusRequester = rememberOverlayFocusRequester(preview.entryIndex)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
+                        .focusRequester(overlayFocusRequester)
+                        .focusable()
                 ) {
                     if (VlcPlayback.available) {
                         DesktopMediaPlayer(
@@ -3210,10 +3213,13 @@ internal fun DesktopArchivePane(
                 val stepHasNext = stepPosition >= 0 &&
                     stepPosition < unifiedPreviewIndices.lastIndex
                 var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
+                val overlayFocusRequester = rememberOverlayFocusRequester(preview.entryIndex)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
+                        .focusRequester(overlayFocusRequester)
+                        .focusable()
                 ) {
                     if (VlcPlayback.available) {
                         DesktopMediaPlayer(
@@ -3268,10 +3274,13 @@ internal fun DesktopArchivePane(
                 val stepHasNext = stepPosition >= 0 &&
                     stepPosition < unifiedPreviewIndices.lastIndex
                 var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
+                val overlayFocusRequester = rememberOverlayFocusRequester(preview.entryIndex)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
+                        .focusRequester(overlayFocusRequester)
+                        .focusable()
                 ) {
                     DesktopPdfViewer(path = preview.path)
                     ArchiveOverlayBar(
@@ -3302,10 +3311,13 @@ internal fun DesktopArchivePane(
                 val stepHasNext = stepPosition >= 0 &&
                     stepPosition < unifiedPreviewIndices.lastIndex
                 var infoOpen by remember(preview.entryIndex) { mutableStateOf(false) }
+                val overlayFocusRequester = rememberOverlayFocusRequester(preview.entryIndex)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(MaterialTheme.colorScheme.background)
+                        .focusRequester(overlayFocusRequester)
+                        .focusable()
                         // Ctrl+wheel zoom for the non-HTML text surface
                         // (item P5); the HTML viewer below installs its own.
                         .then(
@@ -3404,6 +3416,25 @@ internal fun DesktopArchivePane(
             null -> Unit
         }
     }
+}
+
+/**
+ * Focus for a non-image in-zip overlay (PC 1.6.26 item P3): the image
+ * overlay has always requested focus for itself on mount, which is what
+ * keeps keyboard switching alive while it is open. The video/audio/PDF/
+ * text overlays never did — so stepping from an image entry onto one of
+ * them disposed the focused image surface and left NOTHING focused, and
+ * a keyboard user's W/E presses went nowhere until the next mouse click
+ * (proven by DesktopTwoLevelSwitchingTest's diagnostic probe: the key
+ * step failed while the same step from the overlay's Next button
+ * worked). Each overlay now requests focus for its own root whenever it
+ * opens or steps to another entry, exactly like the image overlay.
+ */
+@Composable
+private fun rememberOverlayFocusRequester(entryIndex: Int): FocusRequester {
+    val requester = remember { FocusRequester() }
+    LaunchedEffect(entryIndex) { requester.requestFocus() }
+    return requester
 }
 
 /**
