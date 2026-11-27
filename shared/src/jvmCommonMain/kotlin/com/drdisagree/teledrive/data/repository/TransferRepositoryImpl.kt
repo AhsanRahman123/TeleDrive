@@ -459,6 +459,13 @@ class TransferRepositoryImpl(
         } else {
             transferDao.setState(id, TransferState.CANCELLED, System.currentTimeMillis())
             transfer.fileId?.let { fileDao.setBackupStateIfLocalOnly(it, BackupState.NONE) }
+            // vc184 A2: cancel must reach the native queue too. A QUEUED row can
+            // already sit in TDLib's persistent download list (attached by an
+            // earlier execution or a priority refresh); flipping only the Room
+            // row left TDLib downloading it in the background. The running
+            // executor's own reconcile removes its row as well — removal is
+            // idempotent, so doing both is harmless.
+            removeNativeDownloadIfPresent(transfer)
         }
         syncFileStates()
         backupSessionTracker.refresh(transfer.backupSessionId)
@@ -505,7 +512,19 @@ class TransferRepositoryImpl(
         backupSessionTracker.refreshActive()
     }
 
-    override suspend fun cancelAll() {
+    override suspend fun cancelAll() = workerControlLock.withLock {
+        // Serialized with pause/resume like every other control op (vc184 A2):
+        // previously cancelAll ran outside workerControlLock, so a concurrent
+        // resume could re-queue a row after the sweep and leave it running
+        // under a completed Cancel all.
+        // Snapshot the live incoming rows BEFORE the sweep: after it they are
+        // CANCELLED and indistinguishable from history, but each one can still
+        // own an entry in TDLib's persistent download list (queued rows
+        // included — an earlier execution or a priority refresh may have
+        // attached them). Cancel all must remove those entries, not just flip
+        // the Room rows; previously only a currently-running executor removed
+        // its own row, so queued downloads kept moving inside TDLib.
+        val activeIncoming = transferDao.incomingQueueOrder()
         val cancelled = enqueueLock.withLock {
             // Serialize cancellation against upload inserts. Any import batch holding an older
             // generation is rejected if it tries to enqueue after this block completes.
@@ -517,6 +536,7 @@ class TransferRepositoryImpl(
         // The archive rows are already CANCELLED, so their owners see a terminal state
         // and will not overwrite it; just stop the extraction jobs.
         archiveExtractionJobs.activeIds().forEach { archiveExtractionJobs.cancel(it) }
+        activeIncoming.forEach { removeNativeDownloadIfPresent(it) }
         SafeLog.d(TAG, "Cancel-all invoked: $cancelled transfers cancelled")
         syncFileStates()
         backupSessionTracker.refreshActive()
@@ -795,6 +815,31 @@ class TransferRepositoryImpl(
             SafeLog.w(
                 TAG,
                 "Could not pause native download for transfer ${transfer.id}: ${error.message}"
+            )
+        }
+    }
+
+    /**
+     * The cancel-side twin of [pauseNativeDownloadIfPresent]: TDLib's persistent
+     * download list is a separate state store from the Room row, so cancelling
+     * only the row leaves the native entry downloading. Best effort — a file
+     * that was never attached has no entry to remove, and the row is already
+     * cancelled either way.
+     */
+    private suspend fun removeNativeDownloadIfPresent(transfer: TransferEntity) {
+        if (!transfer.type.isIncoming) return
+        val remoteFileId = transfer.fileId
+            ?.let { fileDao.byId(it)?.remoteFileId }
+            ?.takeIf { it.isNotBlank() }
+            ?: return
+        try {
+            telegramClient.removeManagedDownload(remoteFileId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            SafeLog.w(
+                TAG,
+                "Could not remove native download for transfer ${transfer.id}: ${error.message}"
             )
         }
     }
