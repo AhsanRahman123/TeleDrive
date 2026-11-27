@@ -38,13 +38,11 @@ fun Modifier.keyboardCollection(
             collectionInfo = state.collectionInfo(itemCount)
             if (label != null) collectionRole(label, grid = state.columns > 1)
         }
-        // Only Enter needs preview handling: a clickable row may consume it before
-        // bubbling, and the collection uses it to transfer focus into a newly opened folder.
-        // All other keys bubble first so editable descendants can process their native keys.
-        .onPreviewKeyEvent { event ->
-            if (event.isPlainCollectionEnter()) state.handle(event, shortcuts)
-            else false
-        }
+        // Enter and Page keys need preview handling: a clickable row may consume
+        // Enter before bubbling, and the lazy layout consumes PageUp/PageDown for
+        // its own scrolling before the event can bubble (R3 item P9). All other
+        // keys bubble first so editable descendants can process their native keys.
+        .onPreviewKeyEvent { event -> state.handlePreview(event, shortcuts) }
         .onKeyEvent { event ->
             if (event.isPlainCollectionEnter()) false
             else state.handle(event, shortcuts)

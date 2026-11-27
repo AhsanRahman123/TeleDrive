@@ -95,10 +95,33 @@ class KeyboardCollectionState internal constructor(
         if (!hasFocus) itemFocusAllowed = false
     }
 
-    internal fun handle(event: KeyEvent, shortcuts: CollectionShortcuts): Boolean {
-        if (event.key == Key.PageDown || event.key == Key.PageUp) {
-            println("P9DIAG handle key=${event.key} type=${event.type} containerTabStop=$containerTabStop containerFocused=$containerFocused focusInItem=$focusInItem focusOnItem=$focusOnItem current=$current")
+    /**
+     * Preview-phase handling for the container (called before the event
+     * descends to the focused child). Enter was already preview-handled
+     * because a clickable row may consume it before bubbling. Page keys
+     * need the same treatment (R3 item P9): the lazy layout consumes
+     * PageUp/PageDown KeyDown for its own scrolling before the event can
+     * bubble up to the container handler, so from a focused row the
+     * bubble-phase branch in [handle] never sees the KeyDown at all —
+     * the list scrolled a page but the focus highlight never moved.
+     * Preview-paging is limited to when the collection item itself owns
+     * focus: a nested control inside a row (rename/search field) keeps
+     * its own Page keys.
+     */
+    internal fun handlePreview(event: KeyEvent, shortcuts: CollectionShortcuts): Boolean {
+        if (event.isPlainEnterKey()) return handle(event, shortcuts)
+        if (event.type != KeyEventType.KeyDown || horizontal || !focusOnItem) return false
+        val plain = !event.isCtrlPressed && !event.isMetaPressed && !event.isAltPressed &&
+            !event.isShiftPressed
+        if (!plain) return false
+        return when (event.key) {
+            Key.PageDown -> pageBy(1)
+            Key.PageUp -> pageBy(-1)
+            else -> false
         }
+    }
+
+    internal fun handle(event: KeyEvent, shortcuts: CollectionShortcuts): Boolean {
         if (event.type == KeyEventType.KeyDown && containerTabStop && containerFocused) {
             return enterFromContainer(event)
         }
@@ -307,24 +330,17 @@ class KeyboardCollectionState internal constructor(
         current = target
         // Mark the target as the focus holder before revealing/requesting:
         // canFocus() passes for the focused index, and an off-screen target
-        // composes during the reveal scroll while layoutInfo still shows
-        // the old viewport — without this mark its focus properties resolve
-        // canFocus=false (the anchor is still an old-layout item) and the
-        // request below silently no-ops (R3 item P9: paging to an
-        // off-screen item scrolled but never landed focus; the same race
-        // affected Home/End jumps to off-screen items).
+        // composes during the reveal scroll while layoutInfo may still show
+        // the old viewport — the mark keeps its focus gate open regardless
+        // of when its focus properties resolve.
         focusedIndex = target
         if (cells().none { it.index == target }) reveal(target)
-        println("P9DIAG focusNow target=$target afterReveal cells=${cells().map { it.index }} canFocus=${canFocus(target)} focusOnItem=$focusOnItem focusedIndex=$focusedIndex")
-        repeat(FOCUS_ATTEMPTS) { attempt ->
+        repeat(FOCUS_ATTEMPTS) {
             runCatching { requester(target).requestFocus() }
-                .onFailure { println("P9DIAG attempt=$attempt requestFocus threw $it") }
             withFrameNanos { }
             withFrameNanos { }
-            println("P9DIAG attempt=$attempt focusOnItem=$focusOnItem current=$current focusedIndex=$focusedIndex canFocus=${canFocus(target)}")
             if (focusOnItem && current == target) return
         }
-        println("P9DIAG focusNow EXHAUSTED target=$target")
     }
 
     private companion object {
@@ -339,6 +355,14 @@ class KeyboardCollectionState internal constructor(
         )
     }
 }
+
+private fun KeyEvent.isPlainEnterKey(): Boolean =
+    type == KeyEventType.KeyDown &&
+        !isCtrlPressed &&
+        !isMetaPressed &&
+        !isAltPressed &&
+        !isShiftPressed &&
+        (key == Key.Enter || key == Key.NumPadEnter)
 
 /**
  * The item one page away from [current]: [pageSize] items in [direction]
