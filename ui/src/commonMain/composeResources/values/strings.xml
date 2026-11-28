@@ -507,6 +507,7 @@
     <string name="bubble_hide">Hide bubble</string>
     <string name="bubble_cancel_all">Cancel all</string>
     <string name="bubble_show_transfers">Show transfers</string>
+    <string name="bubble_open_transfers">Open Transfers</string>
     <string name="preview_archive_entries_saved">Saved %1$d files to Downloads</string>
     <string name="preview_archive_entry_failed">Could not save %1$s: %2$s</string>
     <string name="preview_archive_none_saved">None of the selected files could be saved</string>

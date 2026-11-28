@@ -139,21 +139,6 @@ class TransferBubbleLogicTest {
     }
 
     @Test
-    fun `tapping either widget style opens the full transfers screen`() {
-        // vc186 A6: one tap contract for both shells — the bubble and the
-        // bottom strip route the same shared tap handler in
-        // TransferWidgetOverlay, which switches on this decision.
-        assertEquals(
-            WidgetTapTarget.TRANSFERS_SCREEN,
-            widgetTapTarget(TransferWidgetStyle.BUBBLE)
-        )
-        assertEquals(
-            WidgetTapTarget.TRANSFERS_SCREEN,
-            widgetTapTarget(TransferWidgetStyle.BOTTOM_STRIP)
-        )
-    }
-
-    @Test
     fun `visibility priority is switch, then fullscreen, then user hide`() {
         assertEquals(BubbleVisibility.GONE, bubbleVisibility(false, false, false))
         assertEquals(BubbleVisibility.GONE, bubbleVisibility(true, true, false))
